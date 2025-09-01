@@ -2,25 +2,24 @@
 
 ## Project Structure & Module Organization
 - `src/`: core sources
-  - `libasr/`: ASR and compiler infrastructure
-  - `lfortran/`: frontend, drivers, backends
-  - `runtime/`: Fortran runtime (configured and built via CMake)
-  - `server/`: language-server and related services
-- `tests/`: unit/compiler tests (.f/.f90 with reference outputs)
-- `integration_tests/`: end-to-end scenarios and larger suites
-- `doc/`: docs, manpages; website docs generated from here
+  - `libasr/`: ASR + utilities, passes, verification
+  - `lfortran/`: parser, semantics, drivers, backends
+  - `runtime/`: Fortran runtime (built via CMake)
+  - `server/`: language server
+- `tests/`, `integration_tests/`: unit/E2E suites
+- `doc/`: docs & manpages (site generated from here)
 - `examples/`, `grammar/`, `cmake/`, `ci/`, `share/`: supporting assets
 
 ## Build, Test, and Development Commands
-- Configure + build (Release):
-  - `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release`
-  - `cmake --build build --parallel`
-- Enable LLVM/JIT (example): `cmake -S . -B build -DWITH_LLVM=ON`
-- Test suites:
-  - Compiler tests: `./run_tests.py` (add `-j16` for parallel)
-  - CTest from build dir: `ctest --output-on-failure`
-  - Integration: `cd integration_tests && ./run_tests.py -j16`
-- Pixi (optional): `pixi run build`, `pixi run tests`
+- Configure + build: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j`
+- Enable LLVM (example): `cmake -S . -B build -DWITH_LLVM=ON`
+- Tests: `./run_tests.py -j16` (compiler) and `cd integration_tests && ./run_tests.py -j16`
+ 
+## Architecture & Scope
+- AST (syntax only) ↔ ASR (semantic, valid-only). See `doc/src/design.md`.
+- Pipeline: parse → semantics → ASR passes → codegen (LLVM/C/C++/x86/WASM).
+- ASR is immutable; verified in Debug. Use builders and existing utils.
+- Add or tweak passes in `src/libasr/pass`; avoid duplicate helpers/APIs.
 
 ## Git Remotes & Issues
 - Upstream: `lfortran/lfortran` on GitHub (canonical repo and issues).
@@ -34,21 +33,21 @@
    - Ensure the `upstream` remote exists (see setup) when working from a fork.
 
 ## Coding Style & Naming Conventions
-- C/C++: C++17, enforced by `.clang-format`. Run pre-commit hooks before pushing.
-- Pre-commit: `pre-commit install` once; then `pre-commit run -a`.
-- Filenames: lower_snake_case for sources/tests; CMake targets use concise, descriptive names.
-- Keep functions small and focused; avoid commented-out code.
+- C/C++: C++17; format via `.clang-format` (pre-commit hooks).
+- Pre-commit: `pre-commit install` (once) → `pre-commit run -a`.
+- Names: lower_snake_case files; concise CMake target names.
+- Keep functions small; no commented-out code.
 
 ## Testing Guidelines
-- Add focused tests under `tests/` mirroring existing patterns (e.g., `feature_x.f90`).
-- Run `./run_tests.py` locally and ensure a full pass. Do not disable or skip tests.
-- For tests needing multiple files, use `extrafiles` as in existing cases.
-- Use integration tests for cross-component flows.
+- Add focused tests in `tests/` (e.g., `feature_x.f90`).
+- Ensure full pass: `./run_tests.py -j16`.
+- Multi-file: use `extrafiles` like existing cases.
+- Use `integration_tests/` for cross-component flows.
 
 ## Commit & Pull Request Guidelines
-- Commits: small, single-topic, imperative mood (e.g., "fix: handle BOZ constants").
-- Reference issues in the description (`fixes #123`) and explain rationale.
-- PRs: include what/why, key paths, test evidence (command + summary), and any flags used (e.g., `WITH_LLVM`). Ensure CI passes.
+- Commits: small, single-topic, imperative (e.g., "fix: handle BOZ constants").
+- PRs target `upstream/main`; reference issues (`fixes #123`), explain rationale.
+- Include test evidence (commands + summary); ensure CI passes.
 - Do not commit generated artifacts, large binaries, or local configs.
 
 ## Security & Configuration Tips
