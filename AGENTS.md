@@ -1,5 +1,8 @@
 # Repository Guidelines
 
+This file is for LLM agents and new contributors to have a single point of detailed 
+reference how to contribute to the project.
+
 ## Project Structure & Module Organization
 - `src/`: core sources
   - `libasr/`: ASR + utilities, passes, verification
@@ -34,7 +37,7 @@
 
 ## Git Remotes & Issues
 - Upstream: `lfortran/lfortran` on GitHub (canonical repo and issues).
-- Fork workflow: `origin` is your fork; submit PRs to upstream.
+- Fork workflow: `origin` is your fork; submit draft PRs to upstream and mark ready for review.
 - Setup:
   - `git remote add upstream git@github.com:lfortran/lfortran.git`
   - `git fetch upstream --tags`
