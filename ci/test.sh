@@ -35,10 +35,6 @@ src/bin/lfortran integration_tests/intrinsics_04s.f90 -o intrinsics_04s
 src/bin/lfortran integration_tests/intrinsics_04.f90 -o intrinsics_04
 ./intrinsics_04
 
-# (Moved) CRLF fixed-form parsing regression is now covered by an
-# integration test generated with CRLF endings in CMake (see
-# integration_tests/CMakeLists.txt: crlf_fixed_form).
-
 
 # Run all tests (does not work on Windows yet):
 cmake --version
