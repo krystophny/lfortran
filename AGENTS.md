@@ -21,7 +21,16 @@
 - Configure + build: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j`
 - Enable LLVM (example): `cmake -S . -B build -DWITH_LLVM=ON`
 - Tests: `./run_tests.py -j16` (compiler) and `cd integration_tests && ./run_tests.py -j16`
- 
+
+## Quick Smoke Test
+- AST/ASR checks (no LLVM needed):
+  - `cmake --build build --target lfortran`
+  - `build/src/bin/lfortran --show-ast examples/expr2.f90`
+  - `build/src/bin/lfortran --show-asr --no-color examples/expr2.f90`
+- Run a program (requires LLVM):
+  - Reconfigure with `-DWITH_LLVM=ON`, rebuild, then:
+  - `build/src/bin/lfortran examples/expr2.f90 && ./a.out`
+
 ## Architecture & Scope
 - AST (syntax only) ↔ ASR (semantic, valid-only). See `doc/src/design.md`.
 - Pipeline: parse → semantics → ASR passes → codegen (LLVM/C/C++/x86/WASM).
