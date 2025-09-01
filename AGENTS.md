@@ -46,7 +46,7 @@
 ## Coding Style & Naming Conventions
 - C/C++: C++17; follow the existing formatting in the file to be consistent; use 4 spaces for indentation
 - Names: lower_snake_case files; concise CMake target names.
-- Keep functions small; no commented-out code.
+- No commented-out code.
 
 ## Testing Guidelines
 - Add tests for all features into `integration_tests/`
