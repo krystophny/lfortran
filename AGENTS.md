@@ -49,10 +49,13 @@
 - Keep functions small; no commented-out code.
 
 ## Testing Guidelines
-- Add focused tests in `tests/` (e.g., `feature_x.f90`).
-- Ensure full pass: `./run_tests.py -j16`.
+- Add tests for all features into `integration_tests/`
 - Multi-file: use `extrafiles` like existing cases.
-- Use `integration_tests/` for cross-component flows.
+- Ensure integration tests all pass: `cd integration_tests && ./run_tests.py -j16`.
+- If a test does not compile yet, you can test individual components by adding a test into reference tests in `tests/`.
+- Ensure reference tests pass: `./run_tests.py -j16`.
+- If reference results need to be updated (after change in output): `./run_tests.py -u`
+- Test all new error messages by adding a test into `tests/errors/continue_compilation_1.f90` and update reference results (`./run_tests.py -u`)
 
 ## Commit & Pull Request Guidelines
 - Commits: small, single-topic, imperative (e.g., "fix: handle BOZ constants").
