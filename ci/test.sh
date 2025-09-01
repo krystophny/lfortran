@@ -35,6 +35,19 @@ src/bin/lfortran integration_tests/intrinsics_04s.f90 -o intrinsics_04s
 src/bin/lfortran integration_tests/intrinsics_04.f90 -o intrinsics_04
 ./intrinsics_04
 
+# Smoke test: fixed-form with CRLF line endings (issue #924)
+python - << 'PY'
+import os
+code = (
+    b"      program test\r\n"
+    b"      print *, 1\r\n"
+    b"      end\r\n"
+)
+with open("crlf_fixed_form.f", "wb") as f:
+    f.write(code)
+PY
+src/bin/lfortran --fixed-form --show-ast crlf_fixed_form.f > /dev/null
+
 
 # Run all tests (does not work on Windows yet):
 cmake --version
