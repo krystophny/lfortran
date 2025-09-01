@@ -10,6 +10,13 @@
 - `doc/`: docs & manpages (site generated from here)
 - `examples/`, `grammar/`, `cmake/`, `ci/`, `share/`: supporting assets
 
+## Prerequisites
+- Build tools: CMake (>=3.10), Ninja, Git, Python (>=3.8).
+- Compilers: GCC or Clang (C/C++).
+- Generators (required): re2c, bison.
+- Libraries: zlib (static available).
+- Optional (feature flags): LLVM dev (WITH_LLVM), libunwind (stacktrace), RapidJSON (WITH_JSON), fmt (WITH_FMT), xeus + xeus-zmq (WITH_XEUS), Pandoc (docs).
+
 ## Build, Test, and Development Commands
 - Configure + build: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j`
 - Enable LLVM (example): `cmake -S . -B build -DWITH_LLVM=ON`
@@ -49,7 +56,3 @@
 - PRs target `upstream/main`; reference issues (`fixes #123`), explain rationale.
 - Include test evidence (commands + summary); ensure CI passes.
 - Do not commit generated artifacts, large binaries, or local configs.
-
-## Security & Configuration Tips
-- Prefer CMake options (e.g., `WITH_LLVM`, `WITH_LSP`) over ad‑hoc patches.
-- Avoid hardcoded paths/secrets; use env vars or CMake cache vars.
