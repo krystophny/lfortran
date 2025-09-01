@@ -31,6 +31,16 @@ message("NOFAST_LLVM16: ${NOFAST_LLVM16}")
 message("STD_F23: ${STD_F23}")
 message("LLVM_GOC: ${LLVM_GOC}")
 
+# Regression: fixed-form with CRLF (issue #924)
+# Generate a fixed-form source with CRLF line endings and ensure it parses.
+file(GENERATE
+    OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/crlf_fixed_form.f
+    CONTENT "      program test\n      print *, 1\n      end\n"
+    NEWLINE_STYLE CRLF)
+add_test(NAME crlf_fixed_form
+    COMMAND ${CMAKE_SOURCE_DIR}/../src/bin/lfortran --fixed-form --show-ast crlf_fixed_form.f)
+set_tests_properties(crlf_fixed_form PROPERTIES LABELS "llvm")
+
 macro(RUN_UTIL RUN_FAIL RUN_NAME RUN_FILE_NAME RUN_LABELS RUN_EXTRAFILES RUN_EXTRA_ARGS RUN_COPY_TO_BIN RUN_GFORTRAN_ARGS)
     set(fail ${${RUN_FAIL}})
     set(name ${${RUN_NAME}})

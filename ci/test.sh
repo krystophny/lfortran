@@ -35,10 +35,9 @@ src/bin/lfortran integration_tests/intrinsics_04s.f90 -o intrinsics_04s
 src/bin/lfortran integration_tests/intrinsics_04.f90 -o intrinsics_04
 ./intrinsics_04
 
-# Smoke test: fixed-form with CRLF line endings (issue #924)
-# Use POSIX printf to avoid here-doc parsing issues with `shell`.
-printf "      program test\r\n      print *, 1\r\n      end\r\n" > crlf_fixed_form.f
-src/bin/lfortran --fixed-form --show-ast crlf_fixed_form.f > /dev/null
+# (Moved) CRLF fixed-form parsing regression is now covered by an
+# integration test generated with CRLF endings in CMake (see
+# integration_tests/CMakeLists.txt: crlf_fixed_form).
 
 
 # Run all tests (does not work on Windows yet):
