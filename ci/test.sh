@@ -36,16 +36,8 @@ src/bin/lfortran integration_tests/intrinsics_04.f90 -o intrinsics_04
 ./intrinsics_04
 
 # Smoke test: fixed-form with CRLF line endings (issue #924)
-python - << 'PY'
-import os
-code = (
-    b"      program test\r\n"
-    b"      print *, 1\r\n"
-    b"      end\r\n"
-)
-with open("crlf_fixed_form.f", "wb") as f:
-    f.write(code)
-PY
+# Use POSIX printf to avoid here-doc parsing issues with `shell`.
+printf "      program test\r\n      print *, 1\r\n      end\r\n" > crlf_fixed_form.f
 src/bin/lfortran --fixed-form --show-ast crlf_fixed_form.f > /dev/null
 
 
