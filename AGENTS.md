@@ -52,13 +52,35 @@ reference how to contribute to the project.
 - No commented-out code.
 
 ## Testing Guidelines
-- Add tests for all features into `integration_tests/`
-- Multi-file: use `extrafiles` like existing cases.
-- Ensure integration tests all pass: `cd integration_tests && ./run_tests.py -j16`.
-- If a test does not compile yet, you can test individual components by adding a test into reference tests in `tests/`.
-- Ensure reference tests pass: `./run_tests.py -j16`.
-- If reference results need to be updated (after change in output): `./run_tests.py -u`
-- Test all new error messages by adding a test into `tests/errors/continue_compilation_1.f90` and update reference results (`./run_tests.py -u`)
+- Full coverage required: every behavior change must come with tests that fail before your change and pass after. Do not merge without a full local pass of unit and integration suites.
+
+### Unit/Reference Tests (`tests/`)
+- Purpose: fast, deterministic checks of AST/ASR/codegen outputs and CLI behaviors.
+- Add a source file under `tests/` (use `.f90` or `.f` for fixed-form). Do not normalize line endings that the test depends on; `.gitattributes` preserves files in `tests/**`.
+- Register the test in `tests/tests.toml` with a `[[test]]` table:
+  - `filename = "foo.f90"` (relative to `tests/`)
+  - Enable outputs to check, e.g. `ast = true`, `asr = true`, `llvm = true`, `obj = true`, `run = true`, etc.
+  - For fixed-form (`.f`), `run_tests.py` automatically adds `--fixed-form` for AST/ASR.
+  - For multi-file module use, set `extrafiles = "mod1.f90,mod2.f90"` (these are precompiled before running the main test).
+- Generate reference outputs the first time or when outputs intentionally change:
+  - `./run_tests.py -u` (updates all) or `./run_tests.py -t foo.f90 -u -s` (single test).
+- Run unit tests locally before committing: `./run_tests.py -j16` (use `-s` for sequential if debugging).
+
+### Integration Tests (`integration_tests/`)
+- Purpose: build-and-run end-to-end programs across backends/configurations via CMake/CTest.
+- Add a `.f90` program under `integration_tests/` and wire it through the existing CMake/test macros.
+  - Prefer using the existing `RUN_UTIL` macro in `integration_tests/CMakeLists.txt` rather than ad-hoc commands.
+  - Avoid custom test generation in CMake; place real sources in the tree and check them in.
+- Run integration tests locally: `cd integration_tests && ./run_tests.py -j16` or using CTest targets created by CMake.
+
+### Common Commands
+- Run all tests: `ctest` and `./run_tests.py -j16`
+- Run a specific test: `./run_tests.py -t pattern -s`
+- Update references: `./run_tests.py -u` (or `-t pattern -u`)
+
+References
+- Developer docs: `doc/src/installation.md` (Tests section) and `doc/src/progress.md`.
+- Online docs: https://docs.lfortran.org/en/installation/ (see Tests: run, update, integration).
 
 ## Commit & Pull Request Guidelines
 - Commits: small, single-topic, imperative (e.g., "fix: handle BOZ constants").
