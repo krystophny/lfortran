@@ -11,31 +11,26 @@
 - `examples/`, `grammar/`, `cmake/`, `ci/`, `share/`: supporting assets
 
 ## Prerequisites
-- Build tools: CMake (>=3.10), Ninja, Git, Python (>=3.8).
-- Compilers: GCC or Clang (C/C++).
-- Generators (required): re2c, bison.
-- Libraries: zlib (static available).
-- Optional (feature flags): LLVM dev (WITH_LLVM), libunwind (stacktrace), RapidJSON (WITH_JSON), fmt (WITH_FMT), xeus + xeus-zmq (WITH_XEUS), Pandoc (docs).
+- Tools: CMake (>=3.10), Ninja, Git, Python (>=3.8), GCC/Clang.
+- Generators: re2c, bison (needed for build0/codegen).
+- Libraries: zlib; optional: LLVM dev, libunwind, RapidJSON, fmt, xeus/xeus-zmq, Pandoc.
 
 ## Build, Test, and Development Commands
-- Configure + build: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j`
-- Enable LLVM (example): `cmake -S . -B build -DWITH_LLVM=ON`
-- Tests: `./run_tests.py -j16` (compiler) and `cd integration_tests && ./run_tests.py -j16`
+- Typical dev config (Ninja + LLVM):
+  - `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DWITH_LLVM=ON`
+  - `cmake --build build -j`
+- Release build: `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DWITH_LLVM=ON`
+- Tests: `./run_tests.py -j16` (compiler); `cd integration_tests && ./run_tests.py -j16`
 
 ## Quick Smoke Test
-- AST/ASR checks (no LLVM needed):
-  - `cmake --build build --target lfortran`
-  - `build/src/bin/lfortran --show-ast examples/expr2.f90`
-  - `build/src/bin/lfortran --show-asr --no-color examples/expr2.f90`
-- Run a program (requires LLVM):
-  - Reconfigure with `-DWITH_LLVM=ON`, rebuild, then:
-  - `build/src/bin/lfortran examples/expr2.f90 && ./a.out`
+- We usually build with LLVM enabled (`-DWITH_LLVM=ON`).
+- AST/ASR (no LLVM): `build/src/bin/lfortran --show-ast examples/expr2.f90`
+- Run program (LLVM): `build/src/bin/lfortran examples/expr2.f90 && ./a.out`
 
 ## Architecture & Scope
-- AST (syntax only) ↔ ASR (semantic, valid-only). See `doc/src/design.md`.
+- AST (syntax) ↔ ASR (semantic, valid-only). See `doc/src/design.md`.
 - Pipeline: parse → semantics → ASR passes → codegen (LLVM/C/C++/x86/WASM).
-- ASR is immutable; verified in Debug. Use builders and existing utils.
-- Add or tweak passes in `src/libasr/pass`; avoid duplicate helpers/APIs.
+- Prefer `src/libasr/pass` and existing utils; avoid duplicate helpers/APIs.
 
 ## Git Remotes & Issues
 - Upstream: `lfortran/lfortran` on GitHub (canonical repo and issues).
