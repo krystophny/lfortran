@@ -65,4 +65,5 @@ reference how to contribute to the project.
 - PRs target `upstream/main`; reference issues (`fixes #123`), explain rationale.
 - Include test evidence (commands + summary); ensure CI passes.
 - Do not commit generated artifacts, large binaries, or local configs.
-- Always start with draft PR and mark ready for review only when finished.
+ - Before draft PR: all local tests pass.
+ - Open a draft PR; mark ready only when finished.
