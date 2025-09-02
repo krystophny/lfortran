@@ -67,8 +67,7 @@ reference how to contribute to the project.
   - Enable outputs to check, e.g. `ast = true`, `asr = true`, `llvm = true`, `obj = true`, `run = true`, etc.
   - For fixed-form (`.f`), `run_tests.py` automatically adds `--fixed-form` for AST/ASR.
   - For multi-file module use, set `extrafiles = "mod1.f90,mod2.f90"` (these are precompiled before running the main test).
-- Generate reference outputs the first time or when outputs intentionally change:
-  - `./run_tests.py -u` (updates all) or `./run_tests.py -t foo.f90 -u -s` (single test).
+- Generate or refresh references only as needed; see "Reference Generation: Best Practices" below for the recommended single‑test workflow.
 - Run unit tests locally before committing: `./run_tests.py -j16` (use `-s` for sequential if debugging).
 
 #### Reference Generation: Best Practices
@@ -126,7 +125,6 @@ reference how to contribute to the project.
 ### Common Commands
 - Run all tests: `ctest` and `./run_tests.py -j16`
 - Run a specific test: `./run_tests.py -t pattern -s`
-- Update references: `./run_tests.py -u` (or `-t pattern -u`)
 
 References
 - Developer docs: `doc/src/installation.md` (Tests section) and `doc/src/progress.md`.
