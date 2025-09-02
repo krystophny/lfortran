@@ -74,9 +74,9 @@ reference how to contribute to the project.
   - Set env like CI and call the same helper scripts:
     - `export LFORTRAN_CMAKE_GENERATOR=Ninja`
     - `export ENABLE_RUNTIME_STACKTRACE=yes` (Linux/macOS)
-    - Build: `shell ci/build.sh`
+    - Build: `bash ci/build.sh`
     - Quick integration run (LLVM):
-      - `shell ci/test.sh` (runs a CMake+CTest LLVM pass and runner passes)
+      - `bash ci/test.sh` (runs a CMake+CTest LLVM pass and runner passes)
       - or: `cd integration_tests && ./run_tests.py -b llvm && ./run_tests.py -b llvm -f -nf16`
   - GFortran pass: `cd integration_tests && ./run_tests.py -b gfortran`
   - Other backends as in CI:
