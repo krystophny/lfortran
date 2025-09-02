@@ -14,11 +14,11 @@ namespace LCompilers::LFortran {
 
 void Tokenizer::set_string(const std::string &str)
 {
-    // The input string must be NULL terminated, otherwise the tokenizer will
-    // not detect the end of string. After C++11, the std::string is guaranteed
-    // to end with \0, but we check this here just in case.
-    LCOMPILERS_ASSERT(str[str.size()] == '\0');
-    cur = (unsigned char *)(&str[0]);
+    // The input string must be NULL terminated; use c_str() to avoid
+    // undefined behavior on empty strings when indexing at size().
+    const char *p = str.c_str();
+    LCOMPILERS_ASSERT(p[str.size()] == '\0');
+    cur = (unsigned char *)(p);
     string_start = cur;
     cur_line = cur;
     line_num = 1;

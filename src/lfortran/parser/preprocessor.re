@@ -269,8 +269,8 @@ int parse_bexpr(unsigned char *string_start, unsigned char *&cur, const cpp_symt
 
 Result<std::string> CPreprocessor::run(const std::string &input, LocationManager &lm,
         cpp_symtab &macro_definitions, diag::Diagnostics &diagnostics) const {
-    LCOMPILERS_ASSERT(input[input.size()] == '\0');
-    unsigned char *string_start=(unsigned char*)(&input[0]);
+    LCOMPILERS_ASSERT(input.c_str()[input.size()] == '\0');
+    unsigned char *string_start=(unsigned char*)(input.c_str());
     unsigned char *cur = string_start;
     std::string output;
     lm.files.back().preprocessor = true;
@@ -732,8 +732,8 @@ std::string function_like_macro_expansion(
             std::vector<std::string> &def_args,
             std::string &expansion,
             std::vector<std::string> &call_args) {
-    LCOMPILERS_ASSERT(expansion[expansion.size()] == '\0');
-    unsigned char *string_start=(unsigned char*)(&expansion[0]);
+    LCOMPILERS_ASSERT(expansion.c_str()[expansion.size()] == '\0');
+    unsigned char *string_start=(unsigned char*)(expansion.c_str());
     unsigned char *cur = string_start;
     std::string output;
     for (;;) {
