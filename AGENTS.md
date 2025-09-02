@@ -62,9 +62,9 @@ reference how to contribute to the project.
 
 ### Integration Tests (`integration_tests/`)
 - Purpose: build-and-run end-to-end programs across backends/configurations via CMake/CTest.
-- Add a `.f90` program under `integration_tests/` and wire it through the existing CMake/test macros.
-  - Prefer using the existing `RUN_UTIL` macro in `integration_tests/CMakeLists.txt` rather than ad-hoc commands.
-  - Avoid custom test generation in CMake; place real sources in the tree and check them in.
+- Add a `.f90` program under `integration_tests/` and register it in `integration_tests/CMakeLists.txt` using the `RUN(...)` macro (labels like `gfortran`, `llvm`, `cpp`, etc.).
+  - See `integration_tests/CMakeLists.txt` (search for `macro(RUN` and existing `RUN(NAME ...)` entries).
+  - Avoid custom generation; place real sources in the tree and check them in.
 - Prefer integration tests; all new tests should be integration tests.
 - Ensure integration tests pass locally: `cd integration_tests && ./run_tests.py -j16`.
 - Add checks for correct results inside the `.f90` file using `if (i /= 4) error stop`-style idioms.
@@ -97,10 +97,12 @@ reference how to contribute to the project.
     `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DWITH_LLVM=ON -DWITH_RUNTIME_STACKTRACE=yes -DWITH_UNWIND=ON`
   - Run integration with LFortran flags injected via env:
     `FFLAGS="--debug-with-line-column" ./run_tests.py -j8`
+  - More details: `integration_tests/run_tests.py` (CLI flags and supported backends).
 
 ### Unit/Reference Tests (`tests/`)
 - Use only when an integration test is not yet feasible (e.g., feature doesn’t compile end‑to‑end). Prefer integration tests for all new work.
 - Add a small focused source under `tests/` and register it in `tests/tests.toml` with the needed outputs (`ast`, `asr`, `llvm`, `run`, etc.). Use `.f90` or `.f` (fixed-form auto-handled).
+  - See `tests/tests.toml` for examples; reference outputs live under `tests/reference/`.
 - Multi-file modules: set `extrafiles = "mod1.f90,mod2.f90"`.
 - Run locally: `./run_tests.py -j16` (use `-s` to debug).
 - Update references only when outputs intentionally change: `./run_tests.py -t path/to/test -u -s`.
@@ -119,8 +121,9 @@ reference how to contribute to the project.
 - Run a specific test: `./run_tests.py -t pattern -s`
 
 References
-- Developer docs: `doc/src/installation.md` (Tests section) and `doc/src/progress.md`.
-- Online docs: https://docs.lfortran.org/en/installation/ (see Tests: run, update, integration).
+- Developer docs: `doc/src/installation.md` (Tests) and `doc/src/progress.md` (workflow).
+- Online docs: https://docs.lfortran.org/en/installation/ (Tests: run, update, integration).
+- CI examples: `.github/workflows/Quick-Checks-CI.yml` and `ci/test.sh`.
 
 ## Commit & Pull Request Guidelines
 - Commits: small, single-topic, imperative (e.g., "fix: handle BOZ constants").
