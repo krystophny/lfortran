@@ -2,7 +2,7 @@
     "basename": "ast-crlf_fixed_form-cb101bd",
     "cmd": "lfortran --fixed-form --show-ast --no-color {infile} -o {outfile}",
     "infile": "tests/crlf_fixed_form.f",
-    "infile_hash": "1642ea0478399ef87408ecae283b0f98e01ec80df7a018121d547f68",
+    "infile_hash": "b0232e66fb46e9ca1532e44dc1e011b8f7a49f2ab80ee8c829310df2",
     "outfile": null,
     "outfile_hash": null,
     "stdout": null,
