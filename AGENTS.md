@@ -86,6 +86,8 @@ reference how to contribute to the project.
 - Add a `.f90` program under `integration_tests/` and wire it through the existing CMake/test macros.
   - Prefer using the existing `RUN_UTIL` macro in `integration_tests/CMakeLists.txt` rather than ad-hoc commands.
   - Avoid custom test generation in CMake; place real sources in the tree and check them in.
+- Add checks for correct results inside the `.f90` file using `if (i /= 4) error stop`-style idioms.
+- Always label new tests with at least `gfortran` (to ensure the code compiles with GFortran and does not rely on any LFortran-specific behavior) and `llvm` (to test with LFortran's default LLVM backend).
 - CI‑parity (recommended): run with the same env and scripts CI uses
   - Use micromamba with `ci/environment.yml` to match toolchain (LLVM, etc.).
   - Set env like CI and call the same helper scripts:
