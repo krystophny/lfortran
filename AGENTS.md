@@ -71,6 +71,17 @@ reference how to contribute to the project.
   - `./run_tests.py -u` (updates all) or `./run_tests.py -t foo.f90 -u -s` (single test).
 - Run unit tests locally before committing: `./run_tests.py -j16` (use `-s` for sequential if debugging).
 
+#### Reference Generation: Best Practices
+- Prefer single‑test updates to avoid accidental mass changes:
+  - `./run_tests.py -t ../integration_tests/your_test.f90 -u -s`
+- Only stage the new files for your test under `tests/reference/`:
+  - `git add tests/reference/*your_test*`
+- Avoid a blanket `-u` unless you purposely intend to refresh all references.
+- For tests referring to files outside `tests/` (e.g., `../integration_tests/...`), the reference files are still written to `tests/reference/`.
+- If you mistakenly removed many refs, restore and re‑generate just your test:
+  - `git restore --worktree tests/reference`
+  - Re‑run the single‑test `-u` command above, then stage only your new refs.
+
 ### Integration Tests (`integration_tests/`)
 - Purpose: build-and-run end-to-end programs across backends/configurations via CMake/CTest.
 - Add a `.f90` program under `integration_tests/` and wire it through the existing CMake/test macros.
