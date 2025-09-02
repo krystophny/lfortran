@@ -80,6 +80,7 @@ reference how to contribute to the project.
       - or: `cd integration_tests && ./run_tests.py -b llvm && ./run_tests.py -b llvm -f -nf16`
   - GFortran pass: `cd integration_tests && ./run_tests.py -b gfortran`
   - Other backends as in CI:
+    - `./run_tests.py -b llvm2 llvm_rtlib llvm_nopragma && ./run_tests.py -b llvm2 llvm_rtlib llvm_nopragma -f`
     - `./run_tests.py -b cpp c c_nopragma` and `-f`
     - `./run_tests.py -b wasm` and `-f`
     - `./run_tests.py -b llvm_omp` / `target_offload` / `fortran -j1`
@@ -98,28 +99,12 @@ reference how to contribute to the project.
     `FFLAGS="--debug-with-line-column" ./run_tests.py -j8`
 
 ### Unit/Reference Tests (`tests/`)
-- Important: only use reference tests for cases that cannot be integration tests. The best tests are integration tests; all new tests should be integration tests. If a test does not compile yet, validate individual components by adding a reference test in `tests/` and update references as needed.
-- Purpose: fast, deterministic checks of AST/ASR/codegen outputs and CLI behaviors.
-- Add a source file under `tests/` (use `.f90` or `.f` for fixed-form). Do not normalize line endings that the test depends on; `.gitattributes` preserves files in `tests/**`.
-- Register the test in `tests/tests.toml` with a `[[test]]` table:
-  - `filename = "foo.f90"` (relative to `tests/`)
-  - Enable outputs to check, e.g. `ast = true`, `asr = true`, `llvm = true`, `obj = true`, `run = true`, etc.
-  - For fixed-form (`.f`), `run_tests.py` automatically adds `--fixed-form` for AST/ASR.
-  - For multi-file module use, set `extrafiles = "mod1.f90,mod2.f90"` (these are precompiled before running the main test).
-- Don’t forget to update references for any new or changed unit test. Prefer the single‑test workflow in "Reference Generation: Best Practices" below to avoid unintended churn.
-- Run unit tests locally before committing: `./run_tests.py -j16` (use `-s` for sequential if debugging).
-- Test all new error messages by adding a test into `tests/errors/continue_compilation_1.f90` and update reference results (`./run_tests.py -u`).
-
-#### Reference Generation: Best Practices
-- Prefer single‑test updates to avoid accidental mass changes:
-  - `./run_tests.py -t ../integration_tests/your_test.f90 -u -s`
-- Only stage the new files for your test under `tests/reference/`:
-  - `git add tests/reference/*your_test*`
-- Avoid a blanket `-u` unless you purposely intend to refresh all references.
-- For tests referring to files outside `tests/` (e.g., `../integration_tests/...`), the reference files are still written to `tests/reference/`.
-- If you mistakenly removed many refs, restore and re‑generate just your test:
-  - `git restore --worktree tests/reference`
-  - Re‑run the single‑test `-u` command above, then stage only your new refs.
+- Use only when an integration test is not yet feasible (e.g., feature doesn’t compile end‑to‑end). Prefer integration tests for all new work.
+- Add a small focused source under `tests/` and register it in `tests/tests.toml` with the needed outputs (`ast`, `asr`, `llvm`, `run`, etc.). Use `.f90` or `.f` (fixed-form auto-handled).
+- Multi-file modules: set `extrafiles = "mod1.f90,mod2.f90"`.
+- Run locally: `./run_tests.py -j16` (use `-s` to debug).
+- Update references only when outputs intentionally change: `./run_tests.py -t path/to/test -u -s`.
+- Error messages: add to `tests/errors/continue_compilation_1.f90` and update references.
 
 ### Local Troubleshooting
 - Modfile version mismatch: if you see "Incompatible format: LFortran Modfile...",
