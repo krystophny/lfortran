@@ -59,33 +59,14 @@ reference how to contribute to the project.
 ## Testing Guidelines
 - Full coverage required: every behavior change must come with tests that fail before your change and pass after. Do not merge without a full local pass of unit and integration suites.
 
-### Unit/Reference Tests (`tests/`)
-- Purpose: fast, deterministic checks of AST/ASR/codegen outputs and CLI behaviors.
-- Add a source file under `tests/` (use `.f90` or `.f` for fixed-form). Do not normalize line endings that the test depends on; `.gitattributes` preserves files in `tests/**`.
-- Register the test in `tests/tests.toml` with a `[[test]]` table:
-  - `filename = "foo.f90"` (relative to `tests/`)
-  - Enable outputs to check, e.g. `ast = true`, `asr = true`, `llvm = true`, `obj = true`, `run = true`, etc.
-  - For fixed-form (`.f`), `run_tests.py` automatically adds `--fixed-form` for AST/ASR.
-  - For multi-file module use, set `extrafiles = "mod1.f90,mod2.f90"` (these are precompiled before running the main test).
-- Don’t forget to update references for any new or changed unit test. Prefer the single‑test workflow in "Reference Generation: Best Practices" below to avoid unintended churn.
-- Run unit tests locally before committing: `./run_tests.py -j16` (use `-s` for sequential if debugging).
-
-#### Reference Generation: Best Practices
-- Prefer single‑test updates to avoid accidental mass changes:
-  - `./run_tests.py -t ../integration_tests/your_test.f90 -u -s`
-- Only stage the new files for your test under `tests/reference/`:
-  - `git add tests/reference/*your_test*`
-- Avoid a blanket `-u` unless you purposely intend to refresh all references.
-- For tests referring to files outside `tests/` (e.g., `../integration_tests/...`), the reference files are still written to `tests/reference/`.
-- If you mistakenly removed many refs, restore and re‑generate just your test:
-  - `git restore --worktree tests/reference`
-  - Re‑run the single‑test `-u` command above, then stage only your new refs.
 
 ### Integration Tests (`integration_tests/`)
 - Purpose: build-and-run end-to-end programs across backends/configurations via CMake/CTest.
 - Add a `.f90` program under `integration_tests/` and wire it through the existing CMake/test macros.
   - Prefer using the existing `RUN_UTIL` macro in `integration_tests/CMakeLists.txt` rather than ad-hoc commands.
   - Avoid custom test generation in CMake; place real sources in the tree and check them in.
+- Prefer integration tests; all new tests should be integration tests.
+- Ensure integration tests pass locally: `cd integration_tests && ./run_tests.py -j16`.
 - Add checks for correct results inside the `.f90` file using `if (i /= 4) error stop`-style idioms.
 - Always label new tests with at least `gfortran` (to ensure the code compiles with GFortran and does not rely on any LFortran-specific behavior) and `llvm` (to test with LFortran's default LLVM backend).
 - CI‑parity (recommended): run with the same env and scripts CI uses
@@ -115,6 +96,30 @@ reference how to contribute to the project.
     `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DWITH_LLVM=ON -DWITH_RUNTIME_STACKTRACE=yes -DWITH_UNWIND=ON`
   - Run integration with LFortran flags injected via env:
     `FFLAGS="--debug-with-line-column" ./run_tests.py -j8`
+
+### Unit/Reference Tests (`tests/`)
+- Important: only use reference tests for cases that cannot be integration tests. The best tests are integration tests; all new tests should be integration tests. If a test does not compile yet, validate individual components by adding a reference test in `tests/` and update references as needed.
+- Purpose: fast, deterministic checks of AST/ASR/codegen outputs and CLI behaviors.
+- Add a source file under `tests/` (use `.f90` or `.f` for fixed-form). Do not normalize line endings that the test depends on; `.gitattributes` preserves files in `tests/**`.
+- Register the test in `tests/tests.toml` with a `[[test]]` table:
+  - `filename = "foo.f90"` (relative to `tests/`)
+  - Enable outputs to check, e.g. `ast = true`, `asr = true`, `llvm = true`, `obj = true`, `run = true`, etc.
+  - For fixed-form (`.f`), `run_tests.py` automatically adds `--fixed-form` for AST/ASR.
+  - For multi-file module use, set `extrafiles = "mod1.f90,mod2.f90"` (these are precompiled before running the main test).
+- Don’t forget to update references for any new or changed unit test. Prefer the single‑test workflow in "Reference Generation: Best Practices" below to avoid unintended churn.
+- Run unit tests locally before committing: `./run_tests.py -j16` (use `-s` for sequential if debugging).
+- Test all new error messages by adding a test into `tests/errors/continue_compilation_1.f90` and update reference results (`./run_tests.py -u`).
+
+#### Reference Generation: Best Practices
+- Prefer single‑test updates to avoid accidental mass changes:
+  - `./run_tests.py -t ../integration_tests/your_test.f90 -u -s`
+- Only stage the new files for your test under `tests/reference/`:
+  - `git add tests/reference/*your_test*`
+- Avoid a blanket `-u` unless you purposely intend to refresh all references.
+- For tests referring to files outside `tests/` (e.g., `../integration_tests/...`), the reference files are still written to `tests/reference/`.
+- If you mistakenly removed many refs, restore and re‑generate just your test:
+  - `git restore --worktree tests/reference`
+  - Re‑run the single‑test `-u` command above, then stage only your new refs.
 
 ### Local Troubleshooting
 - Modfile version mismatch: if you see "Incompatible format: LFortran Modfile...",
