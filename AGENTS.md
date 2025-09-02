@@ -67,7 +67,7 @@ reference how to contribute to the project.
   - Enable outputs to check, e.g. `ast = true`, `asr = true`, `llvm = true`, `obj = true`, `run = true`, etc.
   - For fixed-form (`.f`), `run_tests.py` automatically adds `--fixed-form` for AST/ASR.
   - For multi-file module use, set `extrafiles = "mod1.f90,mod2.f90"` (these are precompiled before running the main test).
-- Generate or refresh references only as needed; see "Reference Generation: Best Practices" below for the recommended single‑test workflow.
+- Don’t forget to update references for any new or changed unit test. Prefer the single‑test workflow in "Reference Generation: Best Practices" below to avoid unintended churn.
 - Run unit tests locally before committing: `./run_tests.py -j16` (use `-s` for sequential if debugging).
 
 #### Reference Generation: Best Practices
