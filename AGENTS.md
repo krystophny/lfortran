@@ -60,6 +60,17 @@ reference how to contribute to the project.
 - Full coverage required: every behavior change must come with tests that fail before your change and pass after. Do not merge without a full local pass of unit and integration suites.
 
 
+#### Reference Generation: Best Practices
+- Prefer single‑test updates to avoid accidental mass changes:
+  - `./run_tests.py -t ../integration_tests/your_test.f90 -u -s`
+- Only stage the new files for your test under `tests/reference/`:
+  - `git add tests/reference/*your_test*`
+- Avoid a blanket `-u` unless you purposely intend to refresh all references.
+- For tests referring to files outside `tests/` (e.g., `../integration_tests/...`), the reference files are still written to `tests/reference/`.
+- If you mistakenly removed many refs, restore and re‑generate just your test:
+  - `git restore --worktree tests/reference`
+  - Re‑run the single‑test `-u` command above, then stage only your new refs.
+
 ### Integration Tests (`integration_tests/`)
 - Purpose: build-and-run end-to-end programs across backends/configurations via CMake/CTest.
 - Add a `.f90` program under `integration_tests/` and register it in `integration_tests/CMakeLists.txt` using the `RUN(...)` macro (labels like `gfortran`, `llvm`, `cpp`, etc.).
