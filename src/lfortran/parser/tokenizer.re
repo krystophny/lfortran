@@ -248,8 +248,9 @@ int Tokenizer::lex(Allocator &al, YYSTYPE &yylval, Location &loc, diag::Diagnost
             exp = [edED][-+]? digit+;
             integer = digit+ ("_" kind)?;
             real = ((significand exp?) | (digit+ exp)) ("_" kind)?;
-            string1 = (kind "_")? '"' ('""'|[^"\x00])* '"';
-            string2 = (kind "_")? "'" ("''"|[^'\x00])* "'";
+            // Exclude CR (\r) inside string tokens so Windows CRLF newlines do not leak into literals
+            string1 = (kind "_")? '"' ('""'|[^"\x00\r])* '"';
+            string2 = (kind "_")? "'" ("''"|[^'\x00\r])* "'";
             omp_kw = "!$" [oO][mM][pP];
             omp = omp_kw [^\n\x00]*;
             omp_end = omp_kw whitespace+ [eE][nN][dD] [^\n\x00]*;
