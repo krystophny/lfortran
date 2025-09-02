@@ -104,7 +104,6 @@ reference how to contribute to the project.
 - Use only when an integration test is not yet feasible (e.g., feature doesn’t compile end‑to‑end). Prefer integration tests for all new work.
 - If possible, still add a test under `integration_tests/`, but only register `gfortran` (not `llvm`), then register this test in `tests/tests.toml` with the needed outputs (`ast`, `asr`, `llvm`, `run`, etc.). Use `.f90` or `.f` (fixed-form auto-handled). Only if that cannot be done, add a new test into `tests/`.
   - See `tests/tests.toml` for examples; reference outputs live under `tests/reference/`.
-- Line-ending-sensitive cases (e.g., CRLF fixed-form): add under `tests/` and preserve original line endings; `.gitattributes` already enforces no normalization for `tests/**`.
 - Multi-file modules: set `extrafiles = "mod1.f90,mod2.f90"`.
 - Run locally: `./run_tests.py -j16` (use `-s` to debug).
 - Update references only when outputs intentionally change: `./run_tests.py -t path/to/test -u -s`.
