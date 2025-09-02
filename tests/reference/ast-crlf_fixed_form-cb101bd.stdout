@@ -12,7 +12,7 @@
         (Print
             0
             ()
-            [(String "hello\r world")]
+            [(String "hello world")]
             ()
         )]
         []
