@@ -59,6 +59,12 @@ reference how to contribute to the project.
 ## Testing Guidelines
 - Full coverage required: every behavior change must come with tests that fail before your change and pass after. Do not merge without a full local pass of unit and integration suites.
 
+### Testing Policy (Integration-First)
+- Prefer integration tests. All new tests should be integration tests unless an end‑to‑end (E2E) test is not yet feasible.
+- Add unit/reference tests only when an integration test cannot be written to prove the behavior right now (e.g., feature does not compile/run E2E yet). State the reason in the PR description and plan to promote to an integration test once feasible.
+- Validate behavior, not formatting. Avoid brittle textual IR comparisons across toolchain versions; favor runtime checks in integration tests.
+- Keep tests minimal and focused: assert expected results inside the program using simple `error stop` checks.
+
 
 ### Integration Tests (`integration_tests/`)
 - Purpose: build-and-run end-to-end programs across backends/configurations via CMake/CTest.
@@ -102,6 +108,7 @@ reference how to contribute to the project.
 
 ### Unit/Reference Tests (`tests/`)
 - Use only when an integration test is not yet feasible (e.g., feature doesn’t compile end‑to‑end). Prefer integration tests for all new work.
+- Document in the PR why an integration test was not used and when it will be promoted.
 - Add a small focused source under `tests/` and register it in `tests/tests.toml` with the needed outputs (`ast`, `asr`, `llvm`, `run`, etc.). Use `.f90` or `.f` (fixed-form auto-handled).
   - See `tests/tests.toml` for examples; reference outputs live under `tests/reference/`.
 - Multi-file modules: set `extrafiles = "mod1.f90,mod2.f90"`.
@@ -109,6 +116,11 @@ reference how to contribute to the project.
 - Update references only when outputs intentionally change: `./run_tests.py -t path/to/test -u -s`.
 - Error messages: add to `tests/errors/continue_compilation_1.f90` and update references.
  - If your integration test does not compile yet, temporarily validate the change by adding a reference test that checks AST/ASR construction (enable `asr = true` and/or `ast = true` in `tests/tests.toml`). Promote it to an integration test once end‑to‑end compilation succeeds.
+
+### Quick Checklist
+- Add integration test under `integration_tests/`, register via `RUN(...)`, include `error stop` assertions, and label with `gfortran` and `llvm`.
+- If E2E is not possible, add a temporary unit/reference test and clearly state why in the PR; plan promotion.
+- Avoid textual IR stability tests unless explicitly required; prefer behavior checks.
 
 ### Local Troubleshooting
 - Modfile version mismatch: if you see "Incompatible format: LFortran Modfile...",
