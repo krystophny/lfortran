@@ -69,6 +69,7 @@ reference how to contribute to the project.
 - Ensure integration tests pass locally: `cd integration_tests && ./run_tests.py -j16`.
 - Add checks for correct results inside the `.f90` file using `if (i /= 4) error stop`-style idioms.
 - Always label new tests with at least `gfortran` (to ensure the code compiles with GFortran and does not rely on any LFortran-specific behavior) and `llvm` (to test with LFortran's default LLVM backend).
+ - When fixing a bug, add an integration test that reproduces the failure and now compiles/runs successfully.
 - CI‑parity (recommended): run with the same env and scripts CI uses
   - Use micromamba with `ci/environment.yml` to match toolchain (LLVM, etc.).
   - Set env like CI and call the same helper scripts:
@@ -107,6 +108,7 @@ reference how to contribute to the project.
 - Run locally: `./run_tests.py -j16` (use `-s` to debug).
 - Update references only when outputs intentionally change: `./run_tests.py -t path/to/test -u -s`.
 - Error messages: add to `tests/errors/continue_compilation_1.f90` and update references.
+ - If your integration test does not compile yet, temporarily validate the change by adding a reference test that checks AST/ASR construction (enable `asr = true` and/or `ast = true` in `tests/tests.toml`). Promote it to an integration test once end‑to‑end compilation succeeds.
 
 ### Local Troubleshooting
 - Modfile version mismatch: if you see "Incompatible format: LFortran Modfile...",
@@ -130,5 +132,6 @@ References
 - PRs target `upstream/main`; reference issues (`fixes #123`), explain rationale.
 - Include test evidence (commands + summary); ensure CI passes.
 - Do not commit generated artifacts, large binaries, or local configs.
- - Before draft PR: all local tests pass.
- - Open a draft PR; mark ready only when finished.
+ - Use Draft PRs while iterating; click “Ready for review” only when satisfied.
+ - Use plain Markdown in PR descriptions (no escaped `\n`). Keep it clean, minimal, and follow simple headings (Summary, Scope, Verification, Rationale).
+ - Before marking ready: ensure all local tests pass (unit + integration) and include evidence.
