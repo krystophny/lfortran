@@ -1,7 +1,6 @@
-C Fixed-form CRLF test with labels and continuation
+C Fixed-form CRLF test with label and continuation
       program test
-  10  print *, 'fixed'
+  10  continue
       print *, 'hello
      * world'
-      goto 10
       end
