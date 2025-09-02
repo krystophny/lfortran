@@ -76,7 +76,26 @@ reference how to contribute to the project.
 - Add a `.f90` program under `integration_tests/` and wire it through the existing CMake/test macros.
   - Prefer using the existing `RUN_UTIL` macro in `integration_tests/CMakeLists.txt` rather than ad-hoc commands.
   - Avoid custom test generation in CMake; place real sources in the tree and check them in.
-- Run integration tests locally: `cd integration_tests && ./run_tests.py -j16` or using CTest targets created by CMake.
+- CI‑parity (recommended): run with the same env and scripts CI uses
+  - Use micromamba with `ci/environment.yml` to match toolchain (LLVM, etc.).
+  - Set env like CI and call the same helper scripts:
+    - `export LFORTRAN_CMAKE_GENERATOR=Ninja`
+    - `export ENABLE_RUNTIME_STACKTRACE=yes` (Linux/macOS)
+    - Build: `shell ci/build.sh`
+    - Quick integration run (LLVM):
+      - `shell ci/test.sh` (runs a CMake+CTest LLVM pass and runner passes)
+      - or: `cd integration_tests && ./run_tests.py -b llvm && ./run_tests.py -b llvm -f -nf16`
+  - GFortran pass: `cd integration_tests && ./run_tests.py -b gfortran`
+  - Other backends as in CI:
+    - `./run_tests.py -b cpp c c_nopragma` and `-f`
+    - `./run_tests.py -b wasm` and `-f`
+    - `./run_tests.py -b llvm_omp` / `target_offload` / `fortran -j1`
+
+- Minimal local (without micromamba):
+  - Build: `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DWITH_LLVM=ON -DWITH_RUNTIME_STACKTRACE=yes`
+  - Run: `cd integration_tests && ./run_tests.py -b llvm && ./run_tests.py -b llvm -f -nf16`
+  - If diagnostics need line/column mapping during local debugging, inject:
+    `FFLAGS="--debug-with-line-column" ./run_tests.py -b llvm`
 - If builds fail with messages about missing debug info or line/column emission:
   - Install LLVM tools so `llvm-dwarfdump` is available (e.g., `sudo pacman -S llvm`,
     `apt install llvm`, or `conda install -c conda-forge llvm-tools`).
