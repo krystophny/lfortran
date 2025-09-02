@@ -1,0 +1,20 @@
+(TranslationUnit
+    [(Program
+        test
+        ()
+        []
+        []
+        []
+        [(Continue
+            10
+            ()
+        )
+        (Print
+            0
+            ()
+            [(String "hello\r world")]
+            ()
+        )]
+        []
+    )]
+)

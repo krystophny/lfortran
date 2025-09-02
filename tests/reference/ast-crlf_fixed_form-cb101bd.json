@@ -5,9 +5,9 @@
     "infile_hash": "e96bb5c995d0b2ee78605b345ce4528554efe2c7d340ee2ca6474648",
     "outfile": null,
     "outfile_hash": null,
-    "stdout": null,
-    "stdout_hash": null,
-    "stderr": "ast-crlf_fixed_form-cb101bd.stderr",
-    "stderr_hash": "0763eb8c7a074f538f7f447551bd89572706fd8650a0b57450f924c5",
-    "returncode": 127
+    "stdout": "ast-crlf_fixed_form-cb101bd.stdout",
+    "stdout_hash": "f3e0c26df2bacd87f94a6d49912b9d7fdbaa7b937a9e99475d01ed0d",
+    "stderr": null,
+    "stderr_hash": null,
+    "returncode": 0
 }
