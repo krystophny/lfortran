@@ -4,9 +4,8 @@ all whitespace.  It uses a hand written recursive descent parser to figure out
 how to properly tokenize the input. It returns a list of tokens that are then
 fed into our Bison parser, that is shared with the free-form parser.
 
-Note: The prescanner removes CR from regular code, but not from string literals.
+Note: The prescanner removes CR, so we only handle LF here.
 */
-#include <algorithm>
 #include <unordered_map>
 #include <utility>
 
@@ -434,6 +433,7 @@ struct FixedFormRecursiveDescent {
 
     void next_line(unsigned char *&cur) {
         while (*cur != '\n' && *cur != '\0') {
+            // Skip CR characters (treat as whitespace like free-form tokenizer)
             if (*cur == '\r') {
                 cur++;
                 continue;
@@ -628,10 +628,6 @@ struct FixedFormRecursiveDescent {
                 // String is ended by delim
                 return true;
             }
-            if (*cur == '\r') {
-                cur++;
-                continue;
-            }
             cur++;
         }
     }
@@ -749,7 +745,6 @@ struct FixedFormRecursiveDescent {
                     y2.int_suffix.int_kind);
             } else if (token == yytokentype::TK_STRING) {
                 std::string tk{tostr(t.tok+1, t.tok + len-1)};
-                tk.erase(std::remove(tk.begin(), tk.end(), '\r'), tk.end());
                 y2.string.from_str(m_a, tk);
             } else {
                 std::string tk{tostr(t.tok, t.tok + len)};
