@@ -449,7 +449,17 @@ class EditProcedureVisitor: public ASR::CallReplacerOnExpressionsVisitor<EditPro
     void call_replacer() {
         replacer.current_expr = current_expr;
         replacer.current_scope = current_scope;
-        replacer.replace_expr(*current_expr);
+        if (current_expr && *current_expr) {
+            replacer.replace_expr(*current_expr);
+        }
+    }
+
+    // Override visit_dimension to prevent crashes when visiting dimensions in type structures
+    void visit_dimension(const ASR::dimension_t &x) {
+        // Skip visiting dimension expressions entirely in this pass to avoid segfaults
+        // on garbage pointers in assumed-size arrays in ArrayPhysicalCast types.
+        // The pass_array_by_data transformation doesn't need to modify dimension expressions.
+        (void)x; // Suppress unused parameter warning
     }
 
     void visit_BlockCall(const ASR::BlockCall_t& x) {
@@ -869,6 +879,14 @@ class EditProcedureCallsVisitor : public ASR::ASRPassBaseWalkVisitor<EditProcedu
         void visit_FunctionCall(const ASR::FunctionCall_t& x) {
             ASR::ASRPassBaseWalkVisitor<EditProcedureCallsVisitor>::visit_FunctionCall(x);
             visit_Call(x);
+        }
+
+        // Override visit_dimension to prevent crashes when visiting dimensions in type structures
+        void visit_dimension(const ASR::dimension_t &x) {
+            // Skip visiting dimension expressions entirely in this pass to avoid segfaults
+            // on garbage pointers in assumed-size arrays in ArrayPhysicalCast types.
+            // The pass_array_by_data transformation doesn't need to modify dimension expressions.
+            (void)x; // Suppress unused parameter warning
         }
 
         void visit_Variable(const ASR::Variable_t &x) {
