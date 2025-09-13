@@ -2690,3 +2690,6 @@ RUN(NAME test_unsigned LABELS llvm llvm_wasm llvm_wasm_emcc) # No gfortran
 # LFortran extenstion (Python's str)
 
 RUN(NAME test_str LABELS llvm llvm_wasm llvm_wasm_emcc) # No gfortran
+
+# LAPACK stfsm minimal reproducer - triggers LLVM codegen failure with nested branches
+RUN(NAME lapack_stfsm_min FAIL LABELS llvm EXTRA_ARGS --fixed-form --implicit-interface --separate-compilation --legacy-array-sections --skip-pass=pass_array_by_data --cpp)
