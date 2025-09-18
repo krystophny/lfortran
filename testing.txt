@@ -93,13 +93,38 @@ Integration Tests
 Unit Tests (`./run_tests.py` Top-Level)
 - After installing `toml` into the LLVM11 env, ASR regression tests run but multiple baselines differ: LLVM11 now emits explicit `IntegerConstant 1` lower bounds, while stored references omit them. This mirrors the sequence-association change.
 
-Paths Forward (minimal change options)
-1. Skip failing LAPACK cases in LLVM11 test runs (mark `lapack_04` and related ASR references as known regressions for LLVM <=11). Pros: fast unblock; Cons: reduced coverage.
-2. Update LLVM11-specific golden references (ASR outputs with explicit lower bounds) and continue using the LLVM11 toolchain as-is. Pros: keeps tests green; Cons: references diverge between compilers.
-3. Adjust lowering for typed-pointer backends: detect LLVM_VERSION_MAJOR < 13 and emit legacy `%array` descriptors for sequence-association intrinsics (fallback behavior). Pros: full compatibility; Cons: code change required in `asr_to_llvm.cpp` path.
-4. Switch LLVM11 validation to compiler-only (build + selected smoke tests) while keeping LLVM20 as primary integration target. Pros: reduces effort; Cons: less coverage for LLVM11.
+Remediation Options (no skipping)
+1. **Typed-pointer fallback in codegen**
+   - Guard the existing array-section lowering with `#if LLVM_VERSION_MAJOR <= 12` (typed pointers).
+   - When the callee expects a descriptor (`DescriptorArray`) but the actual argument is a scalar/pointer (`PointerArray` or unbounded pointer), build a temporary stack descriptor:
+     * Allocate `array_type` via `llvm_utils->CreateAlloca`.
+     * Store the raw data pointer (`float*`, etc.) in the descriptor’s data slot.
+     * Populate lower bounds with one (`i32 1`) and lengths with either the known size or `1` when only a single element is passed.
+     * Pass the descriptor pointer to the call. Ensure `ptr_type_deprecated` is populated so LLVM11’s typed pointers remain satisfied.
+   - Touch points: `handle_array_section_association_to_pointer()`, and the implicit interface call site in `visit_FunctionCall/visit_SubroutineCall` to ensure scalars that undergo sequence association also trigger the fallback.
+   - Rebuild and re-run:
+     ```bash
+     cmake --build build -j
+     PATH=$MAMBA_ROOT_PREFIX/envs/lfortran-llvm11/bin:$PWD/build/src/bin:$PATH ./run_tests.py -b llvm -t lapack_04
+     PATH=$MAMBA_ROOT_PREFIX/envs/lfortran-llvm11/bin:$PWD/build/src/bin:$PATH ./run_tests.py
+     ```
+   - Once passing, run the full integration suite under LLVM11 for confirmation.
 
-Next Steps
-- Decide on one of the options above before rerunning `run_tests.py` or `run_tests.py -b llvm` for LLVM11.
-- If pursuing option 3, tweak the pointer lowering in `asr_to_llvm.cpp` around the array-section descriptor path with a compile-time guard, then re-test.
+2. **Align LLVM11 ASR references**
+   - Regenerate ASR baselines with the LLVM11 compiler:
+     ```bash
+     PATH=$MAMBA_ROOT_PREFIX/envs/lfortran-llvm11/bin:$PWD/build/src/bin:$PATH ./run_tests.py --update
+     ```
+   - Review resulting diffs (mainly insertion of explicit lower bounds) and commit updated goldens so both LLVM11 and LLVM20 produce acceptable outputs.
+   - After updating references, rerun unit tests to confirm clean state.
 
+Detailed Plan to Fix `lapack_04` (Option 1)
+1. **Detection**: In `visit_SubroutineCall()` (and the helper used in implicit-interface sequence association), check if the expected argument type is `DescriptorArray` while the actual ASR type is `PointerArray` or scalar. For LLVM11 builds, branch to the fallback.
+2. **Descriptor builder**: Implement a helper (e.g., `create_stack_array_descriptor(expected_type, actual_expr)`) that allocates and fills a descriptor mirroring the logic already used for array sections (via `arr_descr->fill_descriptor_for_array_section_data_only`). Ensure lower-bound values default to one and lengths to the inferred extent or one when unknown.
+3. **Opaque pointer compatibility**: Wrap the fallback in `#if LLVM_VERSION_MAJOR <= 12` so that LLVM20 continues using opaque-pointer logic without change.
+4. **Testing**:
+   - Rebuild with LLVM11.
+   - Execute `./run_tests.py -b llvm -t lapack_04` to confirm the verifier passes.
+   - Run the full LLVM11 integration suite.
+   - Re-run top-level unit tests to ensure ASR baselines remain stable (optionally guarded with `--update` only after verifying diffs are intentional).
+5. **Final regression**: Switch back to LLVM20 environment and confirm integration tests still pass to avoid regressions on the primary toolchain.
