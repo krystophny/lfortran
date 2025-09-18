@@ -1,0 +1,105 @@
+Status (2025-09-18)
+-------------------
+- Branch `lapack-part1` rebased cleanly on top of `upstream/main` (tip: e125b4e2b "fix: handle assumed-size pointer array sections").
+- Force-pushed rebased history to origin; working tree is clean and aligned with `origin/lapack-part1`.
+- Fresh build succeeds: `cmake --build build -j`.
+- Full LLVM integration suite passes: `PATH=$PWD/build/src/bin:$MAMBA_ROOT_PREFIX/envs/lf-ci-llvm20/bin:$PATH ./run_tests.py -b llvm` (1852 tests green after upstream additions).
+- Third-party fortran_mpi suite passes in both modes:
+  * `PATH=... FC="lfortran --cpp" LFORTRAN_LINKER=mpicc OMPI_CC=gcc ./run_tests.sh`
+  * `PATH=... FC="lfortran --cpp --separate-compilation" LFORTRAN_LINKER=mpicc OMPI_CC=gcc ./run_tests.sh`
+- Reference-LAPACK external build script remains green (see ci/test_third_party_codes.sh Section 12); no regressions observed post-rebase.
+
+Next Steps
+----------
+- If additional testing is needed (e.g., `ci/test_third_party_codes.sh` end-to-end), run with the rebased toolchain.
+- Monitor upstream for further LAPACK-related changes; rerun the two fortran_mpi modes plus integration suite after major updates.
+
+LLVM11 lapack_04 Investigation (2025-09-18)
+-------------------------------------------
+Summary
+- Rebased branch `lapack-part2` on top of our current work; build tree regenerated.
+- LLVM 11 toolchain in `$MAMBA_ROOT_PREFIX/envs/lfortran-llvm11` used to build via:
+  `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DWITH_LLVM=ON -DWITH_RUNTIME_STACKTRACE=yes -DCMAKE_PREFIX_PATH=$MAMBA_ROOT_PREFIX/envs/lfortran-llvm11`
+  followed by `cmake --build build -j`.
+- Integration suite (`./run_tests.py -b llvm`) fails at `lapack_04` with LLVM verifier error: `Call parameter type does not match function signature!` for `slacpy` call where legacy LAPACK sequence association passes a scalar actual argument against an assumed-shape dummy. LLVM 11 still disallows the `float*` scalar matching the expected `%array*` descriptor type. LLVM 20 accepts the same IR due to opaque pointer support.
+- Manually rebuilding `lapack_04.f90` with `--legacy-array-sections` does not resolve the verifier error under LLVM 11; the same mismatch occurs.
+- LLVM 20 build (`envs/lf-ci-llvm20`) compiles the file successfully without any extra flags, confirming this is specific to LLVM 11 (opaque pointer vs typed pointer difference).
+- No additional rebuild needed for LLVM 20; this procedure targets LLVM 11 validation only.
+
+Testing Procedure (LLVM 11)
+1. Ensure clean workspace on branch `lapack-part2` (derived from `lapack-part1`). Remove existing `build/` if present.
+2. Generate parser sources:
+   ```bash
+   bash build0.sh
+   ```
+3. Configure for LLVM 11 environment:
+   ```bash
+   cmake -S . -B build -G Ninja \
+         -DCMAKE_BUILD_TYPE=Debug \
+         -DWITH_LLVM=ON \
+         -DWITH_RUNTIME_STACKTRACE=yes \
+         -DCMAKE_PREFIX_PATH=$MAMBA_ROOT_PREFIX/envs/lfortran-llvm11
+   ```
+4. Build:
+   ```bash
+   cmake --build build -j
+   ```
+5. Run targeted integration test to observe failure:
+   ```bash
+   cd integration_tests
+   PATH=$MAMBA_ROOT_PREFIX/envs/lfortran-llvm11/bin:$PWD/../build/src/bin:$PATH \
+       ./run_tests.py -t lapack_04 -b llvm -- -v   # `-- -v` optional to see compiler commands
+   ```
+   or simply run full suite (`./run_tests.py -b llvm`) and watch `lapack_04` fail with the verifier error shown above.
+6. Optional experiment: compile `lapack_04.f90` manually with LFortran built against LLVM 11, observing the same `slacpy` mismatch message:
+   ```bash
+   PATH=$MAMBA_ROOT_PREFIX/envs/lfortran-llvm11/bin:$PWD/build/src/bin:$PATH \
+       lfortran --fixed-form --implicit-interface integration_tests/lapack_04.f90
+   ```
+   (Adding `--legacy-array-sections` does not change the outcome.)
+
+Known Behavior
+- LLVM 20’s opaque pointer mode accepts the generated IR, so the issue does not appear in current CI runs.
+- LLVM 11 still uses typed pointers; passing a scalar `float*` where `%array*` is expected trips the verifier. The failure is localized to LAPACK sequence-association patterns (e.g., `slacpy`, `sorm22`).
+
+Next Steps
+- Decide whether to backport the legacy typed-pointer lowering to support LLVM 11, or skip `lapack_04` when testing against older toolchains.
+- If implementing a fix, rerun steps 3–5 above to confirm success.
+
+LLVM11 unit tests
+-----------------
+`PATH=$MAMBA_ROOT_PREFIX/envs/lfortran-llvm11/bin:$PWD/build/src/bin:$PATH ./run_tests.py`
+-> fails immediately because the `toml` Python module is not found in the environment.
+Resolution: install `toml` into the LLVM11 Python env (e.g., `python -m pip install toml`).
+
+LLVM11 unit tests (post toml install)
+------------------------------------
+After installing `toml` into `$MAMBA_ROOT_PREFIX/envs/lfortran-llvm11`, running
+`PATH=$MAMBA_ROOT_PREFIX/envs/lfortran-llvm11/bin:$PWD/build/src/bin:$PATH ./run_tests.py` executes the ASR unit suite but fails during comparison of LAPACK-related reference outputs. Diff shows ASR now injects explicit lower-bound `IntegerConstant 1` entries, whereas the stored reference assumes omitted lower bounds. This mirrors the behavior difference already seen with LLVM 11 builds (typed pointer/data descriptor mismatch in `slacpy`).
+Next action: update LLVM11 reference outputs or adjust lowering to match older expectation.
+
+LLVM11 Status Summary (2025-09-18)
+---------------------------------
+Environment
+- Branch `lapack-part2` (based on latest `lapack-part1`).
+- LLVM 11 toolchain in `$MAMBA_ROOT_PREFIX/envs/lfortran-llvm11`.
+- Parser regenerated (`build0.sh`), CMake configured and built with LLVM11.
+
+Integration Tests
+- `PATH=$MAMBA_ROOT_PREFIX/envs/lfortran-llvm11/bin:$PWD/build/src/bin:$PATH ./run_tests.py -b llvm`
+  => Fails on `lapack_04` with LLVM verifier error: `Call parameter type does not match function signature!`. Root cause is typed-pointer ABI (LLVM11) rejecting scalar actuals where `%array*` descriptors are required (sequence association in LAPACK’s `slacpy`). LLVM20 (opaque pointers) handles this correctly.
+- Adding `--legacy-array-sections` did not change the outcome; mismatch persists.
+
+Unit Tests (`./run_tests.py` Top-Level)
+- After installing `toml` into the LLVM11 env, ASR regression tests run but multiple baselines differ: LLVM11 now emits explicit `IntegerConstant 1` lower bounds, while stored references omit them. This mirrors the sequence-association change.
+
+Paths Forward (minimal change options)
+1. Skip failing LAPACK cases in LLVM11 test runs (mark `lapack_04` and related ASR references as known regressions for LLVM <=11). Pros: fast unblock; Cons: reduced coverage.
+2. Update LLVM11-specific golden references (ASR outputs with explicit lower bounds) and continue using the LLVM11 toolchain as-is. Pros: keeps tests green; Cons: references diverge between compilers.
+3. Adjust lowering for typed-pointer backends: detect LLVM_VERSION_MAJOR < 13 and emit legacy `%array` descriptors for sequence-association intrinsics (fallback behavior). Pros: full compatibility; Cons: code change required in `asr_to_llvm.cpp` path.
+4. Switch LLVM11 validation to compiler-only (build + selected smoke tests) while keeping LLVM20 as primary integration target. Pros: reduces effort; Cons: less coverage for LLVM11.
+
+Next Steps
+- Decide on one of the options above before rerunning `run_tests.py` or `run_tests.py -b llvm` for LLVM11.
+- If pursuing option 3, tweak the pointer lowering in `asr_to_llvm.cpp` around the array-section descriptor path with a compile-time guard, then re-test.
+
