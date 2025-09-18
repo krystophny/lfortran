@@ -44,13 +44,13 @@ Testing Procedure (LLVM 11)
    ```bash
    cmake --build build -j
    ```
-5. Run targeted integration test to observe failure:
+5. Manually compile `lapack_04.f90` to observe failure (the integration driver does not expose a per-test selector):
    ```bash
    cd integration_tests
    PATH=$MAMBA_ROOT_PREFIX/envs/lfortran-llvm11/bin:$PWD/../build/src/bin:$PATH \
-       ./run_tests.py -t lapack_04 -b llvm -- -v   # `-- -v` optional to see compiler commands
+       lfortran --fixed-form --implicit-interface lapack_04.f90
    ```
-   or simply run full suite (`./run_tests.py -b llvm`) and watch `lapack_04` fail with the verifier error shown above.
+   The compiler aborts with the LLVM verifier error described above. Running the full suite (`./run_tests.py -b llvm`) yields the same failure when it reaches `lapack_04`.
 6. Optional experiment: compile `lapack_04.f90` manually with LFortran built against LLVM 11, observing the same `slacpy` mismatch message:
    ```bash
    PATH=$MAMBA_ROOT_PREFIX/envs/lfortran-llvm11/bin:$PWD/build/src/bin:$PATH \
@@ -128,3 +128,7 @@ Detailed Plan to Fix `lapack_04` (Option 1)
    - Run the full LLVM11 integration suite.
    - Re-run top-level unit tests to ensure ASR baselines remain stable (optionally guarded with `--update` only after verifying diffs are intentional).
 5. **Final regression**: Switch back to LLVM20 environment and confirm integration tests still pass to avoid regressions on the primary toolchain.
+   ```bash
+   PATH=$MAMBA_ROOT_PREFIX/envs/lfortran-llvm11/bin:$PWD/build/src/bin:$PATH \
+       lfortran --fixed-form --implicit-interface integration_tests/lapack_04.f90
+   ```
