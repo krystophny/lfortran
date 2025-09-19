@@ -6320,24 +6320,55 @@ public:
             LCOMPILERS_ASSERT(array_value_rank == value_rank);
             Vec<llvm::Value*> llvm_diminfo;
             llvm_diminfo.reserve(al, value_rank * 2);
+            llvm::Value* value_dim_desc_array = nullptr;
+            llvm::Type* i32_type = llvm::Type::getInt32Ty(context);
+            if( value_rank > 0 ) {
+                bool need_runtime_diminfo = false;
+                for( int i = 0; i < value_rank; i++ ) {
+                    if( !m_dims[i].m_start || !m_dims[i].m_length ) {
+                        need_runtime_diminfo = true;
+                        break;
+                    }
+                }
+                ASR::ttype_t* value_base_type = ASRUtils::type_get_past_pointer(value_array_type);
+                bool has_descriptor = value_base_type &&
+                    ASRUtils::extract_physical_type(value_base_type) ==
+                        ASR::array_physical_typeType::DescriptorArray;
+                if( need_runtime_diminfo && has_descriptor ) {
+                    llvm::Type* value_desc_struct_type = llvm_utils->get_type_from_ttype_t_util(
+                        array_section->m_v,
+                        ASRUtils::type_get_past_allocatable_pointer(value_array_type),
+                        module.get());
+                    value_dim_desc_array = arr_descr->get_pointer_to_dimension_descriptor_array(
+                        value_desc_struct_type, value_desc);
+                }
+            }
             for( int i = 0; i < value_rank; i++ ) {
+                llvm::Value* dim_index = llvm::ConstantInt::get(i32_type, llvm::APInt(32, i));
+
+                llvm::Value* lb_val = nullptr;
                 if( m_dims[i].m_start ) {
                     visit_expr_wrapper(m_dims[i].m_start, true);
-                    llvm_diminfo.push_back(al, tmp);
+                    lb_val = builder->CreateSExtOrTrunc(tmp, i32_type);
+                } else if( value_dim_desc_array ) {
+                    llvm::Value* dim_struct = arr_descr->get_pointer_to_dimension_descriptor(
+                        value_dim_desc_array, dim_index);
+                    lb_val = arr_descr->get_lower_bound(dim_struct);
                 } else {
-                    llvm_diminfo.push_back(al,
-                        llvm::ConstantInt::get(llvm::Type::getInt32Ty(context),
-                            llvm::APInt(32, 1)));
+                    lb_val = llvm::ConstantInt::get(i32_type, llvm::APInt(32, 1));
                 }
+                llvm_diminfo.push_back(al, lb_val);
 
+                llvm::Value* len_val = nullptr;
                 if( m_dims[i].m_length ) {
                     visit_expr_wrapper(m_dims[i].m_length, true);
-                    llvm_diminfo.push_back(al, tmp);
+                    len_val = builder->CreateSExtOrTrunc(tmp, i32_type);
+                } else if( value_dim_desc_array ) {
+                    len_val = arr_descr->get_dimension_size(value_dim_desc_array, dim_index);
                 } else {
-                    llvm_diminfo.push_back(al,
-                        llvm::ConstantInt::get(llvm::Type::getInt32Ty(context),
-                            llvm::APInt(32, 1)));
+                    len_val = llvm::ConstantInt::get(i32_type, llvm::APInt(32, 1));
                 }
+                llvm_diminfo.push_back(al, len_val);
             }
             arr_descr->fill_descriptor_for_array_section_data_only(value_desc, value_el_type, expr_type(x.m_value),
                 target, expr_type(x.m_target), x.m_target,
@@ -12174,6 +12205,31 @@ public:
                 }
             }
 
+            // Legacy sequence association: decay descriptors when callee expects data-only arrays.
+            if( compiler_options.legacy_array_sections && orig_arg ) {
+                ASR::ttype_t* expected_type = orig_arg->m_type;
+                ASR::ttype_t* actual_type_full = ASRUtils::expr_type(x.m_args[i].m_value);
+                ASR::ttype_t* expected_base_type = ASRUtils::type_get_past_allocatable_pointer(expected_type);
+                ASR::ttype_t* actual_base_type = ASRUtils::type_get_past_allocatable_pointer(actual_type_full);
+                if( expected_base_type && actual_base_type &&
+                    ASRUtils::is_array(expected_base_type) && ASRUtils::is_array(actual_base_type) ) {
+                    ASR::array_physical_typeType expected_phy = ASRUtils::extract_physical_type(expected_base_type);
+                    ASR::array_physical_typeType actual_phy = ASRUtils::extract_physical_type(actual_base_type);
+                    bool expected_data_only = (expected_phy == ASR::array_physical_typeType::PointerArray ||
+                                               expected_phy == ASR::array_physical_typeType::UnboundedPointerArray ||
+                                               expected_phy == ASR::array_physical_typeType::FixedSizeArray);
+                    if( expected_data_only && actual_phy == ASR::array_physical_typeType::DescriptorArray ) {
+                        llvm::Value* data_ptr_field = arr_descr->get_pointer_to_data(
+                            x.m_args[i].m_value, actual_type_full, tmp, module.get());
+                        llvm::Type* element_type = llvm_utils->get_type_from_ttype_t_util(
+                            x.m_args[i].m_value,
+                            ASRUtils::extract_type(actual_base_type),
+                            module.get());
+                        tmp = llvm_utils->CreateLoad2(element_type->getPointerTo(), data_ptr_field);
+                    }
+                }
+            }
+
             // To avoid segmentation faults when original argument
             // is not a ASR::Variable_t like callbacks.
             if( orig_arg ) {
@@ -12880,8 +12936,10 @@ public:
                                                   !ASRUtils::get_FunctionType(subrout_called)->m_module);
                     bool is_recursive_call = (parent_function != nullptr &&
                                               subrout_called == parent_function);
+                    bool allow_sequence_assoc = compiler_options.legacy_array_sections &&
+                                                compiler_options.implicit_interface;
 
-                    if (compiler_options.implicit_interface &&
+                    if (allow_sequence_assoc &&
                         (is_external_implicit || is_recursive_call)) {
                         // 1. ArrayItem passed - ambiguous (scalar or array start)
                         if (ASR::is_a<ASR::ArrayItem_t>(*passed_arg)) {
@@ -12915,7 +12973,7 @@ public:
 
                     if (!skip_type_check &&
                         !ASRUtils::types_equal(expected_arg_type, passed_arg_type, expected_arg, passed_arg, true)) {
-                        if (compiler_options.implicit_interface) {
+                        if (allow_sequence_assoc) {
                             // Support legacy Fortran sequence association patterns where ranks or
                             // element types differ. GFortran accepts these when implicit
                             // interfaces are used (or with -fallow-argument-mismatch), and many
@@ -13849,7 +13907,8 @@ public:
                 break;
             }
             case ASR::array_physical_typeType::FixedSizeArray:
-            case ASR::array_physical_typeType::PointerArray: {
+            case ASR::array_physical_typeType::PointerArray:
+            case ASR::array_physical_typeType::UnboundedPointerArray: {
                 llvm::Type* target_type = llvm_utils->get_type_from_ttype_t_util(x.m_v,
                     ASRUtils::type_get_past_allocatable(
                         ASRUtils::type_get_past_pointer(x.m_type)), module.get());
@@ -13858,6 +13917,25 @@ public:
                 llvm::BasicBlock *mergeBB = llvm::BasicBlock::Create(context, "ifcont");
                 ASR::dimension_t* m_dims = nullptr;
                 int n_dims = ASRUtils::extract_dimensions_from_ttype(x_mv_type, m_dims);
+                llvm::Value* dim_desc_array = nullptr;
+                ASR::ttype_t* base_type_for_desc = ASRUtils::type_get_past_pointer(x_mv_type);
+                bool descriptor_available = base_type_for_desc &&
+                    ASRUtils::extract_physical_type(base_type_for_desc) ==
+                        ASR::array_physical_typeType::DescriptorArray;
+                if( descriptor_available &&
+                    (physical_type == ASR::array_physical_typeType::PointerArray ||
+                     physical_type == ASR::array_physical_typeType::UnboundedPointerArray) ) {
+                    bool need_runtime_bounds = false;
+                    for( int i = 0; i < n_dims; i++ ) {
+                        if( !m_dims[i].m_start || !m_dims[i].m_length ) {
+                            need_runtime_bounds = true;
+                            break;
+                        }
+                    }
+                    if( need_runtime_bounds ) {
+                        dim_desc_array = arr_descr->get_pointer_to_dimension_descriptor_array(array_type, llvm_arg1);
+                    }
+                }
                 for( int i = 0; i < n_dims; i++ ) {
                     llvm::Function *fn = builder->GetInsertBlock()->getParent();
 
@@ -13869,20 +13947,53 @@ public:
                     builder->CreateCondBr(cond, thenBB, elseBB);
                     builder->SetInsertPoint(thenBB);
                     {
+                        llvm::Value* dim_index = llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), llvm::APInt(32, i));
+                        llvm::Value* desc_lbound = nullptr;
+                        llvm::Value* desc_length = nullptr;
+                        if( dim_desc_array ) {
+                            llvm::Value* dim_struct = arr_descr->get_pointer_to_dimension_descriptor(dim_desc_array, dim_index);
+                            desc_lbound = arr_descr->get_lower_bound(dim_struct);
+                            desc_length = arr_descr->get_dimension_size(dim_desc_array, dim_index);
+                        }
+                        llvm::Value* lb_store = nullptr;
                         if( x.m_bound == ASR::arrayboundType::LBound ) {
-                            this->visit_expr_wrapper(m_dims[i].m_start, true);
-                            tmp = builder->CreateSExtOrTrunc(tmp, target_type);
-                            builder->CreateStore(tmp, target);
+                            if( m_dims[i].m_start ) {
+                                this->visit_expr_wrapper(m_dims[i].m_start, true);
+                                lb_store = builder->CreateSExtOrTrunc(tmp, target_type);
+                            } else if( desc_lbound ) {
+                                lb_store = builder->CreateSExtOrTrunc(desc_lbound, target_type);
+                            } else {
+                                lb_store = llvm::ConstantInt::get(target_type,
+                                    llvm::APInt(target_type->getIntegerBitWidth(), 1));
+                            }
+                            builder->CreateStore(lb_store, target);
                         } else if( x.m_bound == ASR::arrayboundType::UBound ) {
-                            llvm::Value *lbound = nullptr, *length = nullptr;
-                            this->visit_expr_wrapper(m_dims[i].m_start, true);
-                            lbound = tmp;
-                            load_array_size_deep_copy(m_dims[i].m_length);
-                            length = tmp;
-                            builder->CreateStore(
-                                builder->CreateSub(builder->CreateSExtOrTrunc(builder->CreateAdd(length, lbound), target_type),
-                                      llvm::ConstantInt::get(context, llvm::APInt(32, 1))),
-                                target);
+                            if( m_dims[i].m_start ) {
+                                this->visit_expr_wrapper(m_dims[i].m_start, true);
+                                lb_store = builder->CreateSExtOrTrunc(tmp, target_type);
+                            } else if( desc_lbound ) {
+                                lb_store = builder->CreateSExtOrTrunc(desc_lbound, target_type);
+                            } else {
+                                lb_store = llvm::ConstantInt::get(target_type,
+                                    llvm::APInt(target_type->getIntegerBitWidth(), 1));
+                            }
+
+                            llvm::Value* length_val = nullptr;
+                            if( m_dims[i].m_length ) {
+                                load_array_size_deep_copy(m_dims[i].m_length);
+                                length_val = builder->CreateSExtOrTrunc(tmp, target_type);
+                            } else if( desc_length ) {
+                                length_val = builder->CreateSExtOrTrunc(desc_length, target_type);
+                            } else {
+                                length_val = llvm::ConstantInt::get(target_type,
+                                    llvm::APInt(target_type->getIntegerBitWidth(), 0));
+                            }
+
+                            llvm::Value* upper_bound = builder->CreateSub(
+                                builder->CreateAdd(length_val, lb_store),
+                                llvm::ConstantInt::get(target_type,
+                                    llvm::APInt(target_type->getIntegerBitWidth(), 1)));
+                            builder->CreateStore(upper_bound, target);
                         }
                     }
                     builder->CreateBr(mergeBB);

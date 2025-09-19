@@ -862,6 +862,7 @@ time_section "🧪 Testing Reference-LAPACK (Official Repository)" '
 
   extra_fflags="--fixed-form-infer --implicit-interface"
   if [[ "$FC" == *lfortran* ]]; then
+    extra_fflags+=" --legacy-array-sections"
     python - <<'PY'
 from pathlib import Path
 path = Path("LAPACKE/include/CMakeLists.txt")
