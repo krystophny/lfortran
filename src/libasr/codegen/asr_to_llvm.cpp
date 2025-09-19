@@ -12936,8 +12936,7 @@ public:
                                                   !ASRUtils::get_FunctionType(subrout_called)->m_module);
                     bool is_recursive_call = (parent_function != nullptr &&
                                               subrout_called == parent_function);
-                    bool allow_sequence_assoc = compiler_options.legacy_array_sections &&
-                                                compiler_options.implicit_interface;
+                    bool allow_sequence_assoc = compiler_options.legacy_array_sections;
 
                     if (allow_sequence_assoc &&
                         (is_external_implicit || is_recursive_call)) {
@@ -12974,16 +12973,17 @@ public:
                     if (!skip_type_check &&
                         !ASRUtils::types_equal(expected_arg_type, passed_arg_type, expected_arg, passed_arg, true)) {
                         if (allow_sequence_assoc) {
-                            // Support legacy Fortran sequence association patterns where ranks or
-                            // element types differ. GFortran accepts these when implicit
-                            // interfaces are used (or with -fallow-argument-mismatch), and many
-                            // third-party codes rely on this behaviour. When the implicit
-                            // interface flag is enabled we therefore skip the strict type check
-                            // to match that behaviour.
+                            // Support legacy Fortran sequence association patterns when
+                            // `--legacy-array-sections` is enabled. GFortran accepts these
+                            // when implicit interfaces are used (or with -fallow-argument-mismatch),
+                            // and many third-party codes rely on this behaviour, so we skip the
+                            // strict type check here to match that behaviour.
                             continue;
                         }
-                        throw CodeGenError("Type mismatch in subroutine call, expected `" + ASRUtils::type_to_str_python_expr(expected_arg_type, expected_arg)
-                                + "`, passed `" + ASRUtils::type_to_str_python_expr(passed_arg_type, passed_arg) + "`", x.m_args[i].m_value->base.loc);
+                        std::string mismatch_msg = "Type mismatch in subroutine call, expected `" +
+                            ASRUtils::type_to_str_python_expr(expected_arg_type, expected_arg) +
+                            "`, passed `" + ASRUtils::type_to_str_python_expr(passed_arg_type, passed_arg) + "`";
+                        LCOMPILERS_ASSERT_MSG(false, mismatch_msg.c_str());
                     }
                 }
             }

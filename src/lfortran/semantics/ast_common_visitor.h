@@ -9544,8 +9544,8 @@ public:
             } else {
                 ASR::ttype_t *var_type = ASRUtils::expr_type(var_expr);
 
-                // With implicit interfaces, ArrayItem is ambiguous
-                if (compiler_options.implicit_interface &&
+                // Legacy sequence association allows ArrayItem to alias arrays
+                if (compiler_options.legacy_array_sections &&
                     ASR::is_a<ASR::ArrayItem_t>(*var_expr)) {
                     // ArrayItem like C(i,j) could be:
                     // 1. A scalar value
