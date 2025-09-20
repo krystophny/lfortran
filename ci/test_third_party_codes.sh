@@ -860,9 +860,7 @@ time_section "🧪 Testing Reference-LAPACK (Official Repository)" '
   # Use latest stable release
   git checkout v3.12.0
 
-  extra_fflags="--fixed-form-infer --implicit-interface"
-  if [[ "$FC" == *lfortran* ]]; then
-    python - <<'PY'
+  python - <<PY
 from pathlib import Path
 path = Path("LAPACKE/include/CMakeLists.txt")
 needle = "  FortranCInterface_VERIFY()"
@@ -880,10 +878,9 @@ if needle not in text:
     raise SystemExit("Unable to locate FortranCInterface_VERIFY() for patching")
 path.write_text(text.replace(needle, replacement, 1))
 PY
-    extra_fflags+=" --cpp"
-  fi
 
-  print_subsection "Building Reference-LAPACK with LFortran"
+  extra_fflags="--cpp --fixed-form-infer --implicit-interface --legacy-array-sections"
+  print_subsection "Building Reference-LAPACK with $FC and flags: $extra_fflags"
   mkdir build && cd build
 
   cmake -DCMAKE_Fortran_COMPILER=$FC \
@@ -898,12 +895,10 @@ PY
 
   make -j8
 
-  print_success "Successfully built Reference-LAPACK with LFortran"
+  print_success "Successfully built Reference-LAPACK"
+  cd ..
 
-  # Optional: Run some basic tests if enabled
-  # ctest --output-on-failure -j8
-
-  cd ../..
+  cd ..
   rm -rf reference-lapack
 '
 
