@@ -663,6 +663,10 @@ namespace LCompilers {
         }
 
         llvm::Value* SimpleCMODescriptor::get_pointer_to_data(llvm::Type* type, llvm::Value* arr) {
+            // FORTRAN 77: In fixed-form mode, raw pointer parameters are not descriptor structs
+            if (!type->isStructTy()) {
+                return arr;  // Raw pointer - already the data pointer
+            }
             return llvm_utils->create_gep2(type, arr, 0);
         }
 
@@ -670,6 +674,14 @@ namespace LCompilers {
             llvm::Type* const array_desc_type = llvm_utils->arr_api->
                 get_array_type(arr_expr, ASRUtils::type_get_past_allocatable_pointer(arr_type),
                     llvm_utils->get_el_type(arr_expr, ASRUtils::extract_type(arr_type), module), false);
+
+            // FORTRAN 77: In fixed-form mode, function parameters that are arrays come in as raw pointers (ptr type),
+            // not as descriptor structs (%array type). If arr_type is not a struct, it's already the data pointer.
+            if (!array_desc_type->isStructTy()) {
+                // Raw pointer - already points to array data, not a descriptor
+                return arr;
+            }
+
             return llvm_utils->create_gep2(array_desc_type, arr, 0);
         }
 

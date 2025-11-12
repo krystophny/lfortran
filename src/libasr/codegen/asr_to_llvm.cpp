@@ -5956,7 +5956,14 @@ public:
             llvm::Type *el_type = llvm_utils->get_type_from_ttype_t_util(asr_expr, ASRUtils::extract_type(asr_type), module.get());
             switch( physical_type ) {
                 case ASR::array_physical_typeType::DescriptorArray: {
-                    llvm_tmp = llvm_utils->CreateLoad2(el_type->getPointerTo(), arr_descr->get_pointer_to_data(llvm_utils->get_type_from_ttype_t_util(asr_expr, asr_type, module.get()), llvm_tmp));
+                    // FORTRAN 77: In fixed-form mode, array parameters are raw pointers, not descriptors
+                    // Check if llvm_tmp is already a raw pointer (not pointing to a descriptor struct)
+                    llvm::Type* expected_desc_type = llvm_utils->get_type_from_ttype_t_util(asr_expr, asr_type, module.get());
+                    if (expected_desc_type->isStructTy()) {
+                        // It's a descriptor, extract the data pointer
+                        llvm_tmp = llvm_utils->CreateLoad2(el_type->getPointerTo(), arr_descr->get_pointer_to_data(expected_desc_type, llvm_tmp));
+                    }
+                    // else: already a raw pointer (fixed-form parameter), use as-is
                     break;
                 }
                 case ASR::array_physical_typeType::FixedSizeArray: {
@@ -12209,15 +12216,8 @@ public:
                             tmp = llvm_symtab[h];
                         }
 
-                        // FORTRAN 77: Extract raw pointer from array descriptors when calling fixed-form functions
-                        // TEMPORARY: Force extraction for debugging
-                        if (ASRUtils::is_array(arg->m_type) && tmp->getType()->isPointerTy()) {
-                            llvm::Type* desc_type = tmp->getType();
-                            llvm::Value* maybe_raw_ptr = arr_descr->get_pointer_to_data(desc_type, tmp);
-                            if (maybe_raw_ptr) {
-                                tmp = maybe_raw_ptr;
-                            }
-                        }
+                        // Note: No extraction needed here for fixed-form parameters
+                        // They are already raw pointers from function signature
 
                         if (ASRUtils::is_character(*orig_arg->m_type) &&
                             ASRUtils::is_character(*ASRUtils::expr_type(x.m_args[i].m_value))) {
@@ -12662,20 +12662,28 @@ public:
 
             // FORTRAN 77: Extract raw pointer from descriptor when calling fixed-form functions
             // Skip if argument is ArrayItem - it's already a raw pointer to the element
+            // Also skip if tmp is already a raw pointer (e.g., from a fixed-form parameter)
             if (compiler_options.fixed_form && orig_arg &&
                 !ASR::is_a<ASR::ArrayItem_t>(*x.m_args[i].m_value) &&
                 tmp->getType()->isPointerTy() &&
                 ASRUtils::is_array(ASRUtils::type_get_past_allocatable_pointer(orig_arg->m_type))) {
-                // Callee expects raw pointer - extract from descriptor
+
+                // Check if tmp points to a descriptor struct (not already a raw element pointer)
                 ASR::ttype_t* arg_asr_type = ASRUtils::expr_type(x.m_args[i].m_value);
-                llvm::Type* desc_type = llvm_utils->get_type_from_ttype_t_util(
+                llvm::Type* expected_desc_type = llvm_utils->get_type_from_ttype_t_util(
                     x.m_args[i].m_value, arg_asr_type, module.get());
-                llvm::Value* data_ptr_field = arr_descr->get_pointer_to_data(desc_type, tmp);
-                // Load the actual data pointer from the descriptor field
-                ASR::ttype_t* element_asr_type = ASRUtils::get_contained_type(ASRUtils::type_get_past_allocatable_pointer(orig_arg->m_type));
-                llvm::Type* elem_llvm_type = llvm_utils->get_type_from_ttype_t_util(
-                    x.m_args[i].m_value, element_asr_type, module.get());
-                tmp = llvm_utils->CreateLoad2(elem_llvm_type->getPointerTo(), data_ptr_field);
+
+                // Only extract if tmp actually points to a descriptor (struct type with fields)
+                if (expected_desc_type->isStructTy()) {
+                    // Callee expects raw pointer - extract from descriptor
+                    llvm::Value* data_ptr_field = arr_descr->get_pointer_to_data(expected_desc_type, tmp);
+                    // Load the actual data pointer from the descriptor field
+                    ASR::ttype_t* element_asr_type = ASRUtils::get_contained_type(ASRUtils::type_get_past_allocatable_pointer(orig_arg->m_type));
+                    llvm::Type* elem_llvm_type = llvm_utils->get_type_from_ttype_t_util(
+                        x.m_args[i].m_value, element_asr_type, module.get());
+                    tmp = llvm_utils->CreateLoad2(elem_llvm_type->getPointerTo(), data_ptr_field);
+                }
+                // else: tmp is already a raw pointer (from fixed-form parameter), use as-is
             }
 
             args.push_back(tmp);
@@ -13121,6 +13129,14 @@ public:
                     llvm::Value* arg = tmp;
                     ASR::dimension_t* m_dims = nullptr;
                     int n_dims = ASRUtils::extract_dimensions_from_ttype(arr_cast->m_type, m_dims);
+
+                    // FORTRAN 77: In fixed-form mode, array parameters are raw pointers, not descriptors
+                    // Skip bounds checking if arr_type is not a descriptor struct
+                    if (!arr_type->isStructTy()) {
+                        // Raw pointer (fixed-form parameter) - skip bounds check since we can't access descriptor fields
+                        continue;
+                    }
+
                     llvm::Value* desc_rank = arr_descr->get_rank(arr_type, arg);
                     llvm::Value* pointer_rank = llvm::ConstantInt::get(llvm_utils->getIntType(4), llvm::APInt(32, n_dims));
                     llvm::Function *fn = builder->GetInsertBlock()->getParent();
