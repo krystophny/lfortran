@@ -2996,10 +2996,21 @@ public:
                     LCompilers::create_global_string_ptr(context, *module, *builder, array_name));
             }
 
+            bool treat_as_raw_pointer = false;
+            if (compiler_options.fixed_form) {
+                if (v && (ASRUtils::is_arg_dummy(v->m_intent) ||
+                          v->m_presence == ASR::presenceType::Required)) {
+                    treat_as_raw_pointer = true;
+                }
+#if LLVM_VERSION_MAJOR < 15
+                if (array_t->m_physical_type == ASR::array_physical_typeType::FixedSizeArray) {
+                    treat_as_raw_pointer = true;
+                }
+#endif
+            }
+
             // FORTRAN 77: Simple pointer arithmetic for arrays in fixed-form mode
-            if (compiler_options.fixed_form && v &&
-                (ASRUtils::is_arg_dummy(v->m_intent) ||
-                 v->m_presence == ASR::presenceType::Required)) {
+            if (treat_as_raw_pointer) {
                 // In fixed-form mode, array parameters are raw pointers - use direct GEP
                 // Calculate linear index from multi-dimensional indices (column-major)
                 llvm::Value* linear_index = nullptr;
@@ -3038,8 +3049,27 @@ public:
                 }
 
                 // Generate GEP: array[linear_index]
-                // Use CreateGEP with single index for raw pointer
-                tmp = builder->CreateGEP(type, array, linear_index);
+                // In typed-pointer LLVM we need explicit bitcasts to the element type
+#if LLVM_VERSION_MAJOR < 15
+                llvm::Type* element_type = nullptr;
+                if (array->getType()->isPointerTy()) {
+                    if (array->getType()->getPointerElementType()->isArrayTy()) {
+                        ASR::ttype_t* asr_element_type = array_t->m_type;
+                        element_type = llvm_utils->get_type_from_ttype_t_util(asr_element_type, nullptr, module.get());
+                        array = builder->CreateBitCast(array, element_type->getPointerTo());
+                    } else {
+                        element_type = array->getType()->getPointerElementType();
+                    }
+                } else {
+                    ASR::ttype_t* asr_element_type = array_t->m_type;
+                    element_type = llvm_utils->get_type_from_ttype_t_util(asr_element_type, nullptr, module.get());
+                }
+#else
+                ASR::ttype_t* asr_element_type = array_t->m_type;
+                llvm::Type* element_type = llvm_utils->get_type_from_ttype_t_util(asr_element_type, nullptr, module.get());
+                array = builder->CreateBitCast(array, element_type->getPointerTo());
+#endif
+                tmp = builder->CreateGEP(element_type, array, linear_index);
                 return;
             }
 
@@ -7846,8 +7876,18 @@ public:
             if( ASR::is_a<ASR::StructInstanceMember_t>(*m_arg) ) {
                 arg = llvm_utils->CreateLoad2(m_arg_llvm_type, arg);
             }
-            tmp = llvm_utils->CreateLoad2(data_type->getPointerTo(), arr_descr->get_pointer_to_data(m_arg, m_type, arg, module.get()));
-            tmp = llvm_utils->create_ptr_gep2(data_type, tmp, arr_descr->get_offset(arr_type, arg));
+            // FORTRAN 77: In fixed-form mode, get_pointer_to_data returns raw pointer directly
+            llvm::Value* data_ptr_location = arr_descr->get_pointer_to_data(m_arg, m_type, arg, module.get());
+
+            // Check if arr_type is a struct (descriptor) or raw pointer
+            if (arr_type->isStructTy()) {
+                // Normal descriptor case - load the data pointer from the descriptor
+                tmp = llvm_utils->CreateLoad2(data_type->getPointerTo(), data_ptr_location);
+                tmp = llvm_utils->create_ptr_gep2(data_type, tmp, arr_descr->get_offset(arr_type, arg));
+            } else {
+                // Fixed-form raw pointer case - already have the pointer, no load needed
+                tmp = data_ptr_location;
+            }
         } else if(
             m_new == ASR::array_physical_typeType::PointerArray &&
             m_old == ASR::array_physical_typeType::FixedSizeArray) {
@@ -7883,7 +7923,11 @@ public:
                 !ASR::is_a<ASR::ArrayConstructor_t>(*m_arg) ) {
                 tmp = llvm_utils->create_gep2(arr_type, tmp, 0);
             }
-            PointerToData_to_Descriptor(m_arg, m_type, m_type_for_dimensions);
+            // FORTRAN 77: In fixed-form mode, treat DescriptorArray as PointerArray (raw pointers)
+            // Skip descriptor creation and just use the raw pointer
+            if (!compiler_options.fixed_form) {
+                PointerToData_to_Descriptor(m_arg, m_type, m_type_for_dimensions);
+            }
         } else if(
             m_new == ASR::array_physical_typeType::DescriptorArray &&
             m_old == ASR::array_physical_typeType::PointerArray) {

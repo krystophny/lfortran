@@ -124,16 +124,23 @@ namespace LCompilers {
                 llvm::Type* t = llvm_utils->get_type_from_ttype_t_util(nullptr, ASRUtils::get_contained_type(asr_arg_type), llvm_utils->module);
                 return llvm_utils->CreateLoad2(t, get_pointer_to_data(nullptr, ASRUtils::get_contained_type(asr_arg_type), tmp, llvm_utils->module));
             }
+            // FORTRAN 77: For raw pointers (non-struct types), just pass through
+            if (!arg_type->isStructTy()) {
+                return tmp;
+            }
             llvm::Value* arg_struct = llvm_utils->CreateAlloca(*builder, arg_type);
             llvm::Value* first_ele_ptr = nullptr;
             std::string asr_arg_type_code = ASRUtils::get_type_code(ASRUtils::get_contained_type(asr_arg_type), false, false);
             llvm::Type* element_type = llvm_utils->get_type_from_ttype_t_util(
                 nullptr, ASRUtils::get_contained_type(asr_arg_type), llvm_utils->module);
             llvm::StructType* tmp_struct_type = tkr2array[asr_arg_type_code].first;
+            llvm::Value* data_ptr = get_pointer_to_data(arg_type, tmp);
             if( tmp_struct_type->getElementType(0)->isArrayTy() ) {
-                first_ele_ptr = llvm_utils->create_gep2(element_type, get_pointer_to_data(arg_type, tmp), 0);
+                // Descriptor case: GEP into the embedded array to get pointer to first element
+                llvm::Type* array_type = tmp_struct_type->getElementType(0);
+                first_ele_ptr = llvm_utils->create_gep2(array_type, data_ptr, 0);
             } else if( tmp_struct_type->getNumElements() < 5 ) {
-                first_ele_ptr = llvm_utils->CreateLoad2(element_type, get_pointer_to_data(arg_type, tmp));
+                first_ele_ptr = llvm_utils->CreateLoad2(element_type, data_ptr);
             } else if( tmp_struct_type->getNumElements() == 5 ) {
                 return tmp;
             }
@@ -188,6 +195,19 @@ namespace LCompilers {
         llvm::Type* SimpleCMODescriptor::get_array_type
         (ASR::expr_t* expr, ASR::ttype_t* m_type_, llvm::Type* el_type,
         bool get_pointer) {
+            // FORTRAN 77: In fixed-form mode with DescriptorArray physical type,
+            // arrays are passed as raw pointers (float*), not descriptor structs (%array*)
+            if (co.fixed_form && ASR::is_a<ASR::Array_t>(*m_type_)) {
+                ASR::Array_t* array_type = ASR::down_cast<ASR::Array_t>(m_type_);
+                if (array_type->m_physical_type == ASR::array_physical_typeType::DescriptorArray) {
+                    // Return raw pointer to element type instead of descriptor struct
+                    if (get_pointer) {
+                        return el_type->getPointerTo()->getPointerTo();  // element** (rarely used)
+                    }
+                    return el_type->getPointerTo();  // element* (e.g., float*)
+                }
+            }
+
             std::string array_key = ASRUtils::get_type_code(m_type_, false, false, true, expr);
             if( tkr2array.find(array_key) != tkr2array.end() ) {
                 if( get_pointer ) {
@@ -224,6 +244,11 @@ namespace LCompilers {
 
         llvm::Value* SimpleCMODescriptor::
         get_pointer_to_dimension_descriptor_array(llvm::Type* type, llvm::Value* arr, bool load) {
+            // FORTRAN 77: Raw pointers don't have dimension descriptor arrays
+            if (!type->isStructTy()) {
+                // Return nullptr for raw pointers - they don't have dimension information
+                return llvm::ConstantPointerNull::get(dim_des->getPointerTo());
+            }
             llvm::Value* dim_des_arr_ptr = llvm_utils->create_gep2(type, arr, 2);
             if( !load ) {
                 return dim_des_arr_ptr;
@@ -233,6 +258,13 @@ namespace LCompilers {
 
         llvm::Value* SimpleCMODescriptor::
         get_rank(llvm::Type* type, llvm::Value* arr, bool get_pointer) {
+            // FORTRAN 77: Raw pointers don't have rank fields
+            if (!type->isStructTy()) {
+                // For raw pointers, rank is unknown/implicit from context
+                // Return rank 1 as a reasonable default for 1D arrays
+                llvm::Type *i32 = llvm::Type::getInt32Ty(context);
+                return llvm::ConstantInt::get(context, llvm::APInt(32, 1));
+            }
             llvm::Value* rank_ptr = llvm_utils->create_gep2(type, arr, 4);
             if( get_pointer ) {
                 return rank_ptr;
@@ -243,6 +275,10 @@ namespace LCompilers {
 
         void SimpleCMODescriptor::
         set_rank(llvm::Type* type,llvm::Value* arr, llvm::Value* rank) {
+            // FORTRAN 77: Raw pointers don't have rank fields, skip for non-structs
+            if (!type->isStructTy()) {
+                return;
+            }
             llvm::Value* rank_ptr = llvm_utils->create_gep2(type, arr, 4);
             LLVM::CreateStore(*builder, rank, rank_ptr);
         }
@@ -686,6 +722,12 @@ namespace LCompilers {
         }
 
         llvm::Value* SimpleCMODescriptor::get_offset(llvm::Type* type, llvm::Value* arr, bool load) {
+            // FORTRAN 77: Raw pointers don't have offset fields, only descriptors do
+            if (!type->isStructTy()) {
+                // For raw pointers, offset is always 0
+                llvm::Type *i32 = llvm::Type::getInt32Ty(context);
+                return llvm::ConstantInt::get(context, llvm::APInt(32, 0));
+            }
             llvm::Value* offset = llvm_utils->create_gep2(type, arr, 1);
             if( !load ) {
                 return offset;
@@ -824,7 +866,18 @@ namespace LCompilers {
                     tmp = llvm_utils->get_string_element_in_array(ASR::down_cast<ASR::String_t>(ASRUtils::extract_type(asr_type)), array, idx);
                 } else {
                     if( is_fixed_size ) {
-                        tmp = llvm_utils->create_gep2(type, array, idx);
+                        ASR::ttype_t* base_asr_type = ASRUtils::type_get_past_array(asr_type);
+                        llvm::Type* element_type = llvm_utils->get_type_from_ttype_t_util(expr, base_asr_type, llvm_utils->module);
+                        llvm::Value* data_ptr = array;
+#if LLVM_VERSION_MAJOR < 15
+                        if (!(data_ptr->getType()->isPointerTy() &&
+                              data_ptr->getType()->getPointerElementType() == element_type)) {
+                            data_ptr = builder->CreateBitCast(array, element_type->getPointerTo());
+                        }
+#else
+                        data_ptr = builder->CreateBitCast(array, element_type->getPointerTo());
+#endif
+                        tmp = llvm_utils->create_ptr_gep2(element_type, data_ptr, idx);
                     } else {
                         tmp = llvm_utils->create_ptr_gep2(type, array, idx);
                     }
