@@ -13381,12 +13381,8 @@ public:
             std::vector<llvm::Value *> args2 = convert_call_args(x, is_method);
             args.insert(args.end(), args2.begin(), args2.end());
             // check if type of each arg is same as type of each arg in subrout_called
-            ASR::symbol_t* past_external = symbol_get_past_external(x.m_name);
-            // For EXTERNAL functions with implicit interfaces (past_external == nullptr),
-            // skip type checking to allow FORTRAN 77 sequence association
-            bool is_implicit_interface = (past_external == nullptr);
-            if (!is_implicit_interface && ASR::is_a<ASR::Function_t>(*past_external)) {
-                ASR::Function_t* subrout_called = ASR::down_cast<ASR::Function_t>(past_external);
+            if (ASR::is_a<ASR::Function_t>(*symbol_get_past_external(x.m_name))) {
+                ASR::Function_t* subrout_called = ASR::down_cast<ASR::Function_t>(symbol_get_past_external(x.m_name));
                 for (size_t i = 0; i < subrout_called->n_args; i++) {
                     ASR::expr_t* expected_arg = subrout_called->m_args[i];
                     ASR::expr_t* passed_arg = x.m_args[i].m_value;
