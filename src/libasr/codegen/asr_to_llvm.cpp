@@ -12661,7 +12661,9 @@ public:
             }
 
             // FORTRAN 77: Extract raw pointer from descriptor when calling fixed-form functions
+            // Skip if argument is ArrayItem - it's already a raw pointer to the element
             if (compiler_options.fixed_form && orig_arg &&
+                !ASR::is_a<ASR::ArrayItem_t>(*x.m_args[i].m_value) &&
                 tmp->getType()->isPointerTy() &&
                 ASRUtils::is_array(ASRUtils::type_get_past_allocatable_pointer(orig_arg->m_type))) {
                 // Callee expects raw pointer - extract from descriptor
@@ -13480,9 +13482,17 @@ public:
                     ASR::ttype_t* expected_arg_type = ASRUtils::expr_type(expected_arg);
                     ASR::ttype_t* passed_arg_type = ASRUtils::expr_type(passed_arg);
                     if (ASR::is_a<ASR::ArrayItem_t>(*passed_arg)) {
-                        if (!ASRUtils::types_equal(expected_arg_type, passed_arg_type, expected_arg, passed_arg, true)) {
-                            throw CodeGenError("Type mismatch in subroutine call, expected `" + ASRUtils::type_to_str_python_expr(expected_arg_type, expected_arg)
-                                    + "`, passed `" + ASRUtils::type_to_str_python_expr(passed_arg_type, passed_arg) + "`", x.m_args[i].m_value->base.loc);
+                        // FORTRAN 77 sequence association: Allow passing array element to array parameter
+                        // In fixed-form mode, A(i) can be passed to a subroutine expecting an array,
+                        // treating the element as the start of an array sequence
+                        bool allow_sequence_association = compiler_options.fixed_form &&
+                                                         ASRUtils::is_array(expected_arg_type);
+
+                        if (!allow_sequence_association) {
+                            if (!ASRUtils::types_equal(expected_arg_type, passed_arg_type, expected_arg, passed_arg, true)) {
+                                throw CodeGenError("Type mismatch in subroutine call, expected `" + ASRUtils::type_to_str_python_expr(expected_arg_type, expected_arg)
+                                        + "`, passed `" + ASRUtils::type_to_str_python_expr(passed_arg_type, passed_arg) + "`", x.m_args[i].m_value->base.loc);
+                            }
                         }
                     }
                 }
