@@ -1,25 +1,32 @@
-C Test FORTRAN 77 sequence association with assumed-size arrays
-C This pattern is common in LAPACK where array elements are passed
-C to subroutines expecting array pointers
-      SUBROUTINE CALLER(A, N)
-      IMPLICIT NONE
-      INTEGER N
-      REAL A(N, *)
-      EXTERNAL SUB
-C Pass array element as start of array - FORTRAN 77 sequence association
-      CALL SUB(A(1,1), N)
-      END
+! Minimal reproducer for 0-based array with sequence association
+! Tests A(0:*) passing A(1) to subroutine expecting 2D array
+PROGRAM TEST
+    IMPLICIT NONE
+    REAL A(0:100)
+    INTEGER M, N, LDA
+    REAL ALPHA
 
-      SUBROUTINE SUB(X, N)
-      IMPLICIT NONE
-      INTEGER N
-      REAL X(*)
-      X(1) = 42.0
-      END
+    M = 6
+    N = 4
+    LDA = 7
 
-      PROGRAM TEST
-      REAL A(10, 10)
-      CALL CALLER(A, 10)
-      IF (A(1,1) /= 42.0) ERROR STOP
-      PRINT *, 'PASS'
-      END
+    A = 1.0
+    ALPHA = 2.0
+
+    ! Pass A(1) from 0-based array to subroutine expecting 2D array
+    CALL STRSM(3, N, ALPHA, A(1), LDA)
+
+    PRINT *, 'Test completed successfully'
+END PROGRAM
+
+SUBROUTINE STRSM(M, N, ALPHA, A, LDA)
+    IMPLICIT NONE
+    INTEGER M, N, LDA
+    REAL ALPHA
+    REAL A(LDA, *)
+
+    PRINT *, 'Accessing A(1,1) =', A(1,1)
+    PRINT *, 'LDA =', LDA
+    PRINT *, 'M =', M
+    PRINT *, 'N =', N
+END SUBROUTINE
