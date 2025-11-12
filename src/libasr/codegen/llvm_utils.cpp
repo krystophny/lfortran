@@ -959,7 +959,18 @@ namespace LCompilers {
                     is_array_type = false;  // Prevent further array processing
 
                 } else if( is_array_type ) {
-                    type = type_original->getPointerTo();
+                    // FORTRAN 77: use raw element pointer instead of descriptor
+                    if (compiler_options.fixed_form) {
+                        // In fixed-form mode, pass arrays as raw pointers to first element
+                        ASR::ttype_t* element_type = ASRUtils::get_contained_type(arg->m_type);
+                        llvm::Type* elem_llvm_type = get_type_from_ttype_t_util(x.m_args[i],
+                            element_type, module);
+                        type = elem_llvm_type->getPointerTo();  // e.g., float*
+                        is_array_type = false;  // Treat as simple pointer, not array descriptor
+                    } else {
+                        // Modern Fortran: use descriptor pointer
+                        type = type_original->getPointerTo();
+                    }
                 } else {
                     type = type_original;
                 }

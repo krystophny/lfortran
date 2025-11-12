@@ -2996,6 +2996,53 @@ public:
                     LCompilers::create_global_string_ptr(context, *module, *builder, array_name));
             }
 
+            // FORTRAN 77: Simple pointer arithmetic for arrays in fixed-form mode
+            if (compiler_options.fixed_form && v &&
+                (ASRUtils::is_arg_dummy(v->m_intent) ||
+                 v->m_presence == ASR::presenceType::Required)) {
+                // In fixed-form mode, array parameters are raw pointers - use direct GEP
+                // Calculate linear index from multi-dimensional indices (column-major)
+                llvm::Value* linear_index = nullptr;
+
+                if (x.n_args == 1) {
+                    // 1D case: index - 1 (Fortran is 1-based, but convert to 0-based)
+                    linear_index = builder->CreateSub(indices[0],
+                        llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 1));
+                } else {
+                    // Multi-D case: calculate linear index using column-major layout
+                    // For array A(i,j,k) with dimensions (D1,D2,D3):
+                    // linear = (i-1) + (j-1)*D1 + (k-1)*D1*D2
+                    linear_index = builder->CreateSub(indices[0],
+                        llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 1));
+
+                    llvm::Value* stride = llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 1);
+                    for (size_t idim = 1; idim < x.n_args; idim++) {
+                        // Get dimension size for this axis
+                        int ptr_loads_copy = ptr_loads;
+                        ptr_loads = 2 - !LLVM::is_llvm_pointer(*ASRUtils::expr_type(m_dims[idim-1].m_length));
+                        this->visit_expr_wrapper(m_dims[idim-1].m_length, true);
+                        ptr_loads = ptr_loads_copy;
+                        llvm::Value* dim_size = tmp;
+
+                        // stride *= dim_size
+                        stride = builder->CreateMul(stride, dim_size);
+
+                        // offset = (index[idim] - 1) * stride
+                        llvm::Value* idx_adjusted = builder->CreateSub(indices[idim],
+                            llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 1));
+                        llvm::Value* offset = builder->CreateMul(idx_adjusted, stride);
+
+                        // linear_index += offset
+                        linear_index = builder->CreateAdd(linear_index, offset);
+                    }
+                }
+
+                // Generate GEP: array[linear_index]
+                // Use CreateGEP with single index for raw pointer
+                tmp = builder->CreateGEP(type, array, linear_index);
+                return;
+            }
+
             Vec<llvm::Value*> llvm_diminfo;
             llvm_diminfo.reserve(al, 2 * x.n_args + 1);
             if( array_t->m_physical_type == ASR::array_physical_typeType::PointerArray ||
@@ -5666,6 +5713,11 @@ public:
                 ASRUtils::is_array(symbol_type) &&
                 ASRUtils::extract_physical_type(symbol_type)
                     == ASR::array_physical_typeType::DescriptorArray ) {
+                // FORTRAN 77: skip descriptor setup in fixed-form mode (raw pointers)
+                if (compiler_options.fixed_form) {
+                    // In fixed-form mode, arrays are raw pointers - no descriptor setup needed
+                    continue;
+                }
                 llvm::Type* desc_array_type = llvm_utils->get_type_from_ttype_t_util(ASRUtils::get_expr_from_sym(al, sym.second),
                         ASRUtils::type_get_past_allocatable_pointer(symbol_type),
                         module.get());
@@ -12156,6 +12208,17 @@ public:
                         } else {
                             tmp = llvm_symtab[h];
                         }
+
+                        // FORTRAN 77: Extract raw pointer from array descriptors when calling fixed-form functions
+                        // TEMPORARY: Force extraction for debugging
+                        if (ASRUtils::is_array(arg->m_type) && tmp->getType()->isPointerTy()) {
+                            llvm::Type* desc_type = tmp->getType();
+                            llvm::Value* maybe_raw_ptr = arr_descr->get_pointer_to_data(desc_type, tmp);
+                            if (maybe_raw_ptr) {
+                                tmp = maybe_raw_ptr;
+                            }
+                        }
+
                         if (ASRUtils::is_character(*orig_arg->m_type) &&
                             ASRUtils::is_character(*ASRUtils::expr_type(x.m_args[i].m_value))) {
                             ASR::String_t* orig_ttype = ASR::down_cast<ASR::String_t>(ASRUtils::extract_type(orig_arg->m_type));
@@ -12303,6 +12366,18 @@ public:
                                 }
                             }
                         } else {
+                            // FORTRAN 77: extract raw pointer from descriptor in fixed-form mode
+                            // TEMPORARY DEBUG: try without orig_arg check
+                            if (compiler_options.fixed_form && tmp->getType()->isPointerTy()) {
+                                // Assume it's an array descriptor and try to extract raw pointer
+                                llvm::Type* desc_type = tmp->getType();
+                                llvm::Value* raw_ptr = arr_descr->get_pointer_to_data(desc_type, tmp);
+                                // Only use the raw pointer if we successfully extracted it
+                                if (raw_ptr) {
+                                    tmp = raw_ptr;
+                                }
+                            }
+
                             if( orig_arg &&
                                 !LLVM::is_llvm_pointer(*orig_arg->m_type) &&
                                 LLVM::is_llvm_pointer(*arg->m_type) ) {
@@ -12583,6 +12658,22 @@ public:
                         ASRUtils::type_get_past_pointer(orig_arg->m_type)),
                     ASRUtils::type_get_past_allocatable(
                         ASRUtils::type_get_past_pointer(ASRUtils::expr_type(x.m_args[i].m_value))));
+            }
+
+            // FORTRAN 77: Extract raw pointer from descriptor when calling fixed-form functions
+            if (compiler_options.fixed_form && orig_arg &&
+                tmp->getType()->isPointerTy() &&
+                ASRUtils::is_array(ASRUtils::type_get_past_allocatable_pointer(orig_arg->m_type))) {
+                // Callee expects raw pointer - extract from descriptor
+                ASR::ttype_t* arg_asr_type = ASRUtils::expr_type(x.m_args[i].m_value);
+                llvm::Type* desc_type = llvm_utils->get_type_from_ttype_t_util(
+                    x.m_args[i].m_value, arg_asr_type, module.get());
+                llvm::Value* data_ptr_field = arr_descr->get_pointer_to_data(desc_type, tmp);
+                // Load the actual data pointer from the descriptor field
+                ASR::ttype_t* element_asr_type = ASRUtils::get_contained_type(ASRUtils::type_get_past_allocatable_pointer(orig_arg->m_type));
+                llvm::Type* elem_llvm_type = llvm_utils->get_type_from_ttype_t_util(
+                    x.m_args[i].m_value, element_asr_type, module.get());
+                tmp = llvm_utils->CreateLoad2(elem_llvm_type->getPointerTo(), data_ptr_field);
             }
 
             args.push_back(tmp);
