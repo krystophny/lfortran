@@ -373,6 +373,36 @@ public:
                 type_encoding = llvm::dwarf::DW_ATE_float;
                 break;
             }
+            case ASR::ttypeType::String: {
+                type_name = "character";
+                if (type_size == 0) {
+                    type_size = 8;
+                }
+#if LLVM_VERSION_MAJOR >= 8
+                type_encoding = llvm::dwarf::DW_ATE_UTF;
+#else
+                type_encoding = llvm::dwarf::DW_ATE_unsigned_char;
+#endif
+                break;
+            }
+            case ASR::ttypeType::Array: {
+                ASR::Array_t* array_t = ASR::down_cast<ASR::Array_t>(t);
+                get_type_debug_info(array_t->m_type, type_name,
+                    type_size, type_encoding);
+                break;
+            }
+            case ASR::ttypeType::Pointer: {
+                ASR::Pointer_t* ptr_t = ASR::down_cast<ASR::Pointer_t>(t);
+                get_type_debug_info(ptr_t->m_type, type_name,
+                    type_size, type_encoding);
+                break;
+            }
+            case ASR::ttypeType::Allocatable: {
+                ASR::Allocatable_t* alloc_t = ASR::down_cast<ASR::Allocatable_t>(t);
+                get_type_debug_info(alloc_t->m_type, type_name,
+                    type_size, type_encoding);
+                break;
+            }
             default : throw LCompilersException("Debug information for the type: `"
                 + std::to_string(t->type) + "` is not yet implemented");
         }
