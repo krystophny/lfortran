@@ -1272,6 +1272,15 @@ RUN(NAME intrinsics_396 LABELS gfortran llvm)
 
 RUN(NAME la_constants LABELS gfortran llvm llvm_wasm llvm_wasm_emcc) # LAPACK constants
 
+RUN(NAME template_lapack_01 LABELS llvm llvm_wasm llvm_wasm_emcc wasm)
+RUN(NAME lapack_01 LABELS gfortran llvm)
+RUN(NAME lapack_02 LABELS gfortran llvm EXTRA_ARGS --std=legacy GFORTRAN_ARGS -ffixed-form)
+RUN(NAME lapack_03 LABELS gfortran llvm EXTRA_ARGS --std=legacy GFORTRAN_ARGS -ffixed-form)
+RUN(NAME lapack_04 LABELS gfortran llvm EXTRA_ARGS --std=legacy GFORTRAN_ARGS -ffixed-form)
+RUN(NAME lapack_05 LABELS gfortran llvm EXTRA_ARGS --std=legacy GFORTRAN_ARGS -ffixed-form)
+RUN(NAME lapack_06 LABELS gfortran llvm EXTRA_ARGS --std=legacy GFORTRAN_ARGS -ffixed-form)
+RUN(NAME lapack_assumed_size_ptr LABELS gfortran llvm EXTRA_ARGS --std=legacy GFORTRAN_ARGS -ffixed-form)
+
 RUN(NAME integer_boz_01 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 
 RUN(NAME test_dshiftr LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
