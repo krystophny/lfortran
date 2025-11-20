@@ -472,17 +472,30 @@ public:
         std::vector<std::pair<llvm::Value*, llvm::Value*>> llvm_dims;
         int64_t ptr_loads_copy = ptr_loads;
         ptr_loads = 2;
+        bool has_unknown_dim = false;
         for( int r = 0; r < n_dims; r++ ) {
             ASR::dimension_t m_dim = m_dims[r];
-            LCOMPILERS_ASSERT(m_dim.m_start != nullptr);
-            visit_expr(*(m_dim.m_start));
-            llvm::Value* start = tmp;
-            LCOMPILERS_ASSERT(m_dim.m_length != nullptr);
-            load_array_size_deep_copy(m_dim.m_length);
-            llvm::Value* end = tmp;
+            llvm::Value* start = nullptr;
+            if( m_dim.m_start ) {
+                visit_expr(*(m_dim.m_start));
+                start = tmp;
+            } else {
+                start = llvm::ConstantInt::get(context, llvm::APInt(32, 1));
+            }
+            llvm::Value* end = nullptr;
+            if( m_dim.m_length ) {
+                load_array_size_deep_copy(m_dim.m_length);
+                end = tmp;
+            } else {
+                has_unknown_dim = true;
+                end = llvm::ConstantInt::get(context, llvm::APInt(32, 2147483647));
+            }
             llvm_dims.push_back(std::make_pair(start, end));
         }
         ptr_loads = ptr_loads_copy;
+        if( has_unknown_dim ) {
+            reserve_data_memory = false;
+        }
         if( is_data_only ) {
             if( !ASRUtils::is_fixed_size_array(m_dims, n_dims) ) {
                 llvm::Value* const_1 = llvm::ConstantInt::get(context, llvm::APInt(32, 1));
@@ -6266,10 +6279,10 @@ public:
         llvm::Value* target_desc = tmp;
         ptr_loads = ptr_loads_copy;
 
-        ASR::ttype_t* target_desc_type = ASRUtils::duplicate_type_with_empty_dims(al,
+        ASR::ttype_t* target_desc_type = ASRUtils::duplicate_type(al,
             ASRUtils::type_get_past_allocatable(
                 ASRUtils::type_get_past_pointer(value_array_type)),
-             ASR::array_physical_typeType::DescriptorArray, true);
+             nullptr, ASR::array_physical_typeType::DescriptorArray, true);
         llvm::Type* target_type = llvm_utils->get_type_from_ttype_t_util(array_section->m_v, target_desc_type, module.get());
         llvm::AllocaInst *target = llvm_utils->CreateAlloca(
             target_type, nullptr, "array_section_descriptor");
@@ -6330,12 +6343,12 @@ public:
                 llvm_diminfo.push_back(al, tmp);
             }
             arr_descr->fill_descriptor_for_array_section_data_only(value_desc, value_el_type, expr_type(x.m_value),
-                target, expr_type(x.m_target), x.m_target,
+                target, target_desc_type, x.m_target,
                 lbs.p, ubs.p, ds.p, non_sliced_indices.p,
                 llvm_diminfo.p, value_rank, target_rank, location_manager);
         } else {
             arr_descr->fill_descriptor_for_array_section(value_desc, value_el_type, expr_type(x.m_value),
-                target, expr_type(x.m_target), x.m_target,
+                target, target_desc_type, x.m_target,
                 lbs.p, ubs.p, ds.p, non_sliced_indices.p,
                 array_section->n_args, target_rank, location_manager);
         }
