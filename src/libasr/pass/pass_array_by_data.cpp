@@ -447,6 +447,9 @@ class EditProcedureVisitor: public ASR::CallReplacerOnExpressionsVisitor<EditPro
     v(v_), replacer(v) {}
 
     void call_replacer() {
+        if (current_expr == nullptr || *current_expr == nullptr) {
+            return;
+        }
         replacer.current_expr = current_expr;
         replacer.current_scope = current_scope;
         replacer.replace_expr(*current_expr);
@@ -468,6 +471,23 @@ class EditProcedureVisitor: public ASR::CallReplacerOnExpressionsVisitor<EditPro
         ASR::SubroutineCall_t& xx = const_cast<ASR::SubroutineCall_t&>(x);
         edit_symbol_reference(name)
         ASR::CallReplacerOnExpressionsVisitor<EditProcedureVisitor>::visit_SubroutineCall(x);
+    }
+
+    void visit_ArrayPhysicalCast(const ASR::ArrayPhysicalCast_t& x) {
+        ASR::ArrayPhysicalCast_t& xx = const_cast<ASR::ArrayPhysicalCast_t&>(x);
+        if (ASR::is_a<ASR::Array_t>(*xx.m_type)) {
+            ASR::Array_t* arr = ASR::down_cast<ASR::Array_t>(xx.m_type);
+            for (size_t i = 0; i < arr->n_dims; i++) {
+                arr->m_dims[i].m_start = nullptr;
+                arr->m_dims[i].m_length = nullptr;
+            }
+        }
+        ASR::CallReplacerOnExpressionsVisitor<EditProcedureVisitor>::visit_ArrayPhysicalCast(x);
+    }
+
+    void visit_dimension(const ASR::dimension_t& /*x*/) {
+        // Skip dimension bounds; pass_array_by_data does not rewrite them.
+        return;
     }
 
     void visit_Module(const ASR::Module_t& x) {
@@ -523,6 +543,11 @@ class EditProcedureCallsVisitor : public ASR::ASRPassBaseWalkVisitor<EditProcedu
             std::set<ASR::symbol_t*>& not_to_be_erased_):
         al(al_), v(v_), not_to_be_erased(not_to_be_erased_) {}
 
+        void visit_dimension(const ASR::dimension_t& /*x*/) {
+            // Dimension bounds are left untouched for pass_array_by_data callbacks.
+            return;
+        }
+
         // this is exactly the same as the one in EditProcedureReplacer
         ASR::symbol_t* resolve_new_proc(ASR::symbol_t* old_sym) {
             ASR::symbol_t* ext_sym = ASRUtils::symbol_get_past_external(old_sym);
@@ -573,6 +598,18 @@ class EditProcedureCallsVisitor : public ASR::ASRPassBaseWalkVisitor<EditProcedu
                 xx.m_args = new_args.p;
                 xx.n_args = new_args.size();
             }
+        }
+
+        void visit_ArrayPhysicalCast(const ASR::ArrayPhysicalCast_t& x) {
+            ASR::ArrayPhysicalCast_t& xx = const_cast<ASR::ArrayPhysicalCast_t&>(x);
+            if (ASR::is_a<ASR::Array_t>(*xx.m_type)) {
+                ASR::Array_t* arr = ASR::down_cast<ASR::Array_t>(xx.m_type);
+                for (size_t i = 0; i < arr->n_dims; i++) {
+                    arr->m_dims[i].m_start = nullptr;
+                    arr->m_dims[i].m_length = nullptr;
+                }
+            }
+            ASR::ASRPassBaseWalkVisitor<EditProcedureCallsVisitor>::visit_ArrayPhysicalCast(x);
         }
 
         static inline void get_dimensions(ASR::expr_t* array, Vec<ASR::expr_t*>& dims,
