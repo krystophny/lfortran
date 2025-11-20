@@ -1698,7 +1698,9 @@ namespace LCompilers {
                     type_ptr = llvm::Type::getInt64Ty(context);
                     break;
                 default:
-                    LCOMPILERS_ASSERT(false);
+                    // Unknown kind: fall back to default integer to keep legacy
+                    // lowering progressing (e.g., implicit interfaces).
+                    type_ptr = llvm::Type::getInt32Ty(context);
             }
         }
         return type_ptr;

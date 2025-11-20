@@ -663,44 +663,11 @@ class EditProcedureCallsVisitor : public ASR::ASRPassBaseWalkVisitor<EditProcedu
                 }
 
                 ASR::expr_t* orig_arg_i = orig_args[i].m_value;
-                ASR::ttype_t* orig_arg_type = ASRUtils::expr_type(orig_arg_i);
                 Vec<ASR::expr_t*> dim_vars;
                 dim_vars.reserve(al, 2);
                 get_dimensions(orig_arg_i, dim_vars, al);
 
-                if( ASRUtils::is_array(orig_arg_type) ) {
-                    ASR::Array_t* array_t = ASR::down_cast<ASR::Array_t>(
-                        ASRUtils::type_get_past_allocatable(ASRUtils::type_get_past_pointer(orig_arg_type)));
-                    if( array_t->m_physical_type != ASR::array_physical_typeType::PointerArray ) {
-                        ASRUtils::ASRBuilder builder(al, orig_arg_i->base.loc);
-                        Vec<ASR::dimension_t> new_dims;
-                        new_dims.reserve(al, dim_vars.size());
-                        for (size_t j = 0; j < dim_vars.size(); j++) {
-                            ASR::dimension_t dim;
-                            dim.loc = orig_arg_i->base.loc;
-                            dim.m_start = builder.i32(1);
-                            dim.m_length = dim_vars[j];
-                            new_dims.push_back(al, dim);
-                        }
-                        ASR::ttype_t* cast_type = ASRUtils::duplicate_type(al, orig_arg_type,
-                            &new_dims, ASR::array_physical_typeType::PointerArray, true);
-                        if (!cast_type) {
-                            cast_type = ASRUtils::duplicate_type(al, orig_arg_type,
-                                nullptr, ASR::array_physical_typeType::PointerArray, true);
-                        }
-                        ASR::expr_t* physical_cast = ASRUtils::EXPR(ASRUtils::make_ArrayPhysicalCast_t_util(
-                            al, orig_arg_i->base.loc, orig_arg_i, array_t->m_physical_type,
-                            ASR::array_physical_typeType::PointerArray, cast_type, nullptr));
-                        ASR::call_arg_t physical_cast_arg;
-                        physical_cast_arg.loc = orig_arg_i->base.loc;
-                        physical_cast_arg.m_value = physical_cast;
-                        new_args.push_back(al, physical_cast_arg);
-                    } else {
-                        new_args.push_back(al, orig_args[i]);
-                    }
-                } else {
-                    new_args.push_back(al, orig_args[i]);
-                }
+                new_args.push_back(al, orig_args[i]);
 
                 for( size_t j = 0; j < dim_vars.size(); j++ ) {
                     ASR::call_arg_t dim_var;

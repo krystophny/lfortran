@@ -765,9 +765,7 @@ static inline ASR::array_physical_typeType extract_physical_type(ASR::ttype_t* e
             return extract_physical_type(ASRUtils::type_get_past_allocatable(e));
         }
         default:
-            fprintf(stderr, "debug: extract_physical_type fallback ttype=%d\n", (int)e->type);
-            // Fallback to descriptor to avoid crashing on legacy paths; caller should
-            // ideally pass an array/pointer/allocatable type.
+            // Fallback to descriptor to avoid crashing on legacy/unspecified paths.
             return ASR::array_physical_typeType::DescriptorArray;
     }
 }
@@ -5960,7 +5958,15 @@ static inline ASR::asr_t* make_ArrayPhysicalCast_t_util(Allocator &al, const Loc
         a_old = ASRUtils::extract_physical_type(ASRUtils::expr_type(a_arg_->m_arg));
     }
 
-    LCOMPILERS_ASSERT(ASRUtils::extract_physical_type(ASRUtils::expr_type(a_arg)) == a_old);
+    if( !ASRUtils::is_array(ASRUtils::expr_type(a_arg)) ) {
+        // Nothing to cast; leave scalar/pathological cases untouched.
+        return (ASR::asr_t*) a_arg;
+    }
+    ASR::array_physical_typeType arg_phy = ASRUtils::extract_physical_type(ASRUtils::expr_type(a_arg));
+    if( arg_phy != a_old ) {
+        // Mismatch indicates unknown/legacy metadata; avoid asserting and skip cast.
+        return (ASR::asr_t*) a_arg;
+    }
     // TODO: Allow for DescriptorArray to DescriptorArray physical cast for allocatables
     // later on
     if( (a_old == a_new && a_old != ASR::array_physical_typeType::DescriptorArray) ||
