@@ -527,6 +527,7 @@ Result<std::string> FortranEvaluator::get_c3(ASR::TranslationUnit_t &asr,
     Allocator al(64*1024*1024);
     compiler_options.po.always_run = false;
     compiler_options.po.run_fun = "f";
+    compiler_options.po.legacy_array_sections = compiler_options.legacy_array_sections;
     pass_manager.skip_c_passes();
     pass_manager.apply_passes(al, &asr, compiler_options.po, diagnostics);
     // ASR pass -> C
@@ -594,6 +595,7 @@ Result<std::string> FortranEvaluator::get_fortran(const std::string &code,
     if (asr.ok) {
         LCompilers::PassManager pass_manager;
         pass_manager.use_fortran_passes();
+        compiler_options.po.legacy_array_sections = compiler_options.legacy_array_sections;
         pass_manager.apply_passes(al, asr.result, compiler_options.po, diagnostics);
         return asr_to_fortran(*asr.result, diagnostics, false, 4);
     } else {

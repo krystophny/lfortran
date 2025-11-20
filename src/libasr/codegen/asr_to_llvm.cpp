@@ -7818,8 +7818,41 @@ public:
         llvm::AllocaInst *target = llvm_utils->CreateAlloca(
             target_type, nullptr, "array_descriptor");
         builder->CreateStore(tmp, arr_descr->get_pointer_to_data(target_type, target));
+
+        // Extract dimensions - first try from m_type_for_dimensions
         ASR::dimension_t* m_dims = nullptr;
         int n_dims = ASRUtils::extract_dimensions_from_ttype(m_type_for_dimensions, m_dims);
+
+        // If dimensions are NULL (stripped by pass_array_by_data), extract from source expr
+        bool has_null_dims = false;
+        if (n_dims > 0 && m_dims) {
+            for (int i = 0; i < n_dims; i++) {
+                if (m_dims[i].m_length == nullptr) {
+                    has_null_dims = true;
+                    break;
+                }
+            }
+        }
+
+        if (has_null_dims && ASRUtils::is_array(ASRUtils::expr_type(expr))) {
+            // Dimensions were stripped by pass_array_by_data, get from source expression
+            ASR::dimension_t* expr_dims = nullptr;
+            int expr_n_dims = ASRUtils::extract_dimensions_from_ttype(ASRUtils::expr_type(expr), expr_dims);
+            if (expr_n_dims == n_dims && expr_dims) {
+                // Check if source has concrete dimensions
+                bool source_has_concrete = true;
+                for (int i = 0; i < expr_n_dims; i++) {
+                    if (expr_dims[i].m_length == nullptr) {
+                        source_has_concrete = false;
+                        break;
+                    }
+                }
+                if (source_has_concrete) {
+                    m_dims = expr_dims;
+                }
+            }
+        }
+
         llvm::Type* llvm_data_type = llvm_utils->get_type_from_ttype_t_util(expr,
             ASRUtils::type_get_past_pointer(ASRUtils::type_get_past_allocatable(m_type)), module.get());
         llvm::Type* llvm_typ = llvm_utils->get_type_from_ttype_t_util(expr,
@@ -14814,6 +14847,7 @@ Result<std::unique_ptr<LLVMModule>> asr_to_llvm(ASR::TranslationUnit_t &asr,
     co.po.run_fun = run_fn;
     co.po.always_run = false;
     co.po.skip_optimization_func_instantiation = skip_optimization_func_instantiation;
+    co.po.legacy_array_sections = co.legacy_array_sections;
     pass_manager.rtlib = co.rtlib;
     auto t1 = std::chrono::high_resolution_clock::now();
     pass_manager.apply_passes(al, &asr, co.po, diagnostics);

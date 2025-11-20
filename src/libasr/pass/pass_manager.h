@@ -311,6 +311,16 @@ namespace LCompilers {
                           diag::Diagnostics &diagnostics) {
             double cummulative_time_taken_by_passes_in_microseconds = 0.0;
             auto t1 = std::chrono::high_resolution_clock::now();
+
+            // Skip pass_array_by_data for legacy array sections mode
+            // Legacy F77 code with assumed-size arrays expects raw pointer passing,
+            // but pass_array_by_data corrupts the data when converting descriptors
+            if (pass_options.legacy_array_sections) {
+                if (std::find(_skip_passes.begin(), _skip_passes.end(), "pass_array_by_data") == _skip_passes.end()) {
+                    _skip_passes.push_back("pass_array_by_data");
+                }
+            }
+
             if( !_user_defined_passes.empty() ) {
                 apply_passes(al, asr, _user_defined_passes, pass_options,
                     diagnostics, cummulative_time_taken_by_passes_in_microseconds);
