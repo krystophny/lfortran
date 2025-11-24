@@ -13293,6 +13293,7 @@ public:
                     ASRUtils::symbol_get_past_external(x.m_name));
             }
             llvm::FunctionType* fntype = llvm_utils->get_function_type(*func, module.get());
+            fixup_call_args(fntype, args);
             tmp = builder->CreateCall(fntype, callee, args);
             return ;
         }
@@ -13472,6 +13473,7 @@ public:
                 }
             }
             args = convert_call_args(x, is_method);
+            fixup_call_args(fntype, args);
             tmp = builder->CreateCall(fntype, fn, args);
         } else if (ASR::is_a<ASR::Variable_t>(*proc_sym) &&
                 llvm_symtab.find(h) != llvm_symtab.end()) {
@@ -13481,6 +13483,7 @@ public:
             fn = llvm_utils->CreateLoad2(fntype->getPointerTo(), fn);
             std::string m_name = ASRUtils::symbol_name(x.m_name);
             args = convert_call_args(x, is_method);
+            fixup_call_args(fntype, args);
             tmp = builder->CreateCall(fntype, fn, args);
         } else if (llvm_symtab_fn.find(h) == llvm_symtab_fn.end()) {
             throw CodeGenError("Subroutine code not generated for '"
@@ -13510,6 +13513,7 @@ public:
             if (pass_arg) {
                 args.push_back(pass_arg);
             }
+            fixup_call_args(fn->getFunctionType(), args);
             builder->CreateCall(fn, args);
         }
     }
@@ -13574,9 +13578,29 @@ public:
         return pointer_to_struct;
     }
 
+    // Fix argument types to match function signature for LLVM < 15 (typed pointers)
+    // LLVM 15+ uses opaque pointers where all pointer types are compatible
+    void fixup_call_args(llvm::FunctionType* fnty, std::vector<llvm::Value*>& args) {
+        #if LLVM_VERSION_MAJOR < 15
+        for (size_t i = 0; i < args.size() && i < fnty->getNumParams(); i++) {
+            llvm::Type* expected_type = fnty->getParamType(i);
+            llvm::Type* actual_type = args[i]->getType();
+            if (expected_type != actual_type &&
+                expected_type->isPointerTy() && actual_type->isPointerTy()) {
+                // Both are pointers but different element types - bitcast
+                args[i] = builder->CreateBitCast(args[i], expected_type);
+            }
+        }
+        #else
+        (void)fnty;
+        (void)args;
+        #endif
+    }
+
     llvm::Value* CreateCallUtil(llvm::FunctionType* fnty, llvm::Function* fn,
                                 std::vector<llvm::Value*>& args,
                                 ASR::ttype_t* asr_return_type) {
+        fixup_call_args(fnty, args);
         llvm::Value* return_value = builder->CreateCall(fn, args);
         return CreatePointerToStructTypeReturnValue(fnty, return_value,
                                                 asr_return_type);
@@ -14023,6 +14047,7 @@ public:
             args = convert_call_args(x, false);
             llvm::FunctionType* fntype = llvm_utils->get_function_type(
                 *ASRUtils::get_function(x.m_name), module.get());
+            fixup_call_args(fntype, args);
             tmp = builder->CreateCall(fntype, callee, args);
             return ;
         }
@@ -14179,6 +14204,7 @@ public:
             llvm::FunctionType* fntype = llvm_symtab_fn[h]->getFunctionType();
             std::string m_name = std::string(((ASR::Function_t*)(&(x.m_name->base)))->m_name);
             args = convert_call_args(x, is_method);
+            fixup_call_args(fntype, args);
             tmp = builder->CreateCall(fntype, fn, args);
         } else if (ASRUtils::is_symbol_procedure_variable(ASRUtils::symbol_get_past_external(proc_sym)) && llvm_symtab.find(h) != llvm_symtab.end()) {
             // This is the case were a function pointer ( procedure variable ) is associated and used
@@ -14189,6 +14215,7 @@ public:
             llvm::Value* fn = llvm_symtab[h];
             fn = llvm_utils->CreateLoad2(fn_type, fn);
             args = convert_call_args(x, is_method);
+            fixup_call_args(fntype, args);
             tmp = builder->CreateCall(fntype, fn, args);
         } else if (llvm_symtab_fn.find(h) == llvm_symtab_fn.end()) {
             throw CodeGenError("Function code not generated for '"
@@ -14201,6 +14228,7 @@ public:
             if (pass_arg) {
                 args.push_back(pass_arg);
             }
+            fixup_call_args(fn->getFunctionType(), args);
             ASR::ttype_t *return_var_type0 = EXPR2VAR(s->m_return_var)->m_type;
             if (ASRUtils::get_FunctionType(s)->m_abi == ASR::abiType::BindC) {
                 if (is_a<ASR::Complex_t>(*return_var_type0)) {
