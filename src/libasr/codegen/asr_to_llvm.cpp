@@ -13465,6 +13465,15 @@ public:
             if (pass_arg) {
                 args.push_back(pass_arg);
             }
+#if LLVM_VERSION_MAJOR < 15
+            llvm::FunctionType *ft = fn->getFunctionType();
+            for(size_t i=0; i<args.size() && i<ft->getNumParams(); i++) {
+                 llvm::Type *param_type = ft->getParamType(i);
+                 if (args[i]->getType() != param_type) {
+                      args[i] = builder->CreateBitCast(args[i], param_type);
+                 }
+            }
+#endif
             builder->CreateCall(fn, args);
         }
     }
