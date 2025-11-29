@@ -610,14 +610,31 @@ namespace LCompilers {
 
                 void visit_Assignment(const ASR::Assignment_t& x) {
                     ASR::Assignment_t& xx = const_cast<ASR::Assignment_t&>(x);
-                    ASR::expr_t* a_target = xx.m_target;
-                    bool is_allocatable = ASRUtils::is_allocatable(a_target);
-                    if ( ASR::is_a<ASR::StructInstanceMember_t>(*a_target) ) {
-                        ASR::StructInstanceMember_t* a_target_struct = ASR::down_cast<ASR::StructInstanceMember_t>(a_target);
-                        is_allocatable |= ASRUtils::is_allocatable(a_target_struct->m_v);
+                    bool target_is_expr = xx.m_target &&
+                        xx.m_target->base.type == ASR::asrType::expr;
+                    bool value_is_expr = xx.m_value &&
+                        xx.m_value->base.type == ASR::asrType::expr;
+
+                    ASR::expr_t* a_target = target_is_expr ? xx.m_target : nullptr;
+                    bool is_allocatable = false;
+                    if (a_target) {
+                        is_allocatable = ASRUtils::is_allocatable(a_target);
+                        if (ASR::is_a<ASR::StructInstanceMember_t>(*a_target)) {
+                            ASR::StructInstanceMember_t* a_target_struct = ASR::down_cast<ASR::StructInstanceMember_t>(a_target);
+                            is_allocatable |= ASRUtils::is_allocatable(a_target_struct->m_v);
+                        }
+                        xx.m_realloc_lhs &= is_allocatable;
                     }
-                    xx.m_realloc_lhs &= is_allocatable;
-                    BaseWalkVisitor<UpdateDependenciesVisitor>::visit_Assignment(x);
+                    // Safely walk target/value only when they are expressions
+                    if (target_is_expr) {
+                        this->visit_expr(*xx.m_target);
+                    }
+                    if (value_is_expr) {
+                        this->visit_expr(*xx.m_value);
+                    }
+                    if (xx.m_overloaded) {
+                        this->visit_stmt(*xx.m_overloaded);
+                    }
                 }
             // TODO: Uncomment the following in LFortran
             /*

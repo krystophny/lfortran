@@ -1172,8 +1172,14 @@ namespace OutOfRange
 namespace CompilerVersion {
 
     static inline void verify_args(const ASR::IntrinsicElementalFunction_t& x, diag::Diagnostics& diagnostics) {
-        ASRUtils::require_impl(x.n_args == 0,
-            "compiler_version() takes no argument",
+        if (x.n_args == 0) {
+            return;
+        }
+        if (x.n_args == 2) {
+            return;
+        }
+        ASRUtils::require_impl(false,
+            "compiler_version() takes no explicit argument",
             x.base.base.loc, diagnostics);
     }
 
@@ -1201,8 +1207,14 @@ namespace CompilerVersion {
 namespace CompilerOptions {
 
     static inline void verify_args(const ASR::IntrinsicElementalFunction_t& x, diag::Diagnostics& diagnostics) {
-        ASRUtils::require_impl(x.n_args == 0,
-            "compiler_options() takes no argument",
+        if (x.n_args == 0) {
+            return;
+        }
+        if (x.n_args == 2) {
+            return;
+        }
+        ASRUtils::require_impl(false,
+            "compiler_options() takes no explicit argument",
             x.base.base.loc, diagnostics);
     }
 
