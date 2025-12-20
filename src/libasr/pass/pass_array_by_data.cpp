@@ -107,6 +107,16 @@ class PassArrayByDataProcedureVisitor : public PassUtils::PassVisitor<PassArrayB
                     symbol_duplicator.duplicate_symbol(item.second, new_symtab);
                 }
             }
+
+            // Ensure contained procedures in the duplicated symbol table are host-associated to
+            // the duplicated host scope (new_symtab), not to the original scope. This is required
+            // so that recursive calls and host procedure references remain in-scope after cloning.
+            for (auto& item: new_symtab->get_scope()) {
+                if (ASR::is_a<ASR::Function_t>(*item.second)) {
+                    ASR::Function_t* fn = ASR::down_cast<ASR::Function_t>(item.second);
+                    fn->m_symtab->parent = new_symtab;
+                }
+            }
           Vec<ASR::expr_t*> new_args;
             std::string suffix = "";
             new_args.reserve(al, x->n_args);
@@ -293,7 +303,32 @@ class PassArrayByDataProcedureVisitor : public PassUtils::PassVisitor<PassArrayB
         }
 };
 
+static ASR::symbol_t* import_module_symbol_into_scope(Allocator& al, SymbolTable* current_scope,
+        ASR::symbol_t* sym, const Location& loc) {
+    ASR::symbol_t* sym_unwrapped = ASRUtils::symbol_get_past_external(sym);
+    SymbolTable* sym_parent = ASRUtils::symbol_parent_symtab(sym_unwrapped);
+    if (!sym_parent || !sym_parent->asr_owner ||
+        !ASR::is_a<ASR::symbol_t>(*sym_parent->asr_owner) ||
+        !ASR::is_a<ASR::Module_t>(*ASR::down_cast<ASR::symbol_t>(sym_parent->asr_owner))) {
+        return sym;
+    }
+
+    std::string sym_name = std::string(ASRUtils::symbol_name(sym_unwrapped));
+    if (ASR::symbol_t* local = current_scope->get_symbol(sym_name)) {
+        return local;
+    }
+
+    ASR::Module_t* module = ASR::down_cast<ASR::Module_t>(ASR::down_cast<ASR::symbol_t>(sym_parent->asr_owner));
+    ASR::symbol_t* ext_sym = ASR::down_cast<ASR::symbol_t>(
+        ASR::make_ExternalSymbol_t(al, loc, current_scope, s2c(al, sym_name),
+            sym_unwrapped, module->m_name, nullptr, 0, s2c(al, sym_name), ASR::accessType::Public));
+    current_scope->add_symbol(sym_name, ext_sym);
+    return ext_sym;
+}
+
 #define edit_symbol_reference(attr) ASR::symbol_t* x_sym = xx.m_##attr;    \
+    xx.m_##attr = import_module_symbol_into_scope(v.al, current_scope, x_sym, xx.base.base.loc);    \
+    x_sym = xx.m_##attr;    \
     SymbolTable* x_sym_symtab = ASRUtils::symbol_parent_symtab(x_sym);    \
     if( x_sym_symtab->get_counter() != current_scope->get_counter() &&    \
         !ASRUtils::is_parent(x_sym_symtab, current_scope) ) {    \
@@ -303,6 +338,8 @@ class PassArrayByDataProcedureVisitor : public PassUtils::PassVisitor<PassArrayB
     }    \
 
 #define edit_symbol_pointer(attr) ASR::symbol_t* x_sym = x->m_##attr;    \
+    x->m_##attr = import_module_symbol_into_scope(v.al, current_scope, x_sym, x->base.base.loc);    \
+    x_sym = x->m_##attr;    \
     SymbolTable* x_sym_symtab = ASRUtils::symbol_parent_symtab(x_sym);    \
     if( x_sym_symtab->get_counter() != current_scope->get_counter() &&    \
         !ASRUtils::is_parent(x_sym_symtab, current_scope) ) {    \
@@ -369,13 +406,22 @@ class EditProcedureReplacer: public ASR::BaseExprReplacer<EditProcedureReplacer>
         ASR::symbol_t* ext_sym = ASRUtils::symbol_get_past_external(old_sym);
         if( v.proc2newproc.find(ext_sym) != v.proc2newproc.end() ) {
             ASR::symbol_t* new_sym = v.proc2newproc[ext_sym].first;
-            ASR::asr_t* new_sym_parent = ASRUtils::symbol_parent_symtab(new_sym)->asr_owner;
-            if ( ASR::is_a<ASR::symbol_t>(*new_sym_parent) &&
-                 current_scope->get_counter() != ASRUtils::symbol_parent_symtab(new_sym)->get_counter() ) {
+            SymbolTable* new_sym_parent_symtab = ASRUtils::symbol_parent_symtab(new_sym);
+            if (new_sym_parent_symtab &&
+                (new_sym_parent_symtab->get_counter() == current_scope->get_counter() ||
+                 ASRUtils::is_parent(new_sym_parent_symtab, current_scope))) {
+                return new_sym;
+            }
+
+            ASR::asr_t* new_sym_parent = new_sym_parent_symtab ? new_sym_parent_symtab->asr_owner : nullptr;
+            if (new_sym_parent && ASR::is_a<ASR::symbol_t>(*new_sym_parent)) {
                 ASR::symbol_t* resolved_parent_sym = resolve_new_proc(ASR::down_cast<ASR::symbol_t>(new_sym_parent));
-                if ( resolved_parent_sym != nullptr ) {
-                    ASR::symbol_t* sym_to_return = ASRUtils::symbol_symtab(resolved_parent_sym)->get_symbol(ASRUtils::symbol_name(new_sym));
-                    return sym_to_return ? sym_to_return : new_sym;
+                if (resolved_parent_sym != nullptr) {
+                    ASR::symbol_t* sym_to_return = ASRUtils::symbol_symtab(resolved_parent_sym)->get_symbol(
+                        ASRUtils::symbol_name(new_sym));
+                    if (sym_to_return) {
+                        return sym_to_return;
+                    }
                 }
             }
             return new_sym;
@@ -530,13 +576,22 @@ class EditProcedureCallsVisitor : public ASR::ASRPassBaseWalkVisitor<EditProcedu
             ASR::symbol_t* ext_sym = ASRUtils::symbol_get_past_external(old_sym);
             if( v.proc2newproc.find(ext_sym) != v.proc2newproc.end() ) {
                 ASR::symbol_t* new_sym = v.proc2newproc[ext_sym].first;
-                ASR::asr_t* new_sym_parent = ASRUtils::symbol_parent_symtab(new_sym)->asr_owner;
-                if ( ASR::is_a<ASR::symbol_t>(*new_sym_parent) &&
-                        current_scope->get_counter() != ASRUtils::symbol_parent_symtab(new_sym)->get_counter() ) {
+                SymbolTable* new_sym_parent_symtab = ASRUtils::symbol_parent_symtab(new_sym);
+                if (new_sym_parent_symtab &&
+                    (new_sym_parent_symtab->get_counter() == current_scope->get_counter() ||
+                     ASRUtils::is_parent(new_sym_parent_symtab, current_scope))) {
+                    return new_sym;
+                }
+
+                ASR::asr_t* new_sym_parent = new_sym_parent_symtab ? new_sym_parent_symtab->asr_owner : nullptr;
+                if (new_sym_parent && ASR::is_a<ASR::symbol_t>(*new_sym_parent)) {
                     ASR::symbol_t* resolved_parent_sym = resolve_new_proc(ASR::down_cast<ASR::symbol_t>(new_sym_parent));
-                    if ( resolved_parent_sym != nullptr ) {
-                        ASR::symbol_t* sym_to_return = ASRUtils::symbol_symtab(resolved_parent_sym)->get_symbol(ASRUtils::symbol_name(new_sym));
-                        return sym_to_return ? sym_to_return : new_sym;
+                    if (resolved_parent_sym != nullptr) {
+                        ASR::symbol_t* sym_to_return = ASRUtils::symbol_symtab(resolved_parent_sym)->get_symbol(
+                            ASRUtils::symbol_name(new_sym));
+                        if (sym_to_return) {
+                            return sym_to_return;
+                        }
                     }
                 }
                 return new_sym;
