@@ -347,6 +347,7 @@ class ASRToLLVMVisitor;
                 * Try to only use with debug mode only.
             */
             bool is_proper_string_llvm_variable(ASR::String_t* str_type, llvm::Value* str);
+            bool is_proper_string_llvm_value_or_variable(ASR::String_t* str_type, llvm::Value* str);
 
             /*
              * Allocate heap memory for string.

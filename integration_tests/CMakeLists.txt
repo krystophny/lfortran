@@ -2306,6 +2306,10 @@ RUN(NAME do_loop_04 LABELS llvm) # This test is not supported by gfortran, as it
 RUN(NAME do_loop_05 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME do_loop_06 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME do_loop_07 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
+RUN(NAME do_loop_post_value_01 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc
+    EXTRA_ARGS --use-loop-variable-after-loop)
+RUN(NAME do_loop_post_value_02 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
+RUN(NAME transfer_array_item_01 LABELS gfortran llvm)
 
 
 RUN(NAME array_op_01 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc llvmStackArray wasm) #TODO: fix mlir, commented in PR: #6060
@@ -2585,6 +2589,7 @@ RUN(NAME transfer_07 LABELS gfortran llvm fortran)
 RUN(NAME transfer_08 LABELS gfortran llvm fortran)
 RUN(NAME transfer_09 LABELS gfortran llvm fortran)
 RUN(NAME transfer_10 LABELS gfortran llvm)
+RUN(NAME transfer_11 LABELS gfortran llvm)
 
 RUN(NAME present_01 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME present_02 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)

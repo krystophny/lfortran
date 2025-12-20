@@ -1807,6 +1807,28 @@ namespace LCompilers {
 #endif
     }
 
+    bool LLVMUtils::is_proper_string_llvm_value_or_variable([[maybe_unused]]ASR::String_t* str_type, [[maybe_unused]]llvm::Value* str){
+#if LLVM_VERSION_MAJOR < 15
+        if (is_proper_string_llvm_variable(str_type, str)) {
+            return true;
+        }
+        switch (str_type->m_physical_type){
+            case ASR::DescriptorString: {
+                llvm::Type* expected = get_StringType((ASR::ttype_t*)str_type);
+                return !str->getType()->isPointerTy() && str->getType() == expected;
+            }
+            case ASR::CChar: {
+                return false;
+            }
+            default:
+                throw LCompilersException("Unhandled string physical type");
+        }
+#else
+        // Can't check so return true
+        return true;
+#endif
+    }
+
     void LLVMUtils::set_string_memory_on_heap(ASR::string_physical_typeType str_physical_type,
         llvm::Value* str , llvm::Value* len){
 
@@ -1888,7 +1910,7 @@ namespace LCompilers {
 
     void LLVMUtils::clone_string_state(llvm::Value* const dest, llvm::Value* const src, ASR::String_t* const string_type){
         LCOMPILERS_ASSERT(is_proper_string_llvm_variable(string_type, dest));
-        LCOMPILERS_ASSERT(is_proper_string_llvm_variable(string_type, src));
+        LCOMPILERS_ASSERT(is_proper_string_llvm_value_or_variable(string_type, src));
         llvm::Value* const src_len = get_string_length(string_type, src);
         llvm::Value* const dest_len = get_string_length(string_type, dest, true);
 
@@ -1933,6 +1955,17 @@ namespace LCompilers {
     }
 
     llvm::Value* LLVMUtils::get_string_data(ASR::String_t* str_type, llvm::Value* str, bool get_pointer_to_data){
+        if (str_type->m_physical_type == ASR::DescriptorString &&
+            !str->getType()->isPointerTy() &&
+            str->getType() == get_StringType((ASR::ttype_t*)str_type)) {
+            llvm::Value* const str_tmp = builder->CreateAlloca(string_descriptor);
+            builder->CreateStore(str, str_tmp);
+            llvm::Value* const ptr_to_data = create_gep2(string_descriptor, str_tmp, 0);
+            if (get_pointer_to_data) {
+                return ptr_to_data;
+            }
+            return builder->CreateLoad(character_type, ptr_to_data);
+        }
         LCOMPILERS_ASSERT(is_proper_string_llvm_variable(str_type, str))
         llvm::Value* ptr_to_data {};
         switch (str_type->m_physical_type)
@@ -1959,6 +1992,20 @@ namespace LCompilers {
     // >>>>>>>>>>>>>> Refactor this
 
     llvm::Value* LLVMUtils::get_string_length(ASR::String_t* str_type, llvm::Value* str, bool get_pointer_to_len){
+        if (str_type->m_physical_type == ASR::DescriptorString &&
+            !str->getType()->isPointerTy() &&
+            str->getType() == get_StringType((ASR::ttype_t*)str_type)) {
+            if (str_type->m_len && ASRUtils::is_value_constant(str_type->m_len)) {
+                int64_t len; ASRUtils::extract_value(str_type->m_len, len);
+                return llvm::ConstantInt::get(context, llvm::APInt(64, len));
+            }
+            if (!get_pointer_to_len) {
+                return builder->CreateExtractValue(str, {1});
+            }
+            llvm::Value* const str_tmp = builder->CreateAlloca(string_descriptor);
+            builder->CreateStore(str, str_tmp);
+            return create_gep2(string_descriptor, str_tmp, 1);
+        }
         LCOMPILERS_ASSERT(is_proper_string_llvm_variable(str_type, str))
         if(!get_pointer_to_len && str_type->m_len && ASRUtils::is_value_constant(str_type->m_len)){ // CompileTime-Constant Length
             int64_t len; ASRUtils::extract_value(str_type->m_len, len);

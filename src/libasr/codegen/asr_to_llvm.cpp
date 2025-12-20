@@ -737,17 +737,15 @@ public:
         ptr_loads = 0;
         visit_expr(*str_expr);
         ptr_loads = ptr_loads_copy;
-        switch (str->m_physical_type)
-        {
-            case ASR::DescriptorString:{
-                return builder->CreateLoad(
-                    character_type,
-                    llvm_utils->create_gep2(string_descriptor, tmp, 0));
-            }
-            case ASR::CChar:{
-                llvm::Value* char_ptr = builder->CreateAlloca(llvm::Type::getInt8Ty(context));
-                return builder->CreateStore(tmp, char_ptr);
-            }
+            switch (str->m_physical_type)
+            {
+                case ASR::DescriptorString:{
+                    return llvm_utils->get_string_data(str, tmp);
+                }
+                case ASR::CChar:{
+                    llvm::Value* char_ptr = builder->CreateAlloca(llvm::Type::getInt8Ty(context));
+                    return builder->CreateStore(tmp, char_ptr);
+                }
             default:
                 throw LCompilersException("Unsupported string physical type.");
         }
@@ -7475,7 +7473,6 @@ public:
                     handle_bitcast_assignment_char(x);
                     return;
                 }
- 
                 ASR::ttype_t* value_type = ASRUtils::expr_type(x.m_value);
                 if (ASRUtils::is_integer(*ASRUtils::extract_type(elem_type))
                         && ASR::down_cast<ASR::Integer_t>(ASRUtils::extract_type(elem_type))->m_kind == 1
@@ -7487,6 +7484,7 @@ public:
                     handle_bitcast_assignment_int8(x);
                     return;
                 }
+
                 if (x.m_target->type == ASR::exprType::ArrayItem
                         && ASRUtils::is_integer(*ASRUtils::extract_type(elem_type))
                         && ASR::down_cast<ASR::Integer_t>(ASRUtils::extract_type(elem_type))->m_kind != 1) {
@@ -7528,16 +7526,95 @@ public:
                             llvm::DataLayout data_layout(module->getDataLayout());
                             uint64_t elem_bytes = data_layout.getTypeAllocSize(llvm_elem_type);
 
-                            llvm::Value* byte_offset = builder->CreateMul(
-                                idx0, llvm::ConstantInt::get(llvm::Type::getInt32Ty(context),
-                                    llvm::APInt(32, elem_bytes)));
+	                            llvm::Value* byte_offset = builder->CreateMul(
+	                                idx0, llvm::ConstantInt::get(llvm::Type::getInt32Ty(context),
+	                                    llvm::APInt(32, elem_bytes)));
 
-                            ASR::Variable_t *src_var = EXPR2VAR(src_base);
-                            uint32_t src_h = get_hash((ASR::asr_t*)src_var);
-                            llvm::Value* src_alloc = llvm_symtab[src_h];
+	                            ASR::Variable_t *src_var = EXPR2VAR(src_base);
+	                            // If the computed byte span is out of bounds of the source byte array,
+	                            // fall back to the default TRANSFER lowering (scalar TRANSFER does not
+	                            // depend on the assignment target index).
+	                            bool can_check_src_nbytes = false;
+	                            uint64_t src_nbytes = 0;
+	                            ASR::ttype_t* src_type = ASRUtils::type_get_past_allocatable_pointer(
+	                                ASRUtils::expr_type(src_base));
+	                            if (ASRUtils::is_array(src_type) &&
+	                                ASRUtils::extract_physical_type(src_type) ==
+	                                    ASR::array_physical_typeType::FixedSizeArray) {
+	                                ASR::dimension_t* src_dims = nullptr;
+	                                int src_ndims = ASRUtils::extract_dimensions_from_ttype(src_type, src_dims);
+	                                int64_t src_nelems = ASRUtils::get_fixed_size_of_array(src_dims, src_ndims);
+	                                if (src_nelems >= 0) {
+	                                    can_check_src_nbytes = true;
+	                                    src_nbytes = static_cast<uint64_t>(src_nelems);
+	                                }
+	                            }
 
-                            llvm::Type* i8 = llvm::Type::getInt8Ty(context);
-                            llvm::Type* i32 = llvm::Type::getInt32Ty(context);
+	                            if (can_check_src_nbytes) {
+	                                llvm::Type* i32 = llvm::Type::getInt32Ty(context);
+	                                llvm::Value* end_off = builder->CreateAdd(
+	                                    byte_offset, llvm::ConstantInt::get(i32, llvm::APInt(32, elem_bytes)));
+	                                llvm::Value* in_bounds = builder->CreateICmpULE(
+	                                    end_off, llvm::ConstantInt::get(i32, llvm::APInt(32, src_nbytes)));
+
+	                                llvm::Function* fn = builder->GetInsertBlock()->getParent();
+	                                llvm::BasicBlock* then_bb = llvm::BasicBlock::Create(context,
+	                                    "transfer_indexed", fn);
+	                                llvm::BasicBlock* else_bb = llvm::BasicBlock::Create(context,
+	                                    "transfer_direct", fn);
+	                                llvm::BasicBlock* cont_bb = llvm::BasicBlock::Create(context,
+	                                    "transfer_cont", fn);
+
+	                                builder->CreateCondBr(in_bounds, then_bb, else_bb);
+
+	                                builder->SetInsertPoint(then_bb);
+	                                uint32_t src_h_then = get_hash((ASR::asr_t*)src_var);
+	                                llvm::Value* src_alloc_then = llvm_symtab[src_h_then];
+	                                llvm::Type* i8_then = llvm::Type::getInt8Ty(context);
+	                                llvm::Value* src_i8_then = builder->CreateBitCast(
+	                                    src_alloc_then, i8_then->getPointerTo());
+	                                llvm::Value* src_off_then = builder->CreateInBoundsGEP(
+	                                    i8_then, src_i8_then, byte_offset);
+
+	                                llvm::Type* i32_then = llvm::Type::getInt32Ty(context);
+	                                llvm::AllocaInst* elem_tmp_then = llvm_utils->CreateAlloca(
+	                                    llvm_elem_type, nullptr, "transfer_elem");
+	                                llvm::Value* dst_i8_then = builder->CreateBitCast(
+	                                    elem_tmp_then, i8_then->getPointerTo());
+	                                builder->CreateMemCpy(dst_i8_then, llvm::MaybeAlign(),
+	                                    src_off_then, llvm::MaybeAlign(),
+	                                    llvm::ConstantInt::get(i32_then, llvm::APInt(32, elem_bytes)));
+	                                llvm::Value* elem_val_then = builder->CreateLoad(
+	                                    llvm_elem_type, elem_tmp_then);
+
+	                                is_assignment_target = true;
+	                                this->visit_expr(*x.m_target);
+	                                is_assignment_target = false;
+	                                builder->CreateStore(elem_val_then, tmp);
+	                                builder->CreateBr(cont_bb);
+
+	                                builder->SetInsertPoint(else_bb);
+	                                int64_t ptr_loads_copy = ptr_loads;
+	                                ptr_loads = 0;
+	                                this->visit_expr(*x.m_value);
+	                                ptr_loads = ptr_loads_copy;
+	                                llvm::Value* rhs_direct = tmp;
+
+	                                is_assignment_target = true;
+	                                this->visit_expr(*x.m_target);
+	                                is_assignment_target = false;
+	                                builder->CreateStore(rhs_direct, tmp);
+	                                builder->CreateBr(cont_bb);
+
+	                                builder->SetInsertPoint(cont_bb);
+	                                return;
+	                            }
+
+	                            uint32_t src_h = get_hash((ASR::asr_t*)src_var);
+	                            llvm::Value* src_alloc = llvm_symtab[src_h];
+
+	                            llvm::Type* i8 = llvm::Type::getInt8Ty(context);
+	                            llvm::Type* i32 = llvm::Type::getInt32Ty(context);
                             llvm::Value* src_i8 = builder->CreateBitCast(src_alloc, i8->getPointerTo());
                             llvm::Value* src_off = builder->CreateInBoundsGEP(i8, src_i8, byte_offset);
 
@@ -10734,7 +10811,9 @@ public:
                                                     && ASRUtils::extract_physical_type(expr_type(x.m_source)) == ASR::DescriptorArray;
             p_load = source_is_descriptor_array_? 1 : 0;
         } else {
-            p_load = ptr_loads;
+            // For array results from transfer we need a stable pointer to the source storage,
+            // not an element load driven by surrounding array-scalarization.
+            p_load = ASRUtils::is_array(x.m_type) ? 0 : ptr_loads;
         }
         this->visit_expr_load_wrapper(x.m_source, p_load, true);
         source = tmp;
@@ -10768,6 +10847,106 @@ public:
             builder->CreateStore(source, source_ptr);
         }
 
+        // Handle `transfer(source, 0_int8, size)` and similar cases where the ASR result is an
+        // `integer(int8)` array (either DescriptorArray or FixedSizeArray). The generic bitcast
+        // load path below yields a scalar and later array-physical casts can mis-handle it.
+        if (ASRUtils::is_array(x.m_type)) {
+            ASR::ttype_t* result_array_type = ASRUtils::type_get_past_allocatable_pointer(x.m_type);
+            ASR::ttype_t* result_element_type = ASRUtils::extract_type(result_array_type);
+            bool result_is_int8 = ASRUtils::is_integer(*ASRUtils::extract_type(result_element_type))
+                && ASR::down_cast<ASR::Integer_t>(ASRUtils::extract_type(result_element_type))->m_kind == 1;
+
+            if (result_is_int8
+                    && ASRUtils::extract_physical_type(x.m_type) == ASR::array_physical_typeType::DescriptorArray) {
+                llvm::Type* i8 = llvm::Type::getInt8Ty(context);
+                llvm::Type* i32 = llvm::Type::getInt32Ty(context);
+
+                ASR::dimension_t* asr_dims = nullptr;
+                int n_dims = ASRUtils::extract_dimensions_from_ttype(
+                    result_array_type, asr_dims);
+
+                std::vector<std::pair<llvm::Value*, llvm::Value*>> llvm_dims;
+                llvm_dims.reserve(n_dims);
+                for (int r = 0; r < n_dims; r++) {
+                    if (asr_dims[r].m_length == nullptr) {
+                        throw CodeGenError("transfer: missing result dimension length");
+                    }
+                    this->visit_expr_wrapper(asr_dims[r].m_length, true);
+                    llvm::Value* dim_size = builder->CreateSExtOrTrunc(tmp, i32);
+                    llvm_dims.push_back({
+                        llvm::ConstantInt::get(i32, llvm::APInt(32, 1)),
+                        dim_size
+                    });
+                }
+
+                llvm::Type* array_desc_type = llvm_utils->arr_api->get_array_type(
+                    const_cast<ASR::expr_t*>(&x.base),
+                    ASRUtils::type_get_past_allocatable_pointer(x.m_type),
+                    i8, false);
+                llvm::Value* view_desc = llvm_utils->CreateAlloca(
+                    array_desc_type, nullptr, "transfer_to_int8_desc");
+                arr_descr->fill_array_details(
+                    array_desc_type, view_desc, i8, n_dims, llvm_dims, module.get(), false);
+                builder->CreateStore(
+                    builder->CreateBitCast(source_ptr, i8->getPointerTo()),
+                    arr_descr->get_pointer_to_data(array_desc_type, view_desc));
+                tmp = view_desc;
+                return;
+            }
+
+            if (result_is_int8
+                    && (ASRUtils::extract_physical_type(x.m_type) == ASR::array_physical_typeType::PointerArray ||
+                        ASRUtils::extract_physical_type(x.m_type) == ASR::array_physical_typeType::UnboundedPointerArray)) {
+                // transfer(source, 0_int8, size) where result is data-only array
+                // Materialize as a fresh contiguous byte buffer (value semantics).
+                llvm::Type* i8 = llvm::Type::getInt8Ty(context);
+                llvm::Type* i32 = llvm::Type::getInt32Ty(context);
+
+                ASR::dimension_t* m_dims = nullptr;
+                int n_dims = ASRUtils::extract_dimensions_from_ttype(result_array_type, m_dims);
+                if (n_dims <= 0) {
+                    throw CodeGenError("transfer: expected rank >= 1 for int8 array result");
+                }
+
+                llvm::Value* n_bytes = llvm::ConstantInt::get(i32, llvm::APInt(32, 1));
+                for (int r = 0; r < n_dims; r++) {
+                    if (m_dims[r].m_length == nullptr) {
+                        throw CodeGenError("transfer: missing result dimension length");
+                    }
+                    this->visit_expr_wrapper(m_dims[r].m_length, true);
+                    llvm::Value* dim_size = builder->CreateSExtOrTrunc(tmp, i32);
+                    n_bytes = builder->CreateMul(n_bytes, dim_size);
+                }
+
+                llvm::Value* dst_i8 = LLVMArrUtils::lfortran_malloc(context, *module, *builder, n_bytes);
+                llvm::Value* src_i8 = builder->CreateBitCast(source_ptr, i8->getPointerTo());
+                builder->CreateMemCpy(dst_i8, llvm::MaybeAlign(), src_i8, llvm::MaybeAlign(), n_bytes);
+                tmp = dst_i8;
+                return;
+            }
+
+            if (result_is_int8
+                    && ASRUtils::extract_physical_type(x.m_type) == ASR::array_physical_typeType::FixedSizeArray) {
+                llvm::Type* llvm_result_array_type = llvm_utils->get_type_from_ttype_t_util(
+                    const_cast<ASR::expr_t*>(&x.base), result_array_type, module.get());
+                llvm::AllocaInst* result = llvm_utils->CreateAlloca(
+                    llvm_result_array_type, nullptr, "transfer_to_int8_fixed");
+                llvm::DataLayout data_layout(module->getDataLayout());
+                uint64_t n_bytes = data_layout.getTypeAllocSize(llvm_result_array_type);
+
+                llvm::Value* dst = builder->CreateBitCast(
+                    result, llvm::Type::getInt8Ty(context)->getPointerTo());
+                llvm::Value* src = builder->CreateBitCast(
+                    source_ptr, llvm::Type::getInt8Ty(context)->getPointerTo());
+                builder->CreateMemCpy(
+                    dst, llvm::MaybeAlign(), src, llvm::MaybeAlign(),
+                    llvm::ConstantInt::get(llvm::Type::getInt32Ty(context),
+                        llvm::APInt(32, n_bytes)));
+                tmp = result;
+                return;
+            }
+        }
+
         /* Handle The Return Of The Expression (String, Array, Integer_8, etc.) */
         ASR::ttype_t* mold_type_unwrapped = ASRUtils::type_get_past_allocatable_pointer(expr_type(x.m_mold));
         switch(mold_type_unwrapped->type){
@@ -10794,7 +10973,6 @@ public:
                         ASRUtils::get_string_type(x.m_source),
                         casted_to_i8, source_length, "bit_cast_expr_return");
                     tmp = str_view;
-
                 } else {
                     // For numeric/logical derived-element arrays, implement TRANSFER semantics on
                     // raw byte storage. This avoids element-wise scalarization that assumes equal
@@ -10849,7 +11027,6 @@ public:
                         tmp = result;
                         return;
                     }
-
                 }
             break;
             }
@@ -10870,9 +11047,17 @@ public:
         bool is_string_to_int8 = ASR::is_a<ASR::String_t>(*ASRUtils::extract_type(ASRUtils::expr_type(x.m_source))) &&
                                  ASRUtils::is_integer(*ASRUtils::extract_type(x.m_type)) &&
                                  ASR::down_cast<ASR::Integer_t>(ASRUtils::extract_type(x.m_type))->m_kind == 1;
-        // For string→int8 with array result, skip load (assignment handles it)
-        // For string→int8 with scalar result, do load (element-wise transfer case)
-        bool skip_string_to_int8_load = is_string_to_int8 && ASRUtils::is_array(x.m_type);
+        // For string→int8 with array result (PointerArray/DescriptorArray), skip load and keep the
+        // data pointer. For FixedSizeArray, the specialized handling above materializes bytes.
+        bool skip_string_to_int8_load = false;
+        if (is_string_to_int8 && ASRUtils::is_array(x.m_type)) {
+            ASR::array_physical_typeType x_ptype = ASRUtils::extract_physical_type(x.m_type);
+            skip_string_to_int8_load = (
+                x_ptype == ASR::array_physical_typeType::DescriptorArray ||
+                x_ptype == ASR::array_physical_typeType::PointerArray ||
+                x_ptype == ASR::array_physical_typeType::UnboundedPointerArray
+            );
+        }
         if ( !ASRUtils::types_equal(ASRUtils::extract_type(ASRUtils::expr_type(x.m_source)), ASRUtils::extract_type(x.m_type),
              x.m_source, const_cast<ASR::expr_t*>(&x.base), false) && !ASRUtils::is_string_only(expr_type(x.m_mold)) &&
                 !skip_string_to_int8_load ) {
@@ -12737,7 +12922,6 @@ public:
         return;
     }
 
-
     void handle_bitcast_assignment_int8(const ASR::Assignment_t &x) {
         // Handler for BitCast (transfer intrinsic) to integer(int8) arrays
         // Used for element-by-element lowering of array assignments
@@ -12748,9 +12932,9 @@ public:
         ASR::ttype_t* value_type = ASRUtils::expr_type(x.m_value);
         LCOMPILERS_ASSERT(ASRUtils::is_array(value_type));
 
-        LCOMPILERS_ASSERT(ASRUtils::is_integer(*ASRUtils::extract_type(value_type)));
-        LCOMPILERS_ASSERT(
-            ASR::down_cast<ASR::Integer_t>(ASRUtils::extract_type(value_type))->m_kind == 1);
+        ASR::ttype_t* elem_type = ASRUtils::extract_type(value_type);
+        LCOMPILERS_ASSERT(ASRUtils::is_integer(*elem_type));
+        LCOMPILERS_ASSERT(ASR::down_cast<ASR::Integer_t>(elem_type)->m_kind == 1);
 
         ASR::ArrayItem_t* array_item = ASR::down_cast<ASR::ArrayItem_t>(x.m_target);
         LCOMPILERS_ASSERT(array_item->n_args == 1);
@@ -12870,7 +13054,6 @@ public:
         tmp = nullptr;
         return;
     }
-
 
     void construct_stop(llvm::Value* exit_code, std::string stop_msg, ASR::expr_t* stop_code, Location /*loc*/) {
         std::string fmt {};
@@ -14035,6 +14218,9 @@ public:
                             llvm::Value* descriptor_length = arr_descr->get_array_size(arr_type, arg, dim, 4);
                             load_array_size_deep_copy(m_dims[j].m_length);
                             llvm::Value* pointer_length = tmp;
+                            if (pointer_length->getType() != descriptor_length->getType()) {
+                                pointer_length = builder->CreateSExtOrTrunc(pointer_length, descriptor_length->getType());
+                            }
                             llvm::Value* cond = nullptr;
                             if (compiler_options.po.strict_bounds_checking || is_return_value) {
                                 cond = builder->CreateICmpNE(descriptor_length, pointer_length);
@@ -14058,6 +14244,9 @@ public:
                     start_new_block(elseBB);
                     llvm::Value* desc_size = arr_descr->get_array_size(arr_type, arg, nullptr, 4);
                     llvm::Value* pointer_size = get_array_size_from_asr_type(arr_cast->m_type);
+                    if (pointer_size->getType() != desc_size->getType()) {
+                        pointer_size = builder->CreateSExtOrTrunc(pointer_size, desc_size->getType());
+                    }
                     llvm::Value* cond = nullptr;
                     if (compiler_options.po.strict_bounds_checking || is_return_value) {
                         cond = builder->CreateICmpNE(desc_size, pointer_size);
