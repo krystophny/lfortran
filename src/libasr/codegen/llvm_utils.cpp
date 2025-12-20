@@ -1576,6 +1576,17 @@ namespace LCompilers {
 
 
     llvm::Value *LLVMUtils::CreateLoad2([[maybe_unused]] llvm::Type *t, llvm::Value *x, bool is_volatile) {
+        // LLVM 15+ uses opaque pointers, and some lowering paths can carry small
+        // structs (such as %string_descriptor) by value. Guard against treating
+        // such values as pointers.
+        if (!x->getType()->isPointerTy()) {
+            if (x->getType() == string_descriptor && t == character_type) {
+                return builder->CreateExtractValue(x, {0});
+            }
+            if (x->getType() == string_descriptor && t == llvm::Type::getInt64Ty(context)) {
+                return builder->CreateExtractValue(x, {1});
+            }
+        }
 #if LLVM_VERSION_MAJOR >= 8
         return builder->CreateLoad(t, x, is_volatile);
 #else
@@ -9107,15 +9118,11 @@ llvm::Value* LLVMUtils::handle_global_nonallocatable_stringArray(Allocator& al, 
                         // If member is allocatable string, we need to check if it is allocated before copying
                         if (ASRUtils::is_allocatable(ASRUtils::symbol_type(mem_sym)) && !ASRUtils::is_array(ASRUtils::symbol_type(mem_sym)) &&
                             ASR::is_a<ASR::String_t>(*ASRUtils::extract_type(ASRUtils::symbol_type(mem_sym)))) {
-                            std::vector<llvm::Value*> idx_vec = {
-                                llvm::ConstantInt::get(context, llvm::APInt(32, 0)),
-                                llvm::ConstantInt::get(context, llvm::APInt(32, 0))};
-                            llvm::Value* src_member_char = builder->CreateGEP(mem_type, src_member, idx_vec);;
-                            src_member_char = llvm_utils->CreateLoad2(
-                                llvm::Type::getInt8Ty(context)->getPointerTo(), src_member_char);
-                            is_allocated = builder->CreateICmpNE(
-                                builder->CreatePtrToInt(src_member_char, llvm::Type::getInt64Ty(context)),
-                                llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), llvm::APInt(64, 0)));
+                            ASR::String_t* mem_str_type = ASRUtils::get_string_type(ASRUtils::symbol_type(mem_sym));
+                            llvm::Value* src_member_char = llvm_utils->get_string_data(mem_str_type, src_member);
+                            llvm::Value* null_char = llvm::ConstantPointerNull::get(
+                                llvm::cast<llvm::PointerType>(src_member_char->getType()));
+                            is_allocated = builder->CreateICmpNE(src_member_char, null_char);
                         }
                         llvm_utils->create_if_else(is_allocated, [&]() {
                             llvm_utils->deepcopy(ASRUtils::EXPR(ASR::make_Var_t(al, mem_sym->base.loc, mem_sym)), src_member, dest_member,
