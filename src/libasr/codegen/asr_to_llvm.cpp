@@ -770,8 +770,9 @@ public:
                 break;
             }
             case ASR::AssumedLength:
-                LCOMPILERS_ASSERT_MSG(false,
-                    "Shouldn't define assumed length string variable (They're only arguments) ")
+                // Assumed-length strings must not be initialized here. This can
+                // appear for compiler-generated temporaries that will be
+                // overwritten with a real descriptor later.
                 break;
             case ASR::DeferredLength:
                 // Do nothing, deferred length strings doesn't have information to set it up with.
@@ -793,9 +794,17 @@ public:
         if(ASRUtils::is_descriptorString(type)){
             builder->CreateStore(llvm::Constant::getNullValue(string_descriptor), str);
             ASR::String_t *t = down_cast<ASR::String_t>(ASRUtils::extract_type(type));
-            setup_string_length(str, t, t->m_len);
+            if (t->m_len_kind == ASR::ExpressionLength) {
+                setup_string_length(str, t, t->m_len);
+            } else if (t->m_len_kind == ASR::AssumedLength) {
+                llvm::Value* len_ptr = llvm_utils->get_string_length(t, str, true);
+                builder->CreateStore(
+                    llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), 0),
+                    len_ptr);
+            }
             // Handle Memory
-            if(!ASRUtils::is_allocatable_or_pointer(type)){
+            if(!ASRUtils::is_allocatable_or_pointer(type) &&
+                t->m_len_kind == ASR::ExpressionLength){
                 llvm_utils->set_string_memory_on_heap(t->m_physical_type, str, llvm_utils->get_string_length(t, str));
             }
         } else {
@@ -11638,7 +11647,8 @@ public:
                         llvm::Type::getInt32Ty(context));
         }
 
-        if (x.m_fmt) {
+        if (x.m_fmt && x.n_values == 1 &&
+                ASRUtils::is_string_only(expr_type(x.m_values[0]))) {
             std::vector<llvm::Value*> args;
             args.push_back(unit_val);
             args.push_back(iostat);
@@ -12726,6 +12736,141 @@ public:
         tmp = nullptr;
         return;
     }
+
+
+    void handle_bitcast_assignment_int8(const ASR::Assignment_t &x) {
+        // Handler for BitCast (transfer intrinsic) to integer(int8) arrays
+        // Used for element-by-element lowering of array assignments
+        LCOMPILERS_ASSERT(x.m_target->type == ASR::exprType::ArrayItem);
+        LCOMPILERS_ASSERT(ASR::is_a<ASR::BitCast_t>(*x.m_value));
+
+        ASR::BitCast_t* bitcast = ASR::down_cast<ASR::BitCast_t>(x.m_value);
+        ASR::ttype_t* value_type = ASRUtils::expr_type(x.m_value);
+        LCOMPILERS_ASSERT(ASRUtils::is_array(value_type));
+
+        LCOMPILERS_ASSERT(ASRUtils::is_integer(*ASRUtils::extract_type(value_type)));
+        LCOMPILERS_ASSERT(
+            ASR::down_cast<ASR::Integer_t>(ASRUtils::extract_type(value_type))->m_kind == 1);
+
+        ASR::ArrayItem_t* array_item = ASR::down_cast<ASR::ArrayItem_t>(x.m_target);
+        LCOMPILERS_ASSERT(array_item->n_args == 1);
+        is_assignment_target = true;
+        visit_expr(*x.m_target);
+        is_assignment_target = false;
+        llvm::Value* target_ptr = tmp;
+
+        visit_expr_wrapper(array_item->m_args[0].m_right, true);
+        llvm::Value* array_index = tmp;
+        llvm::Value* zero_based_idx = builder->CreateSub(array_index,
+            llvm::ConstantInt::get(array_index->getType(), 1));
+        llvm::Value* idx_i32 = builder->CreateSExtOrTrunc(zero_based_idx,
+            llvm::Type::getInt32Ty(context));
+
+        // Implement transfer(..., 0_int8, ...) element-by-element by reading raw bytes directly
+        // from the source storage. This avoids re-materializing the full byte buffer per element
+        // and ensures correct mapping for element sizes > 1 byte (e.g., int16 -> int8 byte array).
+        llvm::Type* i8 = llvm::Type::getInt8Ty(context);
+        llvm::Type* i64 = llvm::Type::getInt64Ty(context);
+
+        llvm::Value* src_i8_ptr = nullptr;
+        llvm::Value* src_nbytes_i64 = nullptr;
+
+        ASR::expr_t* src_expr = bitcast->m_source;
+        ASR::ttype_t* src_type = ASRUtils::expr_type(src_expr);
+
+        // Some lowering paths scalarize `transfer(array, 0_int8, ...)` by forming an ArrayItem
+        // for the source. For byte-wise transfer semantics we must treat the source as the whole
+        // array storage, not as element access with the same index as the output byte.
+        if (ASR::is_a<ASR::ArrayItem_t>(*src_expr)) {
+            ASR::ArrayItem_t* src_item = ASR::down_cast<ASR::ArrayItem_t>(src_expr);
+            if (ASRUtils::is_array(ASRUtils::expr_type(src_item->m_v))) {
+                src_expr = src_item->m_v;
+                src_type = ASRUtils::expr_type(src_expr);
+            }
+        } else if (ASR::is_a<ASR::ArraySection_t>(*src_expr)) {
+            ASR::ArraySection_t* src_sec = ASR::down_cast<ASR::ArraySection_t>(src_expr);
+            if (ASRUtils::is_array(ASRUtils::expr_type(src_sec->m_v))) {
+                src_expr = src_sec->m_v;
+                src_type = ASRUtils::expr_type(src_expr);
+            }
+        }
+
+        if (ASRUtils::is_character(*expr_type(src_expr))) {
+            llvm::Value* src_data = nullptr;
+            llvm::Value* src_len = nullptr;
+            std::tie(src_data, src_len) = get_string_data_and_length(src_expr);
+            src_i8_ptr = builder->CreateBitCast(src_data, i8->getPointerTo());
+            src_nbytes_i64 = builder->CreateSExtOrTrunc(src_len, i64);
+        } else if (ASRUtils::is_array(src_type)) {
+            ASR::array_physical_typeType src_ptype = ASRUtils::extract_physical_type(src_type);
+            ASR::ttype_t* src_el_asr_type = ASRUtils::extract_type(src_type);
+            llvm::Type* src_el_llvm_type = llvm_utils->get_type_from_ttype_t_util(
+                src_expr, src_el_asr_type, module.get());
+            uint64_t src_el_bytes = module->getDataLayout().getTypeAllocSize(src_el_llvm_type);
+            llvm::Value* src_el_bytes_i64 = llvm::ConstantInt::get(i64, llvm::APInt(64, src_el_bytes));
+
+            int64_t saved_ptr_loads = ptr_loads;
+            ptr_loads = 0;
+            visit_expr_wrapper(src_expr, true);
+            ptr_loads = saved_ptr_loads;
+            llvm::Value* src_arr = tmp;
+
+            llvm::Value* n_elems_i64 = nullptr;
+            if (src_ptype == ASR::array_physical_typeType::DescriptorArray) {
+                llvm::Type* src_arr_llvm_type = llvm_utils->get_type_from_ttype_t_util(
+                    src_expr, ASRUtils::type_get_past_allocatable_pointer(src_type), module.get());
+                llvm::Value* data_ptr_addr = arr_descr->get_pointer_to_data(
+                    src_expr, src_type, src_arr, module.get());
+                llvm::Value* data_ptr = llvm_utils->CreateLoad2(src_el_llvm_type->getPointerTo(), data_ptr_addr);
+                data_ptr = llvm_utils->create_ptr_gep2(src_el_llvm_type, data_ptr,
+                    arr_descr->get_offset(src_arr_llvm_type, src_arr));
+                src_i8_ptr = builder->CreateBitCast(data_ptr, i8->getPointerTo());
+
+                llvm::Value* n_elems_i32 = arr_descr->get_array_size(src_arr_llvm_type, src_arr, nullptr, 4);
+                n_elems_i64 = builder->CreateSExtOrTrunc(n_elems_i32, i64);
+            } else if (src_ptype == ASR::array_physical_typeType::PointerArray ||
+                       src_ptype == ASR::array_physical_typeType::UnboundedPointerArray) {
+                src_i8_ptr = builder->CreateBitCast(src_arr, i8->getPointerTo());
+                llvm::Value* n_elems_i32 = get_array_size_from_asr_type(src_type);
+                n_elems_i64 = builder->CreateSExtOrTrunc(n_elems_i32, i64);
+            } else if (src_ptype == ASR::array_physical_typeType::FixedSizeArray) {
+                src_i8_ptr = builder->CreateBitCast(src_arr, i8->getPointerTo());
+                llvm::Value* n_elems_i32 = llvm::ConstantInt::get(
+                    llvm::Type::getInt32Ty(context),
+                    llvm::APInt(32, ASRUtils::get_fixed_size_of_array(src_type)));
+                n_elems_i64 = builder->CreateSExtOrTrunc(n_elems_i32, i64);
+            } else {
+                throw CodeGenError("BitCast int8 assignment: unsupported source array physical type");
+            }
+            src_nbytes_i64 = builder->CreateMul(n_elems_i64, src_el_bytes_i64);
+        } else {
+            // Scalar source: treat as raw bytes of the scalar value
+            int64_t saved_ptr_loads = ptr_loads;
+            ptr_loads = 0;
+            visit_expr_wrapper(bitcast->m_source, true);
+            ptr_loads = saved_ptr_loads;
+            llvm::Value* src_val = tmp;
+
+            llvm::Type* src_val_ty = src_val->getType();
+            uint64_t src_bytes = module->getDataLayout().getTypeAllocSize(src_val_ty);
+            src_nbytes_i64 = llvm::ConstantInt::get(i64, llvm::APInt(64, src_bytes));
+
+            llvm::Value* src_ptr = llvm_utils->CreateAlloca(src_val_ty, nullptr, "transfer_scalar_bytes");
+            builder->CreateStore(src_val, src_ptr);
+            src_i8_ptr = builder->CreateBitCast(src_ptr, i8->getPointerTo());
+        }
+
+        llvm::Value* idx_i64 = builder->CreateSExtOrTrunc(idx_i32, i64);
+        llvm::Value* in_bounds = builder->CreateICmpULT(idx_i64, src_nbytes_i64);
+        llvm::Value* byte_ptr = builder->CreateGEP(i8, src_i8_ptr, idx_i32);
+        llvm::Value* byte_val = builder->CreateLoad(i8, byte_ptr);
+        llvm::Value* safe_byte = builder->CreateSelect(
+            in_bounds, byte_val, llvm::ConstantInt::get(i8, llvm::APInt(8, 0)));
+        builder->CreateStore(safe_byte, target_ptr);
+        tmp = nullptr;
+        return;
+    }
+
 
     void construct_stop(llvm::Value* exit_code, std::string stop_msg, ASR::expr_t* stop_code, Location /*loc*/) {
         std::string fmt {};

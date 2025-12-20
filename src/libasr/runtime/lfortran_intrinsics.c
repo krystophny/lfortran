@@ -3644,9 +3644,7 @@ LFORTRAN_API int64_t _lpython_open(char *path, char *flags)
     fd = fopen(path, flags);
     if (!fd)
     {
-        printf("Error in opening the file!\n");
-        perror(path);
-        exit(1);
+        return -1;
     }
     return (int64_t)fd;
 }
@@ -4844,10 +4842,10 @@ LFORTRAN_API void _lfortran_read_array_complex_float(struct _lfortran_complex_32
                     exit(1);
                 }
             } else {
-                // If no parentheses, read as two separate floats
-                (void)!fscanf(filep, "%f %f", &p[i].re, &p[i].im);
-                // Check if the read was successful
-                if (ferror(filep)) {
+                // If no parentheses, treat the already-read token as the real
+                // part and read the imaginary part as the next float.
+                p[i].re = strtof(buffer, NULL);
+                if (fscanf(filep, "%f", &p[i].im) != 1) {
                     fprintf(stderr, "Error: Failed to read complex float from file.\n");
                     exit(1);
                 }
@@ -4903,10 +4901,10 @@ LFORTRAN_API void _lfortran_read_array_complex_double(struct _lfortran_complex_6
                     exit(1);
                 }
             } else {
-                // If no parentheses, read as two separate doubles
-                (void)!fscanf(filep, "%lf %lf", &p[i].re, &p[i].im);
-                // Check if the read was successful
-                if (ferror(filep)) {
+                // If no parentheses, treat the already-read token as the real
+                // part and read the imaginary part as the next double.
+                p[i].re = strtod(buffer, NULL);
+                if (fscanf(filep, "%lf", &p[i].im) != 1) {
                     fprintf(stderr, "Error: Failed to read complex double from file.\n");
                     exit(1);
                 }

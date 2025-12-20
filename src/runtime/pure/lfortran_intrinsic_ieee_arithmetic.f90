@@ -1,20 +1,24 @@
 module lfortran_intrinsic_ieee_arithmetic
+    use, intrinsic :: iso_fortran_env, only: int32, int64, real32, real64
     implicit none
 
     type ieee_class_type
     integer :: value
     end type
 
-    type(ieee_class_type) :: ieee_negative_denormal
-    type(ieee_class_type) :: ieee_negative_inf
-    type(ieee_class_type) :: ieee_negative_normal
-    type(ieee_class_type) :: ieee_negative_zero
-    type(ieee_class_type) :: ieee_positive_denormal
-    type(ieee_class_type) :: ieee_positive_inf
-    type(ieee_class_type) :: ieee_positive_normal
-    type(ieee_class_type) :: ieee_positive_zero
-    type(ieee_class_type) :: ieee_quiet_nan
-    type(ieee_class_type) :: ieee_signaling_nan
+    integer(int32), parameter :: quiet_nan_bits_32 = int(z'7FC00000', int32)
+    integer(int64), parameter :: quiet_nan_bits_64 = int(z'7FF8000000000000', int64)
+
+    type(ieee_class_type), parameter :: ieee_negative_denormal = ieee_class_type(1)
+    type(ieee_class_type), parameter :: ieee_negative_inf      = ieee_class_type(2)
+    type(ieee_class_type), parameter :: ieee_negative_normal   = ieee_class_type(3)
+    type(ieee_class_type), parameter :: ieee_negative_zero     = ieee_class_type(4)
+    type(ieee_class_type), parameter :: ieee_positive_denormal = ieee_class_type(5)
+    type(ieee_class_type), parameter :: ieee_positive_inf      = ieee_class_type(6)
+    type(ieee_class_type), parameter :: ieee_positive_normal   = ieee_class_type(7)
+    type(ieee_class_type), parameter :: ieee_positive_zero     = ieee_class_type(8)
+    type(ieee_class_type), parameter :: ieee_quiet_nan         = ieee_class_type(9)
+    type(ieee_class_type), parameter :: ieee_signaling_nan     = ieee_class_type(10)
 
     interface ieee_class
         module procedure spieee_class, dpieee_class
@@ -63,29 +67,35 @@ module lfortran_intrinsic_ieee_arithmetic
     contains
 
     elemental function spieee_class(x) result(y)
-        use iso_fortran_env, only: real32
         real(real32), intent(in) :: x
         type(ieee_class_type) :: y
     end function
 
     elemental function dpieee_class(x) result(y)
-        use iso_fortran_env, only: real64
         real(real64), intent(in) :: x
         type(ieee_class_type) :: y
     end function
 
     elemental function spieee_value(x, cls) result(y)
-        use iso_fortran_env, only: real32
         real(real32), intent(in) :: x
         type(ieee_class_type), intent(in) :: cls
         real(real32) :: y
+        if (cls%value == ieee_quiet_nan%value) then
+            y = transfer(quiet_nan_bits_32, 0.0_real32)
+        else
+            y = x
+        end if
     end function
 
     elemental function dpieee_value(x, cls) result(y)
-        use iso_fortran_env, only: real64
         real(real64), intent(in) :: x
         type(ieee_class_type), intent(in) :: cls
         real(real64) :: y
+        if (cls%value == ieee_quiet_nan%value) then
+            y = transfer(quiet_nan_bits_64, 0.0_real64)
+        else
+            y = x
+        end if
     end function
 
     elemental function spieee_is_nan(x) result(r)

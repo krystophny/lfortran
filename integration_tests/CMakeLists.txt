@@ -779,6 +779,7 @@ RUN(NAME allocatble_c_ptr LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME hashmap_struct_01 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME hashmap_nested_dealloc_derived_pointer LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME hashmap_derived_pointer_associated LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
+RUN(NAME derived_type_pointer_alloc_member_01 LABELS gfortran llvm)
 RUN(NAME call_subroutine_without_type LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME call_subroutine_without_type_01 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 
@@ -2102,6 +2103,7 @@ RUN(NAME test_iso_c_binding_constants LABELS gfortran llvm llvm_wasm llvm_wasm_e
 RUN(NAME test_iso_fortran_env LABELS gfortran llvm llvm_wasm llvm_wasm_emcc wasm)
 RUN(NAME test_ieee_arithmetic LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME test_ieee_arithmetic_02 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
+RUN(NAME ieee_value_quiet_nan_01 LABELS gfortran llvm)
 RUN(NAME iso_fortran_env_01 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc wasm)
 
 
@@ -2798,6 +2800,8 @@ RUN(NAME no_explicit_return_type_01 LABELS gfortran llvm llvm_wasm llvm_wasm_emc
 RUN(NAME logical_testing LABELS gfortran llvm)
 
 RUN(NAME formatted_read_01 LABELS gfortran llvm COPY_TO_BIN formatted_read_input_01.txt)
+RUN(NAME formatted_read_complex_array_01 LABELS llvm)
+RUN(NAME assumed_length_string_array_item_01 LABELS gfortran llvm)
 
 
 

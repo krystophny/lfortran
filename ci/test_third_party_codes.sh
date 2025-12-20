@@ -306,7 +306,7 @@ time_section "🧪 Testing Numerical Methods Fortran" '
   git checkout a252989e64b3f8d5d2f930dca18411c104ea85f8
 
   print_subsection "Building project"
-  FC="$FC --no-array-bounds-checking --realloc-lhs-arrays" make
+  MAKEFLAGS= FC="$FC --no-array-bounds-checking --realloc-lhs-arrays" make
 
   run_test test_fix_point.exe
   run_test test_integrate_one.exe
@@ -328,7 +328,7 @@ time_section "🧪 Testing Numerical Methods Fortran" '
   git clean -dfx
   print_subsection "Building Numerical Methods Fortran with f23 standard"
 
-  FC="$FC --std=f23 --no-array-bounds-checking" make
+  MAKEFLAGS= FC="$FC --std=f23 --no-array-bounds-checking" make
   run_test test_fix_point.exe
   run_test test_integrate_one.exe
   run_test test_linear.exe
@@ -350,7 +350,7 @@ time_section "🧪 Testing Numerical Methods Fortran" '
   git clean -dfx
   print_subsection "Building Numerical Methods Fortran with separate compilation"
 
-  FC="$FC --separate-compilation --no-array-bounds-checking --realloc-lhs-arrays" make
+  MAKEFLAGS= FC="$FC --separate-compilation --no-array-bounds-checking --realloc-lhs-arrays" make
   run_test test_fix_point.exe
   run_test test_integrate_one.exe
   run_test test_linear.exe
@@ -371,7 +371,7 @@ time_section "🧪 Testing Numerical Methods Fortran" '
   git clean -dfx
   print_subsection "Building Numerical Methods Fortran with separate compilation and f23 standard"
 
-  FC="$FC --separate-compilation --std=f23 --no-array-bounds-checking" make
+  MAKEFLAGS= FC="$FC --separate-compilation --std=f23 --no-array-bounds-checking" make
   run_test test_fix_point.exe
   run_test test_integrate_one.exe
   run_test test_linear.exe
@@ -437,17 +437,17 @@ time_section "🧪 Testing PRIMA" '
 
   if [[ "$RUNNER_OS" == "macos-latest" ]]; then
     cd fortran
-    test_name=test_bobyqa.f90 FC="$FC" ./script.sh
-    test_name=test_newuoa.f90 FC="$FC" ./script.sh
-    test_name=test_uobyqa.f90 FC="$FC" ./script.sh
-    test_name=test_cobyla.f90 FC="$FC" ./script.sh
-    test_name=test_lincoa.f90 FC="$FC" ./script.sh
+    test_name=test_bobyqa.f90 FC="$FC -I../build/fortran/mod" ./script.sh
+    test_name=test_newuoa.f90 FC="$FC -I../build/fortran/mod" ./script.sh
+    test_name=test_uobyqa.f90 FC="$FC -I../build/fortran/mod" ./script.sh
+    test_name=test_cobyla.f90 FC="$FC -I../build/fortran/mod" ./script.sh
+    test_name=test_lincoa.f90 FC="$FC -I../build/fortran/mod" ./script.sh
     cd ..
   fi
 
   if [[ "$RUNNER_OS" == "ubuntu-latest" ]]; then
     cd fortran
-    test_name=test_uobyqa.f90 FC="$FC" ./script.sh
+    test_name=test_uobyqa.f90 FC="$FC -I../build/fortran/mod" ./script.sh
     cd ..
   fi
 
@@ -475,17 +475,17 @@ time_section "🧪 Testing PRIMA" '
 
   if [[ "$RUNNER_OS" == "macos-latest" ]]; then
     cd fortran
-    test_name=test_bobyqa.f90 FC="$FC --std=f23" ./script.sh
-    test_name=test_newuoa.f90 FC="$FC --std=f23" ./script.sh
-    test_name=test_uobyqa.f90 FC="$FC --std=f23" ./script.sh
-    test_name=test_cobyla.f90 FC="$FC --std=f23" ./script.sh
-    test_name=test_lincoa.f90 FC="$FC --std=f23" ./script.sh
+    test_name=test_bobyqa.f90 FC="$FC --std=f23 -I../build/fortran/mod" ./script.sh
+    test_name=test_newuoa.f90 FC="$FC --std=f23 -I../build/fortran/mod" ./script.sh
+    test_name=test_uobyqa.f90 FC="$FC --std=f23 -I../build/fortran/mod" ./script.sh
+    test_name=test_cobyla.f90 FC="$FC --std=f23 -I../build/fortran/mod" ./script.sh
+    test_name=test_lincoa.f90 FC="$FC --std=f23 -I../build/fortran/mod" ./script.sh
     cd ..
   fi
 
   if [[ "$RUNNER_OS" == "ubuntu-latest" ]]; then
     cd fortran
-    test_name=test_uobyqa.f90 FC="$FC --std=f23" ./script.sh
+    test_name=test_uobyqa.f90 FC="$FC --std=f23 -I../build/fortran/mod" ./script.sh
     cd ..
   fi
 
@@ -542,17 +542,17 @@ time_section "🧪 Testing PRIMA" '
 
   if [[ "$RUNNER_OS" == "macos-latest" ]]; then
     cd fortran
-    name=bobyqa test_name=test_bobyqa.f90 FC="$FC --separate-compilation" ./script_sc.sh
-    name=newuoa test_name=test_newuoa.f90 FC="$FC --separate-compilation" ./script_sc.sh
-    name=uobyqa test_name=test_uobyqa.f90 FC="$FC --separate-compilation" ./script_sc.sh
-    name=cobyla test_name=test_cobyla.f90 FC="$FC --separate-compilation" ./script_sc.sh
-    name=lincoa test_name=test_lincoa.f90 FC="$FC --separate-compilation" ./script_sc.sh
+    name=bobyqa test_name=test_bobyqa.f90 FC="$FC --separate-compilation -I../build/fortran/mod" ./script_sc.sh
+    name=newuoa test_name=test_newuoa.f90 FC="$FC --separate-compilation -I../build/fortran/mod" ./script_sc.sh
+    name=uobyqa test_name=test_uobyqa.f90 FC="$FC --separate-compilation -I../build/fortran/mod" ./script_sc.sh
+    name=cobyla test_name=test_cobyla.f90 FC="$FC --separate-compilation -I../build/fortran/mod" ./script_sc.sh
+    name=lincoa test_name=test_lincoa.f90 FC="$FC --separate-compilation -I../build/fortran/mod" ./script_sc.sh
     cd ..
   fi
 
   if [[ "$RUNNER_OS" == "ubuntu-latest" ]]; then
     cd fortran
-    name=uobyqa test_name=test_uobyqa.f90 FC="$FC --separate-compilation" ./script_sc.sh
+    name=uobyqa test_name=test_uobyqa.f90 FC="$FC --separate-compilation -I../build/fortran/mod" ./script_sc.sh
     cd ..
   fi
 
