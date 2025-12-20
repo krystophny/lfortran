@@ -913,7 +913,8 @@ class ASRToLLVMVisitor;
          * @param struct_sym if it's an array of struct. nullptr otherwise.
          * @param in_struct is this array in some struct `(StructType(Array()))`.
          */ 
-        void finalize_array(llvm::Value* const arr, ASR::ttype_t* const t, ASR::Struct_t* const struct_sym, bool in_struct){
+        void finalize_array(llvm::Value* const arr, ASR::ttype_t* const t, ASR::Struct_t* const struct_sym,
+                bool in_struct, bool free_data = true){
             auto *const arr_t            = ASR::down_cast<ASR::Array_t>(ASRUtils::type_get_past_allocatable_pointer(t));
             auto *const arr_llvm_t       = get_llvm_type(t, struct_sym);
             auto *const arrayType_llvm_t = get_llvm_type(arr_t->m_type, struct_sym);
@@ -935,13 +936,15 @@ class ASRToLLVMVisitor;
                     }
 
                     // (struct(array())) -- Need to finalize dimension descriptor in this case
-                    if(in_struct) {
+                    if(in_struct && free_data) {
                         auto const dim_desc_ptr = builder_->CreateLoad(llvm_utils_->dim_descr_type_->getPointerTo(),
                                                                     llvm_utils_->create_gep2(arr_llvm_t, arr, 2));
                         llvm_utils_->lfortran_free(dim_desc_ptr);
                     }
 
-                    free_array_ptr_to_consecutive_data(data, arr_t->m_type);
+                    if (free_data) {
+                        free_array_ptr_to_consecutive_data(data, arr_t->m_type);
+                    }
                 break;
                 }
                 case ASR::PointerArray :{
@@ -951,7 +954,9 @@ class ASRToLLVMVisitor;
                     verify(arr, llvm_type_verify_against);
                     auto const data = arr;
                     free_array_data(data, arr_t->m_type, struct_sym, array_size_lazy);
-                    free_array_ptr_to_consecutive_data(data, arr_t->m_type);
+                    if (free_data) {
+                        free_array_ptr_to_consecutive_data(data, arr_t->m_type);
+                    }
                     break;
                 }
                 case ASR::SIMDArray :

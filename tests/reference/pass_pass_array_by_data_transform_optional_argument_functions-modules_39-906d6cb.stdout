@@ -116,6 +116,26 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                ),
+                                            filewrite_string____1:
+                                                (ExternalSymbol
+                                                    7
+                                                    filewrite_string____1
+                                                    4 filewrite_string____1
+                                                    modules_39_module_fpm_filesystem_39
+                                                    []
+                                                    filewrite_string____1
+                                                    Public
+                                                ),
+                                            join_path:
+                                                (ExternalSymbol
+                                                    7
+                                                    join_path
+                                                    4 join_path
+                                                    modules_39_module_fpm_filesystem_39
+                                                    []
+                                                    join_path
+                                                    Public
                                                 )
                                         })
                                     build_model
@@ -136,10 +156,10 @@
                                     []
                                     []
                                     [(SubroutineCall
-                                        2 filewrite_string____1
-                                        2 filewrite_string____1
+                                        7 filewrite_string____1
+                                        7 filewrite_string____1
                                         [((FunctionCall
-                                            2 join_path
+                                            7 join_path
                                             ()
                                             [((StringConstant
                                                 "build"
@@ -190,16 +210,6 @@
                                     .false.
                                     .false.
                                     ()
-                                ),
-                            filewrite_string____1:
-                                (ExternalSymbol
-                                    2
-                                    filewrite_string____1
-                                    4 filewrite_string____1
-                                    modules_39_module_fpm_filesystem_39
-                                    []
-                                    filewrite_string____1
-                                    Public
                                 ),
                             join_path:
                                 (ExternalSymbol

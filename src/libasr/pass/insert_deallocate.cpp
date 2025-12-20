@@ -299,9 +299,9 @@ class LoopTempVarDeallocateVisitor : public ASR::BaseWalkVisitor<LoopTempVarDeal
 //   `Function_t::m_args` and are `allocatable` with `intent(out)`. It does not
 //   handle pointers, components, or more complex argument expressions.
 //
-// - We intentionally skip compiler-generated intrinsic implementations
-//   (`deftype == Implementation`) to avoid changing their internal ownership
-//   conventions.
+// - Optional dummy arguments may be lowered by `transform_optional_argument_functions`
+//   into a required dummy plus a presence-bit argument `(arg, is_arg_present_)`.
+//   In that case, the inserted deallocation is guarded by `is_arg_present_`.
 class IntentOutDeallocateVisitor : public ASR::BaseWalkVisitor<IntentOutDeallocateVisitor>
 {
     Allocator &al;
@@ -313,9 +313,27 @@ public:
         if (func_type->m_abi == ASR::abiType::ExternalUndefined) {
             return;
         }
-        // Skip compiler-generated intrinsic implementations (deftype == Implementation)
-        // These functions handle their own intent(out) allocatable deallocation internally
+        // Skip compiler-generated intrinsic implementations.
+        // These functions handle their own result allocatable allocation/deallocation internally.
+        // We identify them by:
+        // 1. deftype == Implementation AND parent module is lfortran_intrinsic_*, OR
+        // 2. Function name starts with "_lcompilers_" or "__libasr_created__"
+        std::string func_name = x.m_name;
+        bool is_compiler_generated =
+            func_name.rfind("_lcompilers_", 0) == 0 ||
+            func_name.rfind("__libasr_created__", 0) == 0;
         if (func_type->m_deftype == ASR::deftypeType::Implementation) {
+            ASR::asr_t* parent = x.m_symtab->parent->asr_owner;
+            if (parent && ASR::is_a<ASR::symbol_t>(*parent) &&
+                    ASR::is_a<ASR::Module_t>(*ASR::down_cast<ASR::symbol_t>(parent))) {
+                std::string mod_name = ASR::down_cast<ASR::Module_t>(
+                    ASR::down_cast<ASR::symbol_t>(parent))->m_name;
+                if (mod_name.rfind("lfortran_intrinsic_", 0) == 0) {
+                    is_compiler_generated = true;
+                }
+            }
+        }
+        if (is_compiler_generated) {
             for (auto &a : x.m_symtab->get_scope()) {
                 visit_symbol(*a.second);
             }
@@ -376,23 +394,37 @@ public:
             ASR::stmt_t* if_stmt = ASRUtils::STMT(ASR::make_If_t(
                 al, loc, nullptr, is_allocated, if_body.p, if_body.n, nullptr, 0));
 
-            // For optional arguments, wrap in: if (present(arg)) then ...
+            ASR::expr_t* present_cond = nullptr;
             if (arg_var->m_presence == ASR::presenceType::Optional) {
-                // Create present(arg) check
                 Vec<ASR::expr_t*> present_args;
                 present_args.reserve(al, 1);
                 present_args.push_back(al, var_expr);
-                ASR::expr_t* is_present = ASRUtils::EXPR(ASR::make_IntrinsicElementalFunction_t(
+                present_cond = ASRUtils::EXPR(ASR::make_IntrinsicElementalFunction_t(
                     al, loc,
                     static_cast<int64_t>(ASRUtils::IntrinsicElementalFunctions::Present),
                     present_args.p, present_args.n, 0, logical_type, nullptr));
+            } else if (i + 1 < xx.n_args && ASR::is_a<ASR::Var_t>(*xx.m_args[i + 1])) {
+                ASR::symbol_t* presence_sym = ASR::down_cast<ASR::Var_t>(xx.m_args[i + 1])->m_v;
+                ASR::symbol_t* presence_sym_deref = ASRUtils::symbol_get_past_external(presence_sym);
+                if (ASR::is_a<ASR::Variable_t>(*presence_sym_deref)) {
+                    ASR::Variable_t* presence_var = ASR::down_cast<ASR::Variable_t>(presence_sym_deref);
+                    ASR::ttype_t* presence_type = ASRUtils::type_get_past_allocatable(presence_var->m_type);
+                    std::string expected_prefix = "is_" + std::string(arg_var->m_name) + "_present_";
+                    std::string presence_name = presence_var->m_name;
+                    if (presence_var->m_intent == ASR::intentType::In
+                            && ASR::is_a<ASR::Logical_t>(*presence_type)
+                            && presence_name.rfind(expected_prefix, 0) == 0) {
+                        present_cond = ASRUtils::EXPR(ASR::make_Var_t(al, loc, presence_sym));
+                    }
+                }
+            }
 
-                // Wrap if_stmt in: if (present(arg)) then if_stmt end if
+            if (present_cond) {
                 Vec<ASR::stmt_t*> present_body;
                 present_body.reserve(al, 1);
                 present_body.push_back(al, if_stmt);
                 ASR::stmt_t* present_if_stmt = ASRUtils::STMT(ASR::make_If_t(
-                    al, loc, nullptr, is_present, present_body.p, present_body.n, nullptr, 0));
+                    al, loc, nullptr, present_cond, present_body.p, present_body.n, nullptr, 0));
                 dealloc_stmts.push_back(al, present_if_stmt);
             } else {
                 dealloc_stmts.push_back(al, if_stmt);

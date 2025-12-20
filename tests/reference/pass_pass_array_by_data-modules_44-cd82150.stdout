@@ -151,6 +151,16 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                ),
+                                            warnwrite_string____1:
+                                                (ExternalSymbol
+                                                    8
+                                                    warnwrite_string____1
+                                                    4 warnwrite_string____1
+                                                    modules_44_module_fpm_filesystem
+                                                    []
+                                                    warnwrite_string____1
+                                                    Public
                                                 )
                                         })
                                     cmd_new
@@ -195,8 +205,8 @@
                                         .false.
                                     )
                                     (SubroutineCall
-                                        2 warnwrite_string____1
-                                        2 warnwrite_string____1
+                                        8 warnwrite_string____1
+                                        8 warnwrite_string____1
                                         [((StructInstanceMember
                                             (Var 8 settings)
                                             8 1_fpm_new_settings_name
@@ -331,16 +341,6 @@
                                     []
                                     ()
                                     2 fpm_cmd_settings
-                                ),
-                            warnwrite_string____1:
-                                (ExternalSymbol
-                                    2
-                                    warnwrite_string____1
-                                    4 warnwrite_string____1
-                                    modules_44_module_fpm_filesystem
-                                    []
-                                    warnwrite_string____1
-                                    Public
                                 )
                         })
                     modules_44_fpm_cmd_new

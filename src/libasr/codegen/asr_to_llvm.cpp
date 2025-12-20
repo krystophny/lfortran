@@ -1358,24 +1358,7 @@ public:
                           ASR::is_a<ASR::Complex_t>(*curr_arg_m_a_type) ||
                           ASR::is_a<ASR::Logical_t>(*curr_arg_m_a_type)) {
                     llvm::Type* llvm_arg_type = llvm_utils->get_type_from_ttype_t_util(curr_arg.m_a, curr_arg_m_a_type, module.get());
-                    // Skip double allocation check for INTENT(OUT) allocatables.
-                    //
-                    // Fortran requires allocatable INTENT(OUT) dummy arguments to be automatically
-                    // deallocated on procedure entry (F2018 15.5.2.13). LFortran currently inserts
-                    // this deallocation only in limited cases (see the `insert_deallocate` pass),
-                    // and it is not complete yet (#9097). Until INTENT(OUT) deallocation is fully
-                    // implemented, keeping the double-allocation runtime check enabled here would
-                    // report false positives in valid programs.
-                    bool is_intent_out = false;
-                    if (ASR::is_a<ASR::Var_t>(*tmp_expr)) {
-                        ASR::symbol_t* sym = ASRUtils::symbol_get_past_external(
-                            ASR::down_cast<ASR::Var_t>(tmp_expr)->m_v);
-                        if (ASR::is_a<ASR::Variable_t>(*sym)) {
-                            ASR::Variable_t* var = ASR::down_cast<ASR::Variable_t>(sym);
-                            is_intent_out = (var->m_intent == ASR::intentType::Out);
-                        }
-                    }
-                    if (!realloc && compiler_options.po.bounds_checking && !is_intent_out) {
+                    if (!realloc && compiler_options.po.bounds_checking) {
                         llvm::Value* current_ptr = llvm_utils->CreateLoad2(llvm_arg_type->getPointerTo(), x_arr);
                         llvm::Value* is_allocated = builder->CreateICmpNE(
                             builder->CreatePtrToInt(current_ptr, llvm::Type::getInt64Ty(context)),
@@ -1666,24 +1649,8 @@ public:
                 if (x_arr && x_arr->getType() == nullptr) {
                     ptr_val = llvm::ConstantPointerNull::get(static_cast<llvm::PointerType*>(i8_ptr_ty));
                 }
-                // Skip double allocation check for INTENT(OUT) allocatables.
-                //
-                // Fortran requires allocatable INTENT(OUT) dummy arguments to be automatically
-                // deallocated on procedure entry (F2018 15.5.2.13). LFortran currently inserts
-                // this deallocation only in limited cases (see the `insert_deallocate` pass),
-                // and it is not complete yet (#9097). Until INTENT(OUT) deallocation is fully
-                // implemented, keeping the double-allocation runtime check enabled here would
-                // report false positives in valid programs.
-                bool is_intent_out = false;
-                if (ASR::is_a<ASR::Var_t>(*tmp_expr)) {
-                    ASR::symbol_t* sym = ASRUtils::symbol_get_past_external(
-                        ASR::down_cast<ASR::Var_t>(tmp_expr)->m_v);
-                    if (ASR::is_a<ASR::Variable_t>(*sym)) {
-                        ASR::Variable_t* var = ASR::down_cast<ASR::Variable_t>(sym);
-                        is_intent_out = (var->m_intent == ASR::intentType::Out);
-                    }
-                }
-                if (!realloc && compiler_options.po.bounds_checking && x_arr && x_arr->getType() != nullptr && !is_intent_out) {
+                if (!realloc && compiler_options.po.bounds_checking
+                    && x_arr && x_arr->getType() != nullptr) {
                     llvm::Value* desc_ptr = llvm_utils->CreateLoad2(type->getPointerTo(), x_arr);
                     llvm::Value* is_allocated = arr_descr->get_is_allocated_flag(desc_ptr, tmp_expr);
                     std::string var_name = "";
@@ -4629,12 +4596,18 @@ public:
     */
     bool is_argument(ASR::Variable_t* v, ASR::expr_t** m_args,
                         int n_args) {
+        uint32_t h_v = get_hash((ASR::asr_t*)v);
         for( int i = 0; i < n_args; i++ ) {
             ASR::expr_t* m_arg = m_args[i];
-            uint32_t h_m_arg = get_hash((ASR::asr_t*)m_arg);
-            uint32_t h_v = get_hash((ASR::asr_t*)v);
-            if( h_m_arg == h_v ) {
-                return true;
+            if (m_arg == nullptr) {
+                continue;
+            }
+            if (ASR::is_a<ASR::Var_t>(*m_arg)) {
+                ASR::Var_t* var = ASR::down_cast<ASR::Var_t>(m_arg);
+                ASR::symbol_t* arg_sym = symbol_get_past_external(var->m_v);
+                if (get_hash((ASR::asr_t*)arg_sym) == h_v) {
+                    return true;
+                }
             }
         }
         return false;
@@ -4969,9 +4942,12 @@ public:
                     }
                     case ASR::array_physical_typeType::DescriptorArray: {
                         llvm::Type* ptr_i_type = llvm_utils->get_type_from_ttype_t_util(expr, ASRUtils::type_get_past_allocatable_pointer(v_m_type), module.get());
-                        ptr_i = llvm_utils->create_ptr_gep2(el_type,
-                            llvm_utils->CreateLoad2(el_type->getPointerTo(), arr_descr->get_pointer_to_data(ptr_i_type, ptr)),
-                            llvm_utils->CreateLoad2(t, llvmi));
+                        // Evaluate expressions with IR side effects in a deterministic order.
+                        // (C++ argument evaluation order is unspecified and differs across compilers.)
+                        llvm::Value* idx_val = llvm_utils->CreateLoad2(t, llvmi);
+                        llvm::Value* data_ptr = arr_descr->get_pointer_to_data(ptr_i_type, ptr);
+                        llvm::Value* base_ptr = llvm_utils->CreateLoad2(el_type->getPointerTo(), data_ptr);
+                        ptr_i = llvm_utils->create_ptr_gep2(el_type, base_ptr, idx_val);
                         break;
                     }
                     case ASR::array_physical_typeType::PointerArray: {
@@ -5230,6 +5206,19 @@ public:
         bool is_malloc_array_type = false;
         bool is_list = false;
         bool is_dict = ASR::is_a<ASR::Dict_t>(*v->m_type);
+
+        bool is_v_arg = false;
+        if (x.class_type == ASR::symbolType::Function) {
+            ASR::Function_t* _func = (ASR::Function_t*)(&(x.base));
+            is_v_arg = is_argument(v, _func->m_args, _func->n_args);
+        }
+
+        // Function arguments are declared via `declare_args()` and must not be
+        // treated as local variables even if their intent is unspecified.
+        if (is_v_arg) {
+            return;
+        }
+
         if (v->m_intent == intent_local ||
             v->m_intent == intent_return_var ||
             !v->m_intent) {
@@ -5252,7 +5241,6 @@ public:
                 ASR::Function_t* _func = (ASR::Function_t*)(&(x.base));
                 std::uint32_t m_h = get_hash((ASR::asr_t*)_func);
                 ASR::abiType abi_type = ASRUtils::get_FunctionType(_func)->m_abi;
-                bool is_v_arg = is_argument(v, _func->m_args, _func->n_args);
                 if( is_array_type && !is_list && !is_dict) {
                     /* The first element in an array descriptor can be either of
                     * llvm::ArrayType or llvm::PointerType. However, a
