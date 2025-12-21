@@ -5456,6 +5456,8 @@ public:
             // to deallocate garbage descriptors and crash (e.g. derived_types_86).
             if (v->m_storage != ASR::storage_typeType::Save &&
                 v->m_storage != ASR::storage_typeType::Parameter &&
+                !ASRUtils::is_pointer(v->m_type) &&
+                !ASRUtils::is_allocatable(v->m_type) &&
                 ASR::is_a<ASR::StructType_t>(*ASRUtils::type_get_past_allocatable_pointer(v->m_type)) &&
                 !ASRUtils::is_class_type(ASRUtils::type_get_past_allocatable_pointer(v->m_type))) {
                 ASR::Struct_t* struct_sym = ASR::down_cast<ASR::Struct_t>(

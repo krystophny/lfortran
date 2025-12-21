@@ -746,7 +746,8 @@ namespace LCompilers {
 
         static inline void create_do_loop(Allocator& al, ASR::ImpliedDoLoop_t* idoloop,
         ASR::expr_t* arr_var, Vec<ASR::stmt_t*>* result_vec,
-        ASR::expr_t* arr_idx=nullptr, bool perform_cast=false,
+        ASR::expr_t* arr_idx, SymbolTable* current_scope,
+        bool perform_cast=false,
         ASR::cast_kindType cast_kind=ASR::cast_kindType::IntegerToInteger,
         ASR::ttype_t* casted_type=nullptr) {
             ASR::do_loop_head_t head;
@@ -797,7 +798,8 @@ namespace LCompilers {
                                             ASR::arraystorageType::RowMajor, nullptr));
                 if( ASR::is_a<ASR::ImpliedDoLoop_t>(*idoloop->m_values[i]) ) {
                     create_do_loop(al, ASR::down_cast<ASR::ImpliedDoLoop_t>(idoloop->m_values[i]),
-                                   arr_var, &doloop_body, arr_idx, perform_cast, cast_kind, casted_type);
+                                   arr_var, &doloop_body, arr_idx, current_scope,
+                                   perform_cast, cast_kind, casted_type);
                 } else {
                     ASR::expr_t* idoloop_m_values_i = idoloop->m_values[i];
                     if( perform_cast ) {
@@ -820,7 +822,31 @@ namespace LCompilers {
             }
             ASR::stmt_t* doloop = ASRUtils::STMT(ASR::make_DoLoop_t(al, arr_var->base.loc,
                 nullptr, head, doloop_body.p, doloop_body.size(), nullptr, 0));
-            result_vec->push_back(al, doloop);
+            if (current_scope != nullptr && ASR::is_a<ASR::Var_t>(*head.m_v)) {
+                ASR::Var_t* loop_var = ASR::down_cast<ASR::Var_t>(head.m_v);
+                std::string saved_name = current_scope->get_unique_name(
+                    std::string("__libasr_implied_do_saved_")
+                        + std::string(ASRUtils::symbol_name(loop_var->m_v)),
+                    false);
+                ASR::asr_t* saved_var_asr = ASRUtils::make_Variable_t_util(
+                    al, head.loc, current_scope, s2c(al, saved_name), nullptr, 0,
+                    ASR::intentType::Local, nullptr, nullptr, ASR::storage_typeType::Default,
+                    ASRUtils::expr_type(head.m_v), nullptr, ASR::abiType::Source,
+                    ASR::accessType::Private, ASR::presenceType::Required, false);
+                current_scope->add_symbol(saved_name, ASR::down_cast<ASR::symbol_t>(saved_var_asr));
+                ASR::expr_t* saved_var = ASRUtils::EXPR(
+                    ASR::make_Var_t(al, head.loc, ASR::down_cast<ASR::symbol_t>(saved_var_asr)));
+
+                result_vec->push_back(al, ASRUtils::STMT(
+                    ASRUtils::make_Assignment_t_util(al, head.loc, saved_var, head.m_v,
+                                                     nullptr, false, false)));
+                result_vec->push_back(al, doloop);
+                result_vec->push_back(al, ASRUtils::STMT(
+                    ASRUtils::make_Assignment_t_util(al, head.loc, head.m_v, saved_var,
+                                                     nullptr, false, false)));
+            } else {
+                result_vec->push_back(al, doloop);
+            }
         }
 
         template <typename LOOP_BODY>
