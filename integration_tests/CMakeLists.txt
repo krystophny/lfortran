@@ -2308,7 +2308,8 @@ RUN(NAME do_loop_06 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME do_loop_07 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME do_loop_post_value_01 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc
     EXTRA_ARGS --use-loop-variable-after-loop)
-RUN(NAME do_loop_post_value_02 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
+RUN(NAME do_loop_post_value_02 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc
+    EXTRA_ARGS --use-loop-variable-after-loop)
 RUN(NAME transfer_array_item_01 LABELS gfortran llvm)
 
 
