@@ -12932,9 +12932,10 @@ public:
 
         ASR::BitCast_t* bitcast = ASR::down_cast<ASR::BitCast_t>(x.m_value);
         ASR::ttype_t* value_type = ASRUtils::expr_type(x.m_value);
-        LCOMPILERS_ASSERT(ASRUtils::is_array(value_type));
-
         ASR::ttype_t* elem_type = ASRUtils::extract_type(value_type);
+        (void) value_type;
+        (void) elem_type;
+        LCOMPILERS_ASSERT(ASRUtils::is_array(value_type));
         LCOMPILERS_ASSERT(ASRUtils::is_integer(*elem_type));
         LCOMPILERS_ASSERT(ASR::down_cast<ASR::Integer_t>(elem_type)->m_kind == 1);
 
