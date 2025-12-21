@@ -1,11 +1,13 @@
 ! Test for intent(out) nested allocatable deallocation
 ! Issue #9097: nested allocatables should be deallocated at procedure entry
 !
-! Verification: Run with valgrind to detect memory leak
+! Fixed by PR #9039: intent(out) now properly deallocates nested allocatables
+!
+! Verification: Run with valgrind to confirm no memory leaks
 !   gfortran:   All heap blocks freed (correct)
 !   ifx:        All heap blocks freed (correct)
 !   nvfortran:  No leaks (correct)
-!   lfortran:   160 bytes definitely lost (BUG - nested data not freed)
+!   lfortran:   All heap blocks freed (correct - after PR #9039)
 program intent_out_nested_dealloc
     implicit none
 

@@ -4,7 +4,7 @@ program do_loop_03
         print *, k
     end do
 
-    ! Standard Fortran semantics: after normal termination, k is last_value + step
+    ! with --use-loop-variable-after-loop
 
     if (k /= 3) error stop
 

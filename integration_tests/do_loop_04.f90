@@ -4,8 +4,9 @@ program do_loop_04
         print *, k
     end do
 
-    ! Legacy LFortran semantics (default without the --use-loop-variable-after-loop flag)
+    ! without --use-loop-variable-after-loop
 
+    ! remove/ update this test if we make using the loop variable after the loop by default
     if (k /= 2) error stop
 
     print *, "k after = ", k
