@@ -1220,101 +1220,6 @@ namespace LCompilers {
             }
         }
 
-        Vec<ASR::stmt_t*> insert_if_stmts_in_loop_body(Allocator& al,
-                                                       ASR::If_t* if_stmt,
-                                                       ASR::stmt_t* decrement_stmt)
-        {
-            Vec<ASR::stmt_t*> body; body.reserve(al, 0);
-            Vec<ASR::stmt_t*> if_stmt_body; if_stmt_body.reserve(al, 0);
-            Vec<ASR::stmt_t*> else_stmt_body; else_stmt_body.reserve(al, 0);
-
-            for (size_t i = 0; i < if_stmt->n_body; i++) {
-                if (ASR::is_a<ASR::If_t>(*if_stmt->m_body[i])) {
-                    Vec<ASR::stmt_t*> nested_if_stmt_body = insert_if_stmts_in_loop_body(al,
-                                                 ASR::down_cast<ASR::If_t>(if_stmt->m_body[i]),
-                                                 decrement_stmt);
-                    for (size_t j = 0; j < nested_if_stmt_body.size(); j++) {
-                        if_stmt_body.push_back(al, nested_if_stmt_body[j]);
-                    }
-                } else if (ASR::is_a<ASR::Exit_t>(*if_stmt->m_body[i])) {
-                    if_stmt_body.push_back(al, decrement_stmt);
-                    if_stmt_body.push_back(al, if_stmt->m_body[i]);
-                    break;  // dead code ahead, skip it
-                } else {
-                    if_stmt_body.push_back(al, if_stmt->m_body[i]);
-                }
-            }
-
-            if_stmt->m_body = if_stmt_body.p;
-            if_stmt->n_body = if_stmt_body.n;
-
-            for (size_t i = 0; i < if_stmt->n_orelse; i++) {
-                if (ASR::is_a<ASR::If_t>(*if_stmt->m_orelse[i])) {
-                    Vec<ASR::stmt_t*> nested_if_stmt_body = insert_if_stmts_in_loop_body(al,
-                                                 ASR::down_cast<ASR::If_t>(if_stmt->m_orelse[i]),
-                                                 decrement_stmt);
-                    for (size_t j = 0; j < nested_if_stmt_body.size(); j++) {
-                        else_stmt_body.push_back(al, nested_if_stmt_body[j]);
-                    }
-                } else if (ASR::is_a<ASR::Exit_t>(*if_stmt->m_orelse[i])) {
-                    else_stmt_body.push_back(al, decrement_stmt);
-                    else_stmt_body.push_back(al, if_stmt->m_orelse[i]);
-                    break;  // dead code ahead, skip it
-                } else {
-                    else_stmt_body.push_back(al, if_stmt->m_orelse[i]);
-                }
-            }
-
-            if_stmt->m_orelse = else_stmt_body.p;
-            if_stmt->n_orelse = else_stmt_body.n;
-
-            body.push_back(al, ASRUtils::STMT(&if_stmt->base.base));
-            return body;
-        }
-
-        void insert_stmts_in_loop_body(Allocator& al,
-                                       const ASR::DoLoop_t& loop,
-                                       Vec<ASR::stmt_t*>& body,
-                                       ASR::expr_t* increment)
-        {
-            Vec<ASR::stmt_t*> new_body;
-            new_body.from_pointer_n_copy(al, body.p, body.n);
-            Location loc = loop.base.base.loc;
-
-            ASR::expr_t* target = loop.m_head.m_v;
-            int a_kind = ASRUtils::extract_kind_from_ttype_t(ASRUtils::expr_type(target));
-            ASR::ttype_t* type = ASRUtils::TYPE(ASR::make_Integer_t(al, loc, a_kind));
-
-            ASR::stmt_t* decrement_stmt = ASRUtils::STMT(
-                                            ASRUtils::make_Assignment_t_util(
-                                                al,
-                                                loc,
-                                                target,
-                                                ASRUtils::EXPR(
-                                                    ASR::make_IntegerBinOp_t(
-                                                    al, loc, target, ASR::binopType::Sub,
-                                                    increment, type, nullptr)),
-                                                nullptr, false, false));
-
-            for (size_t i = 0; i < loop.n_body; i++) {
-                if (ASR::is_a<ASR::Exit_t>(*loop.m_body[i])) {
-                    new_body.push_back(al, decrement_stmt);
-                    new_body.push_back(al, loop.m_body[i]);
-                    break;  // dead code ahead, skip it
-                } else if (ASR::is_a<ASR::If_t>(*loop.m_body[i])) {
-                    Vec<ASR::stmt_t*> if_body = insert_if_stmts_in_loop_body(
-                        al, ASR::down_cast<ASR::If_t>(loop.m_body[i]), decrement_stmt);
-                    for (size_t j = 0; j < if_body.size(); j++) {
-                        new_body.push_back(al, if_body[j]);
-                    }
-                } else {
-                    new_body.push_back(al, loop.m_body[i]);
-                }
-            }
-
-            body = new_body;
-        }
-
         Vec<ASR::stmt_t*> replace_doloop(Allocator &al, const ASR::DoLoop_t &loop,
                                          int comp, bool use_loop_variable_after_loop) {
             Location loc = loop.base.base.loc;
@@ -1324,7 +1229,6 @@ namespace LCompilers {
             ASR::expr_t *cond = nullptr;
             ASR::stmt_t *inc_stmt = nullptr;
             ASR::stmt_t *loop_init_stmt = nullptr;
-            ASR::stmt_t *stmt_add_c_after_loop = nullptr;
             if( loop.m_head.m_v ) {
                 ASR::expr_t* loop_head = loop.m_head.m_v;
                 cast_util(loop_head, a, al, true);
@@ -1391,15 +1295,25 @@ namespace LCompilers {
                         ASR::expr_t *test2 = ASRUtils::EXPR(ASR::make_IntegerCompare_t(al, loop.base.base.loc,
                             c, ASR::cmpopType::LtE, const_zero, log_type, nullptr));
 
-                        // test11: target + c <= b
-                        ASR::expr_t *test11 = ASRUtils::EXPR(ASR::make_IntegerCompare_t(al, loc,
-                            ASRUtils::EXPR(ASR::make_IntegerBinOp_t(al, loc, target,
-                            ASR::binopType::Add, c, int_type, nullptr)), ASR::cmpopType::LtE, b, log_type, nullptr));
-
-                        // test22: target + c >= b
-                        ASR::expr_t *test22 = ASRUtils::EXPR(ASR::make_IntegerCompare_t(al, loc,
-                            ASRUtils::EXPR(ASR::make_IntegerBinOp_t(al, loc, target,
-                            ASR::binopType::Add, c, int_type, nullptr)), ASR::cmpopType::GtE, b, log_type, nullptr));
+                        ASR::expr_t *test11 = nullptr;
+                        ASR::expr_t *test22 = nullptr;
+                        if (use_loop_variable_after_loop) {
+                            // test11: target <= b
+                            test11 = ASRUtils::EXPR(ASR::make_IntegerCompare_t(
+                                al, loc, target, ASR::cmpopType::LtE, b, log_type, nullptr));
+                            // test22: target >= b
+                            test22 = ASRUtils::EXPR(ASR::make_IntegerCompare_t(
+                                al, loc, target, ASR::cmpopType::GtE, b, log_type, nullptr));
+                        } else {
+                            // test11: target + c <= b
+                            test11 = ASRUtils::EXPR(ASR::make_IntegerCompare_t(al, loc,
+                                ASRUtils::EXPR(ASR::make_IntegerBinOp_t(al, loc, target,
+                                ASR::binopType::Add, c, int_type, nullptr)), ASR::cmpopType::LtE, b, log_type, nullptr));
+                            // test22: target + c >= b
+                            test22 = ASRUtils::EXPR(ASR::make_IntegerCompare_t(al, loc,
+                                ASRUtils::EXPR(ASR::make_IntegerBinOp_t(al, loc, target,
+                                ASR::binopType::Add, c, int_type, nullptr)), ASR::cmpopType::GtE, b, log_type, nullptr));
+                        }
 
                         // cond1: test1 && test11
                         ASR::expr_t *cond1 = ASRUtils::EXPR(make_LogicalBinOp_t(al, loc,
@@ -1427,22 +1341,28 @@ namespace LCompilers {
                 int a_kind = ASRUtils::extract_kind_from_ttype_t(ASRUtils::expr_type(target));
                 ASR::ttype_t *type = ASRUtils::TYPE(ASR::make_Integer_t(al, loc, a_kind));
 
-                loop_init_stmt = ASRUtils::STMT(ASRUtils::make_Assignment_t_util(al, loc, target,
-                    ASRUtils::EXPR(ASR::make_IntegerBinOp_t(al, loc, a,
-                            ASR::binopType::Sub, c, type, nullptr)), nullptr, false, false));
+                ASR::expr_t *loop_init_value = nullptr;
                 if (use_loop_variable_after_loop) {
-                    stmt_add_c_after_loop = ASRUtils::STMT(ASRUtils::make_Assignment_t_util(al, loc, target,
-                        ASRUtils::EXPR(ASR::make_IntegerBinOp_t(al, loc, target,
-                                ASR::binopType::Add, c, type, nullptr)), nullptr, false, false));
+                    loop_init_value = a;
+                } else {
+                    loop_init_value = ASRUtils::EXPR(ASR::make_IntegerBinOp_t(
+                        al, loc, a, ASR::binopType::Sub, c, type, nullptr));
                 }
+                loop_init_stmt = ASRUtils::STMT(ASRUtils::make_Assignment_t_util(
+                    al, loc, target, loop_init_value, nullptr, false, false));
 
                 inc_stmt = ASRUtils::STMT(ASRUtils::make_Assignment_t_util(al, loc, target,
                             ASRUtils::EXPR(ASR::make_IntegerBinOp_t(al, loc, target,
                                 ASR::binopType::Add, c, type, nullptr)), nullptr, false, false));
                 if (cond == nullptr) {
                     ASR::ttype_t *log_type = ASRUtils::TYPE(ASR::make_Logical_t(al, loc, 4));
-                    ASR::expr_t* left = ASRUtils::EXPR(ASR::make_IntegerBinOp_t(al, loc, target,
-                                            ASR::binopType::Add, c, type, nullptr));
+                    ASR::expr_t* left = nullptr;
+                    if (use_loop_variable_after_loop) {
+                        left = target;
+                    } else {
+                        left = ASRUtils::EXPR(ASR::make_IntegerBinOp_t(al, loc, target,
+                                                ASR::binopType::Add, c, type, nullptr));
+                    }
 
                     cond = ASRUtils::EXPR(ASR::make_IntegerCompare_t(al, loc,
                         left, cmp_op, b, log_type, nullptr));
@@ -1450,16 +1370,16 @@ namespace LCompilers {
             }
             Vec<ASR::stmt_t*> body;
             body.reserve(al, loop.n_body + (inc_stmt != nullptr));
-            if( inc_stmt ) {
+            if (inc_stmt && !use_loop_variable_after_loop) {
                 body.push_back(al, inc_stmt);
             }
 
-            if (use_loop_variable_after_loop) {
-                insert_stmts_in_loop_body(al, loop, body, c);
-            } else {
-                for (size_t i = 0; i < loop.n_body; i++) {
-                    body.push_back(al, loop.m_body[i]);
-                }
+            for (size_t i = 0; i < loop.n_body; i++) {
+                body.push_back(al, loop.m_body[i]);
+            }
+
+            if (inc_stmt && use_loop_variable_after_loop) {
+                body.push_back(al, inc_stmt);
             }
 
             ASR::stmt_t *while_loop_stmt = ASRUtils::STMT(ASR::make_WhileLoop_t(al, loc,
@@ -1470,9 +1390,6 @@ namespace LCompilers {
                 result.push_back(al, loop_init_stmt);
             }
             result.push_back(al, while_loop_stmt);
-            if (stmt_add_c_after_loop && use_loop_variable_after_loop) {
-                result.push_back(al, stmt_add_c_after_loop);
-            }
 
             return result;
         }
