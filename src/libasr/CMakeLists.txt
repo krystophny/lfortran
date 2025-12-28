@@ -145,6 +145,13 @@ if (WITH_LLVM)
     target_link_libraries(lfortran_utils p::llvm)
 endif()
 
+# Make scripts available in the build tree for development builds (used for
+# debug info generation).
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/dwarf_convert.py
+    ${CMAKE_CURRENT_BINARY_DIR}/dwarf_convert.py COPYONLY)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/dat_convert.py
+    ${CMAKE_CURRENT_BINARY_DIR}/dat_convert.py COPYONLY)
+
 # Install the dwarf_convert.py and dat_convert.py
 install(
     FILES dwarf_convert.py dat_convert.py
