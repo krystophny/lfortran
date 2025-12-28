@@ -2376,6 +2376,7 @@ RUN(NAME allocate_09 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 
 RUN(NAME dealloc_01 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc EXTRA_ARGS --realloc-lhs-arrays)
 RUN(NAME intentout_optional_deallocate_01 LABELS gfortran llvm)
+RUN(NAME transfer_string_to_int8_01 LABELS gfortran llvm)
 RUN(NAME dealloc_02 LABELS gfortran)
 RUN(NAME dealloc_03 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME dealloc_04 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
