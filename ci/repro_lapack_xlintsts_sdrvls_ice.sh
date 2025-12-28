@@ -54,7 +54,12 @@ set -e
 echo
 echo "Build exit code: $BUILD_RC"
 
-cmd="$(rg -n \"^.*lfortran.*\\bsdrvls\\.f-pp\\.f\\b\" \"$BUILD_LOG\" | head -n 1 | sed -E 's/^.*: //')"
+if [[ ! -f "$BUILD_LOG" ]]; then
+    echo "ERROR: build log not found at: $BUILD_LOG"
+    exit 1
+fi
+
+cmd="$(grep -n "sdrvls.f-pp.f" "$BUILD_LOG" | grep -m 1 "lfortran" | sed -E 's/^[0-9]+://')"
 if [[ -z "${cmd}" ]]; then
     echo "ERROR: could not find sdrvls compile command in build log: $BUILD_LOG"
     exit 1
