@@ -1186,9 +1186,9 @@ public:
                 } else if( m_arg_str == std::string("end") ) {
                     if( _type != AST::stmtType::Read ) {
                         diag.add(Diagnostic(
-                            "`end` is only supported with READ",
+                            "`end` is only supported for READ statements",
                             Level::Error, Stage::Semantic, {
-                                Label("",{kwarg.loc})
+                                Label("",{loc})
                             }));
                         throw SemanticAbort();
                     }
@@ -1196,7 +1196,7 @@ public:
                         diag.add(Diagnostic(
                             R"""(Duplicate value of `end` found, `end` has already been specified via keyword arguments)""",
                             Level::Error, Stage::Semantic, {
-                                Label("",{kwarg.loc})
+                                Label("",{loc})
                             }));
                         throw SemanticAbort();
                     }
@@ -1214,9 +1214,9 @@ public:
                 } else if( m_arg_str == std::string("err") ) {
                     if( _type != AST::stmtType::Read ) {
                         diag.add(Diagnostic(
-                            "`err` is only supported with READ",
+                            "`err` is only supported for READ statements",
                             Level::Error, Stage::Semantic, {
-                                Label("",{kwarg.loc})
+                                Label("",{loc})
                             }));
                         throw SemanticAbort();
                     }
@@ -1224,7 +1224,7 @@ public:
                         diag.add(Diagnostic(
                             R"""(Duplicate value of `err` found, `err` has already been specified via keyword arguments)""",
                             Level::Error, Stage::Semantic, {
-                                Label("",{kwarg.loc})
+                                Label("",{loc})
                             }));
                         throw SemanticAbort();
                     }
