@@ -1348,6 +1348,7 @@ public:
                 }
             }
     
+            bool inserted_iostat = false;
             if( _type == AST::stmtType::Read && a_iostat == nullptr
                     && (end_label != -1 || err_label != -1) ) {
                 ASR::ttype_t* int_type = ASRUtils::TYPE(ASR::make_Integer_t(
@@ -1356,6 +1357,7 @@ public:
                 ASR::symbol_t* iostat_sym = declare_implicit_variable2(
                     loc, iostat_name, ASRUtils::intent_local, int_type);
                 a_iostat = ASRUtils::EXPR(ASR::make_Var_t(al, loc, iostat_sym));
+                inserted_iostat = true;
             }
 
             if (a_fmt && ASR::is_a<ASR::IntegerConstant_t>(*a_fmt)) {
@@ -1463,6 +1465,28 @@ public:
                     al, loc, err_label, s2c(al, std::to_string(err_label)))));
                 tmp_vec.push_back(ASR::make_If_t(al, loc, nullptr, err_test,
                     body.p, body.size(), nullptr, 0));
+            }
+            if( inserted_iostat ) {
+                if( end_label == -1 ) {
+                    ASR::expr_t* eof_test = ASRUtils::EXPR(ASR::make_IntegerCompare_t(
+                        al, loc, a_iostat, ASR::cmpopType::Lt, zero, cmp_type, nullptr));
+                    Vec<ASR::stmt_t*> body; body.reserve(al, 1);
+                    body.push_back(al, ASRUtils::STMT(ASR::make_FileRead_t(al, loc, m_label, a_unit, a_fmt,
+                        a_iomsg, nullptr, a_advance, a_size, a_id, a_values_vec.p, a_values_vec.size(),
+                        overloaded_stmt, formatted)));
+                    tmp_vec.push_back(ASR::make_If_t(al, loc, nullptr, eof_test,
+                        body.p, body.size(), nullptr, 0));
+                }
+                if( err_label == -1 ) {
+                    ASR::expr_t* err_test = ASRUtils::EXPR(ASR::make_IntegerCompare_t(
+                        al, loc, a_iostat, ASR::cmpopType::Gt, zero, cmp_type, nullptr));
+                    Vec<ASR::stmt_t*> body; body.reserve(al, 1);
+                    body.push_back(al, ASRUtils::STMT(ASR::make_FileRead_t(al, loc, m_label, a_unit, a_fmt,
+                        a_iomsg, nullptr, a_advance, a_size, a_id, a_values_vec.p, a_values_vec.size(),
+                        overloaded_stmt, formatted)));
+                    tmp_vec.push_back(ASR::make_If_t(al, loc, nullptr, err_test,
+                        body.p, body.size(), nullptr, 0));
+                }
             }
         }
         tmp_vec.insert(tmp_vec.end(), newline_for_advance.begin(), newline_for_advance.end());
