@@ -1,0 +1,5 @@
+semantic error: `end` is only supported for READ statements
+ --> tests/errors/write_end_unsupported_01.f90:6:5
+  |
+6 |     write (*, end=10) x
+  |     ^^^^^^^^^^^^^^^^^^^ 

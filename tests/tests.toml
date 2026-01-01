@@ -4517,6 +4517,30 @@ filename = "errors/iostat_constant_integer.f90"
 asr = true
 
 [[test]]
+filename = "errors/read_end_label_nonliteral_01.f90"
+asr = true
+
+[[test]]
+filename = "errors/read_end_label_nonliteral_02.f90"
+asr = true
+
+[[test]]
+filename = "errors/read_err_label_nonliteral_01.f90"
+asr = true
+
+[[test]]
+filename = "errors/read_err_label_nonliteral_02.f90"
+asr = true
+
+[[test]]
+filename = "errors/write_end_unsupported_01.f90"
+asr = true
+
+[[test]]
+filename = "errors/write_err_unsupported_01.f90"
+asr = true
+
+[[test]]
 filename = "character_parameter_padding_trimming.f90"
 asr = true
 

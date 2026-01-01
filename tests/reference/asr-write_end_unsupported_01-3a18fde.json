@@ -1,0 +1,13 @@
+{
+    "basename": "asr-write_end_unsupported_01-3a18fde",
+    "cmd": "lfortran --show-asr --no-color {infile} -o {outfile}",
+    "infile": "tests/errors/write_end_unsupported_01.f90",
+    "infile_hash": "845e67dbcc2bedb3411b21b93131fc84bb4b0fe5928736c241a4ae43",
+    "outfile": null,
+    "outfile_hash": null,
+    "stdout": null,
+    "stdout_hash": null,
+    "stderr": "asr-write_end_unsupported_01-3a18fde.stderr",
+    "stderr_hash": "75c2b65dbaed0a7961977028539e62cd14c87c41190ac024ae0749de",
+    "returncode": 2
+}
