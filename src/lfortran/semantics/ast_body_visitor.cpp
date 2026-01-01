@@ -1208,12 +1208,25 @@ public:
                         continue;
                     }
                     this->visit_expr(*kwarg.m_value);
+                    if( tmp == nullptr ) {
+                        if (!compiler_options.continue_compilation) {
+                            throw SemanticAbort();
+                        }
+                        continue;
+                    }
                     ASR::expr_t* end_expr = ASRUtils::EXPR(tmp);
                     if( !ASR::is_a<ASR::IntegerConstant_t>(*end_expr) ) {
+                        Location diag_loc = kwarg.loc;
+                        if( diag_loc.first == 0 && diag_loc.last == 0 ) {
+                            diag_loc = kwarg.m_value->base.loc;
+                        }
+                        if( diag_loc.first == 0 && diag_loc.last == 0 ) {
+                            diag_loc = loc;
+                        }
                         diag.add(Diagnostic(
                             "`end` must be a literal integer label",
                             Level::Error, Stage::Semantic, {
-                                Label("",{kwarg.loc})
+                                Label("",{diag_loc})
                             }));
                         if (!compiler_options.continue_compilation) {
                             throw SemanticAbort();
@@ -1245,12 +1258,25 @@ public:
                         continue;
                     }
                     this->visit_expr(*kwarg.m_value);
+                    if( tmp == nullptr ) {
+                        if (!compiler_options.continue_compilation) {
+                            throw SemanticAbort();
+                        }
+                        continue;
+                    }
                     ASR::expr_t* err_expr = ASRUtils::EXPR(tmp);
                     if( !ASR::is_a<ASR::IntegerConstant_t>(*err_expr) ) {
+                        Location diag_loc = kwarg.loc;
+                        if( diag_loc.first == 0 && diag_loc.last == 0 ) {
+                            diag_loc = kwarg.m_value->base.loc;
+                        }
+                        if( diag_loc.first == 0 && diag_loc.last == 0 ) {
+                            diag_loc = loc;
+                        }
                         diag.add(Diagnostic(
                             "`err` must be a literal integer label",
                             Level::Error, Stage::Semantic, {
-                                Label("",{kwarg.loc})
+                                Label("",{diag_loc})
                             }));
                         if (!compiler_options.continue_compilation) {
                             throw SemanticAbort();
