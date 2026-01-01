@@ -455,6 +455,9 @@ program continue_compilation_1
     13 format ()
     read (5, fmt_i3)
 
+    !passing non procedure to procedure parameter
+    call proc_param(42)
+
     x = 9010
     read (*, end=x) x
     read (*, end=9011.0) x
@@ -465,6 +468,4 @@ program continue_compilation_1
 9014 continue
     write (*, err=9015) x
 9015 continue
-    !passing non procedure to procedure parameter
-    call proc_param(42)
 end program

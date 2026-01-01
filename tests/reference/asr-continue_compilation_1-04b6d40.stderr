@@ -913,6 +913,12 @@ semantic error: Assigned format (using integer variable as format specifier) is 
 456 |     read (5, fmt_i3)
     |     ^^^^^^^^^^^^^^^^ 
 
+semantic error: Type mismatch in argument `p`: expected a procedure but got `integer`
+   --> tests/errors/continue_compilation_1.f90:459:21
+    |
+459 |     call proc_param(42)
+    |                     ^^ 
+
 semantic error: `end` must be a literal integer label
  --> tests/errors/continue_compilation_1.f90:1:1
   |
@@ -938,19 +944,13 @@ semantic error: `err` must be a literal integer label
   | ^ 
 
 semantic error: `end` is only supported for READ statements
-   --> tests/errors/continue_compilation_1.f90:464:5
+   --> tests/errors/continue_compilation_1.f90:467:5
     |
-464 |     write (*, end=9014) x
+467 |     write (*, end=9014) x
     |     ^^^^^^^^^^^^^^^^^^^^^ 
 
 semantic error: `err` is only supported for READ statements
-   --> tests/errors/continue_compilation_1.f90:466:5
+   --> tests/errors/continue_compilation_1.f90:469:5
     |
-466 |     write (*, err=9015) x
+469 |     write (*, err=9015) x
     |     ^^^^^^^^^^^^^^^^^^^^^ 
-
-semantic error: Type mismatch in argument `p`: expected a procedure but got `integer`
-   --> tests/errors/continue_compilation_1.f90:469:21
-    |
-469 |     call proc_param(42)
-    |                     ^^ 
