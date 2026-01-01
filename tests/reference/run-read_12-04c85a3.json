@@ -2,12 +2,12 @@
     "basename": "run-read_12-04c85a3",
     "cmd": "lfortran --no-color {infile}",
     "infile": "tests/../integration_tests/read_12.f90",
-    "infile_hash": "a3830c01334513bfd391ba1df9502d07fe85b84044ce385e4dbd27ac",
+    "infile_hash": "dca73ad8beee028ea9e46652638f2f2a7b097694acadf719f420bffa",
     "outfile": null,
     "outfile_hash": null,
-    "stdout": "run-read_12-04c85a3.stdout",
-    "stdout_hash": "4d4e4cd3fc6a71ff01d8571f5425eadf4692a0c1fec7e1430c89d4ef",
-    "stderr": null,
-    "stderr_hash": null,
-    "returncode": 0
+    "stdout": null,
+    "stdout_hash": null,
+    "stderr": "run-read_12-04c85a3.stderr",
+    "stderr_hash": "41748f94d3fa148e1f464dfb0c9c1de9231308509a398dd198d7c906",
+    "returncode": 1
 }
