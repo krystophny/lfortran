@@ -11374,7 +11374,7 @@ public:
         }
     }
 
-    llvm::Function* get_read_function(ASR::ttype_t *type) {
+    llvm::Function* get_read_function(ASR::ttype_t *type, bool with_iostat) {
         type = ASRUtils::type_get_past_allocatable(
             ASRUtils::type_get_past_pointer(type));
         llvm::Function *fn = nullptr;
@@ -11396,13 +11396,20 @@ public:
                     throw CodeGenError("Read Integer function not implemented "
                         "for integer kind: " + std::to_string(a_kind));
                 }
+                if (with_iostat) {
+                    runtime_func_name += "_iostat";
+                }
                 fn = module->getFunction(runtime_func_name);
                 if (!fn) {
+                    std::vector<llvm::Type*> args{
+                        type_arg->getPointerTo(),
+                        llvm::Type::getInt32Ty(context)
+                    };
+                    if (with_iostat) {
+                        args.push_back(llvm::Type::getInt32Ty(context)->getPointerTo());
+                    }
                     llvm::FunctionType *function_type = llvm::FunctionType::get(
-                            llvm::Type::getVoidTy(context), {
-                                type_arg->getPointerTo(),
-                                llvm::Type::getInt32Ty(context)
-                            }, false);
+                            llvm::Type::getVoidTy(context), args, false);
                     fn = llvm::Function::Create(function_type,
                             llvm::Function::ExternalLinkage, runtime_func_name, module.get());
                 }
@@ -11410,14 +11417,21 @@ public:
             }
             case (ASR::ttypeType::String): {
                 std::string runtime_func_name = "_lfortran_read_char";
+                if (with_iostat) {
+                    runtime_func_name += "_iostat";
+                }
                 fn = module->getFunction(runtime_func_name);
                 if (!fn) {
+                    std::vector<llvm::Type*> args{
+                        character_type->getPointerTo(), // Str_data
+                        llvm::Type::getInt64Ty(context), // Str_len
+                        llvm::Type::getInt32Ty(context) // Unit_num
+                    };
+                    if (with_iostat) {
+                        args.push_back(llvm::Type::getInt32Ty(context)->getPointerTo());
+                    }
                     llvm::FunctionType *function_type = llvm::FunctionType::get(
-                            llvm::Type::getVoidTy(context), {
-                                character_type->getPointerTo(), // Str_data
-                                llvm::Type::getInt64Ty(context), // Str_len
-                                llvm::Type::getInt32Ty(context) // Unit_num
-                            }, false);
+                            llvm::Type::getVoidTy(context), args, false);
                     fn = llvm::Function::Create(function_type,
                             llvm::Function::ExternalLinkage, runtime_func_name, module.get());
                 }
@@ -11436,14 +11450,21 @@ public:
                 } else {
                     throw CodeGenError("Read Logical function not implemented for kind: " + std::to_string(a_kind));
                 }
+                if (with_iostat) {
+                    runtime_func_name += "_iostat";
+                }
 
                 fn = module->getFunction(runtime_func_name);
                 if (!fn) {
+                    std::vector<llvm::Type*> args{
+                        type_arg->getPointerTo(),
+                        llvm::Type::getInt32Ty(context)
+                    };
+                    if (with_iostat) {
+                        args.push_back(llvm::Type::getInt32Ty(context)->getPointerTo());
+                    }
                     llvm::FunctionType *function_type = llvm::FunctionType::get(
-                            llvm::Type::getVoidTy(context), {
-                                type_arg->getPointerTo(),
-                                llvm::Type::getInt32Ty(context)
-                            }, false);
+                            llvm::Type::getVoidTy(context), args, false);
                     fn = llvm::Function::Create(function_type,
                             llvm::Function::ExternalLinkage, runtime_func_name, module.get());
                 }
@@ -11460,13 +11481,20 @@ public:
                     runtime_func_name = "_lfortran_read_double";
                     type_arg = llvm::Type::getDoubleTy(context);
                 }
+                if (with_iostat) {
+                    runtime_func_name += "_iostat";
+                }
                 fn = module->getFunction(runtime_func_name);
                 if (!fn) {
+                    std::vector<llvm::Type*> args{
+                        type_arg->getPointerTo(),
+                        llvm::Type::getInt32Ty(context)
+                    };
+                    if (with_iostat) {
+                        args.push_back(llvm::Type::getInt32Ty(context)->getPointerTo());
+                    }
                     llvm::FunctionType *function_type = llvm::FunctionType::get(
-                            llvm::Type::getVoidTy(context), {
-                                type_arg->getPointerTo(),
-                                llvm::Type::getInt32Ty(context)
-                            }, false);
+                            llvm::Type::getVoidTy(context), args, false);
                     fn = llvm::Function::Create(function_type,
                             llvm::Function::ExternalLinkage, runtime_func_name, module.get());
                 }
@@ -11522,6 +11550,9 @@ public:
                 } else {
                     throw CodeGenError("Type not supported.");
                 }
+                if (with_iostat) {
+                    runtime_func_name += "_iostat";
+                }
                 fn = module->getFunction(runtime_func_name);
                 if (!fn) {
                     std::vector<llvm::Type*> types {
@@ -11530,6 +11561,9 @@ public:
                         llvm::Type::getInt32Ty(context)};
                     if(runtime_func_name == "_lfortran_read_array_char"){
                         types.insert(types.begin()+1, llvm::Type::getInt64Ty(context));
+                    }
+                    if (with_iostat) {
+                        types.push_back(llvm::Type::getInt32Ty(context)->getPointerTo());
                     }
                     llvm::FunctionType *function_type = llvm::FunctionType::get(
                         llvm::Type::getVoidTy(context), types, false);
@@ -11668,8 +11702,13 @@ public:
                                     }
                                     size = builder->CreateIntCast(size, llvm::Type::getInt32Ty(context), true);
 
-                                    llvm::Function* fn = get_read_function(arr_type);
-                                    builder->CreateCall(fn, {section_ptr, size, unit_val});
+                                    const bool with_iostat = (x.m_iostat != nullptr);
+                                    llvm::Function* fn = get_read_function(arr_type, with_iostat);
+                                    if (with_iostat) {
+                                        builder->CreateCall(fn, {section_ptr, size, unit_val, iostat});
+                                    } else {
+                                        builder->CreateCall(fn, {section_ptr, size, unit_val});
+                                    }
                                     continue;
                                 }
 
@@ -11705,8 +11744,13 @@ public:
                                 size = builder->CreateIntCast(size, llvm::Type::getInt32Ty(context), true);
 
                                 // Call array read function
-                                llvm::Function* fn = get_read_function(arr_type);
-                                builder->CreateCall(fn, {section_ptr, size, unit_val});
+                                const bool with_iostat = (x.m_iostat != nullptr);
+                                llvm::Function* fn = get_read_function(arr_type, with_iostat);
+                                if (with_iostat) {
+                                    builder->CreateCall(fn, {section_ptr, size, unit_val, iostat});
+                                } else {
+                                    builder->CreateCall(fn, {section_ptr, size, unit_val});
+                                }
                                 continue;
                             }
                         }
@@ -11770,9 +11814,14 @@ public:
                         ptr_loads = ptr_loads_copy;
 
                         // Read into this element (scalar read takes 2 args: ptr, unit)
+                        const bool with_iostat = (x.m_iostat != nullptr);
                         ASR::ttype_t* elem_type = ASRUtils::expr_type(idl->m_values[0]);
-                        llvm::Function* read_fn = get_read_function(elem_type);
-                        builder->CreateCall(read_fn, {elem_ptr, unit_val});
+                        llvm::Function* read_fn = get_read_function(elem_type, with_iostat);
+                        if (with_iostat) {
+                            builder->CreateCall(read_fn, {elem_ptr, unit_val, iostat});
+                        } else {
+                            builder->CreateCall(read_fn, {elem_ptr, unit_val});
+                        }
 
                         builder->CreateBr(loop_inc);
 
@@ -11797,6 +11846,7 @@ public:
                 ptr_loads = ptr_loads_copy;
                 ASR::ttype_t* type = ASRUtils::expr_type(x.m_values[i]);
                 llvm::Function *fn;
+                const bool with_iostat = (x.m_iostat != nullptr);
                 if (ASR::is_a<ASR::Var_t>(*x.m_values[i]) &&
                     ASR::is_a<ASR::ExternalSymbol_t>(*ASR::down_cast<ASR::Var_t>(x.m_values[i])->m_v)) {
                     ASR::Variable_t *asr_target = EXPR2VAR(x.m_values[i]);
@@ -11875,7 +11925,7 @@ public:
                         iostat);
                     return;
                 } else {
-                    fn = get_read_function(type);
+                    fn = get_read_function(type, with_iostat);
                 }
                 if (ASRUtils::is_array(type)) {
                     llvm::Type *el_type = llvm_utils->get_type_from_ttype_t_util(x.m_values[i], ASRUtils::extract_type(type), module.get());
@@ -11903,19 +11953,35 @@ public:
                         x.m_values[i], nullptr, type32, nullptr));
                     visit_ArraySize(*array_size);
                     if(ASRUtils::is_array_of_strings(type)){
-                        builder->CreateCall(fn, {
-                            llvm_utils->get_stringArray_data(type, original_array_representation),
-                            llvm_utils->get_stringArray_length(type, original_array_representation),
-                            tmp, unit_val});
+                        if (with_iostat) {
+                            builder->CreateCall(fn, {
+                                llvm_utils->get_stringArray_data(type, original_array_representation),
+                                llvm_utils->get_stringArray_length(type, original_array_representation),
+                                tmp, unit_val, iostat});
+                        } else {
+                            builder->CreateCall(fn, {
+                                llvm_utils->get_stringArray_data(type, original_array_representation),
+                                llvm_utils->get_stringArray_length(type, original_array_representation),
+                                tmp, unit_val});
+                        }
                         tmp = nullptr;
                     } else {
-                        builder->CreateCall(fn, {arr, tmp, unit_val}); tmp = nullptr;
+                        if (with_iostat) {
+                            builder->CreateCall(fn, {arr, tmp, unit_val, iostat});
+                        } else {
+                            builder->CreateCall(fn, {arr, tmp, unit_val});
+                        }
+                        tmp = nullptr;
                     }
                 } else {
                     if(ASRUtils::is_string_only(type)){
                         llvm::Value* str_data, *str_len;
                         std::tie(str_data, str_len) = llvm_utils->get_string_length_data(ASRUtils::get_string_type(type), var_to_read_into, true);
-                        builder->CreateCall(fn, {str_data, str_len, unit_val});
+                        if (with_iostat) {
+                            builder->CreateCall(fn, {str_data, str_len, unit_val, iostat});
+                        } else {
+                            builder->CreateCall(fn, {str_data, str_len, unit_val});
+                        }
                     } else {
                         if (ASR::is_a<ASR::Allocatable_t>(*type)
                             || ASR::is_a<ASR::Pointer_t>(*type)) {
@@ -11925,7 +11991,11 @@ public:
                                 module.get())->getPointerTo();
                             var_to_read_into = llvm_utils->CreateLoad2(t, var_to_read_into);
                         }
-                        builder->CreateCall(fn, {var_to_read_into, unit_val});
+                        if (with_iostat) {
+                            builder->CreateCall(fn, {var_to_read_into, unit_val, iostat});
+                        } else {
+                            builder->CreateCall(fn, {var_to_read_into, unit_val});
+                        }
                     }
                 }
             }

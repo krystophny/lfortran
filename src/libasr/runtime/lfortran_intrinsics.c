@@ -4439,6 +4439,71 @@ LFORTRAN_API void _lfortran_read_int16(int16_t *p, int32_t unit_num)
     }
 }
 
+LFORTRAN_API void _lfortran_read_int16_iostat(int16_t *p, int32_t unit_num, int32_t *iostat)
+{
+    if (iostat == NULL) {
+        _lfortran_read_int16(p, unit_num);
+        return;
+    }
+    *iostat = 0;
+
+    if (unit_num == -1) {
+        char buffer[100];
+        if (!fgets(buffer, sizeof(buffer), stdin)) {
+            *iostat = -1;
+            return;
+        }
+
+        char *token = strtok(buffer, " \t\n");
+        if (token == NULL) {
+            *iostat = 1;
+            return;
+        }
+
+        char *endptr = NULL;
+        errno = 0;
+        long long_val = strtol(token, &endptr, 10);
+
+        if (endptr == token || *endptr != '\0') {
+            *iostat = 1;
+            return;
+        }
+
+        if (errno == ERANGE || long_val < INT16_MIN || long_val > INT16_MAX) {
+            *iostat = 1;
+            return;
+        }
+
+        *p = (int16_t)long_val;
+        return;
+    }
+
+    bool unit_file_bin;
+    FILE* filep = get_file_pointer_from_unit(unit_num, &unit_file_bin, NULL, NULL, NULL, NULL);
+    if (!filep) {
+        *iostat = 1;
+        return;
+    }
+
+    if (unit_file_bin) {
+        if (fread(p, sizeof(*p), 1, filep) != 1) {
+            *iostat = feof(filep) ? -1 : 1;
+            return;
+        }
+    } else {
+        long temp;
+        if (fscanf(filep, "%ld", &temp) != 1) {
+            *iostat = feof(filep) ? -1 : 1;
+            return;
+        }
+        if (temp < INT16_MIN || temp > INT16_MAX) {
+            *iostat = 1;
+            return;
+        }
+        *p = (int16_t)temp;
+    }
+}
+
 // Improved input validation for integer reading
 // - Prevents auto-casting of invalid inputs to integers
 // NOTE:- More changes need to be implemented for advanced error detection and check
@@ -4523,6 +4588,83 @@ LFORTRAN_API void _lfortran_read_int32(int32_t *p, int32_t unit_num)
     }
 }
 
+LFORTRAN_API void _lfortran_read_int32_iostat(int32_t *p, int32_t unit_num, int32_t *iostat)
+{
+    if (iostat == NULL) {
+        _lfortran_read_int32(p, unit_num);
+        return;
+    }
+    *iostat = 0;
+
+    if (unit_num == -1) {
+        char buffer[100];
+        if (!fgets(buffer, sizeof(buffer), stdin)) {
+            *iostat = -1;
+            return;
+        }
+
+        char *token = strtok(buffer, " \t\n");
+        if (token == NULL) {
+            *iostat = 1;
+            return;
+        }
+
+        char *endptr = NULL;
+        errno = 0;
+        long long_val = strtol(token, &endptr, 10);
+        if (endptr == token || *endptr != '\0') {
+            *iostat = 1;
+            return;
+        }
+        if (errno == ERANGE || long_val < INT32_MIN || long_val > INT32_MAX) {
+            *iostat = 1;
+            return;
+        }
+        *p = (int32_t)long_val;
+        return;
+    }
+
+    bool unit_file_bin;
+    int access_mode;
+    FILE* filep = get_file_pointer_from_unit(unit_num, &unit_file_bin, &access_mode, NULL, NULL, NULL);
+    if (!filep) {
+        *iostat = 1;
+        return;
+    }
+
+    if (unit_file_bin) {
+        if (access_mode == 0) {
+            int32_t record_start = 0, record_end = 0;
+            if (fread(&record_start, sizeof(int32_t), 1, filep) != 1 ||
+                fread(p, sizeof(int32_t), 1, filep) != 1 ||
+                fread(&record_end, sizeof(int32_t), 1, filep) != 1) {
+                *iostat = feof(filep) ? -1 : 1;
+                return;
+            }
+            if (record_start != (int32_t)sizeof(int32_t) || record_end != (int32_t)sizeof(int32_t)) {
+                *iostat = 1;
+                return;
+            }
+        } else {
+            if (fread(p, sizeof(int32_t), 1, filep) != 1) {
+                *iostat = feof(filep) ? -1 : 1;
+                return;
+            }
+        }
+    } else {
+        long temp;
+        if (fscanf(filep, "%ld", &temp) != 1) {
+            *iostat = feof(filep) ? -1 : 1;
+            return;
+        }
+        if (temp < INT32_MIN || temp > INT32_MAX) {
+            *iostat = 1;
+            return;
+        }
+        *p = (int32_t)temp;
+    }
+}
+
 LFORTRAN_API void _lfortran_read_int64(int64_t *p, int32_t unit_num)
 {
     if (unit_num == -1) {
@@ -4579,6 +4721,69 @@ LFORTRAN_API void _lfortran_read_int64(int64_t *p, int32_t unit_num)
             exit(1);
         }
 
+        *p = (int64_t)temp;
+    }
+}
+
+LFORTRAN_API void _lfortran_read_int64_iostat(int64_t *p, int32_t unit_num, int32_t *iostat)
+{
+    if (iostat == NULL) {
+        _lfortran_read_int64(p, unit_num);
+        return;
+    }
+    *iostat = 0;
+
+    if (unit_num == -1) {
+        char buffer[100];
+        if (!fgets(buffer, sizeof(buffer), stdin)) {
+            *iostat = -1;
+            return;
+        }
+
+        char *token = strtok(buffer, " \t\n");
+        if (token == NULL) {
+            *iostat = 1;
+            return;
+        }
+
+        errno = 0;
+        char *endptr = NULL;
+        long long long_val = strtoll(token, &endptr, 10);
+        if (endptr == token || *endptr != '\0') {
+            *iostat = 1;
+            return;
+        }
+        if (errno == ERANGE || long_val < INT64_MIN || long_val > INT64_MAX) {
+            *iostat = 1;
+            return;
+        }
+
+        *p = (int64_t)long_val;
+        return;
+    }
+
+    bool unit_file_bin;
+    FILE* filep = get_file_pointer_from_unit(unit_num, &unit_file_bin, NULL, NULL, NULL, NULL);
+    if (!filep) {
+        *iostat = 1;
+        return;
+    }
+
+    if (unit_file_bin) {
+        if (fread(p, sizeof(*p), 1, filep) != 1) {
+            *iostat = feof(filep) ? -1 : 1;
+            return;
+        }
+    } else {
+        int64_t temp;
+        if (fscanf(filep, "%" PRId64, &temp) != 1) {
+            *iostat = feof(filep) ? -1 : 1;
+            return;
+        }
+        if (temp < INT64_MIN || temp > INT64_MAX) {
+            *iostat = 1;
+            return;
+        }
         *p = (int64_t)temp;
     }
 }
@@ -4661,6 +4866,70 @@ LFORTRAN_API void _lfortran_read_logical(bool *p, int32_t unit_num)
     }
 }
 
+LFORTRAN_API void _lfortran_read_logical_iostat(bool *p, int32_t unit_num, int32_t *iostat)
+{
+    if (iostat == NULL) {
+        _lfortran_read_logical(p, unit_num);
+        return;
+    }
+    *iostat = 0;
+
+    if (unit_num == -1) {
+        char buffer[100];
+        if (!fgets(buffer, sizeof(buffer), stdin)) {
+            *iostat = -1;
+            return;
+        }
+
+        char *token = strtok(buffer, " \t\n");
+        if (token == NULL) {
+            *iostat = 1;
+            return;
+        }
+
+        for (int i = 0; token[i]; ++i) token[i] = tolower((unsigned char) token[i]);
+
+        if (strcmp(token, "t") == 0 || strcmp(token, "true") == 0 || strcmp(token, ".true.") == 0 || strcmp(token, ".true") == 0) {
+            *p = true;
+        } else if (strcmp(token, "f") == 0 || strcmp(token, "false") == 0 || strcmp(token, ".false.") == 0 || strcmp(token, ".false") == 0) {
+            *p = false;
+        } else {
+            *iostat = 1;
+        }
+        return;
+    }
+
+    bool unit_file_bin;
+    FILE* filep = get_file_pointer_from_unit(unit_num, &unit_file_bin, NULL, NULL, NULL, NULL);
+    if (!filep) {
+        *iostat = 1;
+        return;
+    }
+
+    if (unit_file_bin) {
+        if (fread(p, sizeof(*p), 1, filep) != 1) {
+            *iostat = feof(filep) ? -1 : 1;
+            return;
+        }
+    } else {
+        char token[100] = {0};
+        if (fscanf(filep, "%99s", token) != 1) {
+            *iostat = feof(filep) ? -1 : 1;
+            return;
+        }
+        for (int i = 0; token[i]; ++i) {
+            token[i] = tolower((unsigned char) token[i]);
+        }
+        if (strcmp(token, "t") == 0 || strcmp(token, "true") == 0 || strcmp(token, ".true.") == 0 || strcmp(token, ".true") == 0) {
+            *p = true;
+        } else if (strcmp(token, "f") == 0 || strcmp(token, "false") == 0 || strcmp(token, ".false.") == 0 || strcmp(token, ".false") == 0) {
+            *p = false;
+        } else {
+            *iostat = 1;
+        }
+    }
+}
+
 
 LFORTRAN_API void _lfortran_read_array_int8(int8_t *p, int array_size, int32_t unit_num)
 {
@@ -4691,6 +4960,55 @@ LFORTRAN_API void _lfortran_read_array_int8(int8_t *p, int array_size, int32_t u
     } else {
         for (int i = 0; i < array_size; i++) {
             (void)!fscanf(filep, "%s", &p[i]);
+        }
+    }
+}
+
+LFORTRAN_API void _lfortran_read_array_int8_iostat(int8_t *p, int array_size, int32_t unit_num, int32_t *iostat)
+{
+    if (iostat == NULL) {
+        _lfortran_read_array_int8(p, array_size, unit_num);
+        return;
+    }
+    *iostat = 0;
+
+    if (unit_num == -1) {
+        for (int i = 0; i < array_size; i++) {
+            if (scanf("%" SCNd8, &p[i]) != 1) {
+                *iostat = feof(stdin) ? -1 : 1;
+                return;
+            }
+        }
+        return;
+    }
+
+    bool unit_file_bin;
+    int access_id;
+    bool read_access, write_access;
+    FILE* filep = get_file_pointer_from_unit(unit_num, &unit_file_bin, &access_id, &read_access, &write_access, NULL);
+    if (!filep) {
+        *iostat = 1;
+        return;
+    }
+
+    if (unit_file_bin) {
+        if (access_id != 1) {
+            int32_t record_marker_start;
+            if (fread(&record_marker_start, sizeof(int32_t), 1, filep) != 1) {
+                *iostat = feof(filep) ? -1 : 1;
+                return;
+            }
+        }
+        if (fread(p, sizeof(int8_t), array_size, filep) != (size_t)array_size) {
+            *iostat = feof(filep) ? -1 : 1;
+            return;
+        }
+    } else {
+        for (int i = 0; i < array_size; i++) {
+            if (fscanf(filep, "%" SCNd8, &p[i]) != 1) {
+                *iostat = feof(filep) ? -1 : 1;
+                return;
+            }
         }
     }
 }
@@ -4728,6 +5046,55 @@ LFORTRAN_API void _lfortran_read_array_int16(int16_t *p, int array_size, int32_t
     }
 }
 
+LFORTRAN_API void _lfortran_read_array_int16_iostat(int16_t *p, int array_size, int32_t unit_num, int32_t *iostat)
+{
+    if (iostat == NULL) {
+        _lfortran_read_array_int16(p, array_size, unit_num);
+        return;
+    }
+    *iostat = 0;
+
+    if (unit_num == -1) {
+        for (int i = 0; i < array_size; i++) {
+            if (scanf("%hd", &p[i]) != 1) {
+                *iostat = feof(stdin) ? -1 : 1;
+                return;
+            }
+        }
+        return;
+    }
+
+    bool unit_file_bin;
+    int access_id;
+    bool read_access, write_access;
+    FILE* filep = get_file_pointer_from_unit(unit_num, &unit_file_bin, &access_id, &read_access, &write_access, NULL);
+    if (!filep) {
+        *iostat = 1;
+        return;
+    }
+
+    if (unit_file_bin) {
+        if (access_id != 1) {
+            int32_t record_marker_start;
+            if (fread(&record_marker_start, sizeof(int32_t), 1, filep) != 1) {
+                *iostat = feof(filep) ? -1 : 1;
+                return;
+            }
+        }
+        if (fread(p, sizeof(int16_t), array_size, filep) != (size_t)array_size) {
+            *iostat = feof(filep) ? -1 : 1;
+            return;
+        }
+    } else {
+        for (int i = 0; i < array_size; i++) {
+            if (fscanf(filep, "%hd", &p[i]) != 1) {
+                *iostat = feof(filep) ? -1 : 1;
+                return;
+            }
+        }
+    }
+}
+
 LFORTRAN_API void _lfortran_read_array_int32(int32_t *p, int array_size, int32_t unit_num)
 {
     if (unit_num == -1) {
@@ -4761,6 +5128,55 @@ LFORTRAN_API void _lfortran_read_array_int32(int32_t *p, int array_size, int32_t
     }
 }
 
+LFORTRAN_API void _lfortran_read_array_int32_iostat(int32_t *p, int array_size, int32_t unit_num, int32_t *iostat)
+{
+    if (iostat == NULL) {
+        _lfortran_read_array_int32(p, array_size, unit_num);
+        return;
+    }
+    *iostat = 0;
+
+    if (unit_num == -1) {
+        for (int i = 0; i < array_size; i++) {
+            if (scanf("%d", &p[i]) != 1) {
+                *iostat = feof(stdin) ? -1 : 1;
+                return;
+            }
+        }
+        return;
+    }
+
+    bool unit_file_bin;
+    int access_id;
+    bool read_access, write_access;
+    FILE* filep = get_file_pointer_from_unit(unit_num, &unit_file_bin, &access_id, &read_access, &write_access, NULL);
+    if (!filep) {
+        *iostat = 1;
+        return;
+    }
+
+    if (unit_file_bin) {
+        if (access_id != 1) {
+            int32_t record_marker_start;
+            if (fread(&record_marker_start, sizeof(int32_t), 1, filep) != 1) {
+                *iostat = feof(filep) ? -1 : 1;
+                return;
+            }
+        }
+        if (fread(p, sizeof(int32_t), array_size, filep) != (size_t)array_size) {
+            *iostat = feof(filep) ? -1 : 1;
+            return;
+        }
+    } else {
+        for (int i = 0; i < array_size; i++) {
+            if (fscanf(filep, "%d", &p[i]) != 1) {
+                *iostat = feof(filep) ? -1 : 1;
+                return;
+            }
+        }
+    }
+}
+
 LFORTRAN_API void _lfortran_read_array_int64(int64_t *p, int array_size, int32_t unit_num) {
     if (unit_num == -1) {
         // Read from stdin
@@ -4789,6 +5205,55 @@ LFORTRAN_API void _lfortran_read_array_int64(int64_t *p, int array_size, int32_t
     } else {
         for (int i = 0; i < array_size; i++) {
             (void)!fscanf(filep, "%" SCNd64, &p[i]);
+        }
+    }
+}
+
+LFORTRAN_API void _lfortran_read_array_int64_iostat(int64_t *p, int array_size, int32_t unit_num, int32_t *iostat)
+{
+    if (iostat == NULL) {
+        _lfortran_read_array_int64(p, array_size, unit_num);
+        return;
+    }
+    *iostat = 0;
+
+    if (unit_num == -1) {
+        for (int i = 0; i < array_size; i++) {
+            if (scanf("%" SCNd64, &p[i]) != 1) {
+                *iostat = feof(stdin) ? -1 : 1;
+                return;
+            }
+        }
+        return;
+    }
+
+    bool unit_file_bin;
+    int access_id;
+    bool read_access, write_access;
+    FILE* filep = get_file_pointer_from_unit(unit_num, &unit_file_bin, &access_id, &read_access, &write_access, NULL);
+    if (!filep) {
+        *iostat = 1;
+        return;
+    }
+
+    if (unit_file_bin) {
+        if (access_id != 1) {
+            int32_t record_marker_start;
+            if (fread(&record_marker_start, sizeof(int32_t), 1, filep) != 1) {
+                *iostat = feof(filep) ? -1 : 1;
+                return;
+            }
+        }
+        if (fread(p, sizeof(int64_t), array_size, filep) != (size_t)array_size) {
+            *iostat = feof(filep) ? -1 : 1;
+            return;
+        }
+    } else {
+        for (int i = 0; i < array_size; i++) {
+            if (fscanf(filep, "%" SCNd64, &p[i]) != 1) {
+                *iostat = feof(filep) ? -1 : 1;
+                return;
+            }
         }
     }
 }
@@ -4883,6 +5348,118 @@ LFORTRAN_API void _lfortran_read_char(char **p, int64_t p_len, int32_t unit_num)
     }
 }
 
+LFORTRAN_API void _lfortran_read_char_iostat(char **p, int64_t p_len, int32_t unit_num, int32_t *iostat)
+{
+    if (iostat == NULL) {
+        _lfortran_read_char(p, p_len, unit_num);
+        return;
+    }
+    *iostat = 0;
+
+    if (unit_num == -1) {
+        if (!fgets(*p, p_len + 1, stdin)) {
+            *iostat = -1;
+            return;
+        }
+        size_t len = strcspn(*p, "\n");
+        pad_with_spaces(*p, len, p_len);
+        return;
+    }
+
+    bool unit_file_bin;
+    int access_id;
+    bool read_access, write_access;
+    int delim_value;
+    FILE *filep = get_file_pointer_from_unit(unit_num, &unit_file_bin,
+                                             &access_id, &read_access, &write_access, &delim_value);
+    if (!filep) {
+        *iostat = 1;
+        return;
+    }
+
+    if (unit_file_bin) {
+        int32_t data_length = 0;
+
+        if (access_id != 1 && ftell(filep) == 0) {
+            if (fread(&data_length, sizeof(int32_t), 1, filep) != 1) {
+                *iostat = feof(filep) ? -1 : 1;
+                return;
+            }
+        }
+
+        long current_pos = ftell(filep);
+        fseek(filep, 0L, SEEK_END);
+        long end_pos = ftell(filep);
+        fseek(filep, current_pos, SEEK_SET);
+
+        if (access_id != 1) {
+            data_length = (int32_t)(end_pos - current_pos - 4);
+        } else {
+            data_length = (int32_t)(end_pos - current_pos);
+        }
+
+        if (data_length > p_len) data_length = (int32_t)p_len;
+
+        if (fread(*p, sizeof(char), data_length, filep) != (size_t)data_length) {
+            *iostat = feof(filep) ? -1 : 1;
+            return;
+        }
+
+        pad_with_spaces(*p, data_length, p_len);
+
+    } else {
+        char *tmp_buffer = (char *)malloc((p_len + 1) * sizeof(char));
+        if (!tmp_buffer) {
+            *iostat = 1;
+            return;
+        }
+        char c;
+        size_t len = 0;
+        if (delim_value == 1) {
+            c = fgetc(filep);
+            if (c == EOF) {
+                free(tmp_buffer);
+                *iostat = -1;
+                return;
+            }
+            while ((c = fgetc(filep)) != EOF && c != '\'') {
+                if (len < (size_t)p_len) tmp_buffer[len++] = (char)c;
+            }
+            if (c == EOF) {
+                free(tmp_buffer);
+                *iostat = -1;
+                return;
+            }
+        } else if (delim_value == 2) {
+            c = fgetc(filep);
+            if (c == EOF) {
+                free(tmp_buffer);
+                *iostat = -1;
+                return;
+            }
+            while ((c = fgetc(filep)) != EOF && c != '"') {
+                if (len < (size_t)p_len) tmp_buffer[len++] = (char)c;
+            }
+            if (c == EOF) {
+                free(tmp_buffer);
+                *iostat = -1;
+                return;
+            }
+        } else {
+            if (fscanf(filep, "%s", tmp_buffer) != 1) {
+                free(tmp_buffer);
+                *iostat = feof(filep) ? -1 : 1;
+                return;
+            }
+            len = strlen(tmp_buffer);
+        }
+
+        memcpy(*p, tmp_buffer, len);
+        pad_with_spaces(*p, len, p_len);
+        free(tmp_buffer);
+    }
+}
+
 
 // Improved input validation for float reading
 // - Prevents auto-casting of invalid inputs to float/real
@@ -4928,6 +5505,56 @@ LFORTRAN_API void _lfortran_read_float(float *p, int32_t unit_num)
         if (fscanf(filep, "%f", p) != 1) {
             fprintf(stderr, "Error: Invalid input for float from file.\n");
             exit(1);
+        }
+    }
+}
+
+LFORTRAN_API void _lfortran_read_float_iostat(float *p, int32_t unit_num, int32_t *iostat)
+{
+    if (iostat == NULL) {
+        _lfortran_read_float(p, unit_num);
+        return;
+    }
+    *iostat = 0;
+
+    if (unit_num == -1) {
+        char buffer[100];
+        if (!fgets(buffer, sizeof(buffer), stdin)) {
+            *iostat = -1;
+            return;
+        }
+
+        char *token = strtok(buffer, " \t\n");
+        if (token == NULL) {
+            *iostat = 1;
+            return;
+        }
+
+        char *endptr;
+        *p = strtof(token, &endptr);
+        if (*endptr != '\0') {
+            *iostat = 1;
+            return;
+        }
+        return;
+    }
+
+    bool unit_file_bin;
+    FILE* filep = get_file_pointer_from_unit(unit_num, &unit_file_bin, NULL, NULL, NULL, NULL);
+    if (!filep) {
+        *iostat = 1;
+        return;
+    }
+
+    if (unit_file_bin) {
+        if (fread(p, sizeof(*p), 1, filep) != 1) {
+            *iostat = feof(filep) ? -1 : 1;
+            return;
+        }
+    } else {
+        if (fscanf(filep, "%f", p) != 1) {
+            *iostat = feof(filep) ? -1 : 1;
+            return;
         }
     }
 }
@@ -4985,6 +5612,69 @@ LFORTRAN_API void _lfortran_read_array_complex_float(struct _lfortran_complex_32
                 if (ferror(filep)) {
                     fprintf(stderr, "Error: Failed to read complex float from file.\n");
                     exit(1);
+                }
+            }
+        }
+    }
+}
+
+LFORTRAN_API void _lfortran_read_array_complex_float_iostat(struct _lfortran_complex_32 *p, int array_size, int32_t unit_num, int32_t *iostat)
+{
+    if (iostat == NULL) {
+        _lfortran_read_array_complex_float(p, array_size, unit_num);
+        return;
+    }
+    *iostat = 0;
+
+    if (unit_num == -1) {
+        for (int i = 0; i < array_size; i++) {
+            if (scanf("%f %f", &p[i].re, &p[i].im) != 2) {
+                *iostat = feof(stdin) ? -1 : 1;
+                return;
+            }
+        }
+        return;
+    }
+
+    bool unit_file_bin;
+    FILE* filep = get_file_pointer_from_unit(unit_num, &unit_file_bin, NULL, NULL, NULL, NULL);
+    if (!filep) {
+        *iostat = 1;
+        return;
+    }
+
+    if (unit_file_bin) {
+        if (fread(p, sizeof(struct _lfortran_complex_32), array_size, filep) != (size_t)array_size) {
+            *iostat = feof(filep) ? -1 : 1;
+            return;
+        }
+    } else {
+        for (int i = 0; i < array_size; i++) {
+            char buffer[100];
+            if (fscanf(filep, "%s", buffer) != 1) {
+                *iostat = feof(filep) ? -1 : 1;
+                return;
+            }
+            char *start = strchr(buffer, '(');
+            char *end = strchr(buffer, ')');
+            if (start && end && end > start) {
+                *end = '\0';
+                start++;
+                char *comma = strchr(start, ',');
+                if (comma) {
+                    *comma = '\0';
+                    while (isspace((unsigned char)*start)) start++;
+                    while (isspace((unsigned char)*(end - 1))) end--;
+                    p[i].re = strtof(start, NULL);
+                    p[i].im = strtof(comma + 1, NULL);
+                } else {
+                    *iostat = 1;
+                    return;
+                }
+            } else {
+                if (fscanf(filep, "%f %f", &p[i].re, &p[i].im) != 2) {
+                    *iostat = feof(filep) ? -1 : 1;
+                    return;
                 }
             }
         }
@@ -5050,6 +5740,69 @@ LFORTRAN_API void _lfortran_read_array_complex_double(struct _lfortran_complex_6
     }
 }
 
+LFORTRAN_API void _lfortran_read_array_complex_double_iostat(struct _lfortran_complex_64 *p, int array_size, int32_t unit_num, int32_t *iostat)
+{
+    if (iostat == NULL) {
+        _lfortran_read_array_complex_double(p, array_size, unit_num);
+        return;
+    }
+    *iostat = 0;
+
+    if (unit_num == -1) {
+        for (int i = 0; i < array_size; i++) {
+            if (scanf("%lf %lf", &p[i].re, &p[i].im) != 2) {
+                *iostat = feof(stdin) ? -1 : 1;
+                return;
+            }
+        }
+        return;
+    }
+
+    bool unit_file_bin;
+    FILE* filep = get_file_pointer_from_unit(unit_num, &unit_file_bin, NULL, NULL, NULL, NULL);
+    if (!filep) {
+        *iostat = 1;
+        return;
+    }
+
+    if (unit_file_bin) {
+        if (fread(p, sizeof(struct _lfortran_complex_64), array_size, filep) != (size_t)array_size) {
+            *iostat = feof(filep) ? -1 : 1;
+            return;
+        }
+    } else {
+        for (int i = 0; i < array_size; i++) {
+            char buffer[100];
+            if (fscanf(filep, "%s", buffer) != 1) {
+                *iostat = feof(filep) ? -1 : 1;
+                return;
+            }
+            char *start = strchr(buffer, '(');
+            char *end = strchr(buffer, ')');
+            if (start && end && end > start) {
+                *end = '\0';
+                start++;
+                char *comma = strchr(start, ',');
+                if (comma) {
+                    *comma = '\0';
+                    while (isspace((unsigned char)*start)) start++;
+                    while (isspace((unsigned char)*(end - 1))) end--;
+                    p[i].re = strtod(start, NULL);
+                    p[i].im = strtod(comma + 1, NULL);
+                } else {
+                    *iostat = 1;
+                    return;
+                }
+            } else {
+                if (fscanf(filep, "%lf %lf", &p[i].re, &p[i].im) != 2) {
+                    *iostat = feof(filep) ? -1 : 1;
+                    return;
+                }
+            }
+        }
+    }
+}
+
 LFORTRAN_API void _lfortran_read_array_float(float *p, int array_size, int32_t unit_num)
 {
     if (unit_num == -1) {
@@ -5076,6 +5829,46 @@ LFORTRAN_API void _lfortran_read_array_float(float *p, int array_size, int32_t u
     }
 }
 
+LFORTRAN_API void _lfortran_read_array_float_iostat(float *p, int array_size, int32_t unit_num, int32_t *iostat)
+{
+    if (iostat == NULL) {
+        _lfortran_read_array_float(p, array_size, unit_num);
+        return;
+    }
+    *iostat = 0;
+
+    if (unit_num == -1) {
+        for (int i = 0; i < array_size; i++) {
+            if (scanf("%f", &p[i]) != 1) {
+                *iostat = feof(stdin) ? -1 : 1;
+                return;
+            }
+        }
+        return;
+    }
+
+    bool unit_file_bin;
+    FILE* filep = get_file_pointer_from_unit(unit_num, &unit_file_bin, NULL, NULL, NULL, NULL);
+    if (!filep) {
+        *iostat = 1;
+        return;
+    }
+
+    if (unit_file_bin) {
+        if (fread(p, sizeof(float), array_size, filep) != (size_t)array_size) {
+            *iostat = feof(filep) ? -1 : 1;
+            return;
+        }
+    } else {
+        for (int i = 0; i < array_size; i++) {
+            if (fscanf(filep, "%f", &p[i]) != 1) {
+                *iostat = feof(filep) ? -1 : 1;
+                return;
+            }
+        }
+    }
+}
+
 LFORTRAN_API void _lfortran_read_array_double(double *p, int array_size, int32_t unit_num)
 {
     if (unit_num == -1) {
@@ -5098,6 +5891,46 @@ LFORTRAN_API void _lfortran_read_array_double(double *p, int array_size, int32_t
     } else {
         for (int i = 0; i < array_size; i++) {
             (void)!fscanf(filep, "%lf", &p[i]);
+        }
+    }
+}
+
+LFORTRAN_API void _lfortran_read_array_double_iostat(double *p, int array_size, int32_t unit_num, int32_t *iostat)
+{
+    if (iostat == NULL) {
+        _lfortran_read_array_double(p, array_size, unit_num);
+        return;
+    }
+    *iostat = 0;
+
+    if (unit_num == -1) {
+        for (int i = 0; i < array_size; i++) {
+            if (scanf("%lf", &p[i]) != 1) {
+                *iostat = feof(stdin) ? -1 : 1;
+                return;
+            }
+        }
+        return;
+    }
+
+    bool unit_file_bin;
+    FILE* filep = get_file_pointer_from_unit(unit_num, &unit_file_bin, NULL, NULL, NULL, NULL);
+    if (!filep) {
+        *iostat = 1;
+        return;
+    }
+
+    if (unit_file_bin) {
+        if (fread(p, sizeof(double), array_size, filep) != (size_t)array_size) {
+            *iostat = feof(filep) ? -1 : 1;
+            return;
+        }
+    } else {
+        for (int i = 0; i < array_size; i++) {
+            if (fscanf(filep, "%lf", &p[i]) != 1) {
+                *iostat = feof(filep) ? -1 : 1;
+                return;
+            }
         }
     }
 }
@@ -5145,6 +5978,56 @@ LFORTRAN_API void _lfortran_read_array_char(char *p, int64_t length, int array_s
 
 }
 
+LFORTRAN_API void _lfortran_read_array_char_iostat(char *p, int64_t length, int array_size, int32_t unit_num, int32_t *iostat)
+{
+    if (iostat == NULL) {
+        _lfortran_read_array_char(p, length, array_size, unit_num);
+        return;
+    }
+    *iostat = 0;
+
+    if (p == NULL) {
+        *iostat = 1;
+        return;
+    }
+
+    bool unit_file_bin;
+    FILE* filep;
+    if (unit_num == -1) {
+        filep = stdin;
+        unit_file_bin = false;
+    } else {
+        filep = get_file_pointer_from_unit(unit_num, &unit_file_bin, NULL, NULL, NULL, NULL);
+        if (!filep) {
+            *iostat = 1;
+            return;
+        }
+    }
+
+    if (unit_file_bin) {
+        size_t want = (size_t)(length * array_size);
+        size_t got = fread(p, sizeof(char), want, filep);
+        if (got != want) {
+            *iostat = feof(filep) ? -1 : 1;
+        }
+        if (got < want) {
+            memset(p + got, ' ', want - got);
+        }
+    } else {
+        char length_format[23];
+        sprintf(length_format, "%%%" PRId64, length);
+        strcat(length_format, "s");
+        for (int i = 0; i < array_size; i++) {
+            int scan_ret = fscanf(filep, length_format, p + (i * length));
+            if (scan_ret != 1) {
+                *iostat = feof(filep) ? -1 : 1;
+                return;
+            }
+            (void)!fscanf(filep, "%*[^\n \t]");
+        }
+    }
+}
+
 LFORTRAN_API void _lfortran_read_double(double *p, int32_t unit_num)
 {
     if (unit_num == -1) {
@@ -5164,6 +6047,39 @@ LFORTRAN_API void _lfortran_read_double(double *p, int32_t unit_num)
         (void)!fread(p, sizeof(*p), 1, filep);
     } else {
         (void)!fscanf(filep, "%lf", p);
+    }
+}
+
+LFORTRAN_API void _lfortran_read_double_iostat(double *p, int32_t unit_num, int32_t *iostat)
+{
+    if (iostat == NULL) {
+        _lfortran_read_double(p, unit_num);
+        return;
+    }
+    *iostat = 0;
+
+    if (unit_num == -1) {
+        if (scanf("%lf", p) != 1) {
+            *iostat = feof(stdin) ? -1 : 1;
+        }
+        return;
+    }
+
+    bool unit_file_bin;
+    FILE* filep = get_file_pointer_from_unit(unit_num, &unit_file_bin, NULL, NULL, NULL, NULL);
+    if (!filep) {
+        *iostat = 1;
+        return;
+    }
+
+    if (unit_file_bin) {
+        if (fread(p, sizeof(*p), 1, filep) != 1) {
+            *iostat = feof(filep) ? -1 : 1;
+        }
+    } else {
+        if (fscanf(filep, "%lf", p) != 1) {
+            *iostat = feof(filep) ? -1 : 1;
+        }
     }
 }
 
