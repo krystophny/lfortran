@@ -11,12 +11,12 @@ program read_12
     read(u, *, end=10) x
     if (x /= 1) then
         print *, "FAIL"
-        stop 1
+        error stop
     end if
 
     read(u, *, end=10) x
     print *, "FAIL"
-    stop 2
+    error stop
 
 10  continue
     print *, "PASS"

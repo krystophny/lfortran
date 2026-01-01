@@ -8,8 +8,12 @@ program integerStringInput_int64
 
     do
         read(10, *, iostat=ios) x
-        if (ios /= 0) then
-            cycle
+        if (ios < 0) then
+            exit
+        end if
+        if (ios > 0) then
+            print *, "PASS"
+            exit
         end if
         print *, "Read int64 integer:", x
     end do
