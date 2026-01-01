@@ -1191,7 +1191,10 @@ public:
                             Level::Error, Stage::Semantic, {
                                 Label("",{loc})
                             }));
-                        throw SemanticAbort();
+                        if (!compiler_options.continue_compilation) {
+                            throw SemanticAbort();
+                        }
+                        continue;
                     }
                     if( end_label != -1 ) {
                         diag.add(Diagnostic(
@@ -1199,7 +1202,10 @@ public:
                             Level::Error, Stage::Semantic, {
                                 Label("",{loc})
                             }));
-                        throw SemanticAbort();
+                        if (!compiler_options.continue_compilation) {
+                            throw SemanticAbort();
+                        }
+                        continue;
                     }
                     this->visit_expr(*kwarg.m_value);
                     ASR::expr_t* end_expr = ASRUtils::EXPR(tmp);
@@ -1209,7 +1215,10 @@ public:
                             Level::Error, Stage::Semantic, {
                                 Label("",{kwarg.loc})
                             }));
-                        throw SemanticAbort();
+                        if (!compiler_options.continue_compilation) {
+                            throw SemanticAbort();
+                        }
+                        continue;
                     }
                     end_label = ASR::down_cast<ASR::IntegerConstant_t>(end_expr)->m_n;
                 } else if( m_arg_str == std::string("err") ) {
@@ -1219,7 +1228,10 @@ public:
                             Level::Error, Stage::Semantic, {
                                 Label("",{loc})
                             }));
-                        throw SemanticAbort();
+                        if (!compiler_options.continue_compilation) {
+                            throw SemanticAbort();
+                        }
+                        continue;
                     }
                     if( err_label != -1 ) {
                         diag.add(Diagnostic(
@@ -1227,7 +1239,10 @@ public:
                             Level::Error, Stage::Semantic, {
                                 Label("",{loc})
                             }));
-                        throw SemanticAbort();
+                        if (!compiler_options.continue_compilation) {
+                            throw SemanticAbort();
+                        }
+                        continue;
                     }
                     this->visit_expr(*kwarg.m_value);
                     ASR::expr_t* err_expr = ASRUtils::EXPR(tmp);
@@ -1237,7 +1252,10 @@ public:
                             Level::Error, Stage::Semantic, {
                                 Label("",{kwarg.loc})
                             }));
-                        throw SemanticAbort();
+                        if (!compiler_options.continue_compilation) {
+                            throw SemanticAbort();
+                        }
+                        continue;
                     }
                     err_label = ASR::down_cast<ASR::IntegerConstant_t>(err_expr)->m_n;
                 }
