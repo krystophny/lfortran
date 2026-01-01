@@ -1,5 +1,0 @@
-semantic error: `err` must be a literal integer label
- --> tests/errors/read_err_label_nonliteral_02.f90:1:1
-  |
-1 | program read_err_label_nonliteral_02
-  | ^ 

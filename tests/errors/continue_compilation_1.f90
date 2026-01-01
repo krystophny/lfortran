@@ -34,15 +34,6 @@ module continue_compilation_1_mod
 
 
 
-
-
-
-
-
-
-
-
-
 contains
 
     subroutine my_undefined_type_test()
@@ -455,6 +446,16 @@ program continue_compilation_1
     13 format ()
     read (5, fmt_i3)
 
+    x = 9010
+    read (*, end=x) x
+    read (*, end=9011.0) x
+    x = 9012
+    read (*, err=x) x
+    read (*, err=9013.0) x
+    write (*, end=9014) x
+9014 continue
+    write (*, err=9015) x
+9015 continue
     !passing non procedure to procedure parameter
     call proc_param(42)
 end program

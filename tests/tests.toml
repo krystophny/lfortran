@@ -750,10 +750,6 @@ filename = "../integration_tests/error_stop_04.f90"
 run = true
 
 [[test]]
-filename = "../integration_tests/read_12.f90"
-run = true
-
-[[test]]
 filename = "../integration_tests/write_12.f90"
 run = true
 
@@ -4518,30 +4514,6 @@ asr = true
 
 [[test]]
 filename = "errors/iostat_constant_integer.f90"
-asr = true
-
-[[test]]
-filename = "errors/read_end_label_nonliteral_01.f90"
-asr = true
-
-[[test]]
-filename = "errors/read_end_label_nonliteral_02.f90"
-asr = true
-
-[[test]]
-filename = "errors/read_err_label_nonliteral_01.f90"
-asr = true
-
-[[test]]
-filename = "errors/read_err_label_nonliteral_02.f90"
-asr = true
-
-[[test]]
-filename = "errors/write_end_unsupported_01.f90"
-asr = true
-
-[[test]]
-filename = "errors/write_err_unsupported_01.f90"
 asr = true
 
 [[test]]

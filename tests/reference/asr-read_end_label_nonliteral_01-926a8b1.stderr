@@ -1,5 +1,0 @@
-semantic error: `end` must be a literal integer label
- --> tests/errors/read_end_label_nonliteral_01.f90:1:1
-  |
-1 | program read_end_label_nonliteral_01
-  | ^ 
