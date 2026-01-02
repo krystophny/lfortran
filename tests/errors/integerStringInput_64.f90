@@ -1,7 +1,7 @@
 program integerStringInput_int64
-    use, intrinsic :: iso_fortran_env, only: int64
     implicit none
 
+    integer, parameter :: int64 = selected_int_kind(18)
     integer(int64) :: x
 
     open(unit=10, file="tests/invalidInput_integer.txt", status="unknown")

@@ -1,7 +1,7 @@
 program read_13
-    use, intrinsic :: iso_fortran_env, only: int64
     implicit none
 
+    integer, parameter :: int64 = selected_int_kind(18)
     integer(int64) :: x
     integer :: unit, ios
 

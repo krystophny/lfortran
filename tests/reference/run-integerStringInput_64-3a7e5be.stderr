@@ -1,5 +1,1 @@
-semantic error: Incompatible format: LFortran Modfile was generated using version '0.58.0-603-gce53df543-dirty', but current LFortran version is '0.58.0-603-gc667b254b-dirty'
- --> tests/errors/integerStringInput_64.f90:2:5
-  |
-2 |     use, intrinsic :: iso_fortran_env, only: int64
-  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ 
+Error: Invalid input for int64_t from file.
