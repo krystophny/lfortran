@@ -948,9 +948,3 @@ semantic error: `end` is only supported for READ statements
     |
 467 |     write (*, end=9014) x
     |     ^^^^^^^^^^^^^^^^^^^^^ 
-
-semantic error: `err` is only supported for READ statements
-   --> tests/errors/continue_compilation_1.f90:469:5
-    |
-469 |     write (*, err=9015) x
-    |     ^^^^^^^^^^^^^^^^^^^^^ 

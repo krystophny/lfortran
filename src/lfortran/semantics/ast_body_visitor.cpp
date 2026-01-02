@@ -1,5 +1,6 @@
 #include <string>
 #include <cmath>
+#include <cstring>
 #include <set>
 #include <unordered_set>
 
@@ -903,7 +904,11 @@ public:
     bool parse_read_label_kwarg(const char* kwarg_name, int64_t& label,
             AST::stmtType _type, const AST::kw_argstar_t& kwarg,
             const Location& loc) {
-        if (_type != AST::stmtType::Read) {
+        // END= is only valid for READ; ERR= is valid for READ/WRITE
+        bool is_end = (strcmp(kwarg_name, "end") == 0);
+        bool valid_stmt = (_type == AST::stmtType::Read) ||
+                          (!is_end && _type == AST::stmtType::Write);
+        if (!valid_stmt) {
             Location diag_loc = kwarg.loc;
             if (diag_loc.first == 0 && diag_loc.last == 0) {
                 diag_loc = loc;
