@@ -899,6 +899,49 @@ public:
         }
     }
 
+    // Returns true if parsing succeeded, false if should continue to next kwarg
+    bool parse_read_label_kwarg(const char* kwarg_name, int64_t& label,
+            AST::stmtType _type, const AST::kw_argstar_t& kwarg,
+            const Location& loc) {
+        if (_type != AST::stmtType::Read) {
+            diag.add(Diagnostic(
+                std::string("`") + kwarg_name + "` is only supported for READ statements",
+                Level::Error, Stage::Semantic, {Label("", {loc})}));
+            if (!compiler_options.continue_compilation) throw SemanticAbort();
+            return false;
+        }
+        if (label != -1) {
+            diag.add(Diagnostic(
+                std::string("Duplicate value of `") + kwarg_name +
+                    "` found, `" + kwarg_name + "` has already been specified via keyword arguments",
+                Level::Error, Stage::Semantic, {Label("", {loc})}));
+            if (!compiler_options.continue_compilation) throw SemanticAbort();
+            return false;
+        }
+        this->visit_expr(*kwarg.m_value);
+        if (tmp == nullptr) {
+            if (!compiler_options.continue_compilation) throw SemanticAbort();
+            return false;
+        }
+        ASR::expr_t* label_expr = ASRUtils::EXPR(tmp);
+        if (!ASR::is_a<ASR::IntegerConstant_t>(*label_expr)) {
+            Location diag_loc = kwarg.loc;
+            if (diag_loc.first == 0 && diag_loc.last == 0) {
+                diag_loc = kwarg.m_value->base.loc;
+            }
+            if (diag_loc.first == 0 && diag_loc.last == 0) {
+                diag_loc = loc;
+            }
+            diag.add(Diagnostic(
+                std::string("`") + kwarg_name + "` must be a literal integer label",
+                Level::Error, Stage::Semantic, {Label("", {diag_loc})}));
+            if (!compiler_options.continue_compilation) throw SemanticAbort();
+            return false;
+        }
+        label = ASR::down_cast<ASR::IntegerConstant_t>(label_expr)->m_n;
+        return true;
+    }
+
     void create_read_write_ASR_node(const AST::stmt_t& read_write_stmt, AST::stmtType _type) {
         int64_t m_label = -1;
         int64_t end_label = -1;
@@ -1213,106 +1256,14 @@ public:
                             body.size(), nullptr, 0));
                     a_end = empty;
                 }
-                } else if( m_arg_str == std::string("end") ) {
-                    if( _type != AST::stmtType::Read ) {
-                        diag.add(Diagnostic(
-                            "`end` is only supported for READ statements",
-                            Level::Error, Stage::Semantic, {
-                                Label("",{loc})
-                            }));
-                        if (!compiler_options.continue_compilation) {
-                            throw SemanticAbort();
-                        }
+                } else if (m_arg_str == "end") {
+                    if (!parse_read_label_kwarg("end", end_label, _type, kwarg, loc)) {
                         continue;
                     }
-                    if( end_label != -1 ) {
-                        diag.add(Diagnostic(
-                            R"""(Duplicate value of `end` found, `end` has already been specified via keyword arguments)""",
-                            Level::Error, Stage::Semantic, {
-                                Label("",{loc})
-                            }));
-                        if (!compiler_options.continue_compilation) {
-                            throw SemanticAbort();
-                        }
+                } else if (m_arg_str == "err") {
+                    if (!parse_read_label_kwarg("err", err_label, _type, kwarg, loc)) {
                         continue;
                     }
-                    this->visit_expr(*kwarg.m_value);
-                    if( tmp == nullptr ) {
-                        if (!compiler_options.continue_compilation) {
-                            throw SemanticAbort();
-                        }
-                        continue;
-                    }
-                    ASR::expr_t* end_expr = ASRUtils::EXPR(tmp);
-                    if( !ASR::is_a<ASR::IntegerConstant_t>(*end_expr) ) {
-                        Location diag_loc = kwarg.loc;
-                        if( diag_loc.first == 0 && diag_loc.last == 0 ) {
-                            diag_loc = kwarg.m_value->base.loc;
-                        }
-                        if( diag_loc.first == 0 && diag_loc.last == 0 ) {
-                            diag_loc = loc;
-                        }
-                        diag.add(Diagnostic(
-                            "`end` must be a literal integer label",
-                            Level::Error, Stage::Semantic, {
-                                Label("",{diag_loc})
-                            }));
-                        if (!compiler_options.continue_compilation) {
-                            throw SemanticAbort();
-                        }
-                        continue;
-                    }
-                    end_label = ASR::down_cast<ASR::IntegerConstant_t>(end_expr)->m_n;
-                } else if( m_arg_str == std::string("err") ) {
-                    if( _type != AST::stmtType::Read ) {
-                        diag.add(Diagnostic(
-                            "`err` is only supported for READ statements",
-                            Level::Error, Stage::Semantic, {
-                                Label("",{loc})
-                            }));
-                        if (!compiler_options.continue_compilation) {
-                            throw SemanticAbort();
-                        }
-                        continue;
-                    }
-                    if( err_label != -1 ) {
-                        diag.add(Diagnostic(
-                            R"""(Duplicate value of `err` found, `err` has already been specified via keyword arguments)""",
-                            Level::Error, Stage::Semantic, {
-                                Label("",{loc})
-                            }));
-                        if (!compiler_options.continue_compilation) {
-                            throw SemanticAbort();
-                        }
-                        continue;
-                    }
-                    this->visit_expr(*kwarg.m_value);
-                    if( tmp == nullptr ) {
-                        if (!compiler_options.continue_compilation) {
-                            throw SemanticAbort();
-                        }
-                        continue;
-                    }
-                    ASR::expr_t* err_expr = ASRUtils::EXPR(tmp);
-                    if( !ASR::is_a<ASR::IntegerConstant_t>(*err_expr) ) {
-                        Location diag_loc = kwarg.loc;
-                        if( diag_loc.first == 0 && diag_loc.last == 0 ) {
-                            diag_loc = kwarg.m_value->base.loc;
-                        }
-                        if( diag_loc.first == 0 && diag_loc.last == 0 ) {
-                            diag_loc = loc;
-                        }
-                        diag.add(Diagnostic(
-                            "`err` must be a literal integer label",
-                            Level::Error, Stage::Semantic, {
-                                Label("",{diag_loc})
-                            }));
-                        if (!compiler_options.continue_compilation) {
-                            throw SemanticAbort();
-                        }
-                        continue;
-                    }
-                    err_label = ASR::down_cast<ASR::IntegerConstant_t>(err_expr)->m_n;
                 }
         }
         if( a_fmt == nullptr && a_end != nullptr ) {
@@ -1348,15 +1299,15 @@ public:
             }
         }
 
-            read_write = (_type == AST::stmtType::Write) ? "~write" : "~read";
-            read_write += (formatted) ? "_formatted" : "_unformatted";
-            if (n_values > 0) {
+        read_write = (_type == AST::stmtType::Write) ? "~write" : "~read";
+        read_write += (formatted) ? "_formatted" : "_unformatted";
+        if (n_values > 0) {
             Vec<ASR::expr_t*> overload_args;
             overload_args.reserve(al, 2);
             overload_args.push_back(al, a_values_vec[0]);
             overload_args.push_back(al, a_unit);
             if (formatted) {
-                if (a_fmt) { // iotype
+                if (a_fmt) {
                     overload_args.push_back(al, a_fmt);
                 } else {
                     ASR::ttype_t* char_type = ASRUtils::TYPE(
@@ -1372,7 +1323,6 @@ public:
                 }
                 const Location& loc = read_write_stmt.base.loc;
                 ASR::ttype_t* int_type = ASRUtils::TYPE(ASR::make_Integer_t(al, loc, 4));
-                // v_list
                 Vec<ASR::dimension_t> dims;
                 dims.reserve(al, 1);
                 ASR::dimension_t dim;
@@ -1380,69 +1330,66 @@ public:
                 dim.m_start = ASRUtils::EXPR(ASR::make_IntegerConstant_t(al, loc, 1, int_type));
                 dim.m_length = ASRUtils::EXPR(ASR::make_IntegerConstant_t(al, loc, 0, int_type));
                 dims.push_back(al, dim);
-                ASR::ttype_t* arr_type = ASRUtils::TYPE(ASR::make_Array_t(al, loc, int_type, dims.p, dims.n,
-                    ASR::array_physical_typeType::FixedSizeArray));
+                ASR::ttype_t* arr_type = ASRUtils::TYPE(ASR::make_Array_t(al, loc, int_type,
+                    dims.p, dims.n, ASR::array_physical_typeType::FixedSizeArray));
                 Vec<ASR::expr_t*> arr_args;
                 arr_args.reserve(al, 0);
                 overload_args.push_back(al, ASRUtils::EXPR(ASRUtils::make_ArrayConstructor_t_util(
-                        al, loc, arr_args.p, arr_args.n, arr_type, ASR::arraystorageType::ColMajor)));
+                    al, loc, arr_args.p, arr_args.n, arr_type, ASR::arraystorageType::ColMajor)));
             }
             overload_args.push_back(al, a_iostat);
             overload_args.push_back(al, a_iomsg);
             if (ASRUtils::use_overloaded_file_read_write(read_write, overload_args,
-                current_scope, asr, al, read_write_stmt.base.loc, current_function_dependencies,
-                current_module_dependencies,
-                [&](const std::string &msg, const Location &loc) {
-                    diag.add(Diagnostic(
-                        msg,
-                        Level::Error, Stage::Semantic, {
-                            Label("",{loc})
-                        }));
-                    throw SemanticAbort(); }) ) {
+                    current_scope, asr, al, read_write_stmt.base.loc,
+                    current_function_dependencies, current_module_dependencies,
+                    [&](const std::string &msg, const Location &loc) {
+                        diag.add(Diagnostic(msg, Level::Error, Stage::Semantic,
+                            {Label("", {loc})}));
+                        throw SemanticAbort();
+                    })) {
                 overloaded_stmt = ASRUtils::STMT(asr);
-                }
             }
-    
-            bool inserted_iostat = false;
-            if( _type == AST::stmtType::Read && a_iostat == nullptr
-                    && (end_label != -1 || err_label != -1) ) {
-                ASR::ttype_t* int_type = ASRUtils::TYPE(ASR::make_Integer_t(
-                    al, loc, 4));
-                std::string iostat_name = current_scope->get_unique_name("__lfortran_iostat");
-                ASR::symbol_t* iostat_sym = declare_implicit_variable2(
-                    loc, iostat_name, ASRUtils::intent_local, int_type);
-                a_iostat = ASRUtils::EXPR(ASR::make_Var_t(al, loc, iostat_sym));
-                inserted_iostat = true;
-            }
+        }
 
-            if (a_fmt && ASR::is_a<ASR::IntegerConstant_t>(*a_fmt)) {
-                ASR::IntegerConstant_t* a_fmt_int = ASR::down_cast<ASR::IntegerConstant_t>(a_fmt);
-                int64_t label = a_fmt_int->m_n;
+        bool inserted_iostat = false;
+        if (_type == AST::stmtType::Read && a_iostat == nullptr
+                && (end_label != -1 || err_label != -1)) {
+            ASR::ttype_t* int_type = ASRUtils::TYPE(ASR::make_Integer_t(al, loc, 4));
+            std::string iostat_name = current_scope->get_unique_name("__lfortran_iostat");
+            ASR::symbol_t* iostat_sym = declare_implicit_variable2(
+                loc, iostat_name, ASRUtils::intent_local, int_type);
+            a_iostat = ASRUtils::EXPR(ASR::make_Var_t(al, loc, iostat_sym));
+            inserted_iostat = true;
+        }
+
+        if (a_fmt && ASR::is_a<ASR::IntegerConstant_t>(*a_fmt)) {
+            ASR::IntegerConstant_t* a_fmt_int = ASR::down_cast<ASR::IntegerConstant_t>(a_fmt);
+            int64_t label = a_fmt_int->m_n;
             if (format_statements.find(label) == format_statements.end()) {
-                if( _type == AST::stmtType::Write ) {
-                    tmp = ASR::make_FileWrite_t(al, loc, m_label, a_unit,
-                        a_iomsg, a_iostat, a_id, a_values_vec.p,
-                        a_values_vec.size(), a_separator, a_end, nullptr, true);
-                    print_statements[tmp] = std::make_pair(&w->base,label);
-                    } else if( _type == AST::stmtType::Read ) {
-                        tmp = ASR::make_FileRead_t(al, loc, m_label, a_unit, a_fmt, a_iomsg, a_iostat,
-                            a_advance, a_size, a_id, a_values_vec.p, a_values_vec.size(), nullptr, formatted);
-                        print_statements[tmp] = std::make_pair(&r->base,label);
-                    }
-                    if (_type == AST::stmtType::Read && (end_label != -1 || err_label != -1)) {
-                        tmp_vec.push_back(tmp);
-                        tmp = nullptr;
-                        emit_read_end_err_label_jumps(end_label, err_label, a_iostat, loc, tmp_vec);
-                        tmp_vec.insert(tmp_vec.end(), newline_for_advance.begin(), newline_for_advance.end());
-                    }
-                    return;
+                if (_type == AST::stmtType::Write) {
+                    tmp = ASR::make_FileWrite_t(al, loc, m_label, a_unit, a_iomsg, a_iostat,
+                        a_id, a_values_vec.p, a_values_vec.size(), a_separator, a_end, nullptr, true);
+                    print_statements[tmp] = std::make_pair(&w->base, label);
+                } else if (_type == AST::stmtType::Read) {
+                    tmp = ASR::make_FileRead_t(al, loc, m_label, a_unit, a_fmt, a_iomsg,
+                        a_iostat, a_advance, a_size, a_id, a_values_vec.p, a_values_vec.size(),
+                        nullptr, formatted);
+                    print_statements[tmp] = std::make_pair(&r->base, label);
                 }
-                ASR::ttype_t* a_fmt_type = ASRUtils::TYPE(ASR::make_String_t(
-                    al, a_fmt->base.loc, 1,
-                    ASRUtils::EXPR(ASR::make_IntegerConstant_t(
+                if (_type == AST::stmtType::Read && (end_label != -1 || err_label != -1)) {
+                    tmp_vec.push_back(tmp);
+                    tmp = nullptr;
+                    emit_read_end_err_label_jumps(end_label, err_label, a_iostat, loc, tmp_vec);
+                    tmp_vec.insert(tmp_vec.end(), newline_for_advance.begin(), newline_for_advance.end());
+                }
+                return;
+            }
+            ASR::ttype_t* a_fmt_type = ASRUtils::TYPE(ASR::make_String_t(
+                al, a_fmt->base.loc, 1,
+                ASRUtils::EXPR(ASR::make_IntegerConstant_t(
                     al, a_fmt->base.loc, format_statements[label].size(),
                     ASRUtils::TYPE(ASR::make_Integer_t(al, a_fmt->base.loc, 4)))),
-                    ASR::string_length_kindType::ExpressionLength,
+                ASR::string_length_kindType::ExpressionLength,
                 ASR::string_physical_typeType::DescriptorString));
             a_fmt_constant = ASRUtils::EXPR(ASR::make_StringConstant_t(
                 al, a_fmt->base.loc, s2c(al, format_statements[label]), a_fmt_type));

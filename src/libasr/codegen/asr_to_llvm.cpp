@@ -4660,13 +4660,13 @@ public:
                         item.second);
                 instantiate_function(*v);
             }
-	        }
-	        visit_procedures(x);
-	        llvm_goto_targets.clear();
+        }
+        visit_procedures(x);
+        llvm_goto_targets.clear();
 
-	        builder->SetInsertPoint(BB);
-	        if (compiler_options.emit_debug_info) {
-	            debug_current_scope = SP;
+        builder->SetInsertPoint(BB);
+        if (compiler_options.emit_debug_info) {
+            debug_current_scope = SP;
             builder->SetCurrentDebugLocation(nullptr);
             debug_emit_loc(x);
         }
