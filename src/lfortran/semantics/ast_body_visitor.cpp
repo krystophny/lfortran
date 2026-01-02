@@ -904,9 +904,13 @@ public:
             AST::stmtType _type, const AST::kw_argstar_t& kwarg,
             const Location& loc) {
         if (_type != AST::stmtType::Read) {
+            Location diag_loc = kwarg.loc;
+            if (diag_loc.first == 0 && diag_loc.last == 0) {
+                diag_loc = loc;
+            }
             diag.add(Diagnostic(
                 std::string("`") + kwarg_name + "` is only supported for READ statements",
-                Level::Error, Stage::Semantic, {Label("", {loc})}));
+                Level::Error, Stage::Semantic, {Label("", {diag_loc})}));
             if (!compiler_options.continue_compilation) throw SemanticAbort();
             return false;
         }
