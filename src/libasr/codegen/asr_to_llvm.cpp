@@ -11980,7 +11980,10 @@ public:
                         llvm::Function::ExternalLinkage, runtime_func_name,
                             module.get());
             }
-            if (x.m_iostat) {
+            // When x.m_iostat is provided and values were read (n_values > 0),
+            // only call empty_read if no error occurred during value reads.
+            // When n_values == 0, no reads happened yet so call unconditionally.
+            if (x.m_iostat && x.n_values > 0) {
                 llvm::Value* iostat_val = builder->CreateLoad(
                     llvm::Type::getInt32Ty(context), iostat);
                 llvm::Value* iostat_is_zero = builder->CreateICmpEQ(
