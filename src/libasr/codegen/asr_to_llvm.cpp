@@ -11589,6 +11589,9 @@ public:
         } else {
             iostat = llvm_utils->CreateAlloca(*builder,
                         llvm::Type::getInt32Ty(context));
+            builder->CreateStore(
+                llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), 0),
+                iostat);
         }
 
         if (x.m_advance) {
