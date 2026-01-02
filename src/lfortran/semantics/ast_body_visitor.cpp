@@ -870,6 +870,35 @@ public:
         }
     }
 
+    void emit_read_end_err_label_jumps(int64_t end_label, int64_t err_label,
+            ASR::expr_t* a_iostat, const Location& loc,
+            std::vector<ASR::asr_t*>& tmp_vec) {
+        ASR::ttype_t* iostat_type = ASRUtils::type_get_past_pointer(
+            ASRUtils::expr_type(a_iostat));
+        ASR::expr_t* zero = ASRUtils::EXPR(ASR::make_IntegerConstant_t(
+            al, loc, 0, iostat_type));
+        ASR::ttype_t* cmp_type = ASRUtils::TYPE(ASR::make_Logical_t(
+            al, loc, compiler_options.po.default_integer_kind));
+        if (end_label != -1) {
+            ASR::expr_t* eof_test = ASRUtils::EXPR(ASR::make_IntegerCompare_t(
+                al, loc, a_iostat, ASR::cmpopType::Lt, zero, cmp_type, nullptr));
+            Vec<ASR::stmt_t*> body; body.reserve(al, 1);
+            body.push_back(al, ASRUtils::STMT(ASR::make_GoTo_t(
+                al, loc, end_label, s2c(al, std::to_string(end_label)))));
+            tmp_vec.push_back(ASR::make_If_t(al, loc, nullptr, eof_test,
+                body.p, body.size(), nullptr, 0));
+        }
+        if (err_label != -1) {
+            ASR::expr_t* err_test = ASRUtils::EXPR(ASR::make_IntegerCompare_t(
+                al, loc, a_iostat, ASR::cmpopType::Gt, zero, cmp_type, nullptr));
+            Vec<ASR::stmt_t*> body; body.reserve(al, 1);
+            body.push_back(al, ASRUtils::STMT(ASR::make_GoTo_t(
+                al, loc, err_label, s2c(al, std::to_string(err_label)))));
+            tmp_vec.push_back(ASR::make_If_t(al, loc, nullptr, err_test,
+                body.p, body.size(), nullptr, 0));
+        }
+    }
+
     void create_read_write_ASR_node(const AST::stmt_t& read_write_stmt, AST::stmtType _type) {
         int64_t m_label = -1;
         int64_t end_label = -1;
@@ -1400,31 +1429,10 @@ public:
                             a_advance, a_size, a_id, a_values_vec.p, a_values_vec.size(), nullptr, formatted);
                         print_statements[tmp] = std::make_pair(&r->base,label);
                     }
-                    if( _type == AST::stmtType::Read && (end_label != -1 || err_label != -1) ) {
+                    if (_type == AST::stmtType::Read && (end_label != -1 || err_label != -1)) {
                         tmp_vec.push_back(tmp);
                         tmp = nullptr;
-                        ASR::ttype_t* iostat_type = ASRUtils::type_get_past_pointer(ASRUtils::expr_type(a_iostat));
-                        ASR::expr_t* zero = ASRUtils::EXPR(ASR::make_IntegerConstant_t(al, loc, 0, iostat_type));
-                        ASR::ttype_t* cmp_type = ASRUtils::TYPE(ASR::make_Logical_t(
-                            al, loc, compiler_options.po.default_integer_kind));
-                        if( end_label != -1 ) {
-                            ASR::expr_t* eof_test = ASRUtils::EXPR(ASR::make_IntegerCompare_t(
-                                al, loc, a_iostat, ASR::cmpopType::Lt, zero, cmp_type, nullptr));
-                            Vec<ASR::stmt_t*> body; body.reserve(al, 1);
-                            body.push_back(al, ASRUtils::STMT(ASR::make_GoTo_t(
-                                al, loc, end_label, s2c(al, std::to_string(end_label)))));
-                            tmp_vec.push_back(ASR::make_If_t(al, loc, nullptr, eof_test,
-                                body.p, body.size(), nullptr, 0));
-                        }
-                        if( err_label != -1 ) {
-                            ASR::expr_t* err_test = ASRUtils::EXPR(ASR::make_IntegerCompare_t(
-                                al, loc, a_iostat, ASR::cmpopType::Gt, zero, cmp_type, nullptr));
-                            Vec<ASR::stmt_t*> body; body.reserve(al, 1);
-                            body.push_back(al, ASRUtils::STMT(ASR::make_GoTo_t(
-                                al, loc, err_label, s2c(al, std::to_string(err_label)))));
-                            tmp_vec.push_back(ASR::make_If_t(al, loc, nullptr, err_test,
-                                body.p, body.size(), nullptr, 0));
-                        }
+                        emit_read_end_err_label_jumps(end_label, err_label, a_iostat, loc, tmp_vec);
                         tmp_vec.insert(tmp_vec.end(), newline_for_advance.begin(), newline_for_advance.end());
                     }
                     return;
@@ -1469,47 +1477,32 @@ public:
         }
 
         tmp_vec.push_back(tmp);
-        if( _type == AST::stmtType::Read && (end_label != -1 || err_label != -1) ) {
-            ASR::ttype_t* iostat_type = ASRUtils::type_get_past_pointer(ASRUtils::expr_type(a_iostat));
-            ASR::expr_t* zero = ASRUtils::EXPR(ASR::make_IntegerConstant_t(al, loc, 0, iostat_type));
-            ASR::ttype_t* cmp_type = ASRUtils::TYPE(ASR::make_Logical_t(
-                al, loc, compiler_options.po.default_integer_kind));
-            if( end_label != -1 ) {
-                ASR::expr_t* eof_test = ASRUtils::EXPR(ASR::make_IntegerCompare_t(
-                    al, loc, a_iostat, ASR::cmpopType::Lt, zero, cmp_type, nullptr));
-                Vec<ASR::stmt_t*> body; body.reserve(al, 1);
-                body.push_back(al, ASRUtils::STMT(ASR::make_GoTo_t(
-                    al, loc, end_label, s2c(al, std::to_string(end_label)))));
-                tmp_vec.push_back(ASR::make_If_t(al, loc, nullptr, eof_test,
-                    body.p, body.size(), nullptr, 0));
-            }
-            if( err_label != -1 ) {
-                ASR::expr_t* err_test = ASRUtils::EXPR(ASR::make_IntegerCompare_t(
-                    al, loc, a_iostat, ASR::cmpopType::Gt, zero, cmp_type, nullptr));
-                Vec<ASR::stmt_t*> body; body.reserve(al, 1);
-                body.push_back(al, ASRUtils::STMT(ASR::make_GoTo_t(
-                    al, loc, err_label, s2c(al, std::to_string(err_label)))));
-                tmp_vec.push_back(ASR::make_If_t(al, loc, nullptr, err_test,
-                    body.p, body.size(), nullptr, 0));
-            }
-            if( inserted_iostat ) {
-                if( end_label == -1 ) {
+        if (_type == AST::stmtType::Read && (end_label != -1 || err_label != -1)) {
+            emit_read_end_err_label_jumps(end_label, err_label, a_iostat, loc, tmp_vec);
+            if (inserted_iostat) {
+                ASR::ttype_t* iostat_type = ASRUtils::type_get_past_pointer(
+                    ASRUtils::expr_type(a_iostat));
+                ASR::expr_t* zero = ASRUtils::EXPR(ASR::make_IntegerConstant_t(
+                    al, loc, 0, iostat_type));
+                ASR::ttype_t* cmp_type = ASRUtils::TYPE(ASR::make_Logical_t(
+                    al, loc, compiler_options.po.default_integer_kind));
+                if (end_label == -1) {
                     ASR::expr_t* eof_test = ASRUtils::EXPR(ASR::make_IntegerCompare_t(
                         al, loc, a_iostat, ASR::cmpopType::Lt, zero, cmp_type, nullptr));
                     Vec<ASR::stmt_t*> body; body.reserve(al, 1);
-                    body.push_back(al, ASRUtils::STMT(ASR::make_FileRead_t(al, loc, m_label, a_unit, a_fmt,
-                        a_iomsg, nullptr, a_advance, a_size, a_id, a_values_vec.p, a_values_vec.size(),
-                        overloaded_stmt, formatted)));
+                    body.push_back(al, ASRUtils::STMT(ASR::make_FileRead_t(al, loc, m_label,
+                        a_unit, a_fmt, a_iomsg, nullptr, a_advance, a_size, a_id,
+                        a_values_vec.p, a_values_vec.size(), overloaded_stmt, formatted)));
                     tmp_vec.push_back(ASR::make_If_t(al, loc, nullptr, eof_test,
                         body.p, body.size(), nullptr, 0));
                 }
-                if( err_label == -1 ) {
+                if (err_label == -1) {
                     ASR::expr_t* err_test = ASRUtils::EXPR(ASR::make_IntegerCompare_t(
                         al, loc, a_iostat, ASR::cmpopType::Gt, zero, cmp_type, nullptr));
                     Vec<ASR::stmt_t*> body; body.reserve(al, 1);
-                    body.push_back(al, ASRUtils::STMT(ASR::make_FileRead_t(al, loc, m_label, a_unit, a_fmt,
-                        a_iomsg, nullptr, a_advance, a_size, a_id, a_values_vec.p, a_values_vec.size(),
-                        overloaded_stmt, formatted)));
+                    body.push_back(al, ASRUtils::STMT(ASR::make_FileRead_t(al, loc, m_label,
+                        a_unit, a_fmt, a_iomsg, nullptr, a_advance, a_size, a_id,
+                        a_values_vec.p, a_values_vec.size(), overloaded_stmt, formatted)));
                     tmp_vec.push_back(ASR::make_If_t(al, loc, nullptr, err_test,
                         body.p, body.size(), nullptr, 0));
                 }
