@@ -1,0 +1,75 @@
+name: Self-Hosted CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: LFortran (self-hosted, LLVM 11)
+    runs-on: plasma-runners
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: System info
+        run: |
+          echo "Runner: $RUNNER_NAME"
+          uname -a
+          cat /etc/os-release | head -5
+          nproc
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            git \
+            curl \
+            wget \
+            llvm-11-dev \
+            libclang-11-dev \
+            clang-11 \
+            zlib1g-dev \
+            libblas-dev \
+            liblapack-dev \
+            gfortran \
+            bison \
+            re2c \
+            python3 \
+            python3-pip
+
+      - name: Build LFortran
+        run: |
+          ./build0.sh
+          cmake . -GNinja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DWITH_LLVM=yes \
+            -DWITH_LSP=yes \
+            -DLFORTRAN_BUILD_ALL=yes \
+            -DWITH_STACKTRACE=no \
+            -DCMAKE_INSTALL_PREFIX=$(pwd)/inst
+          cmake --build . -j$(nproc)
+
+      - name: Run tests
+        run: |
+          ctest --output-on-failure -j$(nproc)
+
+      - name: Test LFortran binary
+        run: |
+          ./src/bin/lfortran --version
+          echo 'print *, "Hello from self-hosted runner!"' > /tmp/hello.f90
+          ./src/bin/lfortran /tmp/hello.f90 -o /tmp/hello
+          /tmp/hello
