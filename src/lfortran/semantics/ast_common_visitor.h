@@ -10548,14 +10548,24 @@ public:
                     }
                 }
                 if (ASRUtils::is_array(var_type)) {
-                    // For arrays like A(n, m) we use A(*) in BindC, so that
-                    // the C ABI is just a pointer
+                    // For arrays like A(n, m) we use A(*) in implicit interface.
                     ASR::ttype_t* array_var_type = ASRUtils::type_get_past_allocatable(
                         ASRUtils::type_get_past_pointer(var_type));
                     ASR::Array_t* array_type = ASR::down_cast<ASR::Array_t>(array_var_type);
-                    var_type = ASRUtils::duplicate_type_with_empty_dims(al, array_var_type,
-                        ( array_type->m_physical_type == ASR::array_physical_typeType::UnboundedPointerArray ) ?
-                        array_type->m_physical_type : ASR::array_physical_typeType::PointerArray, true);
+                    // For CHARACTER arrays, use DescriptorArray since Fortran
+                    // assumed-size CHARACTER arrays require descriptors.
+                    // For other arrays, use PointerArray to maintain compatibility
+                    // with existing implicit interface behavior.
+                    ASR::array_physical_typeType phys_type;
+                    if (array_type->m_physical_type == ASR::array_physical_typeType::UnboundedPointerArray) {
+                        phys_type = array_type->m_physical_type;
+                    } else if (ASRUtils::is_character(*array_type->m_type)) {
+                        // CHARACTER assumed-size arrays need DescriptorArray
+                        phys_type = ASR::array_physical_typeType::DescriptorArray;
+                    } else {
+                        phys_type = ASR::array_physical_typeType::PointerArray;
+                    }
+                    var_type = ASRUtils::duplicate_type_with_empty_dims(al, array_var_type, phys_type, true);
                 } else if (ASR::is_a<ASR::ArrayItem_t>(*var_expr) && compiler_options.legacy_array_sections) {
                     ASR::symbol_t* func_sym = parent_scope->resolve_symbol(func_name);
                     ASR::Function_t* func = nullptr;
@@ -10580,7 +10590,7 @@ public:
                     current_scope, s2c(al, arg_name), variable_dependencies_vec.p,
                     variable_dependencies_vec.size(), ASRUtils::intent_unspecified,
                     nullptr, nullptr, ASR::storage_typeType::Default, var_type, ASRUtils::get_struct_sym_from_struct_expr(var_expr),
-                    ASR::abiType::BindC, ASR::Public, ASR::presenceType::Required,
+                    ASR::abiType::Source, ASR::Public, ASR::presenceType::Required,
                     false));
                 current_scope->add_or_overwrite_symbol(arg_name, v);
             }
@@ -10599,7 +10609,7 @@ public:
                 current_scope, s2c(al, return_var_name), variable_dependencies_vec.p,
                 variable_dependencies_vec.size(), ASRUtils::intent_return_var,
                 nullptr, nullptr, ASR::storage_typeType::Default, type, nullptr,
-                ASR::abiType::BindC, ASR::Public, ASR::presenceType::Required,
+                ASR::abiType::Source, ASR::Public, ASR::presenceType::Required,
                 false);
             current_scope->add_symbol(return_var_name, ASR::down_cast<ASR::symbol_t>(return_var));
             to_return = ASRUtils::EXPR(ASR::make_Var_t(al, x.base.base.loc,
@@ -10616,7 +10626,7 @@ public:
             /* a_body */ nullptr,
             /* n_body */ 0,
             /* a_return_var */ to_return,
-            ASR::abiType::BindC, ASR::accessType::Public, ASR::deftypeType::Interface,
+            ASR::abiType::Source, ASR::accessType::Public, ASR::deftypeType::Interface,
             nullptr, false, false, false, false, false, nullptr, 0,
             false, false, false);
         parent_scope->add_or_overwrite_symbol(sym_name, ASR::down_cast<ASR::symbol_t>(tmp));
