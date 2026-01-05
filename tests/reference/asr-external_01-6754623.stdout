@@ -65,7 +65,7 @@
                                                     Default
                                                     (Complex 4)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -86,7 +86,7 @@
                                                     Default
                                                     (Complex 4)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -101,7 +101,7 @@
                                     (FunctionType
                                         [(Complex 4)]
                                         (Complex 4)
-                                        BindC
+                                        Source
                                         Interface
                                         ()
                                         .false.
