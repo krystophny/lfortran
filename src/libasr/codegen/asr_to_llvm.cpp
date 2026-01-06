@@ -4333,15 +4333,15 @@ public:
             llvm::Constant* ptr = module->getOrInsertGlobal(llvm_var_name, type);
 
             if (!external) {
-                double x_re = 0.0, x_im = 0.0;
-                if (x.m_value) {
-                    LCOMPILERS_ASSERT(ASR::is_a<ASR::ComplexConstant_t>(*x.m_value));
-                    ASR::ComplexConstant_t* x_cc = ASR::down_cast<ASR::ComplexConstant_t>(x.m_value);
-                    x_re = x_cc->m_re; x_im = x_cc->m_im;
-                }
                 if (init_value) {
                     module->getNamedGlobal(llvm_var_name)->setInitializer(init_value);
                 } else {
+                    double x_re = 0.0, x_im = 0.0;
+                    if (x.m_value) {
+                        LCOMPILERS_ASSERT(ASR::is_a<ASR::ComplexConstant_t>(*x.m_value));
+                        ASR::ComplexConstant_t* x_cc = ASR::down_cast<ASR::ComplexConstant_t>(x.m_value);
+                        x_re = x_cc->m_re; x_im = x_cc->m_im;
+                    }
                     switch (a_kind) {
                         case 4: {
                             re = llvm::ConstantFP::get(context, llvm::APFloat((float) x_re));
@@ -5248,11 +5248,20 @@ public:
         collect_variable_types_and_struct_types(variable_type_names, struct_types, x_symtab->parent);
     }
     void set_VariableInital_value(ASR::Variable_t* v, llvm::Value* target_var){
-        if (v->m_value != nullptr) {
-            this->visit_expr_wrapper(v->m_value, true, v->m_is_volatile);
-        } else {
-            this->visit_expr_wrapper(v->m_symbolic_value, true, v->m_is_volatile);
+        // For Complex variables with non-Complex m_value (e.g., real assigned to complex),
+        // use m_symbolic_value which should contain the Cast node
+        ASR::expr_t* init_expr = v->m_value;
+        if (init_expr == nullptr) {
+            init_expr = v->m_symbolic_value;
+        } else if (ASR::is_a<ASR::Complex_t>(*v->m_type) &&
+                   !ASR::is_a<ASR::ComplexConstant_t>(*init_expr)) {
+            // m_value is not a ComplexConstant but target is Complex - use m_symbolic_value
+            // which should have the Cast(RealToComplex, ...) node
+            if (v->m_symbolic_value != nullptr) {
+                init_expr = v->m_symbolic_value;
+            }
         }
+        this->visit_expr_wrapper(init_expr, true, v->m_is_volatile);
         llvm::Value *init_value = tmp;
         if( ASRUtils::is_array(v->m_type) &&
             ASRUtils::is_array(ASRUtils::expr_type(v->m_symbolic_value)) &&
@@ -5336,6 +5345,26 @@ public:
                 // Do nothing, the value is already initialized
                 // in the global variable
             } else {
+                // Handle type mismatch when assigning real to complex
+                if (ASR::is_a<ASR::Complex_t>(*v->m_type) &&
+                    !init_value->getType()->isStructTy()) {
+                    // init_value is a scalar (real/int), convert to complex (re, 0.0)
+                    int a_kind = ASRUtils::extract_kind_from_ttype_t(v->m_type);
+                    llvm::Type* target_complex_type = (a_kind == 4) ? complex_type_4 : complex_type_8;
+                    llvm::Value* zero = llvm::ConstantFP::get(context,
+                        (a_kind == 4) ? llvm::APFloat((float)0.0) : llvm::APFloat(0.0));
+                    // Convert init_value to proper float type if needed
+                    llvm::Type* float_type = (a_kind == 4) ?
+                        llvm::Type::getFloatTy(context) : llvm::Type::getDoubleTy(context);
+                    if (init_value->getType() != float_type) {
+                        if (a_kind == 4) {
+                            init_value = builder->CreateFPTrunc(init_value, float_type);
+                        } else {
+                            init_value = builder->CreateFPExt(init_value, float_type);
+                        }
+                    }
+                    init_value = complex_from_floats(init_value, zero, target_complex_type);
+                }
                 builder->CreateStore(init_value, target_var, v->m_is_volatile);
             }
         }
@@ -10534,7 +10563,33 @@ public:
     inline void fetch_var(ASR::Variable_t* x) {
         // Only do for constant variables
         if (x->m_value && x->m_storage == ASR::storage_typeType::Parameter) {
-            this->visit_expr_wrapper(x->m_value, true);
+            // For Complex parameters with non-Complex m_value, use m_symbolic_value
+            // which should contain the Cast(RealToComplex, ...) node
+            ASR::expr_t* val_expr = x->m_value;
+            if (ASR::is_a<ASR::Complex_t>(*x->m_type) &&
+                !ASR::is_a<ASR::ComplexConstant_t>(*x->m_value) &&
+                x->m_symbolic_value != nullptr) {
+                val_expr = x->m_symbolic_value;
+            }
+            this->visit_expr_wrapper(val_expr, true);
+            // If still not a complex struct, convert it
+            if (ASR::is_a<ASR::Complex_t>(*x->m_type) &&
+                !tmp->getType()->isStructTy()) {
+                int a_kind = ASRUtils::extract_kind_from_ttype_t(x->m_type);
+                llvm::Type* target_complex_type = (a_kind == 4) ? complex_type_4 : complex_type_8;
+                llvm::Value* zero = llvm::ConstantFP::get(context,
+                    (a_kind == 4) ? llvm::APFloat((float)0.0) : llvm::APFloat(0.0));
+                llvm::Type* float_type = (a_kind == 4) ?
+                    llvm::Type::getFloatTy(context) : llvm::Type::getDoubleTy(context);
+                if (tmp->getType() != float_type) {
+                    if (a_kind == 4) {
+                        tmp = builder->CreateFPTrunc(tmp, float_type);
+                    } else {
+                        tmp = builder->CreateFPExt(tmp, float_type);
+                    }
+                }
+                tmp = complex_from_floats(tmp, zero, target_complex_type);
+            }
             return;
         }
         ASR::ttype_t *t2_ = ASRUtils::type_get_past_array(x->m_type);
@@ -10903,8 +10958,17 @@ public:
 
     void visit_Cast(const ASR::Cast_t &x) {
         if (x.m_value) {
-            this->visit_expr_wrapper(x.m_value, true);
-            return;
+            // For casts to Complex, m_value might be the real value before conversion
+            // (e.g., -1.0 instead of (-1.0, 0.0)), so we must handle this case specially
+            if ((x.m_kind == ASR::cast_kindType::RealToComplex ||
+                 x.m_kind == ASR::cast_kindType::IntegerToComplex) &&
+                !ASR::is_a<ASR::ComplexConstant_t>(*x.m_value)) {
+                // m_value is not a ComplexConstant, so we need to do the conversion
+                // Fall through to the normal cast handling
+            } else {
+                this->visit_expr_wrapper(x.m_value, true);
+                return;
+            }
         }
         // Visit with appropriate load
         if (ASRUtils::is_string_only(expr_type(x.m_arg))) {
