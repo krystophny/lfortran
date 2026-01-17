@@ -14300,9 +14300,12 @@ public:
             // Bitcast procedure pointer if types don't match (implicit interface fallback)
             // This handles cases where semantics couldn't fix the type mismatch
             // (e.g., external functions defined in different translation units)
+            // Skip for intent(inout/out) - they're passed by reference (pointer to pointer)
             if (orig_arg &&
                     ASR::is_a<ASR::FunctionType_t>(*ASRUtils::expr_type(x.m_args[i].m_value)) &&
-                    ASR::is_a<ASR::FunctionType_t>(*orig_arg->m_type)) {
+                    ASR::is_a<ASR::FunctionType_t>(*orig_arg->m_type) &&
+                    orig_arg->m_intent != ASR::intentType::InOut &&
+                    orig_arg->m_intent != ASR::intentType::Out) {
                 llvm::Type* expected_type = llvm_utils->get_type_from_ttype_t_util(
                     ASRUtils::EXPR(ASR::make_Var_t(al, orig_arg->base.base.loc, &orig_arg->base)),
                     orig_arg->m_type, module.get());
