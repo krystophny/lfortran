@@ -389,7 +389,7 @@ namespace LCompilers {
                 std::vector<llvm::Type*> member_types;
                 member_types.push_back(getIntType(8));
                 if( der_type_name == "~unlimited_polymorphic_type_polymorphic" ) {
-                    member_types.push_back(llvm::Type::getVoidTy(context)->getPointerTo());
+                    member_types.push_back(llvm::Type::getInt8Ty(context)->getPointerTo());
                 } else {
                     member_types.push_back(getStructType(der_type, module, true));
                 }
@@ -8622,7 +8622,7 @@ llvm::Value* LLVMUtils::handle_global_nonallocatable_stringArray(Allocator& al, 
             ASRUtils::intrinsic_type_to_str_with_kind(ttype, kind)), llvm_utils->i8_ptr));  // Type Info
         slots.push_back(llvm::ConstantExpr::getBitCast(copy_function, llvm_utils->i8_ptr));
 
-        llvm::ArrayType *arrTy = llvm::ArrayType::get(llvm_utils->i8_ptr, 2);
+        llvm::ArrayType *arrTy = llvm::ArrayType::get(llvm_utils->i8_ptr, slots.size());
         llvm::Constant *arrInit = llvm::ConstantArray::get(arrTy, slots);
         std::string gv_name = "_VTable_" + ASRUtils::intrinsic_type_to_str_with_kind(ttype, kind);
         llvm::StructType *outerStructTy = llvm::StructType::get(context, { arrTy }, false);

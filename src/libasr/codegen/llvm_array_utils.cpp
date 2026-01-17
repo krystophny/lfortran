@@ -848,7 +848,7 @@ namespace LCompilers {
                 } else {
                     if( polymorphic ) {
                         full_array = llvm_utils->create_gep2(type, full_array, 1);
-                        full_array = builder->CreateBitCast(llvm_utils->CreateLoad2(llvm::Type::getVoidTy(context)->getPointerTo(), full_array), polymorphic_type->getPointerTo());
+                        full_array = builder->CreateBitCast(llvm_utils->CreateLoad2(llvm::Type::getInt8Ty(context)->getPointerTo(), full_array), polymorphic_type->getPointerTo());
                         tmp = llvm_utils->create_ptr_gep2(polymorphic_type, full_array, idx);
                     } else {
                         tmp = llvm_utils->create_ptr_gep2(type, full_array, idx);

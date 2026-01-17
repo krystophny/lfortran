@@ -7201,10 +7201,10 @@ public:
                                     // Get pointer to polymorphic wrapper array
                                     llvm::Value* poly_wrapper_array_ptr = llvm_utils->create_gep2(src_array_desc_type, llvm_value, 0);
 
-                                    // Define polymorphic wrapper structure: { i64 type_id, void* data_ptr }
+                                    // Define polymorphic wrapper structure: { i64 type_id, i8* data_ptr }
                                     std::vector<llvm::Type*> poly_wrapper_fields = {
                                         llvm::Type::getInt64Ty(context),                    // type_id field
-                                        llvm::Type::getVoidTy(context)->getPointerTo()     // data_ptr field
+                                        llvm::Type::getInt8Ty(context)->getPointerTo()     // data_ptr field
                                     };
                                     llvm::Type* poly_wrapper_type = llvm::StructType::get(context, poly_wrapper_fields, false);
 
@@ -7212,10 +7212,10 @@ public:
                                     llvm::Value* first_poly_wrapper = llvm_utils->CreateLoad2(
                                         poly_wrapper_type->getPointerTo(), poly_wrapper_array_ptr);
 
-                                    // Extract the void* data pointer from the polymorphic wrapper
+                                    // Extract the i8* data pointer from the polymorphic wrapper
                                     llvm::Value* void_data_ptr_field = llvm_utils->create_gep2(poly_wrapper_type, first_poly_wrapper, 1);
                                     llvm::Value* void_data_ptr = llvm_utils->CreateLoad2(
-                                        llvm::Type::getVoidTy(context)->getPointerTo(), void_data_ptr_field);
+                                        llvm::Type::getInt8Ty(context)->getPointerTo(), void_data_ptr_field);
 
                                     // Cast void* to concrete element type pointer
                                     llvm::Type* concrete_element_type = llvm_utils->get_el_type(
