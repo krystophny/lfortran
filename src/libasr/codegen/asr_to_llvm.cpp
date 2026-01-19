@@ -9081,24 +9081,7 @@ public:
                 !ASRUtils::is_value_constant(ASRUtils::expr_value(x)) &&
                 (ASRUtils::is_array(expr_type(x)) || !ASRUtils::is_character(*expr_type(x)))) {
                 llvm::Type* x_llvm_type = llvm_utils->get_type_from_ttype_t_util(x, ASRUtils::expr_type(x), module.get());
-                // Under `--fast`, LOGICAL array elements are stored as bytes (`i8`) in memory.
-                // Convert loaded bytes to boolean (`i1`) semantics by checking for non-zero.
-                bool load_logical_from_i8 = false;
-#if LLVM_VERSION_MAJOR < 15
-                if (tmp->getType()->isPointerTy()) {
-                    llvm::PointerType* pt = llvm::cast<llvm::PointerType>(tmp->getType());
-                    load_logical_from_i8 = pt->getElementType()->isIntegerTy(8);
-                }
-#endif
-                if ((compiler_options.fast || compiler_options.po.fast) &&
-                    x_llvm_type->isIntegerTy(1) &&
-                    load_logical_from_i8) {
-                    llvm::Type* i8 = llvm::Type::getInt8Ty(context);
-                    llvm::Value* loaded = llvm_utils->CreateLoad2(i8, tmp, is_volatile);
-                    tmp = builder->CreateICmpNE(loaded, llvm::ConstantInt::get(i8, 0));
-                } else {
-                    tmp = llvm_utils->CreateLoad2(x_llvm_type, tmp, is_volatile);
-                }
+                tmp = llvm_utils->CreateLoad2(x_llvm_type, tmp, is_volatile);
             }
         }
     }

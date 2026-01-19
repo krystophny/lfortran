@@ -630,13 +630,6 @@ namespace LCompilers {
                             type = getComplexType(complex_t->m_kind, true);
                         }
 
-                        if( type == nullptr &&
-                            (compiler_options.fast || compiler_options.po.fast) &&
-                            ASR::is_a<ASR::Logical_t>(*v_type->m_type) ) {
-                            type = llvm::Type::getInt8Ty(context)->getPointerTo();
-                            break;
-                        }
-
                         if( type == nullptr ) {
                             type = get_type_from_ttype_t_util(arg_expr, v_type->m_type, module, arg_m_abi)->getPointerTo();
                         }
@@ -647,13 +640,6 @@ namespace LCompilers {
                         if( ASR::is_a<ASR::Complex_t>(*v_type->m_type) ) {
                             ASR::Complex_t* complex_t = ASR::down_cast<ASR::Complex_t>(v_type->m_type);
                             type = getComplexType(complex_t->m_kind, true);
-                        }
-
-                        if( type == nullptr &&
-                            (compiler_options.fast || compiler_options.po.fast) &&
-                            ASR::is_a<ASR::Logical_t>(*v_type->m_type) ) {
-                            type = llvm::Type::getInt8Ty(context)->getPointerTo();
-                            break;
                         }
 
                         if( type == nullptr ) {
