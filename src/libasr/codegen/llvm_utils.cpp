@@ -495,15 +495,9 @@ namespace LCompilers {
                 break;
             }
             case ASR::ttypeType::Logical: {
-                // `--fast` enables more aggressive LLVM optimizations; keeping LOGICAL arrays
-                // in memory as bit-packed `i1` can be fragile under those transforms.
-                // Use byte-backed storage for LOGICAL elements in arrays when `--fast` is enabled,
-                // while preserving scalar/logical expression semantics elsewhere.
-                if (compiler_options.fast || compiler_options.po.fast) {
-                    el_type = llvm::Type::getInt8Ty(context);
-                } else {
-                    el_type = llvm::Type::getInt1Ty(context);
-                }
+                // Logical element type must match the allocation type (i1) from
+                // get_type_from_ttype_t to avoid GEP type mismatches on LLVM < 15.
+                el_type = llvm::Type::getInt1Ty(context);
                 break;
             }
             case ASR::ttypeType::CPtr: {

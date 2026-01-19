@@ -8367,20 +8367,7 @@ public:
                         llvm::ConstantInt::get(context, llvm::APInt(32, data_size)));
                     builder->CreateMemCpy(target, llvm::MaybeAlign(), value, llvm::MaybeAlign(), llvm_size);
                 } else {
-                    llvm::Value* store_value = value;
-                    bool store_logical_as_i8 = false;
-#if LLVM_VERSION_MAJOR < 15
-                    if (target->getType()->isPointerTy()) {
-                        llvm::PointerType* pt = llvm::cast<llvm::PointerType>(target->getType());
-                        store_logical_as_i8 = pt->getElementType()->isIntegerTy(8);
-                    }
-#endif
-                    if ((compiler_options.fast || compiler_options.po.fast) &&
-                        store_value->getType()->isIntegerTy(1) &&
-                        store_logical_as_i8) {
-                        store_value = builder->CreateZExt(store_value, llvm::Type::getInt8Ty(context));
-                    }
-                    builder->CreateStore(store_value, target);
+                    builder->CreateStore(value, target);
                 }
             } else {
                 if( LLVM::is_llvm_pointer(*target_type) ) {
@@ -8433,35 +8420,9 @@ public:
                 llvm::Type* target_ptr_type = llvm_utils->get_type_from_ttype_t_util(x.m_target, ASRUtils::expr_type(x.m_target), module.get());
                 target = llvm_utils->CreateLoad2(target_ptr_type, target);
             }
-            llvm::Value* store_value = value;
-            bool store_logical_as_i8 = false;
-#if LLVM_VERSION_MAJOR < 15
-            if (target->getType()->isPointerTy()) {
-                llvm::PointerType* pt = llvm::cast<llvm::PointerType>(target->getType());
-                store_logical_as_i8 = pt->getElementType()->isIntegerTy(8);
-            }
-#endif
-            if ((compiler_options.fast || compiler_options.po.fast) &&
-                store_value->getType()->isIntegerTy(1) &&
-                store_logical_as_i8) {
-                store_value = builder->CreateZExt(store_value, llvm::Type::getInt8Ty(context));
-            }
-            builder->CreateStore(store_value, target);
+            builder->CreateStore(value, target);
         } else {
-            llvm::Value* store_value = value;
-            bool store_logical_as_i8 = false;
-#if LLVM_VERSION_MAJOR < 15
-            if (target->getType()->isPointerTy()) {
-                llvm::PointerType* pt = llvm::cast<llvm::PointerType>(target->getType());
-                store_logical_as_i8 = pt->getElementType()->isIntegerTy(8);
-            }
-#endif
-            if ((compiler_options.fast || compiler_options.po.fast) &&
-                store_value->getType()->isIntegerTy(1) &&
-                store_logical_as_i8) {
-                store_value = builder->CreateZExt(store_value, llvm::Type::getInt8Ty(context));
-            }
-            builder->CreateStore(store_value, target);
+            builder->CreateStore(value, target);
         }
     }
 
