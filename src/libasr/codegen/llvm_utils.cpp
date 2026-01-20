@@ -495,7 +495,9 @@ namespace LCompilers {
                 break;
             }
             case ASR::ttypeType::Logical: {
-                el_type = llvm::Type::getInt1Ty(context);
+                // Use i8 for logical array elements to avoid issues with
+                // aggressive LLVM optimizations (--fast). Scalars remain i1.
+                el_type = llvm::Type::getInt8Ty(context);
                 break;
             }
             case ASR::ttypeType::CPtr: {
@@ -528,6 +530,16 @@ namespace LCompilers {
                 break;
         }
         return el_type;
+    }
+
+    llvm::Type* LLVMUtils::logical_to_array_elem_type(llvm::Type* scalar_type) {
+        // For logical arrays, we store elements as i8 (not i1) to avoid
+        // issues with aggressive LLVM optimizations (--fast).
+        // Scalar logicals remain i1 for performance.
+        if (scalar_type == llvm::Type::getInt1Ty(context)) {
+            return llvm::Type::getInt8Ty(context);
+        }
+        return scalar_type;
     }
 
     int32_t get_type_size(ASR::ttype_t* asr_type, llvm::Type* llvm_type,
@@ -630,7 +642,9 @@ namespace LCompilers {
 
 
                         if( type == nullptr ) {
-                            type = get_type_from_ttype_t_util(arg_expr, v_type->m_type, module, arg_m_abi)->getPointerTo();
+                            // Use get_el_type for array element types to ensure
+                            // logical arrays use i8 instead of i1
+                            type = get_el_type(arg_expr, v_type->m_type, module)->getPointerTo();
                         }
                         break;
                     }
@@ -643,7 +657,9 @@ namespace LCompilers {
 
 
                         if( type == nullptr ) {
-                            type = get_type_from_ttype_t_util(arg_expr, v_type->m_type, module, arg_m_abi)->getPointerTo();
+                            // Use get_el_type for array element types to ensure
+                            // logical arrays use i8 instead of i1
+                            type = get_el_type(arg_expr, v_type->m_type, module)->getPointerTo();
                         }
                         break;
                     }
@@ -1626,6 +1642,52 @@ namespace LCompilers {
 #else
         return builder->CreateLoad(x, is_volatile);
 #endif
+    }
+
+    llvm::Value* LLVMUtils::CreateLoad_logical_safe(llvm::Type *expected_type, llvm::Value *ptr, bool is_volatile) {
+        // When loading a logical array element (stored as i8) but expecting i1,
+        // we need to load i8 and convert to i1 using icmp ne 0.
+#if LLVM_VERSION_MAJOR < 15
+        if (expected_type->isIntegerTy(1) &&
+            ptr->getType()->isPointerTy() &&
+            ptr->getType()->getPointerElementType()->isIntegerTy(8)) {
+            // Load i8 from the array element
+            llvm::Value* loaded = builder->CreateLoad(llvm::Type::getInt8Ty(context), ptr, is_volatile);
+            // Convert to i1 using icmp ne 0
+            return builder->CreateICmpNE(loaded, llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0));
+        }
+#else
+        // For LLVM 15+ with opaque pointers, we cannot check the pointer's element type.
+        // We assume that if expected_type is i1, the pointer is to an i8 logical array element.
+        if (expected_type->isIntegerTy(1)) {
+            // Load i8 from the array element
+            llvm::Value* loaded = builder->CreateLoad(llvm::Type::getInt8Ty(context), ptr, is_volatile);
+            // Convert to i1 using icmp ne 0
+            return builder->CreateICmpNE(loaded, llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0));
+        }
+#endif
+        // Default: load as expected type
+        return CreateLoad2(expected_type, ptr, is_volatile);
+    }
+
+    void LLVMUtils::CreateStore_logical_safe(llvm::Value *value, llvm::Value *ptr) {
+        // When storing a logical scalar (i1) to a logical array element (i8*),
+        // we need to zext the i1 value to i8 first.
+#if LLVM_VERSION_MAJOR < 15
+        if (value->getType()->isIntegerTy(1) &&
+            ptr->getType()->isPointerTy() &&
+            ptr->getType()->getPointerElementType()->isIntegerTy(8)) {
+            value = builder->CreateZExt(value, llvm::Type::getInt8Ty(context));
+        }
+#else
+        // For LLVM 15+ with opaque pointers, we need to check the value type
+        // and assume that if we're storing i1, the target is an i8 array element
+        // when the value is a logical (i1).
+        if (value->getType()->isIntegerTy(1)) {
+            value = builder->CreateZExt(value, llvm::Type::getInt8Ty(context));
+        }
+#endif
+        builder->CreateStore(value, ptr);
     }
 
     llvm::Value* LLVMUtils::CreateGEP2(llvm::Type *t, llvm::Value *x,

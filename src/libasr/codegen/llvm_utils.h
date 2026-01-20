@@ -260,6 +260,16 @@ class ASRToLLVMVisitor;
 
             llvm::Value* CreateLoad2(llvm::Type *t, llvm::Value *x, bool is_volatile = false);
 
+            // Load with automatic i8->i1 conversion for logical array elements.
+            // When loading a logical array element (stored as i8) but expecting i1,
+            // loads i8 and converts to i1 using icmp ne 0.
+            llvm::Value* CreateLoad_logical_safe(llvm::Type *expected_type, llvm::Value *ptr, bool is_volatile = false);
+
+            // Store with automatic i1->i8 conversion for logical array elements.
+            // When storing a logical scalar (i1) to a logical array element (i8*),
+            // automatically zext the value.
+            void CreateStore_logical_safe(llvm::Value *value, llvm::Value *ptr);
+
             llvm::Value* CreateGEP2(llvm::Type *t, llvm::Value *x,
                 std::vector<llvm::Value *> &idx);
             llvm::Value* CreateGEP2(llvm::Type *type, llvm::Value *x, int idx);
@@ -584,6 +594,11 @@ class ASRToLLVMVisitor;
             llvm::Type* get_StringType(ASR::ttype_t* type);
 
             llvm::Type* get_el_type(ASR::expr_t* expr, ASR::ttype_t* m_type_, llvm::Module* module);
+
+            // Convert scalar logical type (i1) to array element type (i8).
+            // Logical scalars use i1, but array elements use i8 to avoid
+            // issues with aggressive LLVM optimizations (--fast).
+            llvm::Type* logical_to_array_elem_type(llvm::Type* scalar_type);
 
             llvm::Type* get_dict_type(ASR::expr_t* dict_expr, ASR::ttype_t* asr_type, llvm::Module* module);
 
