@@ -495,9 +495,14 @@ namespace LCompilers {
                 break;
             }
             case ASR::ttypeType::Logical: {
-                // Logical element type must match the allocation type (i1) from
-                // get_type_from_ttype_t to avoid GEP type mismatches on LLVM < 15.
-                el_type = llvm::Type::getInt1Ty(context);
+                // Under `--fast`, LOGICAL arrays are stored as bytes (`i8`) in memory to
+                // avoid fragile bit-packed `i1` memory behavior under some LLVM optimizations.
+                // Expression-level LOGICAL values remain `i1` and are converted on load/store.
+                if (compiler_options.fast || compiler_options.po.fast) {
+                    el_type = llvm::Type::getInt8Ty(context);
+                } else {
+                    el_type = llvm::Type::getInt1Ty(context);
+                }
                 break;
             }
             case ASR::ttypeType::CPtr: {
@@ -631,7 +636,12 @@ namespace LCompilers {
                         }
 
                         if( type == nullptr ) {
-                            type = get_type_from_ttype_t_util(arg_expr, v_type->m_type, module, arg_m_abi)->getPointerTo();
+                            llvm::Type* el_type = get_type_from_ttype_t_util(arg_expr, v_type->m_type, module, arg_m_abi);
+                            if ((compiler_options.fast || compiler_options.po.fast) &&
+                                ASRUtils::is_logical(*ASRUtils::type_get_past_pointer(v_type->m_type))) {
+                                el_type = llvm::Type::getInt8Ty(context);
+                            }
+                            type = el_type->getPointerTo();
                         }
                         break;
                     }
@@ -643,7 +653,12 @@ namespace LCompilers {
                         }
 
                         if( type == nullptr ) {
-                            type = get_type_from_ttype_t_util(arg_expr, v_type->m_type, module, arg_m_abi)->getPointerTo();
+                            llvm::Type* el_type = get_type_from_ttype_t_util(arg_expr, v_type->m_type, module, arg_m_abi);
+                            if ((compiler_options.fast || compiler_options.po.fast) &&
+                                ASRUtils::is_logical(*ASRUtils::type_get_past_pointer(v_type->m_type))) {
+                                el_type = llvm::Type::getInt8Ty(context);
+                            }
+                            type = el_type->getPointerTo();
                         }
                         break;
                     }

@@ -8367,7 +8367,14 @@ public:
                         llvm::ConstantInt::get(context, llvm::APInt(32, data_size)));
                     builder->CreateMemCpy(target, llvm::MaybeAlign(), value, llvm::MaybeAlign(), llvm_size);
                 } else {
-                    builder->CreateStore(value, target);
+                    llvm::Value* store_value = value;
+                    if ((compiler_options.fast || compiler_options.po.fast) &&
+                        target_type &&
+                        ASRUtils::is_logical(*ASRUtils::expr_type(x.m_target)) &&
+                        store_value->getType()->isIntegerTy(1)) {
+                        store_value = builder->CreateZExt(store_value, llvm::Type::getInt8Ty(context));
+                    }
+                    builder->CreateStore(store_value, target);
                 }
             } else {
                 if( LLVM::is_llvm_pointer(*target_type) ) {
@@ -8420,9 +8427,23 @@ public:
                 llvm::Type* target_ptr_type = llvm_utils->get_type_from_ttype_t_util(x.m_target, ASRUtils::expr_type(x.m_target), module.get());
                 target = llvm_utils->CreateLoad2(target_ptr_type, target);
             }
-            builder->CreateStore(value, target);
+            llvm::Value* store_value = value;
+            if ((compiler_options.fast || compiler_options.po.fast) &&
+                x.m_target->type == ASR::exprType::ArrayItem &&
+                ASRUtils::is_logical(*ASRUtils::expr_type(x.m_target)) &&
+                store_value->getType()->isIntegerTy(1)) {
+                store_value = builder->CreateZExt(store_value, llvm::Type::getInt8Ty(context));
+            }
+            builder->CreateStore(store_value, target);
         } else {
-            builder->CreateStore(value, target);
+            llvm::Value* store_value = value;
+            if ((compiler_options.fast || compiler_options.po.fast) &&
+                x.m_target->type == ASR::exprType::ArrayItem &&
+                ASRUtils::is_logical(*ASRUtils::expr_type(x.m_target)) &&
+                store_value->getType()->isIntegerTy(1)) {
+                store_value = builder->CreateZExt(store_value, llvm::Type::getInt8Ty(context));
+            }
+            builder->CreateStore(store_value, target);
         }
     }
 
@@ -9080,8 +9101,19 @@ public:
             if( load_ref &&
                 !ASRUtils::is_value_constant(ASRUtils::expr_value(x)) &&
                 (ASRUtils::is_array(expr_type(x)) || !ASRUtils::is_character(*expr_type(x)))) {
-                llvm::Type* x_llvm_type = llvm_utils->get_type_from_ttype_t_util(x, ASRUtils::expr_type(x), module.get());
-                tmp = llvm_utils->CreateLoad2(x_llvm_type, tmp, is_volatile);
+                if (x->type == ASR::exprType::ArrayItem &&
+                    (compiler_options.fast || compiler_options.po.fast) &&
+                    ASRUtils::is_logical(*ASRUtils::expr_type(x))) {
+                    // Under `--fast`, LOGICAL arrays are byte-backed (i8) in memory.
+                    // Convert i8 -> i1 on loads to preserve expression semantics.
+                    llvm::Value* v_i8 = llvm_utils->CreateLoad2(
+                        llvm::Type::getInt8Ty(context), tmp, is_volatile);
+                    tmp = builder->CreateICmpNE(
+                        v_i8, llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0));
+                } else {
+                    llvm::Type* x_llvm_type = llvm_utils->get_type_from_ttype_t_util(x, ASRUtils::expr_type(x), module.get());
+                    tmp = llvm_utils->CreateLoad2(x_llvm_type, tmp, is_volatile);
+                }
             }
         }
     }
@@ -10771,7 +10803,11 @@ public:
                     throw CodeGenError("ConstArray real kind not supported yet");
             }
         } else if (ASR::is_a<ASR::Logical_t>(*x_m_type)) {
-            el_type = llvm::Type::getInt1Ty(context);
+            if (compiler_options.fast || compiler_options.po.fast) {
+                el_type = llvm::Type::getInt8Ty(context);
+            } else {
+                el_type = llvm::Type::getInt1Ty(context);
+            }
         } else if (ASR::is_a<ASR::String_t>(*x_m_type)) {
             el_type = character_type;
         } else if (ASR::is_a<ASR::Complex_t>(*x_m_type)) {
@@ -10798,7 +10834,11 @@ public:
             ptr_loads = 2;
             this->visit_expr_wrapper(el, true);
             ptr_loads = ptr_loads_copy;
-            builder->CreateStore(tmp, llvm_el);
+            llvm::Value* store_value = tmp;
+            if (el_type->isIntegerTy(8) && store_value->getType()->isIntegerTy(1)) {
+                store_value = builder->CreateZExt(store_value, llvm::Type::getInt8Ty(context));
+            }
+            builder->CreateStore(store_value, llvm_el);
         }
         // Return the vector as float* type:
         tmp = llvm_utils->create_gep2(type_fxn ,p_fxn, 0);
@@ -10819,7 +10859,11 @@ public:
                     throw CodeGenError("ConstArray real kind not supported yet");
             }
         } else if (ASR::is_a<ASR::Logical_t>(*x_m_type)) {
-            el_type = llvm::Type::getInt1Ty(context);
+            if (compiler_options.fast || compiler_options.po.fast) {
+                el_type = llvm::Type::getInt8Ty(context);
+            } else {
+                el_type = llvm::Type::getInt1Ty(context);
+            }
         } else if (ASR::is_a<ASR::String_t>(*x_m_type)) {
             el_type = llvm_utils->get_StringType(x_m_type);
         } else if (ASR::is_a<ASR::Complex_t>(*x_m_type)) {
