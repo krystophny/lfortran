@@ -13543,10 +13543,19 @@ public:
         ASR::expr_t *re = ASRUtils::EXPR(tmp);
         ASR::expr_t *re_value = ASRUtils::expr_value(re);
         int a_kind_r = ASRUtils::extract_kind_from_ttype_t(ASRUtils::expr_type(re));
+        // For complex literals, integer components should use default real kind (4),
+        // not default integer kind (which is 8 in ILP64 mode)
+        if (ASRUtils::is_integer(*ASRUtils::expr_type(re))) {
+            a_kind_r = 4;  // default real kind
+        }
         this->visit_expr(*x.m_im);
         ASR::expr_t *im = ASRUtils::EXPR(tmp);
         ASR::expr_t *im_value = ASRUtils::expr_value(im);
         int a_kind_i = ASRUtils::extract_kind_from_ttype_t(ASRUtils::expr_type(im));
+        // For complex literals, integer components should use default real kind (4)
+        if (ASRUtils::is_integer(*ASRUtils::expr_type(im))) {
+            a_kind_i = 4;  // default real kind
+        }
         // TODO: Add semantic checks what type are allowed
         ASR::ttype_t *type = ASRUtils::TYPE(ASR::make_Complex_t(al, x.base.base.loc,
                 std::max(a_kind_r, a_kind_i)));
