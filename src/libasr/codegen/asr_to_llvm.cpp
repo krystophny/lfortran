@@ -8581,6 +8581,20 @@ public:
             }
             builder->CreateStore(value, target);
         } else {
+            // ILP64: ensure value type matches target type for integer stores
+            ASR::ttype_t* target_ttype = ASRUtils::expr_type(x.m_target);
+            if (ASRUtils::is_integer(*target_ttype) || ASRUtils::is_unsigned_integer(*target_ttype)) {
+                llvm::Type* target_llvm_type = llvm_utils->get_type_from_ttype_t_util(
+                    x.m_target, target_ttype, module.get());
+                if (value->getType() != target_llvm_type &&
+                        value->getType()->isIntegerTy() && target_llvm_type->isIntegerTy()) {
+                    if (ASRUtils::is_unsigned_integer(*target_ttype)) {
+                        value = builder->CreateZExtOrTrunc(value, target_llvm_type);
+                    } else {
+                        value = builder->CreateSExtOrTrunc(value, target_llvm_type);
+                    }
+                }
+            }
             builder->CreateStore(value, target);
         }
     }
@@ -9686,6 +9700,18 @@ public:
         load_non_array_non_character_pointers(x.m_right, ASRUtils::expr_type(x.m_right), right);
         load_unlimited_polymorpic_value(x.m_left, left);
         load_unlimited_polymorpic_value(x.m_right, right);
+        // ILP64: ensure operands have matching integer types (signed extension)
+        llvm::Type* left_type = left->getType();
+        llvm::Type* right_type = right->getType();
+        if (left_type != right_type) {
+            unsigned left_bits = left_type->getIntegerBitWidth();
+            unsigned right_bits = right_type->getIntegerBitWidth();
+            if (left_bits > right_bits) {
+                right = builder->CreateSExt(right, left_type);
+            } else {
+                left = builder->CreateSExt(left, right_type);
+            }
+        }
         switch (x.m_op) {
             case (ASR::cmpopType::Eq) : {
                 tmp = builder->CreateICmpEQ(left, right);
@@ -9729,6 +9755,18 @@ public:
         llvm::Value *right = tmp;
         load_unlimited_polymorpic_value(x.m_left, left);
         load_unlimited_polymorpic_value(x.m_right, right);
+        // ILP64: ensure operands have matching integer types (zero extension)
+        llvm::Type* left_type = left->getType();
+        llvm::Type* right_type = right->getType();
+        if (left_type != right_type) {
+            unsigned left_bits = left_type->getIntegerBitWidth();
+            unsigned right_bits = right_type->getIntegerBitWidth();
+            if (left_bits > right_bits) {
+                right = builder->CreateZExt(right, left_type);
+            } else {
+                left = builder->CreateZExt(left, right_type);
+            }
+        }
         switch (x.m_op) {
             case (ASR::cmpopType::Eq) : {
                 tmp = builder->CreateICmpEQ(left, right);
@@ -10512,6 +10550,20 @@ public:
         load_unlimited_polymorpic_value(x.m_right, right_val);
         LCOMPILERS_ASSERT(ASRUtils::is_integer(*x.m_type) ||
             ASRUtils::is_unsigned_integer(*x.m_type))
+        // ILP64: ensure operands have matching integer types
+        llvm::Type* left_type = left_val->getType();
+        llvm::Type* right_type = right_val->getType();
+        if (left_type != right_type) {
+            unsigned left_bits = left_type->getIntegerBitWidth();
+            unsigned right_bits = right_type->getIntegerBitWidth();
+            if (left_bits > right_bits) {
+                right_val = signed_int ? builder->CreateSExt(right_val, left_type)
+                                       : builder->CreateZExt(right_val, left_type);
+            } else {
+                left_val = signed_int ? builder->CreateSExt(left_val, right_type)
+                                      : builder->CreateZExt(left_val, right_type);
+            }
+        }
         switch (x.m_op) {
             case ASR::binopType::Add: {
                 tmp = builder->CreateAdd(left_val, right_val);
