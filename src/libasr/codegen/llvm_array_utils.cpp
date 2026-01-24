@@ -95,7 +95,8 @@ namespace LCompilers {
         }
 
         SimpleCMODescriptor::SimpleCMODescriptor(llvm::LLVMContext& _context,
-            llvm::IRBuilder<>* _builder, LLVMUtils* _llvm_utils, CompilerOptions& co_):
+            llvm::IRBuilder<>* _builder, LLVMUtils* _llvm_utils, CompilerOptions& co_,
+            llvm::Type* _index_type):
         context(_context),
         llvm_utils(std::move(_llvm_utils)),
         builder(std::move(_builder)),
@@ -106,7 +107,7 @@ namespace LCompilers {
                  llvm::Type::getInt32Ty(context),
                  llvm::Type::getInt32Ty(context)}),
                  "dimension_descriptor")
-        ), co(co_) {
+        ), co(co_), index_type(_index_type ? _index_type : llvm::Type::getInt32Ty(context)) {
         }
 
         bool SimpleCMODescriptor::is_array(ASR::ttype_t* asr_type) {

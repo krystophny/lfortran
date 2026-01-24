@@ -192,6 +192,12 @@ namespace LCompilers {
                 llvm::Type* get_dimension_descriptor_type(bool get_pointer=false) = 0;
 
                 /*
+                * Returns the llvm::Type* used for array indices (i32 or i64).
+                */
+                virtual
+                llvm::Type* get_index_type() const = 0;
+
+                /*
                 * Returns pointer to data in the input
                 * array descriptor according to the rules
                 * implemented by current class.
@@ -357,6 +363,8 @@ namespace LCompilers {
 
                 CompilerOptions& co;
 
+                llvm::Type* index_type;  // i32 or i64 for descriptor indices
+
                 llvm::Value* cmo_convertor_single_element(
                     llvm::Type* type, llvm::Value* arr, std::vector<llvm::Value*>& m_args,
                     int n_args, bool check_for_bounds, LocationManager& lm, std::string array_name = "", std::string infile = "", Location loc = {0, 0});
@@ -369,7 +377,11 @@ namespace LCompilers {
 
                 SimpleCMODescriptor(llvm::LLVMContext& _context,
                     llvm::IRBuilder<>* _builder,
-                    LLVMUtils* _llvm_utils, CompilerOptions& co_);
+                    LLVMUtils* _llvm_utils, CompilerOptions& co_,
+                    llvm::Type* _index_type = nullptr);
+
+                // Get the index type used by this descriptor (i32 or i64)
+                llvm::Type* get_index_type() const { return index_type; }
 
                 virtual
                 bool is_array(ASR::ttype_t* asr_type);
