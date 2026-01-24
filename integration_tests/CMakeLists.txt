@@ -3138,3 +3138,5 @@ RUN(NAME intent_out_allocatable_component_dealloc LABELS gfortran llvm)
 RUN(NAME intent_out_struct_member_no_dealloc LABELS gfortran llvm)
 RUN(NAME intent_out_module_dealloc LABELS gfortran llvm)
 RUN(NAME array_shape_func_call LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
+RUN(NAME ilp64_call_01 LABELS llvm
+    EXTRA_ARGS -fdefault-integer-8 --implicit-argument-casting)
