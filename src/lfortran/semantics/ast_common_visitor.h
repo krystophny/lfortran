@@ -1664,6 +1664,8 @@ public:
     {
         current_module_dependencies.reserve(al, 4);
         enum_init_val = 0;
+        // Set intrinsic context for ILP64 support
+        ASRUtils::IntrinsicContext::default_integer_kind = compiler_options.po.default_integer_kind;
     }
 
     ASR::symbol_t* resolve_symbol(const Location &loc, const std::string &sub_name) {

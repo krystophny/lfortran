@@ -1197,6 +1197,7 @@ static inline ASR::expr_t *eval_MaxMinLoc(Allocator &al, const Location &loc,
 static inline ASR::asr_t* create_MaxMinLoc(Allocator& al, const Location& loc,
         Vec<ASR::expr_t*>& args, ASRUtils::IntrinsicArrayFunctions intrinsic_func_id,
         diag::Diagnostics& diag) {
+    int default_integer_kind = IntrinsicContext::default_integer_kind;
     const int64_t array_id       = 0;
     const int64_t array_mask     = 1;
     const int64_t array_dim      = 2;
@@ -1220,7 +1221,7 @@ static inline ASR::asr_t* create_MaxMinLoc(Allocator& al, const Location& loc,
     Vec<ASR::dimension_t> result_dims; result_dims.reserve(al, 1);
     ASR::dimension_t *m_dims;
     int n_dims = extract_dimensions_from_ttype(array_type, m_dims);
-    int dim = 0, kind = 4; // default kind
+    int dim = 0, kind = default_integer_kind;
     ASR::expr_t* const mask_expr = [&args](){
         if((args[1] && is_logical(*expr_type(args[1])))) return args[1];
         else if(args[2]) return args[2];
@@ -1281,7 +1282,8 @@ static inline ASR::asr_t* create_MaxMinLoc(Allocator& al, const Location& loc,
         ASRUtils::set_kind_to_ttype_t(return_type, kind);
         m_args.push_back(al, args[3]);
     } else {
-        m_args.push_back(al, b.i32(4));
+        m_args.push_back(al, ASRUtils::EXPR(ASR::make_IntegerConstant_t(al, loc,
+            default_integer_kind, TYPE(ASR::make_Integer_t(al, loc, 4)))));
     }
     if (args[4]) {
         if (!ASR::is_a<ASR::Logical_t>(*expr_type(args[4]))) {
@@ -1572,7 +1574,7 @@ namespace Shape {
         ASRBuilder b(al, loc);
         Vec<ASR::expr_t *>m_args; m_args.reserve(al, 1);
         m_args.push_back(al, args[0]);
-        int kind = 4; // default kind
+        int kind = IntrinsicContext::default_integer_kind;
         if (args[1]) {
             if (!ASR::is_a<ASR::Integer_t>(*expr_type(args[1]))) {
                 append_error(diag, "`kind` argument of `shape` must be a scalar integer", loc);
@@ -2025,6 +2027,7 @@ namespace Spread {
 
     static inline ASR::asr_t* create_Spread(Allocator& al, const Location& loc,
             Vec<ASR::expr_t*>& args, diag::Diagnostics& diag) {
+
         ASR::expr_t *source = args[0], *dim = args[1], *ncopies = args[2];
         bool is_scalar = false;
         ASR::ttype_t *type_source = ASRUtils::type_get_past_allocatable_pointer(expr_type(source));
@@ -2275,6 +2278,7 @@ namespace Eoshift {
 
     static inline ASR::asr_t* create_Eoshift(Allocator& al, const Location& loc,
             Vec<ASR::expr_t*>& args, diag::Diagnostics& diag) {
+
         ASR::expr_t *array = args[0], *shift = args[1], *boundary = args[2], *dim = args[3];
         bool is_type_allocatable = false;
         bool is_boundary_present = false;
@@ -3207,6 +3211,7 @@ namespace Sum {
 
     static inline ASR::asr_t* create_Sum(Allocator& al, const Location& loc,
             Vec<ASR::expr_t*>& args, diag::Diagnostics& diag) {
+
         ASR::ttype_t* array_type = expr_type(args[0]);
         if (!is_integer(*array_type) && !is_real(*array_type) && !is_complex(*array_type)) {
             diag.add(diag::Diagnostic("Input to `Sum` is expected to be numeric, but got " +
@@ -3248,6 +3253,7 @@ namespace Product {
 
     static inline ASR::asr_t* create_Product(Allocator& al, const Location& loc,
             Vec<ASR::expr_t*>& args, diag::Diagnostics& diag) {
+
         ASR::ttype_t* array_type = expr_type(args[0]);
         if (!is_integer(*array_type) && !is_real(*array_type) && !is_complex(*array_type)) {
             diag.add(diag::Diagnostic("Input to `Product` is expected to be numeric, but got " +
@@ -3289,6 +3295,7 @@ namespace Iparity {
 
     static inline ASR::asr_t* create_Iparity(Allocator& al, const Location& loc,
             Vec<ASR::expr_t*>& args, diag::Diagnostics& diag) {
+
         ASR::ttype_t* array_type = expr_type(args[0]);
         if (!is_integer(*array_type)) {
             diag.add(diag::Diagnostic("Input to `Iparity` is expected to be an integer, but got " +
@@ -3331,6 +3338,7 @@ namespace MaxVal {
     static inline ASR::asr_t* create_MaxVal(Allocator& al, const Location& loc,
             Vec<ASR::expr_t*>& args,
             diag::Diagnostics& diag) {
+
         ASR::ttype_t* array_type = expr_type(args[0]);
         if (!is_integer(*array_type) && !is_real(*array_type) && !is_character(*array_type)) {
             diag.add(diag::Diagnostic("Input to `MaxVal` is expected to be of integer, real or character type, but got " +
@@ -3516,6 +3524,7 @@ namespace FindLoc {
 
     static inline ASR::asr_t* create_FindLoc(Allocator& al, const Location& loc,
             Vec<ASR::expr_t*>& args, diag::Diagnostics& diag) {
+        int default_integer_kind = IntrinsicContext::default_integer_kind;
         int64_t array_value_id = 0, array_value_mask = 1, array_value_dim = 2, array_value_dim_mask = 3;
         int64_t overload_id = array_value_id;
         ASRUtils::ASRBuilder b(al, loc);
@@ -3572,7 +3581,7 @@ namespace FindLoc {
         Vec<ASR::dimension_t> result_dims; result_dims.reserve(al, 1);
         ASR::dimension_t *m_dims;
         int n_dims = extract_dimensions_from_ttype(array_type, m_dims);
-        int dim = 0, kind = 4; // default kind
+        int dim = 0, kind = default_integer_kind;
         ASR::expr_t *dim_expr = nullptr;
         ASR::expr_t *mask_expr = nullptr;
 
@@ -3829,6 +3838,7 @@ namespace MinVal {
     static inline ASR::asr_t* create_MinVal(Allocator& al, const Location& loc,
             Vec<ASR::expr_t*>& args,
             diag::Diagnostics& diag) {
+
         ASR::ttype_t* array_type = expr_type(args[0]);
         if (!is_integer(*array_type) && !is_real(*array_type) && !is_character(*array_type)) {
             diag.add(diag::Diagnostic("Input to `MinVal` is expected to be of integer, real or character type, but got " +
@@ -3874,6 +3884,7 @@ namespace MatMul {
     static inline ASR::asr_t* create_MatMul(Allocator& al, const Location& loc,
             Vec<ASR::expr_t*>& args,
             diag::Diagnostics& diag) {
+
         ASR::expr_t *matrix_a = args[0], *matrix_b = args[1];
         bool is_type_allocatable = false;
         if (ASRUtils::is_allocatable(matrix_a) || ASRUtils::is_allocatable(matrix_b)) {
@@ -4149,6 +4160,7 @@ namespace Count {
 
     static inline ASR::asr_t* create_Count(Allocator& al, const Location& loc,
             Vec<ASR::expr_t*>& args, diag::Diagnostics& diag) {
+
         int64_t id_mask = 0, id_mask_dim = 1;
         int64_t overload_id = id_mask;
         if (!is_array(expr_type(args[0])) || !is_logical(*expr_type(args[0]))){
@@ -4349,6 +4361,7 @@ namespace Parity {
 
     static inline ASR::asr_t* create_Parity(Allocator& al, const Location& loc,
             Vec<ASR::expr_t*>& args, diag::Diagnostics& diag) {
+
         int64_t id_mask = 0, id_mask_dim = 1;
         int64_t overload_id = id_mask;
 
@@ -4546,6 +4559,7 @@ namespace Norm2 {
 
     static inline ASR::asr_t* create_Norm2(Allocator& al, const Location& loc,
             Vec<ASR::expr_t*>& args, diag::Diagnostics& diag) {
+
         int64_t id_array = 0, id_array_dim = 1;
         int64_t overload_id = id_array;
 
@@ -4935,6 +4949,7 @@ namespace Pack {
     static inline ASR::asr_t* create_Pack(Allocator& al, const Location& loc,
             Vec<ASR::expr_t*>& args,
             diag::Diagnostics& diag) {
+
         ASR::expr_t *array = args[0], *mask = args[1], *vector = args[2];
         bool is_type_allocatable = false;
         bool is_vector_present = false;
@@ -5335,6 +5350,7 @@ namespace Unpack {
     static inline ASR::asr_t* create_Unpack(Allocator& al, const Location& loc,
             Vec<ASR::expr_t*>& args,
             diag::Diagnostics& diag) {
+
         ASR::expr_t *vector = args[0], *mask = args[1], *field = args[2];
         bool is_type_allocatable = false;
         if (ASRUtils::is_allocatable(field) || ASRUtils::is_allocatable(mask)) {
@@ -5624,6 +5640,7 @@ namespace DotProduct {
     static inline ASR::asr_t* create_DotProduct(Allocator& al, const Location& loc,
             Vec<ASR::expr_t*>& args,
             diag::Diagnostics& diag) {
+
         ASR::expr_t *matrix_a = args[0], *matrix_b = args[1];
         ASR::ttype_t *type_a = expr_type(matrix_a);
         ASR::ttype_t *type_b = expr_type(matrix_b);
@@ -5763,6 +5780,7 @@ namespace Transpose {
     static inline ASR::asr_t* create_Transpose(Allocator& al, const Location& loc,
             Vec<ASR::expr_t*>& args,
             diag::Diagnostics& diag) {
+
         ASR::expr_t *matrix_a = args[0];
         bool is_type_allocatable = false;
         if (ASRUtils::is_allocatable(matrix_a)) {

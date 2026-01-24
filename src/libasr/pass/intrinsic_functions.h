@@ -216,6 +216,13 @@ typedef ASR::asr_t* (*create_intrinsic_function)(
     Vec<ASR::expr_t*>&,
     diag::Diagnostics&);
 
+// Context for passing default integer kind to intrinsic functions
+// This is set by the caller before invoking create functions
+struct IntrinsicContext {
+    static int default_integer_kind;
+};
+inline int IntrinsicContext::default_integer_kind = 4;
+
 typedef void (*verify_function)(
     const ASR::IntrinsicElementalFunction_t&,
     diag::Diagnostics&);
