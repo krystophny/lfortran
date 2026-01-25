@@ -3159,3 +3159,5 @@ RUN(NAME ilp64_data_array_01 LABELS gfortran llvm
 RUN(NAME ilp64_maxloc_01 LABELS gfortran llvm
     EXTRA_ARGS -fdefault-integer-8
     GFORTRAN_ARGS -fdefault-integer-8)
+RUN(NAME ilp64_call_01 LABELS llvm
+    EXTRA_ARGS -fdefault-integer-8 --implicit-argument-casting)
