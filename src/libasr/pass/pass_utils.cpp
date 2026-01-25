@@ -1510,6 +1510,8 @@ namespace LCompilers {
             bool perform_cast, ASR::cast_kindType cast_kind, ASR::ttype_t* casted_type) {
             const Location& loc = arr_var->base.loc;
             ASRUtils::ASRBuilder b(al, loc);
+            // Get integer type from idx_vars for ILP64 support
+            ASR::ttype_t* idx_type = ASRUtils::expr_type(idx_vars[0]);
             ASR::dimension_t* m_dims;
             int n_dims = ASRUtils::extract_dimensions_from_ttype(ASRUtils::expr_type(arr_var), m_dims);
             Vec<int> strides;
@@ -1535,10 +1537,10 @@ namespace LCompilers {
                 for (int i = 0; i < n_dims - 1; i++) {
                     int64_t ik = (k % strides[i + 1]) / strides[i];
                     ik += lower_bounds_values[i];
-                    ASR::stmt_t* assign_idx_var = b.Assignment(idx_vars[i], b.i32(ik));
+                    ASR::stmt_t* assign_idx_var = b.Assignment(idx_vars[i], b.i_t(ik, idx_type));
                     result_vec->push_back(al, assign_idx_var);
                 }
-                ASR::stmt_t* assign_idx_var = b.Assignment(idx_vars[n_dims - 1], b.i32(k / strides[n_dims - 1] + lower_bounds_values[n_dims - 1]));
+                ASR::stmt_t* assign_idx_var = b.Assignment(idx_vars[n_dims - 1], b.i_t(k / strides[n_dims - 1] + lower_bounds_values[n_dims - 1], idx_type));
                 result_vec->push_back(al, assign_idx_var);
 
                 ASR::expr_t* curr_init = ASRUtils::fetch_ArrayConstant_value(al, x, k);
