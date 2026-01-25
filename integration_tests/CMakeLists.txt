@@ -2446,6 +2446,10 @@ RUN(NAME array_section_09 LABELS gfortran llvm
     GFORTRAN_ARGS -fdefault-integer-8)
 RUN(NAME array_section_10 LABELS gfortran llvm)
 
+RUN(NAME ilp64_descriptor_01 LABELS gfortran llvm
+    EXTRA_ARGS --descriptor-index-64 -fdefault-integer-8
+    GFORTRAN_ARGS -fdefault-integer-8)
+
 RUN(NAME nested_vars_01 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc llvmStackArray)
 
 RUN(NAME pass_array_by_data_01 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc llvmStackArray wasm)
