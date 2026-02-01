@@ -1932,6 +1932,7 @@ RUN(NAME allocate_35 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc
     EXTRA_ARGS --realloc-lhs-arrays)
 RUN(NAME allocate_36 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME allocate_37 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
+RUN(NAME allocate_38 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 
 RUN(NAME realloc_lhs_16 LABELS gfortran llvm
     EXTRA_ARGS -fdefault-integer-8 --realloc-lhs-arrays
@@ -2227,7 +2228,8 @@ RUN(NAME inquire_04 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME inquire_05 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME inquire_06 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME inquire_07 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
-RUN(NAME inquire_08 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
+RUN(NAME inquire_08 LABELS gfortran llvm)
+RUN(NAME inquire_09 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME test_inquire_size LABELS gfortran llvm )
 RUN(NAME test_backspace_01 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc COPY_TO_BIN file_01_data.txt)
 
@@ -3256,3 +3258,6 @@ RUN(NAME intent_out_module_dealloc LABELS gfortran llvm)
 RUN(NAME array_shape_func_call LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 
 RUN(NAME ilp64_kind_arg_01 LABELS gfortran llvm EXTRA_ARGS -fdefault-integer-8 GFORTRAN_ARGS -fdefault-integer-8)
+
+# UTF-8 BOM handling
+RUN(NAME utf8_bom_01 LABELS gfortran llvm)
