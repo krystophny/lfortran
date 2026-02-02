@@ -1233,6 +1233,7 @@ ASR::asr_t* make_Assignment_t_util(Allocator &al, const Location &a_loc,
         is_allocatable |= ASRUtils::is_allocatable(a_target_struct->m_v);
     }
     a_realloc_lhs = a_realloc_lhs && is_allocatable;
+    a_value = wrap_logical_value_for_array_store(al, a_loc, a_value, a_target);
     return ASR::make_Assignment_t(al, a_loc, a_target, a_value,
         a_overloaded, a_realloc_lhs, a_move);
 }
