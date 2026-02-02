@@ -6688,6 +6688,23 @@ inline void flatten_ArrayConstant_data(Allocator &al, Vec<ASR::expr_t*> &data, A
     }
 }
 
+// Wrap a logical value in LogicalToLogicalByte cast for storage in a logical array.
+// Use this when storing values into logical arrays (assignments, array constants, broadcasts).
+static inline ASR::expr_t* wrap_logical_for_array_store(
+        Allocator &al, const Location &loc, ASR::expr_t* value, ASR::ttype_t* array_elem_type) {
+    ASR::ttype_t* elem_type = ASRUtils::type_get_past_pointer(
+            ASRUtils::type_get_past_allocatable(array_elem_type));
+    if (ASR::is_a<ASR::Logical_t>(*elem_type)) {
+        ASR::ttype_t* value_type = ASRUtils::expr_type(value);
+        if (ASR::is_a<ASR::Logical_t>(*ASRUtils::type_get_past_pointer(
+                ASRUtils::type_get_past_allocatable(value_type)))) {
+            return ASRUtils::EXPR(ASR::make_Cast_t(al, loc, value,
+                ASR::cast_kindType::LogicalToLogicalByte, value_type, nullptr));
+        }
+    }
+    return value;
+}
+
 inline ASR::asr_t* make_ArrayConstructor_t_util(Allocator &al, const Location &a_loc,
     ASR::expr_t** a_args, size_t n_args, ASR::ttype_t* a_type, ASR::arraystorageType a_storage_format,
     ASR::expr_t* a_struct_var=nullptr) {
@@ -7557,16 +7574,7 @@ static inline ASR::asr_t* make_ArrayItem_t_util(Allocator &al, const Location &a
 static inline ASR::expr_t* wrap_logical_value_for_array_store(
         Allocator &al, const Location &loc, ASR::expr_t* value, ASR::expr_t* target) {
     if (ASR::is_a<ASR::ArrayItem_t>(*target)) {
-        ASR::ttype_t* elem_type = ASRUtils::expr_type(target);
-        if (ASR::is_a<ASR::Logical_t>(*ASRUtils::type_get_past_pointer(
-                ASRUtils::type_get_past_allocatable(elem_type)))) {
-            ASR::ttype_t* value_type = ASRUtils::expr_type(value);
-            if (ASR::is_a<ASR::Logical_t>(*ASRUtils::type_get_past_pointer(
-                    ASRUtils::type_get_past_allocatable(value_type)))) {
-                return ASRUtils::EXPR(ASR::make_Cast_t(al, loc, value,
-                    ASR::cast_kindType::LogicalToLogicalByte, value_type, nullptr));
-            }
-        }
+        return wrap_logical_for_array_store(al, loc, value, ASRUtils::expr_type(target));
     }
     return value;
 }

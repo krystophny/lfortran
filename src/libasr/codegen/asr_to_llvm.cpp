@@ -8833,9 +8833,7 @@ public:
         }
         load_unlimited_polymorpic_value(x.m_value, tmp);
         value = tmp;
-        // Fallback for logical array stores: convert i1 to i8 if ASR cast wasn't inserted.
-        // ASR LogicalToLogicalByte casts are inserted via make_Assignment_t_util, but some
-        // code paths (passes, deserialization) may bypass it. This is a safety net.
+
         if (x.m_target->type == ASR::exprType::ArrayItem &&
             ASRUtils::is_logical(*ASRUtils::expr_type(x.m_target)) &&
             value->getType()->isIntegerTy(1)) {
@@ -9758,16 +9756,8 @@ public:
             if( load_ref &&
                 !ASRUtils::is_value_constant(ASRUtils::expr_value(x)) &&
                 (ASRUtils::is_array(expr_type(x)) || !ASRUtils::is_character(*expr_type(x)))) {
-                // Logical arrays are stored as byte-backed (i8) in memory; load as i8 and
-                // convert to scalar i1 for expression semantics.
-                if (x->type == ASR::exprType::ArrayItem &&
-                    ASRUtils::is_logical(*ASRUtils::expr_type(x))) {
-                    llvm::Value* v_i8 = llvm_utils->CreateLoad2(llvm::Type::getInt8Ty(context), tmp, is_volatile);
-                    tmp = builder->CreateICmpNE(v_i8, llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0));
-                } else {
-                    llvm::Type* x_llvm_type = llvm_utils->get_type_from_ttype_t_util(x, ASRUtils::expr_type(x), module.get());
-                    tmp = llvm_utils->CreateLoad2(x_llvm_type, tmp, is_volatile);
-                }
+                llvm::Type* x_llvm_type = llvm_utils->get_type_from_ttype_t_util(x, ASRUtils::expr_type(x), module.get());
+                tmp = llvm_utils->CreateLoad2(x_llvm_type, tmp, is_volatile);
             }
         }
     }
@@ -11484,10 +11474,11 @@ public:
             ptr_loads = 2;
             this->visit_expr_wrapper(el, true);
             ptr_loads = ptr_loads_copy;
-            if (ASRUtils::is_logical(*x_m_type) && tmp->getType()->isIntegerTy(1)) {
-                tmp = builder->CreateZExt(tmp, llvm::Type::getInt8Ty(context));
+            llvm::Value* store_val = tmp;
+            if (ASRUtils::is_logical(*x_m_type) && store_val->getType()->isIntegerTy(1)) {
+                store_val = builder->CreateZExt(store_val, llvm::Type::getInt8Ty(context));
             }
-            builder->CreateStore(tmp, llvm_el);
+            builder->CreateStore(store_val, llvm_el);
         }
         // Return the vector as float* type:
         tmp = llvm_utils->create_gep2(type_fxn ,p_fxn, 0);
@@ -12620,15 +12611,10 @@ public:
                 cast_string_to_array(&x);
             break;
             case (ASR::cast_kindType::LogicalByteToLogical) : {
-                // Convert byte-backed (i8) logical array element to scalar i1.
-                // For future use when logical array reads are handled at ASR level.
-                // Currently reads are handled by get_el_type() returning i8.
                 tmp = builder->CreateICmpNE(tmp, llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0));
                 break;
             }
             case (ASR::cast_kindType::LogicalToLogicalByte) : {
-                // Convert scalar i1 logical to byte (i8) for storage in logical array.
-                // Inserted by make_Assignment_t_util for logical array stores.
                 tmp = builder->CreateZExt(tmp, llvm::Type::getInt8Ty(context));
                 break;
             }
@@ -18877,13 +18863,13 @@ public:
         size_t n_eles = ASRUtils::get_fixed_size_of_array(x.m_type);
         llvm::Type* vec_type = FIXED_VECTOR_TYPE::get(ele_type, n_eles);
         llvm::AllocaInst *vec = llvm_utils->CreateAlloca(*builder, vec_type);
+        llvm::Value* store_val = value;
+        if (ASRUtils::is_logical(*ASRUtils::type_get_past_array(x.m_type)) &&
+            store_val->getType()->isIntegerTy(1)) {
+            store_val = builder->CreateZExt(store_val, llvm::Type::getInt8Ty(context));
+        }
         for (size_t i=0; i < n_eles; i++) {
-            llvm::Value* store_value = value;
-            if (ASRUtils::is_logical(*ASRUtils::type_get_past_array(x.m_type)) &&
-                store_value->getType()->isIntegerTy(1)) {
-                store_value = builder->CreateZExt(store_value, llvm::Type::getInt8Ty(context));
-            }
-            builder->CreateStore(store_value, llvm_utils->create_gep2(vec_type, vec, i));
+            builder->CreateStore(store_val, llvm_utils->create_gep2(vec_type, vec, i));
         }
         tmp = llvm_utils->CreateLoad2(vec_type, vec);
     }
