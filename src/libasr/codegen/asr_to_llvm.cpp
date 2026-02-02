@@ -12618,6 +12618,18 @@ public:
             case ASR::StringToArray :
                 cast_string_to_array(&x);
             break;
+            case (ASR::cast_kindType::LogicalByteToLogical) : {
+                // Convert byte-backed (i8) logical array element to scalar i1.
+                // This cast is inserted during AST->ASR for logical array element loads.
+                tmp = builder->CreateICmpNE(tmp, llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0));
+                break;
+            }
+            case (ASR::cast_kindType::LogicalToLogicalByte) : {
+                // Convert scalar i1 logical to byte (i8) for storage in logical array.
+                // This cast is inserted during AST->ASR for logical array element stores.
+                tmp = builder->CreateZExt(tmp, llvm::Type::getInt8Ty(context));
+                break;
+            }
             default : throw CodeGenError("Cast kind not implemented");
         }
     }

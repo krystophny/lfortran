@@ -2285,6 +2285,14 @@ PyMODINIT_FUNC PyInit_lpython_module_)" + fn_name + R"((void) {
                 last_expr_precedence = 2;
                 break;
             }
+            case (ASR::cast_kindType::LogicalByteToLogical) :
+            case (ASR::cast_kindType::LogicalToLogicalByte) : {
+                // In C/C++, bool is already byte-sized, so these are no-ops.
+                // The cast exists for LLVM where i1 vs i8 storage matters.
+                src = "(bool)(" + src + ")";
+                last_expr_precedence = 2;
+                break;
+            }
             default : throw CodeGenError("Cast kind " + std::to_string(x.m_kind) + " not implemented",
                 x.base.base.loc);
         }

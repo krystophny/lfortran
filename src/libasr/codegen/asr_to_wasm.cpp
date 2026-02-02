@@ -3266,6 +3266,12 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
                 }
                 break;
             }
+            case (ASR::cast_kindType::LogicalByteToLogical):
+            case (ASR::cast_kindType::LogicalToLogicalByte): {
+                // In WASM, logical values are i32, so these are no-ops.
+                // The cast exists for LLVM where i1 vs i8 storage matters.
+                break;
+            }
             default:
                 throw CodeGenError("Cast kind not implemented");
         }
