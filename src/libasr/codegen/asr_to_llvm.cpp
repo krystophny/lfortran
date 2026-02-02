@@ -8833,8 +8833,9 @@ public:
         }
         load_unlimited_polymorpic_value(x.m_value, tmp);
         value = tmp;
-        // Logical arrays use byte-backed storage (i8) in memory; convert scalar i1 values
-        // to i8 before storing into an array element.
+        // Fallback for logical array stores: convert i1 to i8 if ASR cast wasn't inserted.
+        // ASR LogicalToLogicalByte casts are inserted via make_Assignment_t_util, but some
+        // code paths (passes, deserialization) may bypass it. This is a safety net.
         if (x.m_target->type == ASR::exprType::ArrayItem &&
             ASRUtils::is_logical(*ASRUtils::expr_type(x.m_target)) &&
             value->getType()->isIntegerTy(1)) {
@@ -12620,13 +12621,14 @@ public:
             break;
             case (ASR::cast_kindType::LogicalByteToLogical) : {
                 // Convert byte-backed (i8) logical array element to scalar i1.
-                // This cast is inserted during AST->ASR for logical array element loads.
+                // For future use when logical array reads are handled at ASR level.
+                // Currently reads are handled by get_el_type() returning i8.
                 tmp = builder->CreateICmpNE(tmp, llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0));
                 break;
             }
             case (ASR::cast_kindType::LogicalToLogicalByte) : {
                 // Convert scalar i1 logical to byte (i8) for storage in logical array.
-                // This cast is inserted during AST->ASR for logical array element stores.
+                // Inserted by make_Assignment_t_util for logical array stores.
                 tmp = builder->CreateZExt(tmp, llvm::Type::getInt8Ty(context));
                 break;
             }

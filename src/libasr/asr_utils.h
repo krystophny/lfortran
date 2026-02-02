@@ -7552,23 +7552,6 @@ static inline ASR::asr_t* make_ArrayItem_t_util(Allocator &al, const Location &a
         n_args, a_type, a_storage_format, a_value);
 }
 
-// Wrap a scalar logical array element in LogicalByteToLogical cast for value use.
-// Call this when using an ArrayItem for logical as a VALUE (not assignment target).
-// Logical arrays use byte-backed (i8) storage in LLVM; this cast signals
-// the boundary crossing from byte storage to scalar i1 logical value.
-static inline ASR::expr_t* wrap_logical_array_element_for_read(
-        Allocator &al, const Location &loc, ASR::expr_t* array_item) {
-    if (ASR::is_a<ASR::ArrayItem_t>(*array_item)) {
-        ASR::ttype_t* elem_type = ASRUtils::expr_type(array_item);
-        if (ASR::is_a<ASR::Logical_t>(*ASRUtils::type_get_past_pointer(
-                ASRUtils::type_get_past_allocatable(elem_type)))) {
-            return ASRUtils::EXPR(ASR::make_Cast_t(al, loc, array_item,
-                ASR::cast_kindType::LogicalByteToLogical, elem_type, nullptr));
-        }
-    }
-    return array_item;
-}
-
 // Wrap a logical value in LogicalToLogicalByte cast for store to array element.
 // Call this when assigning a value TO a logical array element.
 static inline ASR::expr_t* wrap_logical_value_for_array_store(
