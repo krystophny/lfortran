@@ -899,6 +899,29 @@ class ArrayOpVisitor: public ASR::CallReplacerOnExpressionsVisitor<ArrayOpVisito
                 indices.size(), var_i_type, ASR::arraystorageType::ColMajor, nullptr));
         }
 
+        // Fix logical array assignments: unwrap read-cast from targets, wrap values for write.
+        // make_ArrayItem_t_util wraps logical array elements in Cast for reads,
+        // but assignment targets need the raw ArrayItem, and values need write-cast.
+        // This applies to all assignments in the statement tree (including those inside If bodies).
+        class FixLogicalArrayAssignments : public ASR::BaseWalkVisitor<FixLogicalArrayAssignments> {
+        public:
+            Allocator& al;
+            const Location& loc;
+            FixLogicalArrayAssignments(Allocator& al_, const Location& loc_) : al(al_), loc(loc_) {}
+            void visit_Assignment(const ASR::Assignment_t& x) {
+                ASR::Assignment_t& xx = const_cast<ASR::Assignment_t&>(x);
+                if (ASR::is_a<ASR::Cast_t>(*xx.m_target)) {
+                    ASR::Cast_t* cast = ASR::down_cast<ASR::Cast_t>(xx.m_target);
+                    if (cast->m_kind == ASR::cast_kindType::LogicalByteToLogical) {
+                        xx.m_target = cast->m_arg;
+                        xx.m_value = ASRUtils::wrap_logical_value_for_array_store(al, loc, xx.m_value, xx.m_target);
+                    }
+                }
+            }
+        };
+        FixLogicalArrayAssignments fix_logical(al, loc);
+        fix_logical.visit_stmt(const_cast<ASR::stmt_t&>(x.base));
+
         ASRUtils::RemoveArrayProcessingNodeVisitor array_broadcast_visitor(al);
         for( size_t i = 0; i < fix_types_args.size(); i++ ) {
             array_broadcast_visitor.current_expr = fix_types_args[i];
