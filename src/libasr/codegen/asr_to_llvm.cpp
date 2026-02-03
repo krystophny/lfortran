@@ -9756,18 +9756,8 @@ public:
             if( load_ref &&
                 !ASRUtils::is_value_constant(ASRUtils::expr_value(x)) &&
                 (ASRUtils::is_array(expr_type(x)) || !ASRUtils::is_character(*expr_type(x)))) {
-                ASR::ttype_t* x_type = ASRUtils::expr_type(x);
-                bool is_logical_array_element = x->type == ASR::exprType::ArrayItem &&
-                    ASRUtils::is_logical(*ASRUtils::type_get_past_array(
-                        ASRUtils::type_get_past_allocatable(
-                            ASRUtils::type_get_past_pointer(x_type))));
-                if (is_logical_array_element) {
-                    tmp = llvm_utils->CreateLoad2(llvm::Type::getInt8Ty(context), tmp, is_volatile);
-                    tmp = builder->CreateICmpNE(tmp, llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0));
-                } else {
-                    llvm::Type* x_llvm_type = llvm_utils->get_type_from_ttype_t_util(x, x_type, module.get());
-                    tmp = llvm_utils->CreateLoad2(x_llvm_type, tmp, is_volatile);
-                }
+                llvm::Type* x_llvm_type = llvm_utils->get_type_from_ttype_t_util(x, ASRUtils::expr_type(x), module.get());
+                tmp = llvm_utils->CreateLoad2(x_llvm_type, tmp, is_volatile);
             }
         }
     }
@@ -12143,6 +12133,17 @@ public:
             this->visit_expr_wrapper(x.m_value, true);
             return;
         }
+        // LogicalByteToLogical needs special handling: load i8 from storage, convert to i1.
+        // Standard visiting would load with i1 type which is wrong for byte-backed logical arrays.
+        if (x.m_kind == ASR::cast_kindType::LogicalByteToLogical) {
+            int64_t ptr_loads_copy = ptr_loads;
+            ptr_loads = 0;
+            this->visit_expr(*x.m_arg);
+            ptr_loads = ptr_loads_copy;
+            tmp = llvm_utils->CreateLoad2(llvm::Type::getInt8Ty(context), tmp);
+            tmp = builder->CreateICmpNE(tmp, llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0));
+            return;
+        }
         // Visit with appropriate load
         if (ASRUtils::is_string_only(expr_type(x.m_arg))) {
             this->visit_expr_load_wrapper(x.m_arg, 0);
@@ -12620,10 +12621,6 @@ public:
             case ASR::StringToArray :
                 cast_string_to_array(&x);
             break;
-            case (ASR::cast_kindType::LogicalByteToLogical) : {
-                tmp = builder->CreateICmpNE(tmp, llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0));
-                break;
-            }
             case (ASR::cast_kindType::LogicalToLogicalByte) : {
                 tmp = builder->CreateZExt(tmp, llvm::Type::getInt8Ty(context));
                 break;

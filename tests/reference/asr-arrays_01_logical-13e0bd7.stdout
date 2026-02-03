@@ -173,19 +173,24 @@
                             )
                             (Cast
                                 (LogicalNot
-                                    (ArrayItem
-                                        (Var 2 a)
-                                        [(()
-                                        (IntegerBinOp
-                                            (Var 2 i)
-                                            Sub
-                                            (IntegerConstant 1 (Integer 4) Decimal)
-                                            (Integer 4)
+                                    (Cast
+                                        (ArrayItem
+                                            (Var 2 a)
+                                            [(()
+                                            (IntegerBinOp
+                                                (Var 2 i)
+                                                Sub
+                                                (IntegerConstant 1 (Integer 4) Decimal)
+                                                (Integer 4)
+                                                ()
+                                            )
+                                            ())]
+                                            (Logical 4)
+                                            ColMajor
                                             ()
                                         )
-                                        ())]
+                                        LogicalByteToLogical
                                         (Logical 4)
-                                        ColMajor
                                         ()
                                     )
                                     (Logical 4)
@@ -204,13 +209,18 @@
                     (If
                         ()
                         (LogicalNot
-                            (ArrayItem
-                                (Var 2 a)
-                                [(()
-                                (IntegerConstant 1 (Integer 4) Decimal)
-                                ())]
+                            (Cast
+                                (ArrayItem
+                                    (Var 2 a)
+                                    [(()
+                                    (IntegerConstant 1 (Integer 4) Decimal)
+                                    ())]
+                                    (Logical 4)
+                                    ColMajor
+                                    ()
+                                )
+                                LogicalByteToLogical
                                 (Logical 4)
-                                ColMajor
                                 ()
                             )
                             (Logical 4)
@@ -223,13 +233,18 @@
                     )
                     (If
                         ()
-                        (ArrayItem
-                            (Var 2 a)
-                            [(()
-                            (IntegerConstant 2 (Integer 4) Decimal)
-                            ())]
+                        (Cast
+                            (ArrayItem
+                                (Var 2 a)
+                                [(()
+                                (IntegerConstant 2 (Integer 4) Decimal)
+                                ())]
+                                (Logical 4)
+                                ColMajor
+                                ()
+                            )
+                            LogicalByteToLogical
                             (Logical 4)
-                            ColMajor
                             ()
                         )
                         [(ErrorStop
@@ -240,13 +255,18 @@
                     (If
                         ()
                         (LogicalNot
-                            (ArrayItem
-                                (Var 2 a)
-                                [(()
-                                (IntegerConstant 3 (Integer 4) Decimal)
-                                ())]
+                            (Cast
+                                (ArrayItem
+                                    (Var 2 a)
+                                    [(()
+                                    (IntegerConstant 3 (Integer 4) Decimal)
+                                    ())]
+                                    (Logical 4)
+                                    ColMajor
+                                    ()
+                                )
+                                LogicalByteToLogical
                                 (Logical 4)
-                                ColMajor
                                 ()
                             )
                             (Logical 4)
@@ -304,25 +324,30 @@
                             )
                             (Cast
                                 (LogicalNot
-                                    (ArrayItem
-                                        (Var 2 b)
-                                        [(()
-                                        (IntegerBinOp
+                                    (Cast
+                                        (ArrayItem
+                                            (Var 2 b)
+                                            [(()
                                             (IntegerBinOp
-                                                (Var 2 i)
+                                                (IntegerBinOp
+                                                    (Var 2 i)
+                                                    Sub
+                                                    (IntegerConstant 10 (Integer 4) Decimal)
+                                                    (Integer 4)
+                                                    ()
+                                                )
                                                 Sub
-                                                (IntegerConstant 10 (Integer 4) Decimal)
+                                                (IntegerConstant 1 (Integer 4) Decimal)
                                                 (Integer 4)
                                                 ()
                                             )
-                                            Sub
-                                            (IntegerConstant 1 (Integer 4) Decimal)
-                                            (Integer 4)
+                                            ())]
+                                            (Logical 4)
+                                            ColMajor
                                             ()
                                         )
-                                        ())]
+                                        LogicalByteToLogical
                                         (Logical 4)
-                                        ColMajor
                                         ()
                                     )
                                     (Logical 4)
@@ -340,13 +365,18 @@
                     )
                     (If
                         ()
-                        (ArrayItem
-                            (Var 2 b)
-                            [(()
-                            (IntegerConstant 1 (Integer 4) Decimal)
-                            ())]
+                        (Cast
+                            (ArrayItem
+                                (Var 2 b)
+                                [(()
+                                (IntegerConstant 1 (Integer 4) Decimal)
+                                ())]
+                                (Logical 4)
+                                ColMajor
+                                ()
+                            )
+                            LogicalByteToLogical
                             (Logical 4)
-                            ColMajor
                             ()
                         )
                         [(ErrorStop
@@ -357,13 +387,18 @@
                     (If
                         ()
                         (LogicalNot
-                            (ArrayItem
-                                (Var 2 b)
-                                [(()
-                                (IntegerConstant 2 (Integer 4) Decimal)
-                                ())]
+                            (Cast
+                                (ArrayItem
+                                    (Var 2 b)
+                                    [(()
+                                    (IntegerConstant 2 (Integer 4) Decimal)
+                                    ())]
+                                    (Logical 4)
+                                    ColMajor
+                                    ()
+                                )
+                                LogicalByteToLogical
                                 (Logical 4)
-                                ColMajor
                                 ()
                             )
                             (Logical 4)
@@ -376,13 +411,18 @@
                     )
                     (If
                         ()
-                        (ArrayItem
-                            (Var 2 b)
-                            [(()
-                            (IntegerConstant 3 (Integer 4) Decimal)
-                            ())]
+                        (Cast
+                            (ArrayItem
+                                (Var 2 b)
+                                [(()
+                                (IntegerConstant 3 (Integer 4) Decimal)
+                                ())]
+                                (Logical 4)
+                                ColMajor
+                                ()
+                            )
+                            LogicalByteToLogical
                             (Logical 4)
-                            ColMajor
                             ()
                         )
                         [(ErrorStop
@@ -393,13 +433,18 @@
                     (If
                         ()
                         (LogicalNot
-                            (ArrayItem
-                                (Var 2 b)
-                                [(()
-                                (IntegerConstant 4 (Integer 4) Decimal)
-                                ())]
+                            (Cast
+                                (ArrayItem
+                                    (Var 2 b)
+                                    [(()
+                                    (IntegerConstant 4 (Integer 4) Decimal)
+                                    ())]
+                                    (Logical 4)
+                                    ColMajor
+                                    ()
+                                )
+                                LogicalByteToLogical
                                 (Logical 4)
-                                ColMajor
                                 ()
                             )
                             (Logical 4)
@@ -428,13 +473,18 @@
                             )
                             (Cast
                                 (LogicalBinOp
-                                    (ArrayItem
-                                        (Var 2 a)
-                                        [(()
-                                        (Var 2 i)
-                                        ())]
+                                    (Cast
+                                        (ArrayItem
+                                            (Var 2 a)
+                                            [(()
+                                            (Var 2 i)
+                                            ())]
+                                            (Logical 4)
+                                            ColMajor
+                                            ()
+                                        )
+                                        LogicalByteToLogical
                                         (Logical 4)
-                                        ColMajor
                                         ()
                                     )
                                     And
@@ -457,13 +507,18 @@
                     )
                     (If
                         ()
-                        (ArrayItem
-                            (Var 2 b)
-                            [(()
-                            (IntegerConstant 1 (Integer 4) Decimal)
-                            ())]
+                        (Cast
+                            (ArrayItem
+                                (Var 2 b)
+                                [(()
+                                (IntegerConstant 1 (Integer 4) Decimal)
+                                ())]
+                                (Logical 4)
+                                ColMajor
+                                ()
+                            )
+                            LogicalByteToLogical
                             (Logical 4)
-                            ColMajor
                             ()
                         )
                         [(ErrorStop
@@ -473,13 +528,18 @@
                     )
                     (If
                         ()
-                        (ArrayItem
-                            (Var 2 b)
-                            [(()
-                            (IntegerConstant 2 (Integer 4) Decimal)
-                            ())]
+                        (Cast
+                            (ArrayItem
+                                (Var 2 b)
+                                [(()
+                                (IntegerConstant 2 (Integer 4) Decimal)
+                                ())]
+                                (Logical 4)
+                                ColMajor
+                                ()
+                            )
+                            LogicalByteToLogical
                             (Logical 4)
-                            ColMajor
                             ()
                         )
                         [(ErrorStop
@@ -489,13 +549,18 @@
                     )
                     (If
                         ()
-                        (ArrayItem
-                            (Var 2 b)
-                            [(()
-                            (IntegerConstant 3 (Integer 4) Decimal)
-                            ())]
+                        (Cast
+                            (ArrayItem
+                                (Var 2 b)
+                                [(()
+                                (IntegerConstant 3 (Integer 4) Decimal)
+                                ())]
+                                (Logical 4)
+                                ColMajor
+                                ()
+                            )
+                            LogicalByteToLogical
                             (Logical 4)
-                            ColMajor
                             ()
                         )
                         [(ErrorStop
@@ -517,49 +582,69 @@
                             (LogicalBinOp
                                 (LogicalBinOp
                                     (LogicalBinOp
-                                        (ArrayItem
-                                            (Var 2 b)
-                                            [(()
-                                            (IntegerConstant 1 (Integer 4) Decimal)
-                                            ())]
+                                        (Cast
+                                            (ArrayItem
+                                                (Var 2 b)
+                                                [(()
+                                                (IntegerConstant 1 (Integer 4) Decimal)
+                                                ())]
+                                                (Logical 4)
+                                                ColMajor
+                                                ()
+                                            )
+                                            LogicalByteToLogical
                                             (Logical 4)
-                                            ColMajor
                                             ()
                                         )
                                         Or
-                                        (ArrayItem
-                                            (Var 2 b)
-                                            [(()
-                                            (IntegerConstant 2 (Integer 4) Decimal)
-                                            ())]
+                                        (Cast
+                                            (ArrayItem
+                                                (Var 2 b)
+                                                [(()
+                                                (IntegerConstant 2 (Integer 4) Decimal)
+                                                ())]
+                                                (Logical 4)
+                                                ColMajor
+                                                ()
+                                            )
+                                            LogicalByteToLogical
                                             (Logical 4)
-                                            ColMajor
                                             ()
                                         )
                                         (Logical 4)
                                         ()
                                     )
                                     Or
-                                    (ArrayItem
-                                        (Var 2 b)
-                                        [(()
-                                        (IntegerConstant 3 (Integer 4) Decimal)
-                                        ())]
+                                    (Cast
+                                        (ArrayItem
+                                            (Var 2 b)
+                                            [(()
+                                            (IntegerConstant 3 (Integer 4) Decimal)
+                                            ())]
+                                            (Logical 4)
+                                            ColMajor
+                                            ()
+                                        )
+                                        LogicalByteToLogical
                                         (Logical 4)
-                                        ColMajor
                                         ()
                                     )
                                     (Logical 4)
                                     ()
                                 )
                                 Or
-                                (ArrayItem
-                                    (Var 2 a)
-                                    [(()
-                                    (IntegerConstant 1 (Integer 4) Decimal)
-                                    ())]
+                                (Cast
+                                    (ArrayItem
+                                        (Var 2 a)
+                                        [(()
+                                        (IntegerConstant 1 (Integer 4) Decimal)
+                                        ())]
+                                        (Logical 4)
+                                        ColMajor
+                                        ()
+                                    )
+                                    LogicalByteToLogical
                                     (Logical 4)
-                                    ColMajor
                                     ()
                                 )
                                 (Logical 4)
@@ -576,13 +661,18 @@
                     (If
                         ()
                         (LogicalNot
-                            (ArrayItem
-                                (Var 2 b)
-                                [(()
-                                (IntegerConstant 4 (Integer 4) Decimal)
-                                ())]
+                            (Cast
+                                (ArrayItem
+                                    (Var 2 b)
+                                    [(()
+                                    (IntegerConstant 4 (Integer 4) Decimal)
+                                    ())]
+                                    (Logical 4)
+                                    ColMajor
+                                    ()
+                                )
+                                LogicalByteToLogical
                                 (Logical 4)
-                                ColMajor
                                 ()
                             )
                             (Logical 4)
@@ -604,13 +694,18 @@
                             ()
                         )
                         (Cast
-                            (ArrayItem
-                                (Var 2 a)
-                                [(()
-                                (IntegerConstant 1 (Integer 4) Decimal)
-                                ())]
+                            (Cast
+                                (ArrayItem
+                                    (Var 2 a)
+                                    [(()
+                                    (IntegerConstant 1 (Integer 4) Decimal)
+                                    ())]
+                                    (Logical 4)
+                                    ColMajor
+                                    ()
+                                )
+                                LogicalByteToLogical
                                 (Logical 4)
-                                ColMajor
                                 ()
                             )
                             LogicalToLogicalByte
@@ -624,13 +719,18 @@
                     (If
                         ()
                         (LogicalNot
-                            (ArrayItem
-                                (Var 2 b)
-                                [(()
-                                (IntegerConstant 4 (Integer 4) Decimal)
-                                ())]
+                            (Cast
+                                (ArrayItem
+                                    (Var 2 b)
+                                    [(()
+                                    (IntegerConstant 4 (Integer 4) Decimal)
+                                    ())]
+                                    (Logical 4)
+                                    ColMajor
+                                    ()
+                                )
+                                LogicalByteToLogical
                                 (Logical 4)
-                                ColMajor
                                 ()
                             )
                             (Logical 4)
@@ -751,16 +851,21 @@
                     )
                     (If
                         ()
-                        (ArrayItem
-                            (Var 2 c)
-                            [(()
-                            (IntegerConstant 1 (Integer 4) Decimal)
-                            ())
-                            (()
-                            (IntegerConstant 1 (Integer 4) Decimal)
-                            ())]
+                        (Cast
+                            (ArrayItem
+                                (Var 2 c)
+                                [(()
+                                (IntegerConstant 1 (Integer 4) Decimal)
+                                ())
+                                (()
+                                (IntegerConstant 1 (Integer 4) Decimal)
+                                ())]
+                                (Logical 4)
+                                ColMajor
+                                ()
+                            )
+                            LogicalByteToLogical
                             (Logical 4)
-                            ColMajor
                             ()
                         )
                         [(ErrorStop
@@ -771,16 +876,21 @@
                     (If
                         ()
                         (LogicalNot
-                            (ArrayItem
-                                (Var 2 c)
-                                [(()
-                                (IntegerConstant 1 (Integer 4) Decimal)
-                                ())
-                                (()
-                                (IntegerConstant 2 (Integer 4) Decimal)
-                                ())]
+                            (Cast
+                                (ArrayItem
+                                    (Var 2 c)
+                                    [(()
+                                    (IntegerConstant 1 (Integer 4) Decimal)
+                                    ())
+                                    (()
+                                    (IntegerConstant 2 (Integer 4) Decimal)
+                                    ())]
+                                    (Logical 4)
+                                    ColMajor
+                                    ()
+                                )
+                                LogicalByteToLogical
                                 (Logical 4)
-                                ColMajor
                                 ()
                             )
                             (Logical 4)
@@ -794,16 +904,21 @@
                     (If
                         ()
                         (LogicalNot
-                            (ArrayItem
-                                (Var 2 c)
-                                [(()
-                                (IntegerConstant 2 (Integer 4) Decimal)
-                                ())
-                                (()
-                                (IntegerConstant 1 (Integer 4) Decimal)
-                                ())]
+                            (Cast
+                                (ArrayItem
+                                    (Var 2 c)
+                                    [(()
+                                    (IntegerConstant 2 (Integer 4) Decimal)
+                                    ())
+                                    (()
+                                    (IntegerConstant 1 (Integer 4) Decimal)
+                                    ())]
+                                    (Logical 4)
+                                    ColMajor
+                                    ()
+                                )
+                                LogicalByteToLogical
                                 (Logical 4)
-                                ColMajor
                                 ()
                             )
                             (Logical 4)
@@ -816,16 +931,21 @@
                     )
                     (If
                         ()
-                        (ArrayItem
-                            (Var 2 c)
-                            [(()
-                            (IntegerConstant 2 (Integer 4) Decimal)
-                            ())
-                            (()
-                            (IntegerConstant 2 (Integer 4) Decimal)
-                            ())]
+                        (Cast
+                            (ArrayItem
+                                (Var 2 c)
+                                [(()
+                                (IntegerConstant 2 (Integer 4) Decimal)
+                                ())
+                                (()
+                                (IntegerConstant 2 (Integer 4) Decimal)
+                                ())]
+                                (Logical 4)
+                                ColMajor
+                                ()
+                            )
+                            LogicalByteToLogical
                             (Logical 4)
-                            ColMajor
                             ()
                         )
                         [(ErrorStop

@@ -7549,7 +7549,8 @@ static inline ASR::asr_t* make_ArrayItem_t_util(Allocator &al, const Location &a
         a_v = ASR::down_cast<ASR::ArrayPhysicalCast_t>(a_v)->m_arg;
     }
 
-    if( !ASRUtils::is_array_indexed_with_array_indices(a_args, n_args) ) {
+    bool is_scalar_element = !ASRUtils::is_array_indexed_with_array_indices(a_args, n_args);
+    if( is_scalar_element ) {
         a_type = ASRUtils::extract_type(a_type);
     }
 
@@ -7565,8 +7566,17 @@ static inline ASR::asr_t* make_ArrayItem_t_util(Allocator &al, const Location &a
 
     ASRUtils::ExprStmtDuplicator type_duplicator(al);
     a_type = type_duplicator.duplicate_ttype(a_type);
-    return ASR::make_ArrayItem_t(al, a_loc, a_v, a_args,
+    ASR::asr_t* array_item = ASR::make_ArrayItem_t(al, a_loc, a_v, a_args,
         n_args, a_type, a_storage_format, a_value);
+
+    // Wrap scalar logical array element reads with LogicalByteToLogical cast.
+    // Logical arrays use i8 storage, so reads need conversion to i1.
+    // When used as lvalue targets, make_Assignment_t_util unwraps this.
+    if (is_scalar_element && ASRUtils::is_logical(*a_type)) {
+        return ASR::make_Cast_t(al, a_loc, ASRUtils::EXPR(array_item),
+            ASR::cast_kindType::LogicalByteToLogical, a_type, nullptr);
+    }
+    return array_item;
 }
 
 // Wrap a logical value in LogicalToLogicalByte cast for store to array element.

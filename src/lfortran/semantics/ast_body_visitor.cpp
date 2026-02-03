@@ -4435,6 +4435,15 @@ public:
                 loc, re, y, ASRUtils::expr_type(target), nullptr));
             value = cmplx;
         }
+        // Unwrap LogicalByteToLogical cast from target (added by make_ArrayItem_t_util for reads).
+        // The unwrapped ArrayItem is valid as an lvalue; make_Assignment_t_util will handle the cast.
+        if (ASR::is_a<ASR::Cast_t>(*target)) {
+            ASR::Cast_t* cast = ASR::down_cast<ASR::Cast_t>(target);
+            if (cast->m_kind == ASR::cast_kindType::LogicalByteToLogical &&
+                ASR::is_a<ASR::ArrayItem_t>(*cast->m_arg)) {
+                target = cast->m_arg;
+            }
+        }
         bool is_valid_lhs = (
             target->type == ASR::exprType::Var ||
             target->type == ASR::exprType::ArrayItem ||
