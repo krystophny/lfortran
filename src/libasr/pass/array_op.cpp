@@ -220,6 +220,18 @@ class FixTypeVisitor: public ASR::CallReplacerOnExpressionsVisitor<FixTypeVisito
         ASR::IntegerUnaryMinus_t& xx = const_cast<ASR::IntegerUnaryMinus_t&>(x);
         xx.m_type = ASRUtils::extract_type(x.m_type);
     }
+
+    void visit_LogicalNot(const ASR::LogicalNot_t& x){
+        if( !ASRUtils::is_array(x.m_type) ) {
+            return ;
+        }
+        ASR::CallReplacerOnExpressionsVisitor<FixTypeVisitor>::visit_LogicalNot(x);
+        ASR::LogicalNot_t& xx = const_cast<ASR::LogicalNot_t&>(x);
+        if( !ASRUtils::is_array(ASRUtils::expr_type(xx.m_arg)) ) {
+            xx.m_type = ASRUtils::extract_type(x.m_type);
+            xx.m_value = nullptr;
+        }
+    }
 };
 
 class ReplaceArrayOp: public ASR::BaseExprReplacer<ReplaceArrayOp> {
@@ -766,6 +778,19 @@ class ArrayOpVisitor: public ASR::CallReplacerOnExpressionsVisitor<ArrayOpVisito
             value, value_address, is_value_array, 1,
             var_rank, loc, var2indices, j, index_type);
 
+        if (ASR::is_a<ASR::Assignment_t>(x.base)) {
+            ASR::Assignment_t& asgn = *ASR::down_cast<ASR::Assignment_t>(
+                const_cast<ASR::stmt_t*>(&(x.base)));
+            if (ASR::is_a<ASR::Cast_t>(*asgn.m_target)) {
+                ASR::Cast_t* cast = ASR::down_cast<ASR::Cast_t>(asgn.m_target);
+                if (cast->m_kind == ASR::cast_kindType::LogicalByteToLogical) {
+                    asgn.m_target = cast->m_arg;
+                    asgn.m_value = ASRUtils::wrap_logical_value_for_array_store(
+                        al, loc, asgn.m_value, asgn.m_target);
+                }
+            }
+        }
+
         size_t vars_expr_size = vars_expr.size();
         for( size_t i = offset_for_array_indices; i < vars_expr_size; i++ ) {
             var2indices.erase(i);
@@ -902,7 +927,6 @@ class ArrayOpVisitor: public ASR::CallReplacerOnExpressionsVisitor<ArrayOpVisito
         // Fix logical array assignments: unwrap read-cast from targets, wrap values for write.
         // make_ArrayItem_t_util wraps logical array elements in Cast for reads,
         // but assignment targets need the raw ArrayItem, and values need write-cast.
-        // This applies to all assignments in the statement tree (including those inside If bodies).
         class FixLogicalArrayAssignments : public ASR::BaseWalkVisitor<FixLogicalArrayAssignments> {
         public:
             Allocator& al;

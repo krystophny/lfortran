@@ -8845,12 +8845,6 @@ public:
         load_unlimited_polymorpic_value(x.m_value, tmp);
         value = tmp;
 
-        if (x.m_target->type == ASR::exprType::ArrayItem &&
-            ASRUtils::is_logical(*ASRUtils::expr_type(x.m_target)) &&
-            value->getType()->isIntegerTy(1)) {
-            value = builder->CreateZExt(value, llvm::Type::getInt8Ty(context));
-        }
-
         if (ASR::is_a<ASR::StructType_t>(*target_type) && !ASRUtils::is_class_type(target_type)) {
             if (value->getType()->isPointerTy()) {
                 llvm::Type* st_type = llvm_utils->get_type_from_ttype_t_util(x.m_target, target_type, module.get());

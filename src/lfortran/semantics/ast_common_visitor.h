@@ -4237,14 +4237,6 @@ public:
                             this->visit_expr(*eq2);
                             ASR::expr_t* asr_eq2 = ASRUtils::EXPR(tmp);
 
-                            // Unwrap LogicalByteToLogical cast if present (logical array elements)
-                            if (ASR::is_a<ASR::Cast_t>(*asr_eq2)) {
-                                ASR::Cast_t* cast = ASR::down_cast<ASR::Cast_t>(asr_eq2);
-                                if (cast->m_kind == ASR::cast_kindType::LogicalByteToLogical) {
-                                    asr_eq2 = cast->m_arg;
-                                }
-                            }
-
                             if (AST::is_a<AST::FuncCallOrArray_t>(*eq1) && AST::is_a<AST::FuncCallOrArray_t>(*eq2)) {
                                 ASR::ttype_t* arg_type1 = ASRUtils::type_get_past_allocatable(
                                             ASRUtils::type_get_past_pointer(ASRUtils::expr_type(asr_eq1)));

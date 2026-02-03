@@ -6696,8 +6696,7 @@ static inline ASR::expr_t* wrap_logical_for_array_store(
             ASRUtils::type_get_past_allocatable(array_elem_type));
     if (ASR::is_a<ASR::Logical_t>(*elem_type)) {
         ASR::ttype_t* value_type = ASRUtils::expr_type(value);
-        if (ASR::is_a<ASR::Logical_t>(*ASRUtils::type_get_past_pointer(
-                ASRUtils::type_get_past_allocatable(value_type)))) {
+        if (ASR::is_a<ASR::Logical_t>(*ASRUtils::extract_type(value_type))) {
             return ASRUtils::EXPR(ASR::make_Cast_t(al, loc, value,
                 ASR::cast_kindType::LogicalToLogicalByte, value_type, nullptr));
         }
@@ -7462,6 +7461,11 @@ static inline ASR::asr_t* make_Associate_t_util(
                         value_type, dim_vec_ptr, target_ptype, true), nullptr));
         }
     }
+    if (ASR::is_a<ASR::Cast_t>(*a_value) &&
+        ASR::down_cast<ASR::Cast_t>(a_value)->m_kind ==
+            ASR::cast_kindType::LogicalByteToLogical) {
+        a_value = ASR::down_cast<ASR::Cast_t>(a_value)->m_arg;
+    }
     return ASR::make_Associate_t(al, a_loc, a_target, a_value);
 }
 
@@ -7578,9 +7582,6 @@ static inline ASR::asr_t* make_ArrayItem_t_util(Allocator &al, const Location &a
     ASR::asr_t* array_item = ASR::make_ArrayItem_t(al, a_loc, a_v, a_args,
         n_args, a_type, a_storage_format, a_value);
 
-    // Wrap scalar logical array element reads with LogicalByteToLogical cast.
-    // Logical arrays use i8 storage, so reads need conversion to i1.
-    // When used as lvalue targets, make_Assignment_t_util unwraps this.
     if (is_scalar_element && ASRUtils::is_logical(*a_type)) {
         return ASR::make_Cast_t(al, a_loc, ASRUtils::EXPR(array_item),
             ASR::cast_kindType::LogicalByteToLogical, a_type, nullptr);
