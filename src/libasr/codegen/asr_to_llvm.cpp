@@ -8110,6 +8110,17 @@ public:
     void visit_Assignment(const ASR::Assignment_t &x) {
         if (compiler_options.emit_debug_info) debug_emit_loc(x);
 
+        // Unwrap LogicalByteToLogical cast from target if present.
+        // This cast is added by make_ArrayItem_t_util for logical array reads,
+        // but when used as assignment target we need the underlying ArrayItem.
+        ASR::Assignment_t& xx = const_cast<ASR::Assignment_t&>(x);
+        if (ASR::is_a<ASR::Cast_t>(*xx.m_target)) {
+            ASR::Cast_t* cast = ASR::down_cast<ASR::Cast_t>(xx.m_target);
+            if (cast->m_kind == ASR::cast_kindType::LogicalByteToLogical) {
+                xx.m_target = cast->m_arg;
+            }
+        }
+
         // Special-case: transfer(character, int8_array, size) lowered as BitCast.
         // When scalarized into element-wise assignments, extract the corresponding
         // byte from the source string.
@@ -12140,8 +12151,18 @@ public:
             ptr_loads = 0;
             this->visit_expr(*x.m_arg);
             ptr_loads = ptr_loads_copy;
-            tmp = llvm_utils->CreateLoad2(llvm::Type::getInt8Ty(context), tmp);
-            tmp = builder->CreateICmpNE(tmp, llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0));
+            // If caller wants a pointer (ptr_loads_copy == 0), return the pointer directly.
+            // This happens for equivalence setup where we need the address, not the value.
+            if (ptr_loads_copy == 0) {
+                return;
+            }
+            // If the result is a pointer, load i8 and convert to i1.
+            // If it's already a value (e.g., constant boolean), use it directly.
+            if (tmp->getType()->isPointerTy()) {
+                tmp = llvm_utils->CreateLoad2(llvm::Type::getInt8Ty(context), tmp);
+                tmp = builder->CreateICmpNE(tmp, llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0));
+            }
+            // Otherwise tmp is already an i1 value (constant boolean), no conversion needed
             return;
         }
         // Visit with appropriate load
