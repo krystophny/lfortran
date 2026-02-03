@@ -2228,6 +2228,13 @@ public:
                 }
             }
             // Assume that tmp is an `ArraySection` or `ArrayItem`
+            // Unwrap LogicalByteToLogical cast if present (logical array elements)
+            if (ASR::is_a<ASR::Cast_t>(*tmp_stmt)) {
+                ASR::Cast_t* cast = ASR::down_cast<ASR::Cast_t>(tmp_stmt);
+                if (cast->m_kind == ASR::cast_kindType::LogicalByteToLogical) {
+                    tmp_stmt = cast->m_arg;
+                }
+            }
             if( ASR::is_a<ASR::ArraySection_t>(*tmp_stmt) ) {
                 ASR::ArraySection_t* array_ref = ASR::down_cast<ASR::ArraySection_t>(tmp_stmt);
                 new_arg.m_a = array_ref->m_v;
