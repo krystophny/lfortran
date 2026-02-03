@@ -6854,6 +6854,15 @@ inline void check_simple_intent_mismatch(diag::Diagnostics &diag, ASR::Function_
                                     }
                                     break;
                                 }
+                                case ASR::exprType::Cast: {
+                                    // Allow LogicalByteToLogical cast wrapping ArrayItem (for logical arrays)
+                                    ASR::Cast_t* cast = ASR::down_cast<ASR::Cast_t>(passed_arg_expr);
+                                    if (cast->m_kind == ASR::cast_kindType::LogicalByteToLogical &&
+                                        ASR::is_a<ASR::ArrayItem_t>(*cast->m_arg)) {
+                                        is_valid_variable = true;
+                                    }
+                                    break;
+                                }
                                 default:
                                     is_valid_variable = false;
                                     break;

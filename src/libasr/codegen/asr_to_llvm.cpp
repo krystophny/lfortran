@@ -16100,6 +16100,21 @@ public:
                     tmp = llvm_utils->CreateLoad2(el_type->getPointerTo(), tmp);
                 }
                 llvm::Value *value = tmp;
+
+                auto get_arrayitem_from_logical_array_read_cast = [](ASR::expr_t* e) -> ASR::ArrayItem_t* {
+                    if (ASR::is_a<ASR::ArrayItem_t>(*e)) {
+                        return ASR::down_cast<ASR::ArrayItem_t>(e);
+                    }
+                    if (ASR::is_a<ASR::Cast_t>(*e)) {
+                        ASR::Cast_t* cast = ASR::down_cast<ASR::Cast_t>(e);
+                        if (cast->m_kind == ASR::cast_kindType::LogicalByteToLogical &&
+                            ASR::is_a<ASR::ArrayItem_t>(*cast->m_arg)) {
+                            return ASR::down_cast<ASR::ArrayItem_t>(cast->m_arg);
+                        }
+                    }
+                    return nullptr;
+                };
+
                 if (orig_arg_intent == ASR::intentType::In ||
                     orig_arg_intent == ASR::intentType::InOut ||
                     orig_arg_intent == ASR::intentType::Out) {
@@ -16113,8 +16128,7 @@ public:
                         For example, refer integration_tests/intent_03.f90
                     */
                     // TODO: this is possible in other cases as well, support those.
-                    if ( ASR::is_a<ASR::ArrayItem_t>(*x.m_args[i].m_value) ) {
-                        ASR::ArrayItem_t* arr_item = ASR::down_cast<ASR::ArrayItem_t>(x.m_args[i].m_value);
+                    if (ASR::ArrayItem_t* arr_item = get_arrayitem_from_logical_array_read_cast(x.m_args[i].m_value)) {
                         arr_item->m_value = nullptr;
                         this->visit_expr_wrapper((ASR::expr_t*)arr_item);
                         value = tmp;
@@ -16205,7 +16219,7 @@ public:
                         && orig_arg->m_value_attr) {
                         use_value = true;
                     }
-                    if (ASR::is_a<ASR::ArrayItem_t>(*x.m_args[i].m_value)) {
+                    if (get_arrayitem_from_logical_array_read_cast(x.m_args[i].m_value) != nullptr) {
                         use_value = true;
                     }
                     if (use_value) {
