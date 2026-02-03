@@ -9756,8 +9756,18 @@ public:
             if( load_ref &&
                 !ASRUtils::is_value_constant(ASRUtils::expr_value(x)) &&
                 (ASRUtils::is_array(expr_type(x)) || !ASRUtils::is_character(*expr_type(x)))) {
-                llvm::Type* x_llvm_type = llvm_utils->get_type_from_ttype_t_util(x, ASRUtils::expr_type(x), module.get());
-                tmp = llvm_utils->CreateLoad2(x_llvm_type, tmp, is_volatile);
+                ASR::ttype_t* x_type = ASRUtils::expr_type(x);
+                bool is_logical_array_element = x->type == ASR::exprType::ArrayItem &&
+                    ASRUtils::is_logical(*ASRUtils::type_get_past_array(
+                        ASRUtils::type_get_past_allocatable(
+                            ASRUtils::type_get_past_pointer(x_type))));
+                if (is_logical_array_element) {
+                    tmp = llvm_utils->CreateLoad2(llvm::Type::getInt8Ty(context), tmp, is_volatile);
+                    tmp = builder->CreateICmpNE(tmp, llvm::ConstantInt::get(llvm::Type::getInt8Ty(context), 0));
+                } else {
+                    llvm::Type* x_llvm_type = llvm_utils->get_type_from_ttype_t_util(x, x_type, module.get());
+                    tmp = llvm_utils->CreateLoad2(x_llvm_type, tmp, is_volatile);
+                }
             }
         }
     }
