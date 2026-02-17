@@ -408,7 +408,7 @@ namespace LCompilers {
                 break;
             }
             case ASR::ttypeType::CPtr: {
-                llvm_mem_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                llvm_mem_type = llvm::Type::getInt8Ty(context)->getPointerTo();
                 break;
             }
             default:
@@ -656,7 +656,7 @@ namespace LCompilers {
                 break;
             }
             case ASR::ttypeType::CPtr: {
-                el_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                el_type = llvm::Type::getInt8Ty(context)->getPointerTo();
                 break;
             }
             case ASR::ttypeType::StructType: {
@@ -990,7 +990,7 @@ namespace LCompilers {
                 break;
             }
             case (ASR::ttypeType::CPtr) : {
-                type = llvm::Type::getVoidTy(context)->getPointerTo();
+                type = llvm::Type::getInt8Ty(context)->getPointerTo();
                 break;
             }
             case (ASR::ttypeType::Tuple) : {
@@ -1273,7 +1273,7 @@ namespace LCompilers {
                     break;
                 }
                 case (ASR::ttypeType::CPtr) :
-                    return_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                    return_type = llvm::Type::getInt8Ty(context)->getPointerTo();
                     break;
                 case (ASR::ttypeType::Pointer) : {
                     return_type = get_type_from_ttype_t_util(x.m_return_var, ASRUtils::get_contained_type(return_var_type0), module)->getPointerTo();
@@ -1625,7 +1625,7 @@ namespace LCompilers {
             }
             case (ASR::ttypeType::CPtr) : {
                 a_kind = 8;
-                llvm_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                llvm_type = llvm::Type::getInt8Ty(context)->getPointerTo();
                 break;
             }
             case (ASR::ttypeType::EnumType) : {
