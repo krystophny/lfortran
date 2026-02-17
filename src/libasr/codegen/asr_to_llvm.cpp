@@ -1461,7 +1461,7 @@ public:
         if (ASRUtils::is_unlimited_polymorphic_type(st)) {
             if (!compiler_options.new_classes) {
                 if (is_pointer) {
-                    return llvm::Type::getVoidTy(context)->getPointerTo();
+                    return llvm::Type::getInt8Ty(context)->getPointerTo();
                 } else {
                     return llvm::Type::getVoidTy(context);
                 }
@@ -4343,6 +4343,12 @@ public:
         std::vector<llvm::Constant*> arr_elements;
         size_t arr_const_size = (size_t) ASRUtils::get_fixed_size_of_array(arr_const->m_type);
         arr_elements.reserve(arr_const_size);
+        llvm::ArrayType* arr_type = nullptr;
+        llvm::Type* elem_type = type;
+        if (type->isArrayTy()) {
+            arr_type = llvm::cast<llvm::ArrayType>(type);
+            elem_type = arr_type->getElementType();
+        }
         int a_kind;
         for (size_t i = 0; i < arr_const_size; i++) {
             ASR::expr_t* elem = ASRUtils::fetch_ArrayConstant_value(al, arr_const, i);
@@ -4366,10 +4372,12 @@ public:
                     context, llvm::APInt(1, logical_const->m_value)));
             }
         }
-        llvm::ArrayType* arr_type = llvm::ArrayType::get(type, arr_const_size);
+        if (!arr_type) {
+            arr_type = llvm::ArrayType::get(elem_type, arr_const_size);
+        }
         llvm::Constant* initializer = nullptr;
         if (isNullValueArray(arr_elements)) {
-            initializer = llvm::ConstantArray::getNullValue(type);
+            initializer = llvm::ConstantArray::getNullValue(arr_type);
         } else {
             initializer = llvm::ConstantArray::get(arr_type, arr_elements);
         }
@@ -4587,7 +4595,7 @@ public:
                 }
             llvm_symtab[h] = ptr;
         } else if( x.m_type->type == ASR::ttypeType::CPtr ) {
-            llvm::Type* void_ptr = llvm::Type::getVoidTy(context)->getPointerTo();
+            llvm::Type* void_ptr = llvm::Type::getInt8Ty(context)->getPointerTo();
             llvm::Constant *ptr = module->getOrInsertGlobal(llvm_var_name,
                 void_ptr);
             if (!external) {
@@ -4642,7 +4650,7 @@ public:
             }
             if (!is_class) {
                 if( x.m_type_declaration && ASRUtils::is_c_ptr(x.m_type_declaration) ) {
-                    llvm::Type* void_ptr = llvm::Type::getVoidTy(context)->getPointerTo();
+                    llvm::Type* void_ptr = llvm::Type::getInt8Ty(context)->getPointerTo();
                     llvm::Constant *ptr = module->getOrInsertGlobal(llvm_var_name,
                         void_ptr);
                     if (!external) {
@@ -6544,9 +6552,9 @@ public:
             F->setSubprogram(SP);
             debug_current_scope = SP;
         }
-        proc_return = llvm::BasicBlock::Create(context, "return");
         llvm::BasicBlock *BB = llvm::BasicBlock::Create(context,
                 ".entry", F);
+        proc_return = llvm::BasicBlock::Create(context, "return");
         builder->SetInsertPoint(BB);
         if (compiler_options.emit_debug_info) debug_emit_loc(x);
         declare_args(x, *F);
@@ -6838,7 +6846,7 @@ public:
             tmp = llvm_utils->CreateLoad2(elem_type->getPointerTo(), arr_descr->get_pointer_to_data(elem_type, tmp));
         }
         tmp = builder->CreateBitCast(tmp,
-                    llvm::Type::getVoidTy(context)->getPointerTo());
+                    llvm::Type::getInt8Ty(context)->getPointerTo());
     }
 
 
@@ -6919,7 +6927,7 @@ public:
             tmp = llvm_utils->get_string_data(ASRUtils::get_string_type(x.m_arg), tmp);
         }
         tmp = builder->CreateBitCast(tmp,
-                    llvm::Type::getVoidTy(context)->getPointerTo());
+                    llvm::Type::getInt8Ty(context)->getPointerTo());
     }
 
 
@@ -7989,7 +7997,7 @@ public:
 
                 if ( ASRUtils::is_unlimited_polymorphic_type(value_struct_t) ) {
                     // we need to cast `value_class` to `void*`
-                    llvm::Type* void_ptr_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                    llvm::Type* void_ptr_type = llvm::Type::getInt8Ty(context)->getPointerTo();
                     value_class = builder->CreateBitCast(value_class, void_ptr_type);
                 }
                 builder->CreateStore(value_class, llvm_utils->create_gep2(value_llvm_type, llvm_target, 1));
@@ -11242,10 +11250,16 @@ public:
         if (ASR::is_a<ASR::ArrayItem_t>(*(x.m_source))) {
             source = llvm_utils->CreateLoad2(type, source);
         }
-        llvm::Value *ftarget = builder->CreateSIToFP(target,
-                type);
-        llvm::Value *fsource = builder->CreateSIToFP(source,
-                type);
+        llvm::Value *ftarget = target;
+        llvm::Value *fsource = source;
+        if (ftarget->getType() != type) {
+            if (ftarget->getType()->isIntegerTy()) ftarget = builder->CreateSIToFP(ftarget, type);
+            else if (ftarget->getType()->isFloatingPointTy()) ftarget = builder->CreateFPCast(ftarget, type);
+        }
+        if (fsource->getType() != type) {
+            if (fsource->getType()->isIntegerTy()) fsource = builder->CreateSIToFP(fsource, type);
+            else if (fsource->getType()->isFloatingPointTy()) fsource = builder->CreateFPCast(fsource, type);
+        }
         std::string func_name = a_kind == 4 ? "llvm.copysign.f32" : "llvm.copysign.f64";
         llvm::Function *fn_copysign = module->getFunction(func_name);
         if (!fn_copysign) {
@@ -12648,7 +12662,7 @@ public:
                 break;
             }
             case (ASR::cast_kindType::UnsignedIntegerToCPtr) : {
-                tmp = builder->CreateIntToPtr(tmp, llvm::Type::getVoidTy(context)->getPointerTo());
+                tmp = builder->CreateIntToPtr(tmp, llvm::Type::getInt8Ty(context)->getPointerTo());
                 break;
             }
             case (ASR::cast_kindType::ComplexToComplex) : {
@@ -16244,7 +16258,7 @@ public:
                                     // Local variable of type
                                     // CPtr is a void**, so we
                                     // have to load it
-                                    llvm::Type* cptr_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                                    llvm::Type* cptr_type = llvm::Type::getInt8Ty(context)->getPointerTo();
                                     tmp = llvm_utils->CreateLoad2(cptr_type, tmp);
                                 }
                             } else if ( x_abi == ASR::abiType::BindC && orig_arg != nullptr ) {
@@ -16260,7 +16274,8 @@ public:
                                                     // tmp is {float, float}*
                                                     // type_fx2 is i64
                                                     llvm::Type* type_fx2 = llvm::Type::getInt64Ty(context);
-                                                    tmp = llvm_utils->CreateLoad2(type_fx2, tmp);
+                                                    llvm::Value* c32_as_i64_ptr = builder->CreateBitCast(tmp, type_fx2->getPointerTo());
+                                                    tmp = llvm_utils->CreateLoad2(type_fx2, c32_as_i64_ptr);
                                                 } else if (compiler_options.platform == Platform::macOS_ARM) {
                                                     // tmp is {float, float}*
                                                     // type_fx2 is [2 x float]
@@ -16272,7 +16287,8 @@ public:
                                                     // tmp is {float, float}*
                                                     // type_fx2 is <2 x float>
                                                     llvm::Type* type_fx2 = FIXED_VECTOR_TYPE::get(llvm::Type::getFloatTy(context), 2);
-                                                    tmp = llvm_utils->CreateLoad2(type_fx2, tmp);
+                                                    llvm::Value* c32_as_vec2_ptr = builder->CreateBitCast(tmp, type_fx2->getPointerTo());
+                                                    tmp = llvm_utils->CreateLoad2(type_fx2, c32_as_vec2_ptr);
                                                 }
                                             } else {
                                                 LCOMPILERS_ASSERT(c_kind == 8)
@@ -16290,7 +16306,7 @@ public:
                                             // Local variable or Dummy out argument
                                             // of type CPtr is a void**, so we
                                             // have to load it
-                                            llvm::Type* cptr_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                                            llvm::Type* cptr_type = llvm::Type::getInt8Ty(context)->getPointerTo();
                                             tmp = llvm_utils->CreateLoad2(cptr_type, tmp);
                                         }
                                     } else {
@@ -16592,7 +16608,7 @@ public:
                     case (ASR::ttypeType::StructType) :
                         break;
                     case (ASR::ttypeType::CPtr) :
-                        target_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                        target_type = llvm::Type::getInt8Ty(context)->getPointerTo();
                         break;
                     case ASR::ttypeType::Allocatable:
                     case (ASR::ttypeType::Pointer) : {
@@ -17325,7 +17341,7 @@ public:
                         builder->CreateBitCast(
                             llvm_utils->CreateLoad2(wrapped_struct_llvm_type->getPointerTo(),
                                                     llvm_utils->create_gep2(dt_type, dt, 1)),
-                            llvm::Type::getVoidTy(context)->getPointerTo()),
+                            llvm::Type::getInt8Ty(context)->getPointerTo()),
                         polymorphic_addr);
                     llvm::Value* type_id_addr = llvm_utils->create_gep2(_type, abstract_, 0);
                     if (ASR::is_a<ASR::StructType_t>(*arg_type)) {
@@ -17358,7 +17374,7 @@ public:
                 llvm::Value* polymorphic_data_addr = llvm_utils->create_gep2(array_data_type, polymorphic_data, 1);
                 llvm::Value* dt_data = llvm_utils->CreateLoad2(dt_array_data_type->getPointerTo(), arr_descr->get_pointer_to_data(arg_expr, arg_type, dt, module.get()));
                 builder->CreateStore(
-                    builder->CreateBitCast(dt_data, llvm::Type::getVoidTy(context)->getPointerTo()),
+                    builder->CreateBitCast(dt_data, llvm::Type::getInt8Ty(context)->getPointerTo()),
                     polymorphic_data_addr);
                 llvm::Value* type_id_addr = llvm_utils->create_gep2(array_data_type, polymorphic_data, 0);
                 builder->CreateStore(
@@ -17372,7 +17388,7 @@ public:
                 llvm::Value* abstract_ = llvm_utils->CreateAlloca(_type);
                 llvm::Value* polymorphic_addr = llvm_utils->create_gep2(_type, abstract_, 1);
                 builder->CreateStore(
-                    builder->CreateBitCast(dt, llvm::Type::getVoidTy(context)->getPointerTo()),
+                    builder->CreateBitCast(dt, llvm::Type::getInt8Ty(context)->getPointerTo()),
                     polymorphic_addr);
                 llvm::Value* type_id_addr = llvm_utils->create_gep2(_type, abstract_, 0);
                 if (ASR::is_a<ASR::StructType_t>(*arg_type) && !ASRUtils::is_class_type(arg_type)) {
