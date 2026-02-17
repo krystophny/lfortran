@@ -1252,8 +1252,10 @@ if(get_struct_sym(member_variable) == struct_sym /*recursive declaration*/){cont
             // Free consecutive structs inserted into array's single class structure `{VTable*, underlying_struct*}
             if(ASRUtils::non_unlimited_polymorphic_class(&struct_t->base)){
                 auto const struct_type_llvm = llvm_utils_->getClassType(struct_sym);
-                auto const allocated_cosecutive_structs = builder_->CreateLoad(struct_type_llvm->getPointerTo(),
-                                                             llvm_utils_->CreateGEP2(struct_type_llvm, data_ptr, 1));
+                auto const consecutive_field_ptr = llvm_utils_->CreateGEP2(struct_type_llvm, data_ptr, 1);
+                auto const consecutive_field_type = consecutive_field_ptr->getType()->getPointerElementType();
+                auto const allocated_cosecutive_structs = builder_->CreateLoad(consecutive_field_type,
+                                                             consecutive_field_ptr);
                 llvm_utils_->lfortran_free(allocated_cosecutive_structs);
             }
         }

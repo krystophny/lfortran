@@ -61,6 +61,10 @@
 #include <bin/lfortran_command_line_parser.h>
 #include <bin/lsp_cli.h>
 
+#ifdef HAVE_LFORTRAN_LLVM
+#include <llvm/IR/Function.h>
+#endif
+
 
 #ifdef WITH_LSP
 #include <server/lsp_specification.h>
@@ -148,6 +152,7 @@ void print_one_component(std::string component) {
     } else if (component_name == "File reading" || component_name == "Src -> ASR" ||
                component_name == "ASR passes (total)" || component_name == "LLVM IR creation" ||
                component_name == "ASR -> mod" || component_name == "LLVM opt" ||
+               component_name == "LLVM -> JIT" || component_name == "JIT run" ||
                component_name == "LLVM -> BIN" || component_name == "Linking time") {
         std::cout << CYAN;  // Phase headers in cyan
     }
@@ -179,7 +184,7 @@ void print_time_report(const std::vector<std::string>& vector_of_time_report) {
     std::vector<std::string> allocator_entries;
     std::vector<std::string> pass_entries;
     std::string file_reading, src_to_asr, asr_to_mod, llvm_ir_creation,
-                llvm_opt, llvm_to_bin, linking_time, total_time;
+                llvm_opt, llvm_to_jit, jit_run, llvm_to_bin, linking_time, total_time;
 
     for (const auto& entry : vector_of_time_report) {
         if (entry.find("Allocator usage of last chunk (MB)") != std::string::npos ||
@@ -197,6 +202,10 @@ void print_time_report(const std::vector<std::string>& vector_of_time_report) {
             llvm_ir_creation = entry;
         } else if (entry.find("LLVM opt") != std::string::npos) {
             llvm_opt = entry;
+        } else if (entry.find("LLVM -> JIT") != std::string::npos) {
+            llvm_to_jit = entry;
+        } else if (entry.find("JIT run") != std::string::npos) {
+            jit_run = entry;
         } else if (entry.find("LLVM -> BIN") != std::string::npos) {
             llvm_to_bin = entry;
         } else if (entry.find("Linking time") != std::string::npos) {
@@ -250,6 +259,8 @@ void print_time_report(const std::vector<std::string>& vector_of_time_report) {
     if (!asr_to_mod.empty()) print_one_component(asr_to_mod);
     if (!llvm_ir_creation.empty()) print_one_component(llvm_ir_creation);
     if (!llvm_opt.empty()) print_one_component(llvm_opt);
+    if (!llvm_to_jit.empty()) print_one_component(llvm_to_jit);
+    if (!jit_run.empty()) print_one_component(jit_run);
     if (!llvm_to_bin.empty()) print_one_component(llvm_to_bin);
     if (!linking_time.empty()) print_one_component(linking_time);
 
@@ -1361,7 +1372,6 @@ int execute_src_files_with_jit(const std::vector<std::string> &infiles,
     int time_opt = 0;
     int time_llvm_to_jit = 0;
     int time_jit_run = 0;
-    bool has_jit_main = false;
     size_t i;
 
     if (compiler_options.generate_code_for_global_procedures) {
@@ -1441,7 +1451,6 @@ int execute_src_files_with_jit(const std::vector<std::string> &infiles,
 
             {
                 int time_opt_local = 0;
-                bool module_has_main = false;
                 LCompilers::Result<std::unique_ptr<LCompilers::LLVMModule>>
                     llvm_res = fe.get_llvm3(*asr, lpm, diagnostics, lm, infile, &time_opt_local);
                 std::cerr << diagnostics.render(lm, compiler_options);
@@ -1450,17 +1459,10 @@ int execute_src_files_with_jit(const std::vector<std::string> &infiles,
                     return 5;
                 }
                 m = std::move(llvm_res.result);
-                module_has_main = (m->get_function("main") != nullptr);
-#ifdef WITH_LIRIC
-                /* Liric compat textual IR dump is not fully round-trippable yet.
-                 * Keep module in-memory and add it directly to JIT. */
-#else
                 {
                     std::string llvm_ir = m->str();
                     m = parse_module_from_ir_text(jit, llvm_ir);
                 }
-#endif
-                if (module_has_main) has_jit_main = true;
                 time_opt += time_opt_local;
             }
 
@@ -1480,7 +1482,6 @@ int execute_src_files_with_jit(const std::vector<std::string> &infiles,
 
             t1 = std::chrono::high_resolution_clock::now();
             m = jit.parse_module2(input, infile);
-            if (m->get_function("main") != nullptr) has_jit_main = true;
             jit.add_module(std::move(m));
             t2 = std::chrono::high_resolution_clock::now();
             time_llvm_to_jit += std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
@@ -1491,36 +1492,32 @@ int execute_src_files_with_jit(const std::vector<std::string> &infiles,
         }
     }
 
-    if (has_jit_main) {
+    {
         typedef int (*main_fn_t)(int, char **);
         const char *argv0 = "lfortran";
         char *argv_exec[2];
         intptr_t main_addr;
         main_fn_t main_fn;
-        const std::string wrapper_ir =
-            "declare i32 @main(i32, i8**)\n"
-            "define i32 @__lfortran_jit_entry(i32 %argc, i8** %argv) {\n"
-            "entry:\n"
-            "  %ret = call i32 @main(i32 %argc, i8** %argv)\n"
-            "  ret i32 %ret\n"
-            "}\n";
         auto t1 = std::chrono::high_resolution_clock::now();
         auto t2 = t1;
-        std::unique_ptr<LCompilers::LLVMModule> wrapper_mod = parse_module_from_ir_text(jit, wrapper_ir);
-        jit.add_module(std::move(wrapper_mod));
+
+        try {
+            main_addr = jit.get_symbol_address("main");
+        } catch (...) {
+            main_addr = 0;
+        }
+        if (main_addr == 0) {
+            std::cerr << "error: no executable entry point found for --jit (missing main program)" << std::endl;
+            return 1;
+        }
 
         argv_exec[0] = const_cast<char *>(argv0);
         argv_exec[1] = nullptr;
-        main_addr = jit.get_symbol_address("__lfortran_jit_entry");
         main_fn = reinterpret_cast<main_fn_t>(main_addr);
         (void)main_fn(1, argv_exec);
         t2 = std::chrono::high_resolution_clock::now();
         time_jit_run = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
-    } else {
-        std::cerr << "error: no executable entry point found for --jit (missing main program)" << std::endl;
-        return 1;
     }
-
     if (time_report) {
         std::string message;
         message = "File reading: " + std::to_string(time_file_read / 1000) + "." + std::to_string(time_file_read % 1000) + " ms";
@@ -2876,11 +2873,6 @@ int main_app(int argc, char *argv[]) {
             return 1;
         }
 #ifdef HAVE_LFORTRAN_LLVM
-#ifdef WITH_LIRIC
-        std::cerr << "The --jit option is currently unsupported in WITH_LIRIC builds. "
-                  << "Use the liric bench tools for JIT comparisons." << std::endl;
-        return 1;
-#else
         {
             int result = execute_src_files_with_jit(opts.arg_files, compiler_options.time_report,
                 compiler_options, lfortran_pass_manager);
@@ -2893,7 +2885,6 @@ int main_app(int argc, char *argv[]) {
             }
             return result;
         }
-#endif
 #else
         std::cerr << "The --jit option requires the LLVM backend to be enabled. Recompile with `WITH_LLVM=yes`." << std::endl;
         return 1;
