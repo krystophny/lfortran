@@ -1214,7 +1214,7 @@ if(get_struct_sym(member_variable) == struct_sym /*recursive declaration*/){cont
             if(is_class_type){
                 auto const class_type_llvm = llvm_utils_->getClassType(struct_sym);
                 auto const consecutive_field_ptr = llvm_utils_->CreateGEP2(class_type_llvm, data_ptr, 1);
-                auto const consecutive_field_type = consecutive_field_ptr->getType()->getPointerElementType();
+                auto const consecutive_field_type = class_type_llvm->getStructElementType(1);
                 auto const allocated_cosecutive_structs = builder_->CreateLoad(consecutive_field_type, consecutive_field_ptr);
                 llvm_utils_->lfortran_free(allocated_cosecutive_structs);
                 // deallocate class wrapper 
