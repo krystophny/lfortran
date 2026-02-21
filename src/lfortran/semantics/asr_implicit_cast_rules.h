@@ -143,8 +143,14 @@ public:
       }
     }
 
-    LCOMPILERS_ASSERT(source_type2->type < num_types);
-    LCOMPILERS_ASSERT(dest_type2->type < num_types);
+    if (source_type2->type >= num_types || dest_type2->type >= num_types) {
+      std::string source_str = ASRUtils::type_to_str_with_kind(source_type, *convert_can);
+      std::string dest_str = ASRUtils::type_to_str_with_kind(dest_type, *convert_can);
+      diag.add(Diagnostic("Implicit conversion from `" + source_str + "` to `" + dest_str +
+            "` is not supported",
+          Level::Error, Stage::Semantic, {Label("", {a_loc})}));
+      throw SemanticAbort();
+    }
     int cast_kind = rule_map[source_type2->type][dest_type2->type];
     if (cast_kind == error_case) {
       std::string allowed_types_str = type_names[dest_type2->type][1];
