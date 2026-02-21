@@ -497,71 +497,20 @@ int prompt(bool verbose, CompilerOptions &cu)
             std::cout << r.llvm_ir << std::endl;
         }
 
-        switch (r.type) {
-            case (LCompilers::FortranEvaluator::EvalResult::integer4) : {
-                if (verbose) std::cout << "Return type: integer" << std::endl;
-                if (verbose) section("Result:");
-                std::cout << "integer(4) :: " << repr_name << " = " << r.i32 << std::endl;
-                break;
+        if (verbose) {
+            std::cout << "Return type: "
+                      << LCompilers::FortranEvaluator::eval_result_type_name(r) << std::endl;
+        }
+        if (LCompilers::FortranEvaluator::eval_result_has_value(r)) {
+            if (verbose) section("Result:");
+            std::cout << LCompilers::FortranEvaluator::render_eval_result_repr(r, repr_name) << std::endl;
+        } else if (verbose) {
+            section("Result:");
+            if (r.type == LCompilers::FortranEvaluator::EvalResult::statement) {
+                std::cout << "(statement)" << std::endl;
+            } else {
+                std::cout << "(nothing to execute)" << std::endl;
             }
-            case (LCompilers::FortranEvaluator::EvalResult::integer8) : {
-                if (verbose) std::cout << "Return type: integer(8)" << std::endl;
-                if (verbose) section("Result:");
-                std::cout << "integer(8) :: " << repr_name << " = " << r.i64 << std::endl;
-                break;
-            }
-            case (LCompilers::FortranEvaluator::EvalResult::real4) : {
-                if (verbose) std::cout << "Return type: real" << std::endl;
-                if (verbose) section("Result:");
-                std::cout << "real(4) :: " << repr_name << " = "
-                          << std::setprecision(8) << r.f32 << std::endl;
-                break;
-            }
-            case (LCompilers::FortranEvaluator::EvalResult::real8) : {
-                if (verbose) std::cout << "Return type: real(8)" << std::endl;
-                if (verbose) section("Result:");
-                std::cout << "real(8) :: " << repr_name << " = "
-                          << std::setprecision(17) << r.f64 << std::endl;
-                break;
-            }
-            case (LCompilers::FortranEvaluator::EvalResult::complex4) : {
-                if (verbose) std::cout << "Return type: complex" << std::endl;
-                if (verbose) section("Result:");
-                std::cout << "complex(4) :: " << repr_name << " = "
-                          << std::setprecision(8) << "(" << r.c32.re << ", " << r.c32.im << ")" << std::endl;
-                break;
-            }
-            case (LCompilers::FortranEvaluator::EvalResult::complex8) : {
-                if (verbose) std::cout << "Return type: complex(8)" << std::endl;
-                if (verbose) section("Result:");
-                std::cout << "complex(8) :: " << repr_name << " = "
-                          << std::setprecision(17) << "(" << r.c64.re << ", " << r.c64.im << ")" << std::endl;
-                break;
-            }
-            case (LCompilers::FortranEvaluator::EvalResult::boolean) : {
-                if (verbose) std::cout << "Return type: logical" << std::endl;
-                if (verbose) section("Result:");
-                std::cout << "logical(4) :: " << repr_name << " = "
-                          << (r.b ? ".true." : ".false.") << std::endl;
-                break;
-            }
-            case (LCompilers::FortranEvaluator::EvalResult::statement) : {
-                if (verbose) {
-                    std::cout << "Return type: none" << std::endl;
-                    section("Result:");
-                    std::cout << "(statement)" << std::endl;
-                }
-                break;
-            }
-            case (LCompilers::FortranEvaluator::EvalResult::none) : {
-                if (verbose) {
-                    std::cout << "Return type: none" << std::endl;
-                    section("Result:");
-                    std::cout << "(nothing to execute)" << std::endl;
-                }
-                break;
-            }
-            default : throw LCompilers::LCompilersException("Return type not supported");
         }
     }
     return 0;
