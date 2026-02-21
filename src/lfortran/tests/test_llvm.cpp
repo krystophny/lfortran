@@ -20,7 +20,13 @@ using LCompilers::TRY;
 using LCompilers::FortranEvaluator;
 using LCompilers::CompilerOptions;
 
-TEST_CASE("llvm 1") {
+#ifdef WITH_LIRIC
+#define LFORTRAN_LLVM_TEST_CASE(name) TEST_CASE(name * doctest::skip(true))
+#else
+#define LFORTRAN_LLVM_TEST_CASE(name) TEST_CASE(name)
+#endif
+
+LFORTRAN_LLVM_TEST_CASE("llvm 1") {
     //std::cout << "LLVM Version:" << std::endl;
     //LFortran::LLVMEvaluator::print_version_message();
 
@@ -48,7 +54,7 @@ define i64 @f1()
 */
 }
 
-TEST_CASE("llvm 1 fail") {
+LFORTRAN_LLVM_TEST_CASE("llvm 1 fail") {
     LCompilers::LLVMEvaluator e;
     CHECK_THROWS_AS(e.add_module(R"""(
 define i64 @f1()
@@ -67,7 +73,7 @@ define i64 @f1()
 }
 
 
-TEST_CASE("llvm 2") {
+LFORTRAN_LLVM_TEST_CASE("llvm 2") {
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 @count = global i64 0
@@ -102,7 +108,7 @@ define i64 @f3()
         )"""), LCompilers::LCompilersException);
 }
 
-TEST_CASE("llvm 3") {
+LFORTRAN_LLVM_TEST_CASE("llvm 3") {
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 @count = global i64 5
@@ -189,7 +195,7 @@ define void @inc()
 */
 }
 
-TEST_CASE("llvm 4") {
+LFORTRAN_LLVM_TEST_CASE("llvm 4") {
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 @count = global i64 5
@@ -245,7 +251,7 @@ define void @inc2()
         */
 }
 
-TEST_CASE("llvm array 1") {
+LFORTRAN_LLVM_TEST_CASE("llvm array 1") {
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 ; Sum the three elements in %a
@@ -287,7 +293,7 @@ define i64 @f()
     CHECK(e.execfn<int64_t>("f") == 6);
 }
 
-TEST_CASE("llvm array 2") {
+LFORTRAN_LLVM_TEST_CASE("llvm array 2") {
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 %array = type {i64, [3 x i64]}
@@ -336,7 +342,7 @@ int f(int a, int b) {
     return a+b;
 }
 
-TEST_CASE("llvm callback 0") {
+LFORTRAN_LLVM_TEST_CASE("llvm callback 0") {
     LCompilers::LLVMEvaluator e;
     std::string addr = std::to_string((int64_t)f);
     e.add_module(R"""(
@@ -357,7 +363,7 @@ define i64 @f1()
 }
 
 
-TEST_CASE("ASR -> LLVM 1") {
+LFORTRAN_LLVM_TEST_CASE("ASR -> LLVM 1") {
     std::string source = R"(function f()
 integer :: f
 f = 5
@@ -400,7 +406,7 @@ end function)";
     CHECK(e.execfn<int32_t>("f") == 5);
 }
 
-TEST_CASE("ASR -> LLVM 2") {
+LFORTRAN_LLVM_TEST_CASE("ASR -> LLVM 2") {
     std::string source = R"(function f()
 integer :: f
 f = 4
@@ -438,7 +444,7 @@ end function)";
     CHECK(e.execfn<int32_t>("f") == 4);
 }
 
-TEST_CASE("FortranEvaluator 1") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator 1") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -456,7 +462,7 @@ TEST_CASE("FortranEvaluator 1") {
     CHECK(r.result.i32 == 5);
 }
 
-TEST_CASE("FortranEvaluator 2") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator 2") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -471,7 +477,7 @@ r
     CHECK(r.result.f32 == 3);
 }
 
-TEST_CASE("FortranEvaluator 3") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator 3") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -489,7 +495,7 @@ end do
     CHECK(r.result.i32 == 15);
 }
 
-TEST_CASE("FortranEvaluator 4") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator 4") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -520,7 +526,7 @@ end function
 */
 }
 
-TEST_CASE("FortranEvaluator 5") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator 5") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -556,7 +562,7 @@ end subroutine
     */
 }
 
-TEST_CASE("FortranEvaluator 6") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator 6") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -592,7 +598,7 @@ TEST_CASE("FortranEvaluator 6") {
     diagnostics.diagnostics.clear();
 }
 
-TEST_CASE("FortranEvaluator 6 importing modules") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator 6 importing modules") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -634,7 +640,7 @@ end module funcmod)");
 }
 
 // Tests passing the complex struct by reference
-TEST_CASE("llvm complex type") {
+LFORTRAN_LLVM_TEST_CASE("llvm complex type") {
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 %complex = type { float, float }
@@ -670,7 +676,7 @@ define float @f()
 }
 
 // Tests passing the complex struct by value
-TEST_CASE("llvm complex type value") {
+LFORTRAN_LLVM_TEST_CASE("llvm complex type value") {
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 %complex = type { float, float }
@@ -709,7 +715,7 @@ define float @f()
 }
 
 // Tests passing boolean by reference
-TEST_CASE("llvm boolean type") {
+LFORTRAN_LLVM_TEST_CASE("llvm boolean type") {
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 
@@ -739,7 +745,7 @@ define i1 @b()
 }
 
 // Tests passing boolean by value
-TEST_CASE("llvm boolean type") {
+LFORTRAN_LLVM_TEST_CASE("llvm boolean type") {
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 
@@ -769,7 +775,7 @@ define i1 @b()
 }
 
 // Tests pointers
-TEST_CASE("llvm pointers 1") {
+LFORTRAN_LLVM_TEST_CASE("llvm pointers 1") {
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 @r = global i64 0
@@ -792,7 +798,7 @@ define i64 @f()
     CHECK(*p == 8);
 }
 
-TEST_CASE("llvm pointers 2") {
+LFORTRAN_LLVM_TEST_CASE("llvm pointers 2") {
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 @r = global float 0.0
@@ -811,7 +817,7 @@ define i64 @f()
     CHECK(std::abs(*p - 8) < 1e-6);
 }
 
-TEST_CASE("llvm pointers 3") {
+LFORTRAN_LLVM_TEST_CASE("llvm pointers 3") {
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 ; Takes a variable and returns a pointer to it
@@ -851,7 +857,7 @@ define float @f()
     CHECK(std::abs(r - 8) < 1e-6);
 }
 
-TEST_CASE("llvm pointers 4") {
+LFORTRAN_LLVM_TEST_CASE("llvm pointers 4") {
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 ; Takes a variable and returns a pointer to it
@@ -888,7 +894,7 @@ define float @f()
     CHECK(std::abs(r - 8) < 1e-6);
 }
 
-TEST_CASE("FortranEvaluator 7") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator 7") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -903,7 +909,7 @@ TEST_CASE("FortranEvaluator 7") {
     CHECK(r.result.i32 == 5);
 }
 
-TEST_CASE("FortranEvaluator 8") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator 8") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -918,7 +924,7 @@ TEST_CASE("FortranEvaluator 8") {
     CHECK(r.result.f32 == 3.5);
 }
 
-TEST_CASE("FortranEvaluator 8 double") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator 8 double") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -933,7 +939,7 @@ TEST_CASE("FortranEvaluator 8 double") {
     CHECK(r.result.f64 == 3.5);
 }
 
-TEST_CASE("FortranEvaluator 9 single complex") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator 9 single complex") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -948,7 +954,7 @@ TEST_CASE("FortranEvaluator 9 single complex") {
     }
 }
 
-TEST_CASE("FortranEvaluator 9 double complex") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator 9 double complex") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -963,7 +969,7 @@ TEST_CASE("FortranEvaluator 9 double complex") {
     }
 }
 
-TEST_CASE("FortranEvaluator logical 1") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator logical 1") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -981,7 +987,7 @@ TEST_CASE("FortranEvaluator logical 1") {
     CHECK(r.result.b);
 }
 
-TEST_CASE("FortranEvaluator logical 2") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator logical 2") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -999,7 +1005,7 @@ TEST_CASE("FortranEvaluator logical 2") {
     CHECK(!r.result.b);
 }
 
-TEST_CASE("FortranEvaluator logical 3") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator logical 3") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -1025,7 +1031,7 @@ TEST_CASE("FortranEvaluator logical 3") {
     CHECK(r.result.b);
 }
 
-TEST_CASE("FortranEvaluator logical 4") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator logical 4") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -1050,7 +1056,7 @@ end function is_even
     CHECK(r.result.b);
 }
 
-TEST_CASE("FortranEvaluator integer kind 1") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator integer kind 1") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -1068,7 +1074,7 @@ TEST_CASE("FortranEvaluator integer kind 1") {
     CHECK(r.result.i32 == 5);
 }
 
-TEST_CASE("FortranEvaluator integer kind 2") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator integer kind 2") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -1086,7 +1092,7 @@ TEST_CASE("FortranEvaluator integer kind 2") {
     CHECK(r.result.i64 == 5);
 }
 
-TEST_CASE("FortranEvaluator Array 1") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator Array 1") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -1100,7 +1106,7 @@ TEST_CASE("FortranEvaluator Array 1") {
     CHECK(r.result.type == FortranEvaluator::EvalResult::statement);
 }
 
-TEST_CASE("FortranEvaluator Array 2") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator Array 2") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -1117,7 +1123,7 @@ TEST_CASE("FortranEvaluator Array 2") {
     CHECK(r.result.type == FortranEvaluator::EvalResult::statement);
 }
 
-TEST_CASE("FortranEvaluator re-declaration 1") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator re-declaration 1") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -1148,7 +1154,7 @@ TEST_CASE("FortranEvaluator re-declaration 1") {
 */
 }
 
-TEST_CASE("FortranEvaluator re-declaration 2") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator re-declaration 2") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -1183,7 +1189,7 @@ end function
 */
 }
 
-TEST_CASE("FortranEvaluator asr verify 1") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator asr verify 1") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -1226,7 +1232,7 @@ end subroutine s
     CHECK(r.result.i32 == 4);
 }
 
-TEST_CASE("FortranEvaluator asr verify 2") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator asr verify 2") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -1278,7 +1284,7 @@ end subroutine sa
     CHECK(r.result.i32 == 1);
 }
 
-TEST_CASE("FortranEvaluator asr verify 3") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator asr verify 3") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -1314,7 +1320,7 @@ end function sub
     CHECK(r.result.f32 == -1.0);
 }
 
-TEST_CASE("llvm ir 1") {
+LFORTRAN_LLVM_TEST_CASE("llvm ir 1") {
     LCompilers::LLVMEvaluator e;
     std::string file_name = std::string(LFORTRAN_PROJECT_SOURCE_DIR) + "/src/lfortran/tests/ir.ll";
     std::ifstream infile(file_name);
@@ -1332,7 +1338,7 @@ TEST_CASE("llvm ir 1") {
 // This test does not work on Windows yet
 // https://github.com/lfortran/lfortran/issues/913
 #if !defined(_WIN32)
-TEST_CASE("FortranEvaluator 10 trig functions") {
+LFORTRAN_LLVM_TEST_CASE("FortranEvaluator 10 trig functions") {
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
