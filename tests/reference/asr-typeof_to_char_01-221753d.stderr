@@ -1,0 +1,5 @@
+semantic error: Implicit conversion from `type(c_ptr)` to `string` is not supported
+ --> tests/errors/typeof_to_char_01.f90:4:5
+  |
+4 |     s = typeof(1)
+  |     ^^^^^^^^^^^^^ 

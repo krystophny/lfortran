@@ -1,0 +1,13 @@
+{
+    "basename": "asr-typeof_to_char_01-221753d",
+    "cmd": "lfortran --show-asr --no-color {infile} -o {outfile}",
+    "infile": "tests/errors/typeof_to_char_01.f90",
+    "infile_hash": "227fc763e4233cb9c73b3fb5c32505b4053ae568350bdd034319487f",
+    "outfile": null,
+    "outfile_hash": null,
+    "stdout": null,
+    "stdout_hash": null,
+    "stderr": "asr-typeof_to_char_01-221753d.stderr",
+    "stderr_hash": "558a5e52eddb4c9936e96475c773c4de1ca8b8e5b43fc5dd07dca772",
+    "returncode": 2
+}
