@@ -6,6 +6,15 @@
 #include <libasr/pass/wrap_global_stmts.h>
 #include <libasr/pass/pass_utils.h>
 
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wunused-function"
+#endif
+#include <libasr/pass/intrinsic_functions.h>
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+
 
 namespace LCompilers {
 
@@ -108,12 +117,21 @@ void pass_wrap_global_stmts(Allocator &al,
                 target = return_var_ref;
                 idx++;
             } else {
-                // Non-scalar interactive expressions (for example arrays) cannot be
-                // lowered as function return values. Lower them centrally to a print
-                // statement instead of throwing in frontend-specific code.
+                // Non-scalar interactive expressions cannot be lowered as a native
+                // function return value. Render them centrally via repr().
+                Vec<ASR::expr_t*> repr_args;
+                repr_args.reserve(al, 1);
+                repr_args.push_back(al, value);
+                diag::Diagnostics repr_diag;
+                ASR::expr_t* value_to_print = value;
+                ASR::asr_t* repr_asr = ASRUtils::Repr::create_Repr(
+                    al, loc, repr_args, repr_diag);
+                if (repr_asr && !repr_diag.has_error()) {
+                    value_to_print = ASRUtils::EXPR(repr_asr);
+                }
                 Vec<ASR::expr_t*> print_args;
                 print_args.reserve(al, 1);
-                print_args.push_back(al, value);
+                print_args.push_back(al, value_to_print);
                 ASR::stmt_t* asr_stmt = ASRUtils::STMT(
                     ASRUtils::make_print_t_util(al, loc, print_args.p, print_args.n));
                 body.push_back(al, asr_stmt);

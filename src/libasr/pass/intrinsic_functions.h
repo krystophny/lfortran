@@ -202,10 +202,12 @@ enum class IntrinsicElementalFunctions : int64_t {
     Or,
     Xor,
     TypeOf,
+    Repr,
     TypeName,
     TypeSize,
+    TypeParent,
     TypeSame,
-    Repr
+    TypeExtends
     // ...
 };
 
@@ -5220,6 +5222,34 @@ namespace TypeSize {
 
 } // namespace TypeSize
 
+namespace TypeParent {
+
+    static inline void verify_args(const ASR::IntrinsicElementalFunction_t& x,
+            diag::Diagnostics& diagnostics) {
+        ASRUtils::require_impl(x.n_args == 1,
+            "type_parent expects exactly 1 argument",
+            x.base.base.loc, diagnostics);
+    }
+
+    static inline ASR::asr_t* create_TypeParent(Allocator& al, const Location& loc,
+            Vec<ASR::expr_t*>& args, diag::Diagnostics& diag) {
+        if (args.size() != 1) {
+            append_error(diag, "type_parent takes exactly 1 argument, found "
+                + std::to_string(args.size()), loc);
+            return nullptr;
+        }
+        if (!ASR::is_a<ASR::TypeInfo_t>(*ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(args[0])))) {
+            append_error(diag, "type_parent expects a type(type_info) handle", loc);
+            return nullptr;
+        }
+        return ASR::make_IntrinsicElementalFunction_t(al, loc,
+            static_cast<int64_t>(IntrinsicElementalFunctions::TypeParent),
+            args.p, args.n, 0, TypeOf::type_info_handle_type(al, loc), nullptr);
+    }
+
+} // namespace TypeParent
+
 namespace TypeSame {
 
     static inline void verify_args(const ASR::IntrinsicElementalFunction_t& x,
@@ -5250,6 +5280,36 @@ namespace TypeSame {
 
 } // namespace TypeSame
 
+namespace TypeExtends {
+
+    static inline void verify_args(const ASR::IntrinsicElementalFunction_t& x,
+            diag::Diagnostics& diagnostics) {
+        ASRUtils::require_impl(x.n_args == 2,
+            "type_extends expects exactly 2 arguments",
+            x.base.base.loc, diagnostics);
+    }
+
+    static inline ASR::asr_t* create_TypeExtends(Allocator& al, const Location& loc,
+            Vec<ASR::expr_t*>& args, diag::Diagnostics& diag) {
+        if (args.size() != 2) {
+            append_error(diag, "type_extends takes exactly 2 arguments, found "
+                + std::to_string(args.size()), loc);
+            return nullptr;
+        }
+        for (size_t i = 0; i < args.size(); i++) {
+            if (!ASR::is_a<ASR::TypeInfo_t>(*ASRUtils::type_get_past_allocatable_pointer(
+                    ASRUtils::expr_type(args[i])))) {
+                append_error(diag, "type_extends expects type(type_info) handles", loc);
+                return nullptr;
+            }
+        }
+        return ASR::make_IntrinsicElementalFunction_t(al, loc,
+            static_cast<int64_t>(IntrinsicElementalFunctions::TypeExtends),
+            args.p, args.n, 0, logical, nullptr);
+    }
+
+} // namespace TypeExtends
+
 namespace Repr {
 
     static inline bool is_var_like_name(ASR::expr_t* arg, std::string &name) {
@@ -5272,6 +5332,51 @@ namespace Repr {
         return ASRUtils::EXPR(ASR::make_StringConstant_t(al, loc, s2c(al, s), string_type));
     }
 
+    static inline ASR::expr_t* make_string_concat_expr(Allocator &al, const Location &loc,
+            ASR::expr_t* left, ASR::expr_t* right, ASR::ttype_t* repr_type) {
+        return ASRUtils::EXPR(ASR::make_StringConcat_t(
+            al, loc, left, right, repr_type, nullptr));
+    }
+
+    static inline std::string get_array_shape_suffix(ASR::ttype_t* arg_type) {
+        ASR::dimension_t* m_dims = nullptr;
+        size_t n_dims = ASRUtils::extract_dimensions_from_ttype(arg_type, m_dims);
+        if (n_dims == 0) {
+            return "";
+        }
+        std::string shape = "(";
+        for (size_t i = 0; i < n_dims; i++) {
+            int64_t dim_start = 1;
+            int64_t dim_len = -1;
+            bool has_start = m_dims[i].m_start != nullptr &&
+                ASRUtils::extract_value(ASRUtils::expr_value(m_dims[i].m_start), dim_start);
+            bool has_len = m_dims[i].m_length != nullptr &&
+                ASRUtils::extract_value(ASRUtils::expr_value(m_dims[i].m_length), dim_len);
+            if (has_len) {
+                if (has_start && dim_start != 1) {
+                    shape += std::to_string(dim_start) + ":" +
+                        std::to_string(dim_start + dim_len - 1);
+                } else {
+                    shape += std::to_string(dim_len);
+                }
+            } else if (has_start) {
+                shape += std::to_string(dim_start) + ":";
+            } else {
+                shape += ":";
+            }
+            if (i + 1 < n_dims) {
+                shape += ", ";
+            }
+        }
+        shape += ")";
+        return shape;
+    }
+
+    static inline bool is_type_info_handle(ASR::expr_t* arg) {
+        ASR::ttype_t* t = ASRUtils::type_get_past_allocatable_pointer(ASRUtils::expr_type(arg));
+        return ASR::is_a<ASR::TypeInfo_t>(*t);
+    }
+
     static inline ASR::asr_t* create_Repr(Allocator& al, const Location& loc,
             Vec<ASR::expr_t*>& args, diag::Diagnostics& diag) {
         if (args.size() != 1) {
@@ -5280,28 +5385,59 @@ namespace Repr {
             return nullptr;
         }
 
+        // repr(type(type_info)) should print the reflected type name.
+        if (is_type_info_handle(args[0])) {
+            return TypeName::create_TypeName(al, loc, args, diag);
+        }
+
+        // class(*) value rendering needs runtime dispatch in backend.
+        if (ASRUtils::is_unlimited_polymorphic_type(args[0])) {
+            return ASR::make_IntrinsicElementalFunction_t(al, loc,
+                static_cast<int64_t>(IntrinsicElementalFunctions::Repr),
+                args.p, args.n, 0, allocatable_deferred_string(), nullptr);
+        }
+
         std::string var_name = "it";
         (void) is_var_like_name(args[0], var_name);
+        ASR::ttype_t* arg_type = ASRUtils::expr_type(args[0]);
+        bool is_array = ASRUtils::is_array(arg_type);
+        ASR::ttype_t* extracted_type = ASRUtils::extract_type(arg_type);
+        bool is_struct_scalar = !is_array && ASR::is_a<ASR::StructType_t>(*extracted_type);
         ASR::ttype_t* repr_type = allocatable_deferred_string();
 
-        std::string suffix = " :: " + var_name + " = ";
+        std::string var_suffix = is_array ? get_array_shape_suffix(arg_type) : "";
+        std::string suffix = " :: " + var_name + var_suffix + " = ";
         ASR::expr_t* suffix_expr = make_string_constant_expr(al, loc, suffix);
 
-        ASR::ttype_t* arg_type = ASRUtils::extract_type(ASRUtils::expr_type(args[0]));
-        std::string type_str = ASRUtils::type_to_str_with_kind(arg_type, args[0]);
+        ASR::ttype_t* type_for_decl = is_array ? extracted_type : arg_type;
+        std::string type_str = ASRUtils::type_to_str_with_kind(type_for_decl, args[0]);
         ASR::expr_t* type_expr = make_string_constant_expr(al, loc, type_str);
 
-        ASR::expr_t* prefix_expr = ASRUtils::EXPR(ASR::make_StringConcat_t(
-            al, loc, type_expr, suffix_expr, repr_type, nullptr));
+        ASR::expr_t* prefix_expr = make_string_concat_expr(
+            al, loc, type_expr, suffix_expr, repr_type);
 
         Vec<ASR::expr_t*> fmt_args; fmt_args.reserve(al, 1);
         fmt_args.push_back(al, args[0]);
+        ASR::expr_t* fmt_expr = make_string_constant_expr(al, loc, "(*(g0,:,\", \"))");
         ASR::expr_t* value_expr = ASRUtils::EXPR(ASRUtils::make_StringFormat_t_util(
-            al, loc, nullptr, fmt_args.p, fmt_args.size(),
+            al, loc, fmt_expr, fmt_args.p, fmt_args.size(),
             ASR::string_format_kindType::FormatFortran, repr_type, nullptr));
 
-        ASR::expr_t* repr_expr = ASRUtils::EXPR(ASR::make_StringConcat_t(
-            al, loc, prefix_expr, value_expr, repr_type, nullptr));
+        if (is_array) {
+            ASR::expr_t* open_expr = make_string_constant_expr(al, loc, "[");
+            ASR::expr_t* close_expr = make_string_constant_expr(al, loc, "]");
+            value_expr = make_string_concat_expr(al, loc, open_expr, value_expr, repr_type);
+            value_expr = make_string_concat_expr(al, loc, value_expr, close_expr, repr_type);
+        } else if (is_struct_scalar) {
+            std::string ctor_name = ASRUtils::type_to_str_with_kind(extracted_type, args[0]);
+            ASR::expr_t* ctor_open_expr = make_string_constant_expr(al, loc, ctor_name + "(");
+            ASR::expr_t* ctor_close_expr = make_string_constant_expr(al, loc, ")");
+            value_expr = make_string_concat_expr(al, loc, ctor_open_expr, value_expr, repr_type);
+            value_expr = make_string_concat_expr(al, loc, value_expr, ctor_close_expr, repr_type);
+        }
+
+        ASR::expr_t* repr_expr = make_string_concat_expr(
+            al, loc, prefix_expr, value_expr, repr_type);
         return (ASR::asr_t*) repr_expr;
     }
 

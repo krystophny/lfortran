@@ -1714,6 +1714,11 @@ public:
         {"type_size", IntrinsicSignature({"t"}, 1, 1)},
         {"type_same", IntrinsicSignature({"a", "b"}, 2, 2)},
         {"repr", IntrinsicSignature({"x"}, 1, 1)},
+        {"type_name", IntrinsicSignature({"t"}, 1, 1)},
+        {"type_size", IntrinsicSignature({"t"}, 1, 1)},
+        {"type_parent", IntrinsicSignature({"t"}, 1, 1)},
+        {"type_same", IntrinsicSignature({"a", "b"}, 2, 2)},
+        {"type_extends", IntrinsicSignature({"a", "b"}, 2, 2)},
 
 
         // LFortran-specific intrinsics
@@ -9539,6 +9544,55 @@ public:
         return member;
     }
 
+    bool create_type_info_member_intrinsic_call(const AST::FuncCallOrArray_t &x,
+            const std::string &member_name, ASR::expr_t* receiver_expr) {
+        ASR::ttype_t* receiver_type = ASRUtils::type_get_past_allocatable_pointer(
+            ASRUtils::expr_type(receiver_expr));
+        if (!ASR::is_a<ASR::TypeInfo_t>(*receiver_type)) {
+            return false;
+        }
+
+        if (x.n_keywords != 0) {
+            diag.add(Diagnostic(
+                "Keyword arguments are not supported for type_info member calls",
+                Level::Error, Stage::Semantic, {Label("", {x.base.base.loc})}));
+            throw SemanticAbort();
+        }
+
+        std::string intrinsic_name;
+        if (member_name == "name") {
+            intrinsic_name = "type_name";
+        } else if (member_name == "size") {
+            intrinsic_name = "type_size";
+        } else if (member_name == "parent") {
+            intrinsic_name = "type_parent";
+        } else if (member_name == "same") {
+            intrinsic_name = "type_same";
+        } else if (member_name == "extends") {
+            intrinsic_name = "type_extends";
+        } else {
+            return false;
+        }
+
+        Vec<ASR::expr_t*> intrinsic_args;
+        intrinsic_args.reserve(al, x.n_args + 1);
+        intrinsic_args.push_back(al, receiver_expr);
+        for (size_t i = 0; i < x.n_args; i++) {
+            LCOMPILERS_ASSERT(x.m_args[i].m_end != nullptr);
+            this->visit_expr(*x.m_args[i].m_end);
+            intrinsic_args.push_back(al, ASRUtils::EXPR(tmp));
+        }
+
+        auto create_fn =
+            ASRUtils::IntrinsicElementalFunctionRegistry::get_create_function(intrinsic_name);
+        ASR::asr_t* intrinsic_call = create_fn(al, x.base.base.loc, intrinsic_args, diag);
+        if (diag.has_error() || intrinsic_call == nullptr) {
+            throw SemanticAbort();
+        }
+        tmp = intrinsic_call;
+        return true;
+    }
+
     // TODO: Use Vec<expr_t*> instead of std::vector<expr_t*> for performance
     template <typename T>
     bool handle_intrinsic_node_args(const T& x,
@@ -11838,10 +11892,8 @@ public:
 
                     std::vector<int> array_indices_in_args = find_array_indices_in_args(args);
                     std::vector<std::string> inquiry_functions = {"epsilon", "radix", "range", "precision", "rank", "tiny", "huge", "bit_size", "new_line", "digits",
-                        "maxexponent", "minexponent", "storage_size", "kind", "is_contiguous", "loc", "typeof",
-                        "type_name", "type_size", "type_same"};
-                        "maxexponent", "minexponent", "storage_size", "kind", "is_contiguous", "loc", "typeof",
-                        "type_name", "type_size", "type_same", "repr"};
+                        "maxexponent", "minexponent", "storage_size", "kind", "is_contiguous", "loc", "typeof", "repr",
+                        "type_name", "type_size", "type_parent", "type_same", "type_extends"};
                     if (are_all_args_evaluated &&
                         (std::find(inquiry_functions.begin(), inquiry_functions.end(), var_name) == inquiry_functions.end()) &&
                         !array_indices_in_args.empty())
@@ -12745,6 +12797,9 @@ public:
                     x.m_member[x.n_member - 1].m_name, x.base.base.loc, x.n_member);
             }
             v_expr = ASRUtils::EXPR(tmp);
+            if (create_type_info_member_intrinsic_call(x, var_name, v_expr)) {
+                return;
+            }
             v = resolve_deriv_type_proc(x.base.base.loc, var_name,
                     to_lower(x.m_member[x.n_member - 1].m_name), v_expr,
                     ASRUtils::type_get_past_pointer(ASRUtils::expr_type(v_expr)), scope);
