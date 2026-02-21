@@ -10,7 +10,7 @@ program typeof_repr_01
     a = [1, 2, 3]
 
     t = typeof(x)
-    if (repr(t) /= "real(8)") error stop 1
+    if (t /= "real(8)") error stop 1
 
     s = repr(x)
     if (index(s, "real(8) :: x =") /= 1) error stop 2
