@@ -893,9 +893,15 @@ intrinsic_funcs_args = {
             "return" : "allocatable_deferred_string()"
         }
     ],
+    "Repr": [
+        {
+            "args": [("any",)],
+            "return" : "allocatable_deferred_string()"
+        }
+    ],
 }
 
-skip_create_func = ["Partition", "TypeOf"]
+skip_create_func = ["Partition", "TypeOf", "Repr"]
 compile_time_only_fn = [
     "Epsilon",
     "Radix",
