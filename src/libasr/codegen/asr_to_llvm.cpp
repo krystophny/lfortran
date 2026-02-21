@@ -1735,7 +1735,8 @@ public:
                             dest_class_sym = ASRUtils::symbol_get_past_external(ASRUtils::get_struct_sym_from_struct_expr(m_source));
                             malloc_size = SizeOfTypeUtil(m_source, dest_asr_type, llvm_utils->getIntType(4),
                                 ASRUtils::TYPE(ASR::make_Integer_t(al, x.base.base.loc, 4)));
-                        } else if (curr_arg.m_type != nullptr) {
+                        } else if (curr_arg.m_type != nullptr &&
+                                   ASRUtils::is_unlimited_polymorphic_type(&src_struct_sym->base)) {
                             // Explicit allocate type-spec (e.g. allocate(character(3) :: class(*)))
                             // must drive the runtime payload type.
                             dest_asr_type = curr_arg.m_type;
