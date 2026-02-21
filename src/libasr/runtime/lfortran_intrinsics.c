@@ -8494,12 +8494,16 @@ static bool maybe_capture_macho_main_frame(
     }
     char *image_base_name = get_base_name(image_name);
     if (image_base_name == NULL) {
-        return false;
+        // The current PC is in this image segment; do not abort stacktrace
+        // resolution for this frame even if basename extraction fails.
+        return true;
     }
     bool is_main_image = strcmp(image_base_name, main_base_name) == 0;
     free(image_base_name);
     if (!is_main_image) {
-        return false;
+        // This frame belongs to a non-main image. Keep old behavior of
+        // skipping it without aborting the whole stacktrace resolution.
+        return true;
     }
     d->local_pc[d->local_pc_size] = d->current_pc - offset;
     d->binary_filename[d->local_pc_size] = (char *)image_name;
