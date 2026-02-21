@@ -202,7 +202,12 @@ enum class IntrinsicElementalFunctions : int64_t {
     Or,
     Xor,
     TypeOf,
-    Repr
+    Repr,
+    TypeName,
+    TypeSize,
+    TypeParent,
+    TypeSame,
+    TypeExtends
     // ...
 };
 
@@ -5142,17 +5147,15 @@ namespace NewLine {
 
 namespace TypeOf {
 
-    static ASR::expr_t *eval_TypeOf(Allocator &al, const Location &loc,
-            ASR::ttype_t* /*t1*/, Vec<ASR::expr_t*> &args, diag::Diagnostics& /*diag*/) {
-        ASR::ttype_t* arg_type = ASRUtils::extract_type(ASRUtils::expr_type(args[0]));
-        std::string type_str = ASRUtils::type_to_str_with_kind(arg_type, args[0]);
-        int len = type_str.size();
-        return make_ConstantWithType(make_StringConstant_t, s2c(al, type_str),
-            ASRUtils::TYPE(ASR::make_String_t(al, loc, 1,
-                ASRUtils::EXPR(ASR::make_IntegerConstant_t(al, loc, len,
-                    ASRUtils::TYPE(ASR::make_Integer_t(al, loc, 4)))),
-                ASR::string_length_kindType::ExpressionLength,
-                ASR::string_physical_typeType::DescriptorString)), loc);
+    static inline ASR::ttype_t* type_info_handle_type(Allocator &al, const Location &loc) {
+        return ASRUtils::TYPE(ASR::make_CPtr_t(al, loc));
+    }
+
+    static inline void verify_args(const ASR::IntrinsicElementalFunction_t& x,
+            diag::Diagnostics& diagnostics) {
+        ASRUtils::require_impl(x.n_args == 1,
+            "typeof expects exactly 1 argument",
+            x.base.base.loc, diagnostics);
     }
 
     static inline ASR::asr_t* create_TypeOf(Allocator& al, const Location& loc,
@@ -5163,20 +5166,156 @@ namespace TypeOf {
             return nullptr;
         }
 
-        // class(*) requires runtime type dispatch; defer to backend lowering.
-        if (ASRUtils::is_unlimited_polymorphic_type(args[0])) {
-            return ASR::make_IntrinsicElementalFunction_t(al, loc,
-                static_cast<int64_t>(IntrinsicElementalFunctions::TypeOf),
-                args.p, args.n, 0, allocatable_deferred_string(), nullptr);
-        }
-
-        ASR::ttype_t *dummy_type = nullptr;
-        ASR::expr_t *m_value = eval_TypeOf(al, loc, dummy_type, args, diag);
-        if (diag.has_error()) return nullptr;
-        return (ASR::asr_t*) m_value;
+        return ASR::make_IntrinsicElementalFunction_t(al, loc,
+            static_cast<int64_t>(IntrinsicElementalFunctions::TypeOf),
+            args.p, args.n, 0, type_info_handle_type(al, loc), nullptr);
     }
 
 } // namespace TypeOf
+
+namespace TypeName {
+
+    static inline void verify_args(const ASR::IntrinsicElementalFunction_t& x,
+            diag::Diagnostics& diagnostics) {
+        ASRUtils::require_impl(x.n_args == 1,
+            "type_name expects exactly 1 argument",
+            x.base.base.loc, diagnostics);
+    }
+
+    static inline ASR::asr_t* create_TypeName(Allocator& al, const Location& loc,
+            Vec<ASR::expr_t*>& args, diag::Diagnostics& diag) {
+        if (args.size() != 1) {
+            append_error(diag, "type_name takes exactly 1 argument, found "
+                + std::to_string(args.size()), loc);
+            return nullptr;
+        }
+        if (!ASR::is_a<ASR::CPtr_t>(*ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(args[0])))) {
+            append_error(diag, "type_name expects a type(type_info) handle", loc);
+            return nullptr;
+        }
+        return ASR::make_IntrinsicElementalFunction_t(al, loc,
+            static_cast<int64_t>(IntrinsicElementalFunctions::TypeName),
+            args.p, args.n, 0, allocatable_deferred_string(), nullptr);
+    }
+
+} // namespace TypeName
+
+namespace TypeSize {
+
+    static inline void verify_args(const ASR::IntrinsicElementalFunction_t& x,
+            diag::Diagnostics& diagnostics) {
+        ASRUtils::require_impl(x.n_args == 1,
+            "type_size expects exactly 1 argument",
+            x.base.base.loc, diagnostics);
+    }
+
+    static inline ASR::asr_t* create_TypeSize(Allocator& al, const Location& loc,
+            Vec<ASR::expr_t*>& args, diag::Diagnostics& diag) {
+        if (args.size() != 1) {
+            append_error(diag, "type_size takes exactly 1 argument, found "
+                + std::to_string(args.size()), loc);
+            return nullptr;
+        }
+        if (!ASR::is_a<ASR::CPtr_t>(*ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(args[0])))) {
+            append_error(diag, "type_size expects a type(type_info) handle", loc);
+            return nullptr;
+        }
+        return ASR::make_IntrinsicElementalFunction_t(al, loc,
+            static_cast<int64_t>(IntrinsicElementalFunctions::TypeSize),
+            args.p, args.n, 0, ASRUtils::TYPE(ASR::make_Integer_t(al, loc, 8)), nullptr);
+    }
+
+} // namespace TypeSize
+
+namespace TypeParent {
+
+    static inline void verify_args(const ASR::IntrinsicElementalFunction_t& x,
+            diag::Diagnostics& diagnostics) {
+        ASRUtils::require_impl(x.n_args == 1,
+            "type_parent expects exactly 1 argument",
+            x.base.base.loc, diagnostics);
+    }
+
+    static inline ASR::asr_t* create_TypeParent(Allocator& al, const Location& loc,
+            Vec<ASR::expr_t*>& args, diag::Diagnostics& diag) {
+        if (args.size() != 1) {
+            append_error(diag, "type_parent takes exactly 1 argument, found "
+                + std::to_string(args.size()), loc);
+            return nullptr;
+        }
+        if (!ASR::is_a<ASR::CPtr_t>(*ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(args[0])))) {
+            append_error(diag, "type_parent expects a type(type_info) handle", loc);
+            return nullptr;
+        }
+        return ASR::make_IntrinsicElementalFunction_t(al, loc,
+            static_cast<int64_t>(IntrinsicElementalFunctions::TypeParent),
+            args.p, args.n, 0, TypeOf::type_info_handle_type(al, loc), nullptr);
+    }
+
+} // namespace TypeParent
+
+namespace TypeSame {
+
+    static inline void verify_args(const ASR::IntrinsicElementalFunction_t& x,
+            diag::Diagnostics& diagnostics) {
+        ASRUtils::require_impl(x.n_args == 2,
+            "type_same expects exactly 2 arguments",
+            x.base.base.loc, diagnostics);
+    }
+
+    static inline ASR::asr_t* create_TypeSame(Allocator& al, const Location& loc,
+            Vec<ASR::expr_t*>& args, diag::Diagnostics& diag) {
+        if (args.size() != 2) {
+            append_error(diag, "type_same takes exactly 2 arguments, found "
+                + std::to_string(args.size()), loc);
+            return nullptr;
+        }
+        for (size_t i = 0; i < args.size(); i++) {
+            if (!ASR::is_a<ASR::CPtr_t>(*ASRUtils::type_get_past_allocatable_pointer(
+                    ASRUtils::expr_type(args[i])))) {
+                append_error(diag, "type_same expects type(type_info) handles", loc);
+                return nullptr;
+            }
+        }
+        return ASR::make_IntrinsicElementalFunction_t(al, loc,
+            static_cast<int64_t>(IntrinsicElementalFunctions::TypeSame),
+            args.p, args.n, 0, logical, nullptr);
+    }
+
+} // namespace TypeSame
+
+namespace TypeExtends {
+
+    static inline void verify_args(const ASR::IntrinsicElementalFunction_t& x,
+            diag::Diagnostics& diagnostics) {
+        ASRUtils::require_impl(x.n_args == 2,
+            "type_extends expects exactly 2 arguments",
+            x.base.base.loc, diagnostics);
+    }
+
+    static inline ASR::asr_t* create_TypeExtends(Allocator& al, const Location& loc,
+            Vec<ASR::expr_t*>& args, diag::Diagnostics& diag) {
+        if (args.size() != 2) {
+            append_error(diag, "type_extends takes exactly 2 arguments, found "
+                + std::to_string(args.size()), loc);
+            return nullptr;
+        }
+        for (size_t i = 0; i < args.size(); i++) {
+            if (!ASR::is_a<ASR::CPtr_t>(*ASRUtils::type_get_past_allocatable_pointer(
+                    ASRUtils::expr_type(args[i])))) {
+                append_error(diag, "type_extends expects type(type_info) handles", loc);
+                return nullptr;
+            }
+        }
+        return ASR::make_IntrinsicElementalFunction_t(al, loc,
+            static_cast<int64_t>(IntrinsicElementalFunctions::TypeExtends),
+            args.p, args.n, 0, logical, nullptr);
+    }
+
+} // namespace TypeExtends
 
 namespace Repr {
 
@@ -5240,12 +5379,29 @@ namespace Repr {
         return shape;
     }
 
+    static inline void verify_args(const ASR::IntrinsicElementalFunction_t& x,
+            diag::Diagnostics& diagnostics) {
+        ASRUtils::require_impl(x.n_args == 1,
+            "repr expects exactly 1 argument",
+            x.base.base.loc, diagnostics);
+    }
+
+    static inline bool is_type_info_handle(ASR::expr_t* arg) {
+        ASR::ttype_t* t = ASRUtils::type_get_past_allocatable_pointer(ASRUtils::expr_type(arg));
+        return ASR::is_a<ASR::CPtr_t>(*t);
+    }
+
     static inline ASR::asr_t* create_Repr(Allocator& al, const Location& loc,
             Vec<ASR::expr_t*>& args, diag::Diagnostics& diag) {
         if (args.size() != 1) {
             append_error(diag, "repr takes exactly 1 argument, found "
                 + std::to_string(args.size()), loc);
             return nullptr;
+        }
+
+        // repr(type(type_info)) should print the reflected type name.
+        if (is_type_info_handle(args[0])) {
+            return TypeName::create_TypeName(al, loc, args, diag);
         }
 
         // class(*) value rendering needs runtime dispatch in backend.

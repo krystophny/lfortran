@@ -1711,6 +1711,11 @@ public:
         {"trailz", IntrinsicSignature({"i"}, 1, 1)},
         {"typeof", IntrinsicSignature({"x"}, 1, 1)},
         {"repr", IntrinsicSignature({"x"}, 1, 1)},
+        {"type_name", IntrinsicSignature({"t"}, 1, 1)},
+        {"type_size", IntrinsicSignature({"t"}, 1, 1)},
+        {"type_parent", IntrinsicSignature({"t"}, 1, 1)},
+        {"type_same", IntrinsicSignature({"a", "b"}, 2, 2)},
+        {"type_extends", IntrinsicSignature({"a", "b"}, 2, 2)},
 
 
         // LFortran-specific intrinsics
@@ -7043,26 +7048,8 @@ public:
                     // Builtin reflection type. Respect normal Fortran name resolution:
                     // use this only when no user symbol named `type_info` is found.
                     if (derived_type_name == "type_info") {
-                        if (is_pointer) {
-                            diag.add(Diagnostic(
-                                "`type(type_info)` does not support POINTER attribute",
-                                Level::Error, Stage::Semantic, {
-                                    Label("", {loc})
-                                }));
-                            throw SemanticAbort();
-                        }
-                        if (dims.size() > 0) {
-                            diag.add(Diagnostic(
-                                "Array declaration for `type(type_info)` is not supported yet",
-                                Level::Error, Stage::Semantic, {
-                                    Label("", {loc})
-                                }));
-                            throw SemanticAbort();
-                        }
-                        return ASRUtils::TYPE(ASR::make_Allocatable_t(al, loc,
-                            ASRUtils::TYPE(ASR::make_String_t(al, loc, 1, nullptr,
-                                ASR::string_length_kindType::DeferredLength,
-                                ASR::string_physical_typeType::DescriptorString))));
+                        // Internal representation: opaque runtime type handle.
+                        return ASRUtils::TYPE(ASR::make_CPtr_t(al, loc));
                     }
                     if (is_template) { 
                         diag.add(Diagnostic(
@@ -11837,7 +11824,8 @@ public:
 
                     std::vector<int> array_indices_in_args = find_array_indices_in_args(args);
                     std::vector<std::string> inquiry_functions = {"epsilon", "radix", "range", "precision", "rank", "tiny", "huge", "bit_size", "new_line", "digits",
-                        "maxexponent", "minexponent", "storage_size", "kind", "is_contiguous", "loc", "typeof", "repr"};
+                        "maxexponent", "minexponent", "storage_size", "kind", "is_contiguous", "loc", "typeof", "repr",
+                        "type_name", "type_size", "type_parent", "type_same", "type_extends"};
                     if (are_all_args_evaluated &&
                         (std::find(inquiry_functions.begin(), inquiry_functions.end(), var_name) == inquiry_functions.end()) &&
                         !array_indices_in_args.empty())

@@ -22,6 +22,11 @@ inline std::string get_intrinsic_name(int64_t x) {
         INTRINSIC_NAME_CASE(Kind)
         INTRINSIC_NAME_CASE(TypeOf)
         INTRINSIC_NAME_CASE(Repr)
+        INTRINSIC_NAME_CASE(TypeName)
+        INTRINSIC_NAME_CASE(TypeSize)
+        INTRINSIC_NAME_CASE(TypeParent)
+        INTRINSIC_NAME_CASE(TypeSame)
+        INTRINSIC_NAME_CASE(TypeExtends)
         INTRINSIC_NAME_CASE(Sin)
         INTRINSIC_NAME_CASE(Cos)
         INTRINSIC_NAME_CASE(Tan)
@@ -410,6 +415,16 @@ namespace IntrinsicElementalFunctionRegistry {
             {nullptr, &TypeOf::verify_args}},
         {static_cast<int64_t>(IntrinsicElementalFunctions::Repr),
             {nullptr, &Repr::verify_args}},
+        {static_cast<int64_t>(IntrinsicElementalFunctions::TypeName),
+            {nullptr, &TypeName::verify_args}},
+        {static_cast<int64_t>(IntrinsicElementalFunctions::TypeSize),
+            {nullptr, &TypeSize::verify_args}},
+        {static_cast<int64_t>(IntrinsicElementalFunctions::TypeParent),
+            {nullptr, &TypeParent::verify_args}},
+        {static_cast<int64_t>(IntrinsicElementalFunctions::TypeSame),
+            {nullptr, &TypeSame::verify_args}},
+        {static_cast<int64_t>(IntrinsicElementalFunctions::TypeExtends),
+            {nullptr, &TypeExtends::verify_args}},
         {static_cast<int64_t>(IntrinsicElementalFunctions::Digits),
             {&Digits::instantiate_Digits, &Digits::verify_args}},
         {static_cast<int64_t>(IntrinsicElementalFunctions::Rrspacing),
@@ -685,8 +700,13 @@ namespace IntrinsicElementalFunctionRegistry {
                 {"selected_char_kind", {&SelectedCharKind::create_SelectedCharKind, &SelectedCharKind::eval_SelectedCharKind}},
                 {"selected_logical_kind", {&SelectedLogicalKind::create_SelectedLogicalKind, &SelectedLogicalKind::eval_SelectedLogicalKind}},
                 {"kind", {&Kind::create_Kind, &Kind::eval_Kind}},
-                {"typeof", {&TypeOf::create_TypeOf, &TypeOf::eval_TypeOf}},
+                {"typeof", {&TypeOf::create_TypeOf, nullptr}},
                 {"repr", {&Repr::create_Repr, nullptr}},
+                {"type_name", {&TypeName::create_TypeName, nullptr}},
+                {"type_size", {&TypeSize::create_TypeSize, nullptr}},
+                {"type_parent", {&TypeParent::create_TypeParent, nullptr}},
+                {"type_same", {&TypeSame::create_TypeSame, nullptr}},
+                {"type_extends", {&TypeExtends::create_TypeExtends, nullptr}},
                 {"digits", {&Digits::create_Digits, &Digits::eval_Digits}},
                 {"rrspacing", {&Rrspacing::create_Rrspacing, &Rrspacing::eval_Rrspacing}},
                 {"repeat", {&Repeat::create_Repeat, &Repeat::eval_Repeat}},

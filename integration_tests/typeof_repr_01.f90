@@ -16,7 +16,11 @@ program typeof_repr_01
     p = point(1, 2)
 
     t = typeof(x)
-    if (t /= "real(8)") error stop 1
+    if (repr(t) /= "real(8)") error stop 1
+    if (type_name(t) /= "real(8)") error stop 5
+    if (type_size(t) /= 8_8) error stop 6
+    if (.not. type_same(t, typeof(x))) error stop 7
+    if (type_name(type_parent(t)) /= "~null_type") error stop 8
 
     s = repr(x)
     if (index(s, "real(8) :: x =") /= 1) error stop 2
@@ -27,6 +31,6 @@ program typeof_repr_01
     s = repr(p)
     if (s /= "point :: p = point(1, 2)") error stop 4
 
-    print *, typeof(x)
+    print *, t
     print *, repr(x)
 end program typeof_repr_01
