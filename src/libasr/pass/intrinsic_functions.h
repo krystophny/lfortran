@@ -5374,7 +5374,7 @@ namespace Repr {
 
     static inline bool is_type_info_handle(ASR::expr_t* arg) {
         ASR::ttype_t* t = ASRUtils::type_get_past_allocatable_pointer(ASRUtils::expr_type(arg));
-        return ASR::is_a<ASR::CPtr_t>(*t);
+        return ASR::is_a<ASR::TypeInfo_t>(*t);
     }
 
     static inline ASR::asr_t* create_Repr(Allocator& al, const Location& loc,
