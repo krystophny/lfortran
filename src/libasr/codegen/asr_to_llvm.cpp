@@ -3270,9 +3270,9 @@ public:
         add_type_case(ASR::ttypeType::Complex, 4, 8, "complex(4)");
         add_type_case(ASR::ttypeType::Complex, 8, 16, "complex(8)");
         add_type_case(ASR::ttypeType::Logical, 1, 1, "logical(1)");
-        add_type_case(ASR::ttypeType::Logical, 2, 2, "logical(2)");
-        add_type_case(ASR::ttypeType::Logical, 4, 4, "logical(4)");
-        add_type_case(ASR::ttypeType::Logical, 8, 8, "logical(8)");
+        add_type_case(ASR::ttypeType::Logical, 2, 1, "logical(2)");
+        add_type_case(ASR::ttypeType::Logical, 4, 1, "logical(4)");
+        add_type_case(ASR::ttypeType::Logical, 8, 1, "logical(8)");
         add_type_case(ASR::ttypeType::String, 1, character_desc_size, "character");
 
         builder->SetInsertPoint(currentBB);
@@ -3376,7 +3376,7 @@ public:
         auto add_logical_case = [&](int kind) {
             int64_t tag = uses_new_classes_tag ?
                 ((int)ASR::ttypeType::Logical + kind) : (-((int)ASR::ttypeType::Logical) - kind);
-            uint64_t expected_size = kind;
+            uint64_t expected_size = 1;
             llvm::BasicBlock* thenBB = llvm::BasicBlock::Create(context, "repr.val.fmt.then", fn);
             llvm::BasicBlock* elseBB = llvm::BasicBlock::Create(context, "repr.val.fmt.else", fn);
             builder->SetInsertPoint(currentBB);
@@ -3391,15 +3391,17 @@ public:
             builder->CreateCondBr(cond, thenBB, elseBB);
 
             builder->SetInsertPoint(thenBB);
-            llvm::Type* src_type = llvm::Type::getIntNTy(context, kind * 8);
+            llvm::Type* src_type = llvm::Type::getInt8Ty(context);
             llvm::Value* src_ptr = builder->CreateBitCast(data_ptr, src_type->getPointerTo());
             llvm::Value* src_val = llvm_utils->CreateLoad2(src_type, src_ptr);
-            llvm::Value* logical_i32 = builder->CreateZExtOrTrunc(src_val, i32_type);
-            llvm::Value* logical_ptr = llvm_utils->CreateAlloca(*builder, i32_type);
-            builder->CreateStore(logical_i32, logical_ptr);
+            llvm::Value* logical_bool = builder->CreateICmpNE(
+                src_val, llvm::ConstantInt::get(src_type, 0));
+            llvm::Value* logical_ptr = llvm_utils->CreateAlloca(
+                *builder, llvm::Type::getInt1Ty(context));
+            builder->CreateStore(logical_bool, logical_ptr);
 
             llvm::Value* fmt_data = LCompilers::create_global_string_ptr(
-                context, *module, *builder, "L" + std::to_string(kind));
+                context, *module, *builder, "L");
             llvm::Value* value_ptr = builder->CreateBitCast(logical_ptr, i8_ptr_type);
             llvm::Value* supported = llvm::ConstantInt::getTrue(context);
             builder->CreateBr(fmt_mergeBB);
