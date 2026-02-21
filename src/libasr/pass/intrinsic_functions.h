@@ -5142,7 +5142,7 @@ namespace NewLine {
 namespace TypeOf {
 
     static inline ASR::ttype_t* type_info_handle_type(Allocator &al, const Location &loc) {
-        return ASRUtils::TYPE(ASR::make_CPtr_t(al, loc));
+        return ASRUtils::TYPE(ASR::make_TypeInfo_t(al, loc));
     }
 
     static inline ASR::asr_t* create_TypeOf(Allocator& al, const Location& loc,

@@ -501,6 +501,12 @@ public:
                 type_encoding = llvm::dwarf::DW_ATE_address;
                 break;
             }
+            case ASR::ttypeType::TypeInfo: {
+                type_name = "type_info";
+                type_size = 64;
+                type_encoding = llvm::dwarf::DW_ATE_address;
+                break;
+            }
             default : {
                 type_name = "non-specified-debug-type-SIZE-set-to-ZERO";
                 type_size = 0;
@@ -4586,7 +4592,8 @@ public:
                     ptr = module->getOrInsertGlobal(llvm_var_name, llvm_utils->get_StringType(x.m_type));
                 }
             llvm_symtab[h] = ptr;
-        } else if( x.m_type->type == ASR::ttypeType::CPtr ) {
+        } else if( x.m_type->type == ASR::ttypeType::CPtr ||
+                   x.m_type->type == ASR::ttypeType::TypeInfo ) {
             llvm::Type* void_ptr = llvm::Type::getVoidTy(context)->getPointerTo();
             llvm::Constant *ptr = module->getOrInsertGlobal(llvm_var_name,
                 void_ptr);
@@ -12112,7 +12119,8 @@ public:
                     case ASR::ttypeType::StructType:
                     case ASR::ttypeType::String:
                     case ASR::ttypeType::Logical:
-                    case ASR::ttypeType::CPtr:{
+                    case ASR::ttypeType::CPtr:
+                    case ASR::ttypeType::TypeInfo: {
                         if( t2->type == ASR::ttypeType::StructType ) {
                             current_der_type_name = ASRUtils::symbol_name(
                                 ASRUtils::symbol_get_past_external(ASRUtils::get_struct_sym_from_struct_expr(ASRUtils::EXPR(ASR::make_Var_t(al, x->base.base.loc, (ASR::symbol_t*) x)))));
@@ -15821,7 +15829,7 @@ public:
             res += ")";
         } else if (ASR::is_a<ASR::Logical_t>(*type)) {
             res += "L";
-        } else if(ASR::is_a<ASR::CPtr_t>(*type)){
+        } else if(ASR::is_a<ASR::CPtr_t>(*type) || ASR::is_a<ASR::TypeInfo_t>(*type)){
             res += "CPtr";
         } else {
             throw CodeGenError("Printing support is not available for `" +
@@ -15861,7 +15869,7 @@ public:
         lookup_enum_value_for_nonints = false;
         ptr_loads = ptr_loads_copy;
 
-        if ((t->type == ASR::ttypeType::CPtr && !ASRUtils::is_array(t)) ||
+        if (((t->type == ASR::ttypeType::CPtr || t->type == ASR::ttypeType::TypeInfo) && !ASRUtils::is_array(t)) ||
             (t->type == ASR::ttypeType::Pointer &&
                 (ASR::is_a<ASR::Var_t>(*v) || ASR::is_a<ASR::GetPointer_t>(*v))
                 && !ASRUtils::is_array(t) && !ASRUtils::is_character(*t))
@@ -15971,7 +15979,7 @@ public:
                 }
             }
             args.push_back(tmp);
-        } else if (t->type == ASR::ttypeType::CPtr) {
+        } else if (t->type == ASR::ttypeType::CPtr || t->type == ASR::ttypeType::TypeInfo) {
             fmt.push_back("%lld");
             args.push_back(tmp);
         } else if (t->type == ASR::ttypeType::EnumType) {
@@ -16297,7 +16305,8 @@ public:
                         if( !ASRUtils::is_array(arg->m_type) ) {
 
                             if ((x_abi == ASR::abiType::Source || x_abi == ASR::abiType::ExternalUndefined)
-                                     && ASR::is_a<ASR::CPtr_t>(*arg->m_type)) {
+                                     && (ASR::is_a<ASR::CPtr_t>(*arg->m_type) ||
+                                         ASR::is_a<ASR::TypeInfo_t>(*arg->m_type))) {
                                 if ( orig_arg_intent != ASRUtils::intent_out &&
                                         arg->m_intent == intent_local ) {
                                     // Local variable of type
@@ -16343,7 +16352,8 @@ public:
                                                 }
                                             }
                                         }
-                                    } else if (is_a<ASR::CPtr_t>(*arg_type)) {
+                                    } else if (is_a<ASR::CPtr_t>(*arg_type) ||
+                                               is_a<ASR::TypeInfo_t>(*arg_type)) {
                                         if ( arg->m_intent == intent_local ||
                                                 arg->m_intent == ASRUtils::intent_out) {
                                             // Local variable or Dummy out argument
@@ -16556,7 +16566,8 @@ public:
                     if( (ASR::is_a<ASR::ArrayItem_t>(*x.m_args[i].m_value) &&
                          orig_arg_intent ==  ASR::intentType::In) ||
                         ASR::is_a<ASR::StructInstanceMember_t>(*x.m_args[i].m_value) ||
-                        (ASR::is_a<ASR::CPtr_t>(*arg_type) &&
+                        ((ASR::is_a<ASR::CPtr_t>(*arg_type) ||
+                          ASR::is_a<ASR::TypeInfo_t>(*arg_type)) &&
                          ASR::is_a<ASR::StructInstanceMember_t>(*x.m_args[i].m_value)) ) {
                         if( ASR::is_a<ASR::StructInstanceMember_t>(*x.m_args[i].m_value) &&
                             ASRUtils::is_array(arg_type) ) {
@@ -16651,6 +16662,7 @@ public:
                     case (ASR::ttypeType::StructType) :
                         break;
                     case (ASR::ttypeType::CPtr) :
+                    case (ASR::ttypeType::TypeInfo) :
                         target_type = llvm::Type::getVoidTy(context)->getPointerTo();
                         break;
                     case ASR::ttypeType::Allocatable:
@@ -16759,6 +16771,8 @@ public:
                                         || !ASRUtils::is_allocatable(arg_type))
                                     && (ASRUtils::is_array(arg_type)
                                         || ASR::is_a<ASR::CPtr_t>(
+                                            *ASRUtils::expr_type(x.m_args[i].m_value))
+                                        || ASR::is_a<ASR::TypeInfo_t>(
                                             *ASRUtils::expr_type(x.m_args[i].m_value))))
                                 || (ASR::is_a<ASR::StructInstanceMember_t>(*x.m_args[i].m_value)
                                     && ASRUtils::is_allocatable(arg_type)
@@ -16784,6 +16798,7 @@ public:
                                 }
                         }
                         if( !ASR::is_a<ASR::CPtr_t>(*arg_type) &&
+                            !ASR::is_a<ASR::TypeInfo_t>(*arg_type) &&
                             !(orig_arg && !LLVM::is_llvm_pointer(*orig_arg->m_type) &&
                             LLVM::is_llvm_pointer(*arg_type)) &&
                             !ASRUtils::is_character(*arg_type) &&

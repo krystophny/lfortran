@@ -7059,7 +7059,7 @@ public:
                             throw SemanticAbort();
                         }
                         // Internal representation: opaque runtime type handle.
-                        return ASRUtils::TYPE(ASR::make_CPtr_t(al, loc));
+                        return ASRUtils::TYPE(ASR::make_TypeInfo_t(al, loc));
                     }
                     if (is_template) { 
                         diag.add(Diagnostic(

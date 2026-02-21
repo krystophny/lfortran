@@ -256,6 +256,10 @@ namespace LCompilers {
                 llvm_mem_type = llvm::Type::getVoidTy(context)->getPointerTo();
                 break;
             }
+            case ASR::ttypeType::TypeInfo: {
+                llvm_mem_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                break;
+            }
             default:
                 throw CodeGenError("Cannot identify the type of member, '" +
                                     std::string(member->m_name) +
@@ -503,6 +507,10 @@ namespace LCompilers {
                 break;
             }
             case ASR::ttypeType::CPtr: {
+                el_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                break;
+            }
+            case ASR::ttypeType::TypeInfo: {
                 el_type = llvm::Type::getVoidTy(context)->getPointerTo();
                 break;
             }
@@ -835,7 +843,8 @@ namespace LCompilers {
                 }
                 break;
             }
-            case (ASR::ttypeType::CPtr) : {
+            case (ASR::ttypeType::CPtr) :
+            case (ASR::ttypeType::TypeInfo) : {
                 type = llvm::Type::getVoidTy(context)->getPointerTo();
                 break;
             }
@@ -1019,7 +1028,8 @@ namespace LCompilers {
                 if( (arg->m_intent == ASRUtils::intent_out ||
                      arg->m_intent == ASRUtils::intent_inout ||
                      (arg->m_intent == ASRUtils::intent_unspecified && !arg->m_value_attr)) &&
-                    ASR::is_a<ASR::CPtr_t>(*arg->m_type) ) {
+                    (ASR::is_a<ASR::CPtr_t>(*arg->m_type) ||
+                     ASR::is_a<ASR::TypeInfo_t>(*arg->m_type)) ) {
                     type = type->getPointerTo();
                 }
                 std::uint32_t m_h;
@@ -1116,6 +1126,7 @@ namespace LCompilers {
                     return_type = llvm::Type::getInt1Ty(context);
                     break;
                 case (ASR::ttypeType::CPtr) :
+                case (ASR::ttypeType::TypeInfo) :
                     return_type = llvm::Type::getVoidTy(context)->getPointerTo();
                     break;
                 case (ASR::ttypeType::Pointer) : {
@@ -1464,7 +1475,8 @@ namespace LCompilers {
                 llvm_type = tuple_api->get_tuple_type(type_code, llvm_el_types);
                 break;
             }
-            case (ASR::ttypeType::CPtr) : {
+            case (ASR::ttypeType::CPtr) :
+            case (ASR::ttypeType::TypeInfo) : {
                 a_kind = 8;
                 llvm_type = llvm::Type::getVoidTy(context)->getPointerTo();
                 break;
@@ -3108,6 +3120,10 @@ llvm::Value* LLVMUtils::handle_global_nonallocatable_stringArray(Allocator& al, 
                 break;
             case ASR::ttypeType::FunctionType:
             case ASR::ttypeType::CPtr: {
+                LLVM::CreateStore(*builder, src, dest);
+                break ;
+            }
+            case ASR::ttypeType::TypeInfo: {
                 LLVM::CreateStore(*builder, src, dest);
                 break ;
             }

@@ -936,6 +936,7 @@ class ASRToLLVMVisitor;
                 break;
                 case(ASR::FunctionType):
                 case(ASR::CPtr):
+                case(ASR::TypeInfo):
                 case(ASR::String):
                 // Do nothing
                 break;
@@ -980,6 +981,7 @@ class ASRToLLVMVisitor;
                 case(ASR::Logical):
                 case(ASR::FunctionType):
                 case(ASR::CPtr):
+                case(ASR::TypeInfo):
                 // Pointers -- Do nothing
                 break;
                 default: 
@@ -1254,6 +1256,7 @@ if(get_struct_sym(member_variable) == struct_sym /*recursive declaration*/){cont
                 case ASR::UnsignedInteger:
                 case ASR::Logical :
                 case ASR::CPtr:
+                case ASR::TypeInfo:
                 // Do Nothing.
                 break;
                 default:
@@ -1424,6 +1427,7 @@ if(get_struct_sym(member_variable) == struct_sym /*recursive declaration*/){cont
                     return true;
                 case ASR::FunctionType:
                 case ASR::CPtr:
+                case ASR::TypeInfo:
                     return false;
                 default:
                     throw LCompilersException("Handle this case");
