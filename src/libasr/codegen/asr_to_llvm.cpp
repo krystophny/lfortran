@@ -1736,6 +1736,7 @@ public:
                             malloc_size = SizeOfTypeUtil(m_source, dest_asr_type, llvm_utils->getIntType(4),
                                 ASRUtils::TYPE(ASR::make_Integer_t(al, x.base.base.loc, 4)));
                         } else if (curr_arg.m_type != nullptr &&
+                                   curr_arg.m_sym_subclass == nullptr &&
                                    ASRUtils::is_unlimited_polymorphic_type(&src_struct_sym->base)) {
                             // Explicit allocate type-spec (e.g. allocate(character(3) :: class(*)))
                             // must drive the runtime payload type.
