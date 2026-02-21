@@ -1,5 +1,6 @@
 #include "libasr/assert.h"
 #include "libasr/string_utils.h"
+#include <cctype>
 #include <iostream>
 #include <llvm/IR/Value.h>
 #include <memory>
@@ -3410,6 +3411,392 @@ public:
                     // old classes: compare integer type hashes
                     tmp = builder->CreateICmpEQ(id0, id1);
                 }
+                break;
+            }
+            case ASRUtils::IntrinsicElementalFunctions::TypeOf: {
+                ASR::expr_t* arg = x.m_args[0];
+                llvm::Type* i8_ptr = llvm::Type::getInt8Ty(context)->getPointerTo();
+                llvm::Type* cptr_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                llvm::Type* i64_type = llvm::Type::getInt64Ty(context);
+                llvm::StructType* type_info_type = llvm::StructType::get(
+                    context, {i8_ptr, i8_ptr, i8_ptr}, false);
+                auto as_i8_ptr = [&](llvm::Constant* c) -> llvm::Value* {
+                    return llvm::ConstantExpr::getBitCast(c, i8_ptr);
+                };
+                auto sanitize = [&](std::string s) {
+                    for (char &ch : s) {
+                        if (!std::isalnum(static_cast<unsigned char>(ch))) ch = '_';
+                    }
+                    return s;
+                };
+                auto make_synthetic_typeinfo = [&](ASR::ttype_t* t, ASR::expr_t* e) -> llvm::Value* {
+                    std::string tname = ASRUtils::type_to_str_with_kind(t, e);
+                    std::string key = sanitize(tname);
+                    std::string gv_name = "_Type_Info_Synth_" + key;
+                    llvm::GlobalVariable* gv = module->getGlobalVariable(gv_name);
+                    if (!gv) {
+                        llvm::Type* llvm_t = llvm_utils->get_type_from_ttype_t_util(e, t, module.get());
+                        uint64_t tsize = llvm::DataLayout(module->getDataLayout()).getTypeAllocSize(llvm_t);
+                        llvm::Constant* name_ptr = llvm::dyn_cast<llvm::Constant>(
+                            LCompilers::create_global_string_ptr(
+                                context, *module, *builder, tname, "_Type_Name_" + key));
+                        llvm::Constant* size_ptr = llvm::ConstantExpr::getIntToPtr(
+                            llvm::ConstantInt::get(i64_type, tsize), i8_ptr);
+                        llvm::Constant* parent_ptr = llvm::ConstantPointerNull::get(
+                            llvm::cast<llvm::PointerType>(i8_ptr));
+                        llvm::Constant* init = llvm::ConstantStruct::get(
+                            type_info_type, {name_ptr, size_ptr, parent_ptr});
+                        gv = new llvm::GlobalVariable(
+                            *module, type_info_type, true,
+                            llvm::GlobalValue::LinkOnceODRLinkage, init, gv_name);
+                        gv->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
+                        gv->setAlignment(llvm::MaybeAlign(8));
+                    }
+                    return llvm::ConstantExpr::getBitCast(gv, i8_ptr);
+                };
+                auto static_type_info_handle = [&](ASR::expr_t* e) -> llvm::Value* {
+                    ASR::ttype_t* arg_type = ASRUtils::extract_type(ASRUtils::expr_type(e));
+                    if (ASR::is_a<ASR::StructType_t>(*arg_type)) {
+                        ASR::symbol_t* sym = ASRUtils::symbol_get_past_external(
+                            ASRUtils::get_struct_sym_from_struct_expr(e));
+                        if (sym && ASR::is_a<ASR::Struct_t>(*sym)) {
+                            struct_api->create_type_info_for_struct(sym, module.get());
+                            return as_i8_ptr(struct_api->newclass2typeinfo.at(sym));
+                        }
+                        return make_synthetic_typeinfo(arg_type, e);
+                    } else if (ASR::is_a<ASR::Integer_t>(*arg_type)
+                            || ASR::is_a<ASR::UnsignedInteger_t>(*arg_type)
+                            || ASR::is_a<ASR::Real_t>(*arg_type)
+                            || ASR::is_a<ASR::Logical_t>(*arg_type)
+                            || ASR::is_a<ASR::Complex_t>(*arg_type)
+                            || ASR::is_a<ASR::String_t>(*arg_type)) {
+                        int kind = ASRUtils::extract_kind_from_ttype_t(arg_type);
+                        struct_api->create_type_info_for_intrinsic_type(arg_type, kind, module.get());
+                        return as_i8_ptr(struct_api->intrinsic_type_info.at(
+                            ASRUtils::intrinsic_type_to_str_with_kind(arg_type, kind)));
+                    }
+                    return make_synthetic_typeinfo(arg_type, e);
+                };
+
+                if (!ASRUtils::is_unlimited_polymorphic_type(arg)) {
+                    tmp = static_type_info_handle(arg);
+                    if (tmp->getType() != cptr_type) {
+                        tmp = builder->CreateBitCast(tmp, cptr_type);
+                    }
+                    break;
+                }
+
+                int64_t ptr_loads_copy = ptr_loads;
+                ptr_loads = 0;
+                this->visit_expr(*arg);
+                llvm::Value* arg_ptr = tmp;
+                ptr_loads = ptr_loads_copy;
+
+                ASR::symbol_t* struct_sym = ASRUtils::symbol_get_past_external(
+                    ASRUtils::get_struct_sym_from_struct_expr(arg));
+                llvm::Type* class_type = llvm_utils->getClassType(
+                    ASR::down_cast<ASR::Struct_t>(struct_sym), false);
+                ASR::ttype_t* arg_type = ASRUtils::expr_type(arg);
+                if (ASRUtils::is_allocatable(arg_type) || ASR::is_a<ASR::Pointer_t>(*arg_type)) {
+                    arg_ptr = llvm_utils->CreateLoad2(class_type->getPointerTo(), arg_ptr);
+                }
+
+                llvm::Value* id_ptr = llvm_utils->create_gep2(class_type, arg_ptr, 0);
+                llvm::Type* id_type = llvm::cast<llvm::StructType>(class_type)->getElementType(0);
+                if (id_type->isPointerTy()) {
+                    llvm::Value* vptr = llvm_utils->CreateLoad2(id_type, id_ptr);
+                    llvm::Value* vptr_i8 = builder->CreateBitCast(vptr, i8_ptr->getPointerTo());
+                    llvm::Value* type_info_ptr_ptr = llvm_utils->create_ptr_gep2(
+                        i8_ptr, vptr_i8, llvm::ConstantInt::get(i64_type, -1, true));
+                    tmp = llvm_utils->CreateLoad2(i8_ptr, type_info_ptr_ptr);
+                    if (tmp->getType() != cptr_type) {
+                        tmp = builder->CreateBitCast(tmp, cptr_type);
+                    }
+                    break;
+                }
+
+                llvm::Value* type_id = llvm_utils->CreateLoad2(id_type, id_ptr);
+                if (type_id->getType() != i64_type) {
+                    type_id = builder->CreateSExtOrTrunc(type_id, i64_type);
+                }
+                llvm::Function* fn = builder->GetInsertBlock()->getParent();
+                llvm::BasicBlock* mergeBB = llvm::BasicBlock::Create(context, "typeof.merge", fn);
+                std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> incoming;
+                llvm::BasicBlock* currentBB = builder->GetInsertBlock();
+                auto add_type_case = [&](int64_t id_value, ASR::ttype_t* t) {
+                    llvm::BasicBlock* thenBB = llvm::BasicBlock::Create(context, "typeof.then", fn);
+                    llvm::BasicBlock* elseBB = llvm::BasicBlock::Create(context, "typeof.else", fn);
+                    builder->SetInsertPoint(currentBB);
+                    llvm::Value* cond = builder->CreateICmpEQ(
+                        type_id, llvm::ConstantInt::get(i64_type, llvm::APInt(64, id_value, true)));
+                    builder->CreateCondBr(cond, thenBB, elseBB);
+                    builder->SetInsertPoint(thenBB);
+                    int kind = ASRUtils::extract_kind_from_ttype_t(t);
+                    struct_api->create_type_info_for_intrinsic_type(t, kind, module.get());
+                    llvm::Value* value = as_i8_ptr(struct_api->intrinsic_type_info.at(
+                        ASRUtils::intrinsic_type_to_str_with_kind(t, kind)));
+                    builder->CreateBr(mergeBB);
+                    incoming.push_back({thenBB, value});
+                    currentBB = elseBB;
+                };
+                add_type_case(-((int)ASR::ttypeType::Integer) - 4,
+                    ASRUtils::TYPE(ASR::make_Integer_t(al, arg->base.loc, 4)));
+                add_type_case(-((int)ASR::ttypeType::Integer) - 8,
+                    ASRUtils::TYPE(ASR::make_Integer_t(al, arg->base.loc, 8)));
+                add_type_case(-((int)ASR::ttypeType::Real) - 4,
+                    ASRUtils::TYPE(ASR::make_Real_t(al, arg->base.loc, 4)));
+                add_type_case(-((int)ASR::ttypeType::Real) - 8,
+                    ASRUtils::TYPE(ASR::make_Real_t(al, arg->base.loc, 8)));
+                add_type_case(-((int)ASR::ttypeType::Logical) - 4,
+                    ASRUtils::TYPE(ASR::make_Logical_t(al, arg->base.loc, 4)));
+                add_type_case(-((int)ASR::ttypeType::String) - 1,
+                    ASRUtils::TYPE(ASR::make_String_t(al, arg->base.loc, 1, nullptr,
+                    ASR::string_length_kindType::DeferredLength,
+                    ASR::string_physical_typeType::DescriptorString)));
+                builder->SetInsertPoint(currentBB);
+                llvm::Value* fallback = make_synthetic_typeinfo(
+                    ASRUtils::TYPE(ASR::make_Integer_t(al, arg->base.loc, 8)), arg);
+                builder->CreateBr(mergeBB);
+                incoming.push_back({currentBB, fallback});
+                builder->SetInsertPoint(mergeBB);
+                llvm::PHINode* phi = builder->CreatePHI(i8_ptr, incoming.size(), "typeof.result");
+                for (auto &entry : incoming) {
+                    phi->addIncoming(entry.second, entry.first);
+                }
+                tmp = phi;
+                if (tmp->getType() != cptr_type) {
+                    tmp = builder->CreateBitCast(tmp, cptr_type);
+                }
+                break;
+            }
+            case ASRUtils::IntrinsicElementalFunctions::TypeName: {
+                llvm::Type* i8_ptr = llvm::Type::getInt8Ty(context)->getPointerTo();
+                llvm::Type* cptr_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                llvm::Type* i64_type = llvm::Type::getInt64Ty(context);
+                llvm::StructType* type_info_type = llvm::StructType::get(
+                    context, {i8_ptr, i8_ptr, i8_ptr}, false);
+                auto make_const_desc = [&](const std::string &name) {
+                    llvm::Value* data = LCompilers::create_global_string_ptr(
+                        context, *module, *builder, name);
+                    llvm::Value* len = llvm::ConstantInt::get(
+                        llvm::Type::getInt64Ty(context), llvm::APInt(64, name.size()));
+                    return llvm_utils->create_string_descriptor(data, len, "type_name_desc");
+                };
+                auto load_type_info_handle = [&](ASR::expr_t* arg_expr) -> llvm::Value* {
+                    this->visit_expr(*arg_expr);
+                    llvm::Value* value = tmp;
+                    llvm::Type* arg_type = llvm_utils->get_type_from_ttype_t_util(
+                        arg_expr, ASRUtils::expr_type(arg_expr), module.get());
+                    if ((ASR::is_a<ASR::Var_t>(*arg_expr)
+                         || ASR::is_a<ASR::StructInstanceMember_t>(*arg_expr))
+                        && value->getType() != arg_type) {
+                        value = llvm_utils->CreateLoad2(arg_type, value);
+                    }
+                    if (value->getType() != cptr_type) {
+                        value = builder->CreateBitCast(value, cptr_type);
+                    }
+                    return value;
+                };
+                llvm::Value* ti_ptr = load_type_info_handle(x.m_args[0]);
+                ti_ptr = builder->CreateBitCast(ti_ptr, i8_ptr);
+                llvm::Value* out_desc = llvm_utils->CreateAlloca(*builder,
+                    string_descriptor->getPointerTo());
+                llvm::Value* is_null = builder->CreateICmpEQ(
+                    builder->CreatePtrToInt(ti_ptr, i64_type),
+                    llvm::ConstantInt::get(i64_type, 0));
+                llvm_utils->create_if_else(is_null, [&]() {
+                    builder->CreateStore(make_const_desc("~null_type"), out_desc);
+                }, [&]() {
+                    llvm::Value* ti_cast = builder->CreateBitCast(
+                        ti_ptr, type_info_type->getPointerTo());
+                    llvm::Value* name_ptr_ptr = llvm_utils->create_gep2(
+                        type_info_type, ti_cast, 0);
+                    llvm::Value* name_ptr = llvm_utils->CreateLoad2(i8_ptr, name_ptr_ptr);
+                    llvm::Value* type_tag = builder->CreatePtrToInt(name_ptr, i64_type);
+                    auto tag_eq = [&](ASR::ttypeType type, int kind) -> llvm::Value* {
+                        int64_t tag_value =
+                            static_cast<int64_t>(static_cast<int>(type) + kind);
+                        return builder->CreateICmpEQ(
+                            type_tag,
+                            llvm::ConstantInt::get(i64_type, llvm::APInt(64, tag_value, true)));
+                    };
+                    auto store_const_desc = [&](const std::string &name) {
+                        builder->CreateStore(make_const_desc(name), out_desc);
+                    };
+
+                    llvm::Value* is_intrinsic_tag = tag_eq(ASR::ttypeType::Integer, 1);
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag,
+                        tag_eq(ASR::ttypeType::Integer, 2));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag,
+                        tag_eq(ASR::ttypeType::Integer, 4));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag,
+                        tag_eq(ASR::ttypeType::Integer, 8));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag,
+                        tag_eq(ASR::ttypeType::UnsignedInteger, 1));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag,
+                        tag_eq(ASR::ttypeType::UnsignedInteger, 2));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag,
+                        tag_eq(ASR::ttypeType::UnsignedInteger, 4));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag,
+                        tag_eq(ASR::ttypeType::UnsignedInteger, 8));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag,
+                        tag_eq(ASR::ttypeType::Real, 4));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag,
+                        tag_eq(ASR::ttypeType::Real, 8));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag,
+                        tag_eq(ASR::ttypeType::Logical, 1));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag,
+                        tag_eq(ASR::ttypeType::Logical, 2));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag,
+                        tag_eq(ASR::ttypeType::Logical, 4));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag,
+                        tag_eq(ASR::ttypeType::Logical, 8));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag,
+                        tag_eq(ASR::ttypeType::Complex, 4));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag,
+                        tag_eq(ASR::ttypeType::Complex, 8));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag,
+                        tag_eq(ASR::ttypeType::String, 1));
+
+                    llvm_utils->create_if_else(is_intrinsic_tag, [&]() {
+                        llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Integer, 1), [&]() {
+                            store_const_desc("integer(1)");
+                        }, [&]() {
+                            llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Integer, 2), [&]() {
+                                store_const_desc("integer(2)");
+                            }, [&]() {
+                                llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Integer, 4), [&]() {
+                                    store_const_desc("integer(4)");
+                                }, [&]() {
+                                    llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Integer, 8), [&]() {
+                                        store_const_desc("integer(8)");
+                                    }, [&]() {
+                                        llvm_utils->create_if_else(tag_eq(ASR::ttypeType::UnsignedInteger, 1), [&]() {
+                                            store_const_desc("unsigned(1)");
+                                        }, [&]() {
+                                            llvm_utils->create_if_else(tag_eq(ASR::ttypeType::UnsignedInteger, 2), [&]() {
+                                                store_const_desc("unsigned(2)");
+                                            }, [&]() {
+                                                llvm_utils->create_if_else(tag_eq(ASR::ttypeType::UnsignedInteger, 4), [&]() {
+                                                    store_const_desc("unsigned(4)");
+                                                }, [&]() {
+                                                    llvm_utils->create_if_else(tag_eq(ASR::ttypeType::UnsignedInteger, 8), [&]() {
+                                                        store_const_desc("unsigned(8)");
+                                                    }, [&]() {
+                                                        llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Real, 4), [&]() {
+                                                            store_const_desc("real(4)");
+                                                        }, [&]() {
+                                                            llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Real, 8), [&]() {
+                                                                store_const_desc("real(8)");
+                                                            }, [&]() {
+                                                                llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Logical, 1), [&]() {
+                                                                    store_const_desc("logical(1)");
+                                                                }, [&]() {
+                                                                    llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Logical, 2), [&]() {
+                                                                        store_const_desc("logical(2)");
+                                                                    }, [&]() {
+                                                                        llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Logical, 4), [&]() {
+                                                                            store_const_desc("logical(4)");
+                                                                        }, [&]() {
+                                                                            llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Logical, 8), [&]() {
+                                                                                store_const_desc("logical(8)");
+                                                                            }, [&]() {
+                                                                                llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Complex, 4), [&]() {
+                                                                                    store_const_desc("complex(4)");
+                                                                                }, [&]() {
+                                                                                    llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Complex, 8), [&]() {
+                                                                                        store_const_desc("complex(8)");
+                                                                                    }, [&]() {
+                                                                                        store_const_desc("character");
+                                                                                    });
+                                                                                });
+                                                                            });
+                                                                        });
+                                                                    });
+                                                                });
+                                                            });
+                                                        });
+                                                    });
+                                                });
+                                            });
+                                        });
+                                    });
+                                });
+                            });
+                        });
+                    }, [&]() {
+                        llvm::Value* name_len = lfortran_str_len(nullptr, name_ptr);
+                        llvm::Value* desc = llvm_utils->create_string_descriptor(
+                            name_ptr, name_len, "type_name_desc");
+                        builder->CreateStore(desc, out_desc);
+                    });
+                });
+                tmp = llvm_utils->CreateLoad2(string_descriptor->getPointerTo(), out_desc);
+                break;
+            }
+            case ASRUtils::IntrinsicElementalFunctions::TypeSize: {
+                llvm::Type* i8_ptr = llvm::Type::getInt8Ty(context)->getPointerTo();
+                llvm::Type* cptr_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                llvm::StructType* type_info_type = llvm::StructType::get(
+                    context, {i8_ptr, i8_ptr, i8_ptr}, false);
+                auto load_type_info_handle = [&](ASR::expr_t* arg_expr) -> llvm::Value* {
+                    this->visit_expr(*arg_expr);
+                    llvm::Value* value = tmp;
+                    llvm::Type* arg_type = llvm_utils->get_type_from_ttype_t_util(
+                        arg_expr, ASRUtils::expr_type(arg_expr), module.get());
+                    if ((ASR::is_a<ASR::Var_t>(*arg_expr)
+                         || ASR::is_a<ASR::StructInstanceMember_t>(*arg_expr))
+                        && value->getType() != arg_type) {
+                        value = llvm_utils->CreateLoad2(arg_type, value);
+                    }
+                    if (value->getType() != cptr_type) {
+                        value = builder->CreateBitCast(value, cptr_type);
+                    }
+                    return value;
+                };
+                llvm::Value* ti_ptr = load_type_info_handle(x.m_args[0]);
+                ti_ptr = builder->CreateBitCast(ti_ptr, i8_ptr);
+                llvm::Value* is_null = builder->CreateICmpEQ(
+                    builder->CreatePtrToInt(ti_ptr, llvm::Type::getInt64Ty(context)),
+                    llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), 0));
+                llvm::Value* out = llvm_utils->CreateAlloca(*builder, llvm::Type::getInt64Ty(context));
+                llvm_utils->create_if_else(is_null, [&]() {
+                    builder->CreateStore(
+                        llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), 0), out);
+                }, [&]() {
+                    llvm::Value* ti_cast = builder->CreateBitCast(
+                        ti_ptr, type_info_type->getPointerTo());
+                    llvm::Value* size_ptr_ptr = llvm_utils->create_gep2(type_info_type, ti_cast, 1);
+                    llvm::Value* size_ptr = llvm_utils->CreateLoad2(i8_ptr, size_ptr_ptr);
+                    llvm::Value* size = builder->CreatePtrToInt(
+                        size_ptr, llvm::Type::getInt64Ty(context));
+                    builder->CreateStore(size, out);
+                });
+                tmp = llvm_utils->CreateLoad2(llvm::Type::getInt64Ty(context), out);
+                break;
+            }
+            case ASRUtils::IntrinsicElementalFunctions::TypeSame: {
+                llvm::Type* cptr_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                auto load_type_info_handle = [&](ASR::expr_t* arg_expr) -> llvm::Value* {
+                    this->visit_expr(*arg_expr);
+                    llvm::Value* value = tmp;
+                    llvm::Type* arg_type = llvm_utils->get_type_from_ttype_t_util(
+                        arg_expr, ASRUtils::expr_type(arg_expr), module.get());
+                    if ((ASR::is_a<ASR::Var_t>(*arg_expr)
+                         || ASR::is_a<ASR::StructInstanceMember_t>(*arg_expr))
+                        && value->getType() != arg_type) {
+                        value = llvm_utils->CreateLoad2(arg_type, value);
+                    }
+                    if (value->getType() != cptr_type) {
+                        value = builder->CreateBitCast(value, cptr_type);
+                    }
+                    return value;
+                };
+                llvm::Value* lhs = load_type_info_handle(x.m_args[0]);
+                llvm::Value* rhs = load_type_info_handle(x.m_args[1]);
+                llvm::Value* lhs_i64 = builder->CreatePtrToInt(lhs, llvm::Type::getInt64Ty(context));
+                llvm::Value* rhs_i64 = builder->CreatePtrToInt(rhs, llvm::Type::getInt64Ty(context));
+                tmp = builder->CreateICmpEQ(lhs_i64, rhs_i64);
                 break;
             }
             default: {
