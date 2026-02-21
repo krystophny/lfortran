@@ -348,50 +348,11 @@ namespace LCompilers::LFortran {
             publish_stream("stdout", std_out);
         }
 
-        switch (r.type) {
-            case (LCompilers::FortranEvaluator::EvalResult::integer4) : {
-                nl::json pub_data;
-                pub_data["text/plain"] = std::to_string(r.i32);
-                publish_execution_result(execution_counter, std::move(pub_data), nl::json::object());
-                break;
-            }
-            case (LCompilers::FortranEvaluator::EvalResult::integer8) : {
-                nl::json pub_data;
-                pub_data["text/plain"] = std::to_string(r.i64);
-                publish_execution_result(execution_counter, std::move(pub_data), nl::json::object());
-                break;
-            }
-            case (LCompilers::FortranEvaluator::EvalResult::real4) : {
-                nl::json pub_data;
-                pub_data["text/plain"] = std::to_string(r.f32);
-                publish_execution_result(execution_counter, std::move(pub_data), nl::json::object());
-                break;
-            }
-            case (LCompilers::FortranEvaluator::EvalResult::real8) : {
-                nl::json pub_data;
-                pub_data["text/plain"] = std::to_string(r.f64);
-                publish_execution_result(execution_counter, std::move(pub_data), nl::json::object());
-                break;
-            }
-            case (LCompilers::FortranEvaluator::EvalResult::complex4) : {
-                nl::json pub_data;
-                pub_data["text/plain"] = "(" + std::to_string(r.c32.re) + ", " + std::to_string(r.c32.im) + ")";
-                publish_execution_result(execution_counter, std::move(pub_data), nl::json::object());
-                break;
-            }
-            case (LCompilers::FortranEvaluator::EvalResult::complex8) : {
-                nl::json pub_data;
-                pub_data["text/plain"] = "(" + std::to_string(r.c64.re) + ", " + std::to_string(r.c64.im) + ")";
-                publish_execution_result(execution_counter, std::move(pub_data), nl::json::object());
-                break;
-            }
-            case (LCompilers::FortranEvaluator::EvalResult::statement) : {
-                break;
-            }
-            case (LCompilers::FortranEvaluator::EvalResult::none) : {
-                break;
-            }
-            default : throw LCompilersException("Return type not supported");
+        if (LCompilers::FortranEvaluator::eval_result_has_value(r)) {
+            nl::json pub_data;
+            pub_data["text/plain"] =
+                LCompilers::FortranEvaluator::render_eval_result_plain(r);
+            publish_execution_result(execution_counter, std::move(pub_data), nl::json::object());
         }
 
         nl::json result;
