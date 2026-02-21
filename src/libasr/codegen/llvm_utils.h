@@ -230,6 +230,7 @@ class ASRToLLVMVisitor;
             llvm::StructType *complex_type_4_ptr, *complex_type_8_ptr;
             llvm::PointerType *character_type;
             llvm::Type* string_descriptor; /* <{ i8* --DATA-- , i64 --LENGTH-- }> */
+            llvm::StructType* type_info_type; /* <{ i8* --NAME_OR_TAG--, i64 --SIZE_BYTES--, %type_info* --PARENT-- }> */
             llvm::Type* vptr_type;
             llvm::Type* dim_descr_type_; // dimension_descriptor type (used with descriptorArrays)
             llvm::FunctionType* struct_copy_functype;
@@ -669,6 +670,11 @@ class ASRToLLVMVisitor;
             llvm::Type* getComplexType(int a_kind, bool get_pointer=false);
             // Returns LLVM Type Based On String's PhysicalType
             llvm::Type* get_StringType(ASR::ttype_t* type);
+            llvm::StructType* get_type_info_type();
+            llvm::PointerType* get_type_info_ptr_type();
+            llvm::Value* get_type_info_name_ptr(llvm::Value* type_info_ptr);
+            llvm::Value* get_type_info_size(llvm::Value* type_info_ptr);
+            llvm::Value* get_type_info_parent(llvm::Value* type_info_ptr);
 
             llvm::Type* get_el_type(ASR::expr_t* expr, ASR::ttype_t* m_type_, llvm::Module* module);
 
