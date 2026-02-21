@@ -682,7 +682,7 @@ namespace IntrinsicElementalFunctionRegistry {
                 {"selected_char_kind", {&SelectedCharKind::create_SelectedCharKind, &SelectedCharKind::eval_SelectedCharKind}},
                 {"selected_logical_kind", {&SelectedLogicalKind::create_SelectedLogicalKind, &SelectedLogicalKind::eval_SelectedLogicalKind}},
                 {"kind", {&Kind::create_Kind, &Kind::eval_Kind}},
-                {"typeof", {&TypeOf::create_TypeOf, &TypeOf::eval_TypeOf}},
+                {"typeof", {&TypeOf::create_TypeOf, nullptr}},
                 {"digits", {&Digits::create_Digits, &Digits::eval_Digits}},
                 {"rrspacing", {&Rrspacing::create_Rrspacing, &Rrspacing::eval_Rrspacing}},
                 {"repeat", {&Repeat::create_Repeat, &Repeat::eval_Repeat}},

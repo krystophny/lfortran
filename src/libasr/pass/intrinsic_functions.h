@@ -5141,17 +5141,8 @@ namespace NewLine {
 
 namespace TypeOf {
 
-    static ASR::expr_t *eval_TypeOf(Allocator &al, const Location &loc,
-            ASR::ttype_t* /*t1*/, Vec<ASR::expr_t*> &args, diag::Diagnostics& /*diag*/) {
-        ASR::ttype_t* arg_type = ASRUtils::extract_type(ASRUtils::expr_type(args[0]));
-        std::string type_str = ASRUtils::type_to_str_with_kind(arg_type, args[0]);
-        int len = type_str.size();
-        return make_ConstantWithType(make_StringConstant_t, s2c(al, type_str),
-            ASRUtils::TYPE(ASR::make_String_t(al, loc, 1,
-                ASRUtils::EXPR(ASR::make_IntegerConstant_t(al, loc, len,
-                    ASRUtils::TYPE(ASR::make_Integer_t(al, loc, 4)))),
-                ASR::string_length_kindType::ExpressionLength,
-                ASR::string_physical_typeType::DescriptorString)), loc);
+    static inline ASR::ttype_t* type_info_handle_type(Allocator &al, const Location &loc) {
+        return ASRUtils::TYPE(ASR::make_CPtr_t(al, loc));
     }
 
     static inline ASR::asr_t* create_TypeOf(Allocator& al, const Location& loc,
@@ -5161,10 +5152,10 @@ namespace TypeOf {
                 + std::to_string(args.size()), loc);
             return nullptr;
         }
-        ASR::ttype_t *dummy_type = nullptr;
-        ASR::expr_t *m_value = eval_TypeOf(al, loc, dummy_type, args, diag);
-        if (diag.has_error()) return nullptr;
-        return (ASR::asr_t*) m_value;
+        // Base split keeps typeof typed as `type(type_info)` from day one.
+        // Runtime-backed handles are introduced in later stacked PRs.
+        return ASR::make_PointerNullConstant_t(
+            al, loc, type_info_handle_type(al, loc), nullptr);
     }
 
 } // namespace TypeOf
