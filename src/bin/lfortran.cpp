@@ -2050,41 +2050,20 @@ int link_executable(const std::vector<std::string> &infiles,
 
 #ifdef HAVE_RUNTIME_STACKTRACE
         if (compiler_options.emit_debug_info) {
-            // TODO: Replace the following hardcoded part
-            std::string cmd = "";
-            char ldd_txt[LFORTRAN_DEBUG_MAP_PATH_MAX];
-            char lines_txt[LFORTRAN_DEBUG_MAP_PATH_MAX];
+            // Build the runtime debug line map directly from DWARF info.
             char lines_dat[LFORTRAN_DEBUG_MAP_PATH_MAX];
             if (_lfortran_debug_map_path_from_exe(outfile.c_str(),
-                    LFORTRAN_DEBUG_MAP_SUFFIX_LDD_TXT,
-                    ldd_txt, LFORTRAN_DEBUG_MAP_PATH_MAX) != 0
-                    || _lfortran_debug_map_path_from_exe(outfile.c_str(),
-                    LFORTRAN_DEBUG_MAP_SUFFIX_LINES_TXT,
-                    lines_txt, LFORTRAN_DEBUG_MAP_PATH_MAX) != 0
-                    || _lfortran_debug_map_path_from_exe(outfile.c_str(),
                     LFORTRAN_DEBUG_MAP_SUFFIX_LINES_DAT,
                     lines_dat, LFORTRAN_DEBUG_MAP_PATH_MAX) != 0) {
                 std::cerr << "Error in constructing debug map file paths.\n";
                 return 12;
             }
-#ifdef HAVE_LFORTRAN_MACHO
-            cmd += "dsymutil " + outfile + " && llvm-dwarfdump --debug-line "
-                + outfile + ".dSYM > ";
-#else
-            cmd += "llvm-dwarfdump --debug-line " + outfile + " > ";
-#endif
-            std::string dwarf_scripts_path = LCompilers::LFortran::get_dwarf_scripts_dir();
-            cmd += std::string(ldd_txt) + " && (" + dwarf_scripts_path + "/dwarf_convert.py "
-                + std::string(ldd_txt) + " " + std::string(lines_txt) + " "
-                + std::string(lines_dat) + " && " + dwarf_scripts_path + "/dat_convert.py "
-                + std::string(lines_dat) + ")";
-            int status = system(cmd.c_str());
-            if ( status != 0 ) {
-                std::cerr << "Error in creating the files used to generate "
-                    "the debug information. This might be caused because either"
-                    " `llvm-dwarfdump` or `Python` are not available. "
-                    "Please activate the CONDA environment and compile again.\n";
-                return status;
+
+            std::string error_message;
+            if (!LCompilers::write_runtime_debug_map(outfile, lines_dat, error_message)) {
+                std::cerr << "Error while generating runtime debug map for '"
+                    << outfile << "': " << error_message << "\n";
+                return 12;
             }
         }
 #endif
