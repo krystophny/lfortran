@@ -1,5 +1,6 @@
 #include "libasr/assert.h"
 #include "libasr/string_utils.h"
+#include <cctype>
 #include <iostream>
 #include <llvm/IR/Value.h>
 #include <memory>
@@ -1735,6 +1736,33 @@ public:
                             dest_class_sym = ASRUtils::symbol_get_past_external(ASRUtils::get_struct_sym_from_struct_expr(m_source));
                             malloc_size = SizeOfTypeUtil(m_source, dest_asr_type, llvm_utils->getIntType(4),
                                 ASRUtils::TYPE(ASR::make_Integer_t(al, x.base.base.loc, 4)));
+                        } else if (curr_arg.m_type != nullptr &&
+                                   curr_arg.m_sym_subclass == nullptr &&
+                                   ASRUtils::is_unlimited_polymorphic_type(&src_struct_sym->base)) {
+                            // Explicit allocate type-spec (e.g. allocate(character(3) :: class(*)))
+                            // must drive the runtime payload type.
+                            dest_asr_type = curr_arg.m_type;
+                            if (ASR::is_a<ASR::StructType_t>(*dest_asr_type)) {
+                                dest_class_sym = ASRUtils::symbol_get_past_external(
+                                    ASRUtils::get_struct_sym_from_struct_expr(curr_arg.m_a));
+                            } else {
+                                dest_class_sym = nullptr;
+                            }
+                            malloc_size = SizeOfTypeUtil(curr_arg.m_a, dest_asr_type,
+                                llvm_utils->getIntType(4),
+                                ASRUtils::TYPE(ASR::make_Integer_t(al, x.base.base.loc, 4)));
+                        } else if (curr_arg.m_len_expr != nullptr &&
+                                   ASRUtils::is_unlimited_polymorphic_type(&src_struct_sym->base)) {
+                            // `allocate(character(n) :: class(*))` currently lowers with `m_len_expr`
+                            // set and `m_type == nullptr`. Materialize the intrinsic CHARACTER payload.
+                            dest_class_sym = nullptr;
+                            dest_asr_type = ASRUtils::TYPE(ASR::make_String_t(
+                                al, curr_arg.m_len_expr->base.loc, 1, nullptr,
+                                ASR::string_length_kindType::DeferredLength,
+                                ASR::string_physical_typeType::DescriptorString));
+                            malloc_size = SizeOfTypeUtil(curr_arg.m_a, dest_asr_type,
+                                llvm_utils->getIntType(4),
+                                ASRUtils::TYPE(ASR::make_Integer_t(al, x.base.base.loc, 4)));
                         } else if (curr_arg.m_sym_subclass == nullptr) {
                             dest_class_sym = ASRUtils::symbol_get_past_external(ASRUtils::get_struct_sym_from_struct_expr(curr_arg.m_a));
                             dest_asr_type = ASRUtils::make_StructType_t_util(al, curr_arg_m_a_type->base.loc, dest_class_sym, true);
@@ -1756,7 +1784,7 @@ public:
                             context, *module, *builder, malloc_size);
                         builder->CreateMemSet(malloc_ptr, llvm::ConstantInt::get(context, llvm::APInt(8, 0)),
                                     malloc_size, llvm::MaybeAlign());
-                        if(ASRUtils::is_string_only(dest_asr_type)) { // String type has a state to be cloned.
+                        if (m_source && ASRUtils::is_string_only(dest_asr_type)) { // String type has a state to be cloned.
                             // NOTE : dest_asr_type == source_type (They both refelect the type the class will be)
                             this->visit_expr_load_wrapper(m_source, 0);
                             auto* const dest__source_t = llvm_utils->get_type_from_ttype_t_util(m_source, dest_asr_type, module.get());
@@ -1857,6 +1885,17 @@ public:
 
                         if (ASR::is_a<ASR::StructType_t>(*dest_asr_type)) {
                             allocate_array_members_of_struct(ASR::down_cast<ASR::Struct_t>(dest_class_sym), x_arr, ASRUtils::symbol_type(dest_class_sym));
+                        } else if (!m_source && ASRUtils::is_string_only(dest_asr_type)) {
+                            llvm::Value* amount_to_allocate = nullptr;
+                            if (curr_arg.m_len_expr) {
+                                this->visit_expr_load_wrapper(curr_arg.m_len_expr, 1, true);
+                                amount_to_allocate = tmp;
+                                tmp = nullptr;
+                            }
+                            llvm_utils->allocate_allocatable_string(
+                                ASR::down_cast<ASR::String_t>(dest_asr_type),
+                                x_arr,
+                                amount_to_allocate);
                         }
                         if (m_source && !m_source_is_class && !curr_arg.m_type) {
                             llvm::Value* src = nullptr; {
@@ -3083,6 +3122,476 @@ public:
         llvm_utils->set_api->remove_item(pset, el, module.get(), asr_el_type);
     }
 
+    llvm::Value* make_const_string_descriptor(const std::string &value,
+            const std::string &name) {
+        llvm::Value* data = LCompilers::create_global_string_ptr(
+            context, *module, *builder, value);
+        llvm::Value* len = llvm::ConstantInt::get(
+            llvm::Type::getInt64Ty(context),
+            llvm::APInt(64, static_cast<uint64_t>(value.size())));
+        return llvm_utils->create_string_descriptor(data, len, name);
+    }
+
+    llvm::Value* string_format_fortran_untracked(const std::vector<llvm::Value*> &args) {
+        llvm::Function *fn = module->getFunction("_lcompilers_string_format_fortran");
+        if (!fn) {
+            llvm::FunctionType *function_type = llvm::FunctionType::get(
+                llvm::Type::getInt8Ty(context)->getPointerTo(),
+                {llvm::Type::getInt8Ty(context)->getPointerTo(),
+                 llvm::Type::getInt64Ty(context),
+                 llvm::Type::getInt8Ty(context)->getPointerTo(),
+                 llvm::Type::getInt64Ty(context)->getPointerTo(),
+                 llvm::Type::getInt32Ty(context),
+                 llvm::Type::getInt32Ty(context)},
+                true);
+            fn = llvm::Function::Create(function_type,
+                llvm::Function::ExternalLinkage, "_lcompilers_string_format_fortran",
+                module.get());
+        }
+        return builder->CreateCall(fn, args);
+    }
+
+    std::tuple<llvm::Value*, llvm::Value*, bool, llvm::Value*, llvm::Value*> get_runtime_poly_tag_and_data(
+            ASR::expr_t* arg) {
+        int64_t ptr_loads_copy = ptr_loads;
+        ptr_loads = 0;
+        this->visit_expr(*arg);
+        llvm::Value* arg_ptr = tmp;
+        ptr_loads = ptr_loads_copy;
+
+        ASR::symbol_t* struct_sym = ASRUtils::symbol_get_past_external(
+            ASRUtils::get_struct_sym_from_struct_expr(arg));
+        llvm::Type* class_type = llvm_utils->getClassType(
+            ASR::down_cast<ASR::Struct_t>(struct_sym), false);
+        ASR::ttype_t* arg_type = ASRUtils::expr_type(arg);
+        if (ASRUtils::is_allocatable(arg_type) || ASR::is_a<ASR::Pointer_t>(*arg_type)) {
+            arg_ptr = llvm_utils->CreateLoad2(class_type->getPointerTo(), arg_ptr);
+        }
+
+        llvm::StructType* class_struct_type = llvm::cast<llvm::StructType>(class_type);
+        llvm::Value* id_ptr = llvm_utils->create_gep2(class_type, arg_ptr, 0);
+        llvm::Type* id_type = class_struct_type->getElementType(0);
+
+        llvm::Value* data_ptr_gep = llvm_utils->create_gep2(class_type, arg_ptr, 1);
+        llvm::Type* data_field_type = class_struct_type->getElementType(1);
+        llvm::Value* data_ptr = llvm_utils->CreateLoad2(data_field_type, data_ptr_gep);
+        if (data_ptr->getType() != llvm_utils->i8_ptr) {
+            data_ptr = builder->CreateBitCast(data_ptr, llvm_utils->i8_ptr);
+        }
+
+        bool uses_new_classes_tag = false;
+        llvm::Value* type_id = nullptr;
+        llvm::Value* type_size = llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), 0);
+        llvm::Value* type_info_ptr = llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(llvm_utils->i8_ptr));
+        if (id_type->isPointerTy()) {
+            uses_new_classes_tag = true;
+            llvm::Type* i8_ptr = llvm_utils->i8_ptr;
+            llvm::Type* i64_type = llvm::Type::getInt64Ty(context);
+            llvm::StructType* type_info_type = llvm::StructType::get(
+                context, {i8_ptr, i8_ptr, i8_ptr}, false);
+
+            llvm::Value* vptr = llvm_utils->CreateLoad2(id_type, id_ptr);
+            llvm::Value* vptr_i8 = builder->CreateBitCast(vptr, i8_ptr->getPointerTo());
+            llvm::Value* type_info_ptr_ptr = llvm_utils->create_ptr_gep2(
+                i8_ptr, vptr_i8, llvm::ConstantInt::get(i64_type, -1, true));
+            type_info_ptr = llvm_utils->CreateLoad2(i8_ptr, type_info_ptr_ptr);
+            llvm::Value* ti_cast = builder->CreateBitCast(
+                type_info_ptr, type_info_type->getPointerTo());
+            llvm::Value* tag_ptr_ptr = llvm_utils->create_gep2(type_info_type, ti_cast, 0);
+            llvm::Value* tag_ptr = llvm_utils->CreateLoad2(i8_ptr, tag_ptr_ptr);
+            type_id = builder->CreatePtrToInt(tag_ptr, i64_type);
+            llvm::Value* size_ptr_ptr = llvm_utils->create_gep2(type_info_type, ti_cast, 1);
+            llvm::Value* size_ptr = llvm_utils->CreateLoad2(i8_ptr, size_ptr_ptr);
+            type_size = builder->CreatePtrToInt(size_ptr, i64_type);
+        } else {
+            type_id = llvm_utils->CreateLoad2(id_type, id_ptr);
+            if (type_id->getType() != llvm::Type::getInt64Ty(context)) {
+                type_id = builder->CreateSExtOrTrunc(type_id, llvm::Type::getInt64Ty(context));
+            }
+        }
+
+        return std::make_tuple(type_id, data_ptr, uses_new_classes_tag, type_size, type_info_ptr);
+    }
+
+    llvm::Value* create_typeof_descriptor_from_expr(ASR::expr_t* arg) {
+        if (!ASRUtils::is_unlimited_polymorphic_type(arg)) {
+            ASR::ttype_t* arg_type = ASRUtils::extract_type(ASRUtils::expr_type(arg));
+            return make_const_string_descriptor(ASRUtils::type_to_str_with_kind(arg_type, arg),
+                "typeof_desc");
+        }
+
+        llvm::Value* type_id = nullptr;
+        llvm::Value* data_ptr = nullptr;
+        llvm::Value* type_size = nullptr;
+        llvm::Value* type_info_ptr = nullptr;
+        bool uses_new_classes_tag = false;
+        std::tie(type_id, data_ptr, uses_new_classes_tag, type_size, type_info_ptr) =
+            get_runtime_poly_tag_and_data(arg);
+        (void) data_ptr;
+
+        llvm::Function* fn = builder->GetInsertBlock()->getParent();
+        llvm::BasicBlock* mergeBB = llvm::BasicBlock::Create(context, "typeof.merge", fn);
+        std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> incoming;
+        llvm::BasicBlock* currentBB = builder->GetInsertBlock();
+
+        auto add_type_case = [&](ASR::ttypeType type_kind, int kind,
+                                 uint64_t expected_size, const std::string& type_name) {
+            int64_t tag = uses_new_classes_tag ?
+                ((int)type_kind + kind) : (-((int)type_kind) - kind);
+            llvm::BasicBlock* thenBB = llvm::BasicBlock::Create(context, "typeof.then", fn);
+            llvm::BasicBlock* elseBB = llvm::BasicBlock::Create(context, "typeof.else", fn);
+            builder->SetInsertPoint(currentBB);
+            llvm::Value* tag_match = builder->CreateICmpEQ(
+                type_id, llvm::ConstantInt::get(llvm::Type::getInt64Ty(context),
+                    llvm::APInt(64, tag, true)));
+            llvm::Value* cond = tag_match;
+            if (uses_new_classes_tag) {
+                llvm::Value* size_match = builder->CreateICmpEQ(
+                    type_size, llvm::ConstantInt::get(
+                        llvm::Type::getInt64Ty(context), expected_size));
+                cond = builder->CreateAnd(tag_match, size_match);
+            }
+            builder->CreateCondBr(cond, thenBB, elseBB);
+
+            builder->SetInsertPoint(thenBB);
+            llvm::Value* value = make_const_string_descriptor(type_name, "typeof_case_desc");
+            builder->CreateBr(mergeBB);
+            incoming.push_back({thenBB, value});
+            currentBB = elseBB;
+        };
+
+        uint64_t character_desc_size = llvm::DataLayout(module->getDataLayout())
+            .getTypeAllocSize(string_descriptor);
+        add_type_case(ASR::ttypeType::Integer, 1, 1, "integer(1)");
+        add_type_case(ASR::ttypeType::Integer, 2, 2, "integer(2)");
+        add_type_case(ASR::ttypeType::Integer, 4, 4, "integer(4)");
+        add_type_case(ASR::ttypeType::Integer, 8, 8, "integer(8)");
+        add_type_case(ASR::ttypeType::UnsignedInteger, 1, 1, "unsigned(1)");
+        add_type_case(ASR::ttypeType::UnsignedInteger, 2, 2, "unsigned(2)");
+        add_type_case(ASR::ttypeType::UnsignedInteger, 4, 4, "unsigned(4)");
+        add_type_case(ASR::ttypeType::UnsignedInteger, 8, 8, "unsigned(8)");
+        add_type_case(ASR::ttypeType::Real, 4, 4, "real(4)");
+        add_type_case(ASR::ttypeType::Real, 8, 8, "real(8)");
+        add_type_case(ASR::ttypeType::Complex, 4, 8, "complex(4)");
+        add_type_case(ASR::ttypeType::Complex, 8, 16, "complex(8)");
+        add_type_case(ASR::ttypeType::Logical, 1, 1, "logical(1)");
+        add_type_case(ASR::ttypeType::Logical, 2, 1, "logical(2)");
+        add_type_case(ASR::ttypeType::Logical, 4, 1, "logical(4)");
+        add_type_case(ASR::ttypeType::Logical, 8, 1, "logical(8)");
+        add_type_case(ASR::ttypeType::String, 1, character_desc_size, "character");
+
+        builder->SetInsertPoint(currentBB);
+        if (uses_new_classes_tag) {
+            llvm::Type* i8_ptr = llvm_utils->i8_ptr;
+            llvm::Type* i64_type = llvm::Type::getInt64Ty(context);
+            llvm::StructType* type_info_type = llvm::StructType::get(
+                context, {i8_ptr, i8_ptr, i8_ptr}, false);
+
+            llvm::BasicBlock* nameBB = llvm::BasicBlock::Create(context, "typeof.name", fn);
+            llvm::BasicBlock* literalBB = llvm::BasicBlock::Create(context, "typeof.literal", fn);
+            llvm::Value* likely_name_ptr = builder->CreateICmpUGE(
+                type_id, llvm::ConstantInt::get(i64_type, llvm::APInt(64, 4096)));
+            builder->CreateCondBr(likely_name_ptr, nameBB, literalBB);
+
+            builder->SetInsertPoint(nameBB);
+            llvm::Value* ti_cast = builder->CreateBitCast(
+                type_info_ptr, type_info_type->getPointerTo());
+            llvm::Value* name_ptr_ptr = llvm_utils->create_gep2(type_info_type, ti_cast, 0);
+            llvm::Value* name_ptr = llvm_utils->CreateLoad2(i8_ptr, name_ptr_ptr);
+            llvm::Value* name_len = lfortran_str_len(character_type, name_ptr);
+            llvm::Value* name_desc = llvm_utils->create_string_descriptor(
+                name_ptr, name_len, "typeof_dynamic_name_desc");
+            builder->CreateBr(mergeBB);
+            incoming.push_back({nameBB, name_desc});
+
+            builder->SetInsertPoint(literalBB);
+            llvm::Value* fallback = make_const_string_descriptor("~dynamic_polymorphic_type",
+                "typeof_fallback_desc");
+            builder->CreateBr(mergeBB);
+            incoming.push_back({literalBB, fallback});
+        } else {
+            llvm::Value* fallback = make_const_string_descriptor("~dynamic_polymorphic_type",
+                "typeof_fallback_desc");
+            builder->CreateBr(mergeBB);
+            incoming.push_back({currentBB, fallback});
+        }
+
+        builder->SetInsertPoint(mergeBB);
+        llvm::PHINode* phi = builder->CreatePHI(string_descriptor->getPointerTo(),
+            incoming.size(), "typeof.result");
+        for (auto &entry : incoming) {
+            phi->addIncoming(entry.second, entry.first);
+        }
+        return phi;
+    }
+
+    std::tuple<llvm::Value*, llvm::Value*, llvm::Value*> create_runtime_polymorphic_value_descriptor(
+            ASR::expr_t* arg) {
+        llvm::Value* type_id = nullptr;
+        llvm::Value* data_ptr = nullptr;
+        llvm::Value* type_size = nullptr;
+        llvm::Value* type_info_ptr = nullptr;
+        bool uses_new_classes_tag = false;
+        std::tie(type_id, data_ptr, uses_new_classes_tag, type_size, type_info_ptr) =
+            get_runtime_poly_tag_and_data(arg);
+
+        llvm::Function* fn = builder->GetInsertBlock()->getParent();
+        llvm::BasicBlock* repr_mergeBB = llvm::BasicBlock::Create(context, "repr.val.merge", fn);
+        std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> repr_incoming;
+        std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> cleanup_incoming;
+        std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> wrap_incoming;
+        llvm::BasicBlock* currentBB = builder->GetInsertBlock();
+        llvm::Type* i64_type = llvm::Type::getInt64Ty(context);
+        llvm::Type* i32_type = llvm::Type::getInt32Ty(context);
+        llvm::Type* i8_ptr_type = llvm_utils->i8_ptr;
+        llvm::DataLayout dl(module->getDataLayout());
+
+        // character(*) stores a string descriptor payload directly.
+        int64_t char_tag = uses_new_classes_tag ?
+            ((int)ASR::ttypeType::String + 1) : (-((int)ASR::ttypeType::String) - 1);
+        uint64_t char_size = dl.getTypeAllocSize(string_descriptor);
+        llvm::BasicBlock* charBB = llvm::BasicBlock::Create(context, "repr.val.char", fn);
+        llvm::BasicBlock* nonCharBB = llvm::BasicBlock::Create(context, "repr.val.nonchar", fn);
+        builder->SetInsertPoint(currentBB);
+        llvm::Value* is_char_tag = builder->CreateICmpEQ(
+            type_id, llvm::ConstantInt::get(i64_type, llvm::APInt(64, char_tag, true)));
+        llvm::Value* is_char = is_char_tag;
+        if (uses_new_classes_tag) {
+            llvm::Value* is_char_size = builder->CreateICmpEQ(
+                type_size, llvm::ConstantInt::get(i64_type, char_size));
+            is_char = builder->CreateAnd(is_char_tag, is_char_size);
+        }
+        builder->CreateCondBr(is_char, charBB, nonCharBB);
+
+        builder->SetInsertPoint(charBB);
+        llvm::Value* char_desc = builder->CreateBitCast(data_ptr, string_descriptor->getPointerTo());
+        builder->CreateBr(repr_mergeBB);
+        repr_incoming.push_back({charBB, char_desc});
+        cleanup_incoming.push_back({charBB, llvm::ConstantPointerNull::get(
+            llvm::cast<llvm::PointerType>(i8_ptr_type))});
+        wrap_incoming.push_back({charBB, llvm::ConstantInt::getFalse(context)});
+        currentBB = nonCharBB;
+
+        struct FormatCase {
+            llvm::BasicBlock* bb;
+            llvm::Value* serialization;
+            llvm::Value* value_ptr;
+            llvm::Value* supported;
+            llvm::Value* wrap_with_type;
+        };
+        std::vector<FormatCase> format_cases;
+        llvm::BasicBlock* fmt_mergeBB = llvm::BasicBlock::Create(context, "repr.val.fmt.merge", fn);
+
+        auto add_scalar_case = [&](ASR::ttypeType type_kind, int kind,
+                                   const std::string& serialization, llvm::Type* llvm_value_type) {
+            int64_t tag = uses_new_classes_tag ?
+                ((int)type_kind + kind) : (-((int)type_kind) - kind);
+            uint64_t expected_size = dl.getTypeAllocSize(llvm_value_type);
+            llvm::BasicBlock* thenBB = llvm::BasicBlock::Create(context, "repr.val.fmt.then", fn);
+            llvm::BasicBlock* elseBB = llvm::BasicBlock::Create(context, "repr.val.fmt.else", fn);
+            builder->SetInsertPoint(currentBB);
+            llvm::Value* tag_match = builder->CreateICmpEQ(
+                type_id, llvm::ConstantInt::get(i64_type, llvm::APInt(64, tag, true)));
+            llvm::Value* cond = tag_match;
+            if (uses_new_classes_tag) {
+                llvm::Value* size_match = builder->CreateICmpEQ(
+                    type_size, llvm::ConstantInt::get(i64_type, expected_size));
+                cond = builder->CreateAnd(tag_match, size_match);
+            }
+            builder->CreateCondBr(cond, thenBB, elseBB);
+
+            builder->SetInsertPoint(thenBB);
+            llvm::Value* fmt_data = LCompilers::create_global_string_ptr(
+                context, *module, *builder, serialization);
+            llvm::Value* typed_value_ptr = builder->CreateBitCast(
+                data_ptr, llvm_value_type->getPointerTo());
+            llvm::Value* value_ptr = builder->CreateBitCast(typed_value_ptr, i8_ptr_type);
+            llvm::Value* supported = llvm::ConstantInt::getTrue(context);
+            builder->CreateBr(fmt_mergeBB);
+            format_cases.push_back({
+                thenBB, fmt_data, value_ptr, supported,
+                llvm::ConstantInt::getFalse(context)
+            });
+            currentBB = elseBB;
+        };
+
+        auto add_logical_case = [&](int kind) {
+            int64_t tag = uses_new_classes_tag ?
+                ((int)ASR::ttypeType::Logical + kind) : (-((int)ASR::ttypeType::Logical) - kind);
+            uint64_t expected_size = 1;
+            llvm::BasicBlock* thenBB = llvm::BasicBlock::Create(context, "repr.val.fmt.then", fn);
+            llvm::BasicBlock* elseBB = llvm::BasicBlock::Create(context, "repr.val.fmt.else", fn);
+            builder->SetInsertPoint(currentBB);
+            llvm::Value* tag_match = builder->CreateICmpEQ(
+                type_id, llvm::ConstantInt::get(i64_type, llvm::APInt(64, tag, true)));
+            llvm::Value* cond = tag_match;
+            if (uses_new_classes_tag) {
+                llvm::Value* size_match = builder->CreateICmpEQ(
+                    type_size, llvm::ConstantInt::get(i64_type, expected_size));
+                cond = builder->CreateAnd(tag_match, size_match);
+            }
+            builder->CreateCondBr(cond, thenBB, elseBB);
+
+            builder->SetInsertPoint(thenBB);
+            llvm::Type* src_type = llvm::Type::getInt8Ty(context);
+            llvm::Value* src_ptr = builder->CreateBitCast(data_ptr, src_type->getPointerTo());
+            llvm::Value* src_val = llvm_utils->CreateLoad2(src_type, src_ptr);
+            llvm::Value* logical_bool = builder->CreateICmpNE(
+                src_val, llvm::ConstantInt::get(src_type, 0));
+            llvm::Value* logical_ptr = llvm_utils->CreateAlloca(
+                *builder, llvm::Type::getInt1Ty(context));
+            builder->CreateStore(logical_bool, logical_ptr);
+
+            llvm::Value* fmt_data = LCompilers::create_global_string_ptr(
+                context, *module, *builder, "L");
+            llvm::Value* value_ptr = builder->CreateBitCast(logical_ptr, i8_ptr_type);
+            llvm::Value* supported = llvm::ConstantInt::getTrue(context);
+            builder->CreateBr(fmt_mergeBB);
+            format_cases.push_back({
+                thenBB, fmt_data, value_ptr, supported,
+                llvm::ConstantInt::getFalse(context)
+            });
+            currentBB = elseBB;
+        };
+
+        add_scalar_case(ASR::ttypeType::Integer, 1, "I1", llvm::Type::getInt8Ty(context));
+        add_scalar_case(ASR::ttypeType::Integer, 2, "I2", llvm::Type::getInt16Ty(context));
+        add_scalar_case(ASR::ttypeType::Integer, 4, "I4", llvm::Type::getInt32Ty(context));
+        add_scalar_case(ASR::ttypeType::Integer, 8, "I8", llvm::Type::getInt64Ty(context));
+        add_scalar_case(ASR::ttypeType::UnsignedInteger, 1, "U1", llvm::Type::getInt8Ty(context));
+        add_scalar_case(ASR::ttypeType::UnsignedInteger, 2, "U2", llvm::Type::getInt16Ty(context));
+        add_scalar_case(ASR::ttypeType::UnsignedInteger, 4, "U4", llvm::Type::getInt32Ty(context));
+        add_scalar_case(ASR::ttypeType::UnsignedInteger, 8, "U8", llvm::Type::getInt64Ty(context));
+        add_scalar_case(ASR::ttypeType::Real, 4, "R4", llvm::Type::getFloatTy(context));
+        add_scalar_case(ASR::ttypeType::Real, 8, "R8", llvm::Type::getDoubleTy(context));
+        add_scalar_case(ASR::ttypeType::Complex, 4, "{R4,R4}", llvm_utils->getComplexType(4));
+        add_scalar_case(ASR::ttypeType::Complex, 8, "{R8,R8}", llvm_utils->getComplexType(8));
+        add_logical_case(1);
+        add_logical_case(2);
+        add_logical_case(4);
+        add_logical_case(8);
+
+        if (uses_new_classes_tag) {
+            for (auto &entry : struct_api->newclass2typeinfo) {
+                ASR::symbol_t* struct_sym = ASRUtils::symbol_get_past_external(entry.first);
+                if (!ASR::is_a<ASR::Struct_t>(*struct_sym)) {
+                    continue;
+                }
+
+                std::string struct_serialization;
+                try {
+                    struct_serialization = "(" + serialize_structType_symbols(struct_sym) + ")";
+                } catch (const LCompilersException&) {
+                    // Skip types whose runtime print serialization cannot be emitted.
+                    continue;
+                }
+
+                llvm::BasicBlock* thenBB = llvm::BasicBlock::Create(
+                    context, "repr.val.fmt.then", fn);
+                llvm::BasicBlock* elseBB = llvm::BasicBlock::Create(
+                    context, "repr.val.fmt.else", fn);
+                builder->SetInsertPoint(currentBB);
+                llvm::Value* expected_type_info = builder->CreateBitCast(
+                    entry.second, i8_ptr_type);
+                llvm::Value* is_this_struct = builder->CreateICmpEQ(
+                    type_info_ptr, expected_type_info);
+                builder->CreateCondBr(is_this_struct, thenBB, elseBB);
+
+                builder->SetInsertPoint(thenBB);
+                llvm::Value* fmt_data = LCompilers::create_global_string_ptr(
+                    context, *module, *builder, struct_serialization);
+                llvm::Value* supported = llvm::ConstantInt::getTrue(context);
+                builder->CreateBr(fmt_mergeBB);
+                format_cases.push_back({
+                    thenBB, fmt_data, data_ptr, supported,
+                    llvm::ConstantInt::getTrue(context)
+                });
+
+                currentBB = elseBB;
+            }
+        }
+
+        builder->SetInsertPoint(currentBB);
+        llvm::Value* null_ptr = llvm::ConstantPointerNull::get(
+            llvm::cast<llvm::PointerType>(i8_ptr_type));
+        llvm::Value* unsupported = llvm::ConstantInt::getFalse(context);
+        builder->CreateBr(fmt_mergeBB);
+        format_cases.push_back({
+            currentBB, null_ptr, null_ptr, unsupported,
+            llvm::ConstantInt::getFalse(context)
+        });
+
+        builder->SetInsertPoint(fmt_mergeBB);
+        llvm::PHINode* serialization_phi = builder->CreatePHI(
+            i8_ptr_type, format_cases.size(), "repr.val.serialization");
+        llvm::PHINode* value_ptr_phi = builder->CreatePHI(
+            i8_ptr_type, format_cases.size(), "repr.val.ptr");
+        llvm::PHINode* supported_phi = builder->CreatePHI(
+            llvm::Type::getInt1Ty(context), format_cases.size(), "repr.val.supported");
+        llvm::PHINode* wrap_with_type_phi = builder->CreatePHI(
+            llvm::Type::getInt1Ty(context), format_cases.size(), "repr.val.wrap_with_type");
+        for (auto &entry : format_cases) {
+            serialization_phi->addIncoming(entry.serialization, entry.bb);
+            value_ptr_phi->addIncoming(entry.value_ptr, entry.bb);
+            supported_phi->addIncoming(entry.supported, entry.bb);
+            wrap_with_type_phi->addIncoming(entry.wrap_with_type, entry.bb);
+        }
+
+        llvm::BasicBlock* formatBB = llvm::BasicBlock::Create(context, "repr.val.format", fn);
+        llvm::BasicBlock* unsupportedBB = llvm::BasicBlock::Create(context, "repr.val.unsupported", fn);
+        builder->CreateCondBr(supported_phi, formatBB, unsupportedBB);
+
+        builder->SetInsertPoint(formatBB);
+        std::vector<llvm::Value*> args;
+        std::string repr_default_fmt = "(*(g0,:,\", \"))";
+        llvm::Value* repr_fmt_data = LCompilers::create_global_string_ptr(
+            context, *module, *builder, repr_default_fmt);
+        llvm::Value* repr_fmt_len = llvm::ConstantInt::get(
+            i64_type, llvm::APInt(64, static_cast<uint64_t>(repr_default_fmt.size())));
+        args.push_back(repr_fmt_data);
+        args.push_back(repr_fmt_len);
+        args.push_back(serialization_phi);
+        llvm::Value *result_size_ptr = llvm_utils->CreateAlloca(*builder, i64_type);
+        args.push_back(result_size_ptr);
+        args.push_back(llvm::ConstantInt::get(i32_type, 0));
+        args.push_back(llvm::ConstantInt::get(i32_type, 0));
+        args.push_back(value_ptr_phi);
+        llvm::Value* formatted = string_format_fortran_untracked(args);
+        llvm::Value* result_size = llvm_utils->CreateLoad2(i64_type, result_size_ptr);
+        llvm::Value* format_desc = llvm_utils->create_string_descriptor(
+            formatted, result_size, "repr_poly_value_desc");
+        builder->CreateBr(repr_mergeBB);
+        repr_incoming.push_back({formatBB, format_desc});
+        cleanup_incoming.push_back({formatBB, formatted});
+        wrap_incoming.push_back({formatBB, wrap_with_type_phi});
+
+        builder->SetInsertPoint(unsupportedBB);
+        llvm::Value* fallback = make_const_string_descriptor("<unsupported-polymorphic-value>",
+            "repr_poly_fallback_desc");
+        builder->CreateBr(repr_mergeBB);
+        repr_incoming.push_back({unsupportedBB, fallback});
+        cleanup_incoming.push_back({unsupportedBB, null_ptr});
+        wrap_incoming.push_back({unsupportedBB, llvm::ConstantInt::getFalse(context)});
+
+        builder->SetInsertPoint(repr_mergeBB);
+        llvm::PHINode* repr_phi = builder->CreatePHI(string_descriptor->getPointerTo(),
+            repr_incoming.size(), "repr.val.result");
+        for (auto &entry : repr_incoming) {
+            repr_phi->addIncoming(entry.second, entry.first);
+        }
+        llvm::PHINode* cleanup_phi = builder->CreatePHI(i8_ptr_type,
+            cleanup_incoming.size(), "repr.val.cleanup");
+        for (auto &entry : cleanup_incoming) {
+            cleanup_phi->addIncoming(entry.second, entry.first);
+        }
+        llvm::PHINode* wrap_phi = builder->CreatePHI(
+            llvm::Type::getInt1Ty(context), wrap_incoming.size(), "repr.val.wrap");
+        for (auto &entry : wrap_incoming) {
+            wrap_phi->addIncoming(entry.second, entry.first);
+        }
+        return std::make_tuple(repr_phi, cleanup_phi, wrap_phi);
+    }
+
     void visit_IntrinsicElementalFunction(const ASR::IntrinsicElementalFunction_t& x) {
         if (x.m_value) {
             this->visit_expr_wrapper(x.m_value, true);
@@ -3404,6 +3913,519 @@ public:
                     // old classes: compare integer type hashes
                     tmp = builder->CreateICmpEQ(id0, id1);
                 }
+                break;
+            }
+            case ASRUtils::IntrinsicElementalFunctions::TypeOf: {
+                ASR::expr_t* arg = x.m_args[0];
+                llvm::Type* i8_ptr = llvm::Type::getInt8Ty(context)->getPointerTo();
+                llvm::Type* cptr_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                llvm::Type* i64_type = llvm::Type::getInt64Ty(context);
+                llvm::StructType* type_info_type = llvm::StructType::get(
+                    context, {i8_ptr, i8_ptr, i8_ptr}, false);
+                auto as_i8_ptr = [&](llvm::Constant* c) -> llvm::Value* {
+                    return llvm::ConstantExpr::getBitCast(c, i8_ptr);
+                };
+                auto sanitize = [&](std::string s) {
+                    for (char &ch : s) {
+                        if (!std::isalnum(static_cast<unsigned char>(ch))) ch = '_';
+                    }
+                    return s;
+                };
+                auto make_synthetic_typeinfo = [&](ASR::ttype_t* t, ASR::expr_t* e) -> llvm::Value* {
+                    std::string tname = ASRUtils::type_to_str_with_kind(t, e);
+                    std::string key = sanitize(tname);
+                    std::string gv_name = "_Type_Info_Synth_" + key;
+                    llvm::GlobalVariable* gv = module->getGlobalVariable(gv_name);
+                    if (!gv) {
+                        llvm::Type* llvm_t = llvm_utils->get_type_from_ttype_t_util(e, t, module.get());
+                        uint64_t tsize = llvm::DataLayout(module->getDataLayout()).getTypeAllocSize(llvm_t);
+                        llvm::Constant* name_ptr = llvm::dyn_cast<llvm::Constant>(
+                            LCompilers::create_global_string_ptr(
+                                context, *module, *builder, tname, "_Type_Name_" + key));
+                        llvm::Constant* size_ptr = llvm::ConstantExpr::getIntToPtr(
+                            llvm::ConstantInt::get(i64_type, tsize), i8_ptr);
+                        llvm::Constant* parent_ptr = llvm::ConstantPointerNull::get(
+                            llvm::cast<llvm::PointerType>(i8_ptr));
+                        llvm::Constant* init = llvm::ConstantStruct::get(
+                            type_info_type, {name_ptr, size_ptr, parent_ptr});
+                        gv = new llvm::GlobalVariable(
+                            *module, type_info_type, true, llvm::GlobalValue::LinkOnceODRLinkage, init, gv_name);
+                        gv->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
+                        gv->setAlignment(llvm::MaybeAlign(8));
+                    }
+                    return llvm::ConstantExpr::getBitCast(gv, i8_ptr);
+                };
+                auto static_type_info_handle = [&](ASR::expr_t* e) -> llvm::Value* {
+                    ASR::ttype_t* arg_type = ASRUtils::extract_type(ASRUtils::expr_type(e));
+                    if (ASR::is_a<ASR::StructType_t>(*arg_type)) {
+                        ASR::symbol_t* sym = ASRUtils::symbol_get_past_external(
+                            ASRUtils::get_struct_sym_from_struct_expr(e));
+                        if (sym && ASR::is_a<ASR::Struct_t>(*sym)) {
+                            struct_api->create_type_info_for_struct(sym, module.get());
+                            return as_i8_ptr(struct_api->newclass2typeinfo.at(sym));
+                        }
+                        return make_synthetic_typeinfo(arg_type, e);
+                    } else if (ASR::is_a<ASR::Integer_t>(*arg_type) || ASR::is_a<ASR::Real_t>(*arg_type) ||
+                               ASR::is_a<ASR::Logical_t>(*arg_type) || ASR::is_a<ASR::Complex_t>(*arg_type) ||
+                               ASR::is_a<ASR::String_t>(*arg_type)) {
+                        int kind = ASRUtils::extract_kind_from_ttype_t(arg_type);
+                        struct_api->create_type_info_for_intrinsic_type(arg_type, kind, module.get());
+                        return as_i8_ptr(struct_api->intrinsic_type_info.at(
+                            ASRUtils::intrinsic_type_to_str_with_kind(arg_type, kind)));
+                    }
+                    return make_synthetic_typeinfo(arg_type, e);
+                };
+
+                if (!ASRUtils::is_unlimited_polymorphic_type(arg)) {
+                    tmp = static_type_info_handle(arg);
+                    if (tmp->getType() != cptr_type) {
+                        tmp = builder->CreateBitCast(tmp, cptr_type);
+                    }
+                    break;
+                }
+
+                int64_t ptr_loads_copy = ptr_loads;
+                ptr_loads = 0;
+                this->visit_expr(*arg);
+                llvm::Value* arg_ptr = tmp;
+                ptr_loads = ptr_loads_copy;
+
+                ASR::symbol_t* struct_sym = ASRUtils::symbol_get_past_external(
+                    ASRUtils::get_struct_sym_from_struct_expr(arg));
+                llvm::Type* class_type = llvm_utils->getClassType(
+                    ASR::down_cast<ASR::Struct_t>(struct_sym), false);
+                ASR::ttype_t* arg_type = ASRUtils::expr_type(arg);
+                if (ASRUtils::is_allocatable(arg_type) || ASR::is_a<ASR::Pointer_t>(*arg_type)) {
+                    arg_ptr = llvm_utils->CreateLoad2(class_type->getPointerTo(), arg_ptr);
+                }
+
+                llvm::Value* id_ptr = llvm_utils->create_gep2(class_type, arg_ptr, 0);
+                llvm::Type* id_type = llvm::cast<llvm::StructType>(class_type)->getElementType(0);
+                if (id_type->isPointerTy()) {
+                    llvm::Value* vptr = llvm_utils->CreateLoad2(id_type, id_ptr);
+                    llvm::Value* vptr_i8 = builder->CreateBitCast(vptr, i8_ptr->getPointerTo());
+                    llvm::Value* type_info_ptr_ptr = llvm_utils->create_ptr_gep2(
+                        i8_ptr, vptr_i8, llvm::ConstantInt::get(i64_type, -1, true));
+                    tmp = llvm_utils->CreateLoad2(i8_ptr, type_info_ptr_ptr);
+                    if (tmp->getType() != cptr_type) {
+                        tmp = builder->CreateBitCast(tmp, cptr_type);
+                    }
+                    break;
+                }
+
+                llvm::Value* type_id = llvm_utils->CreateLoad2(id_type, id_ptr);
+                if (type_id->getType() != i64_type) {
+                    type_id = builder->CreateSExtOrTrunc(type_id, i64_type);
+                }
+                llvm::Function* fn = builder->GetInsertBlock()->getParent();
+                llvm::BasicBlock* mergeBB = llvm::BasicBlock::Create(context, "typeof.merge", fn);
+                std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> incoming;
+                llvm::BasicBlock* currentBB = builder->GetInsertBlock();
+                auto add_type_case = [&](int64_t id_value, ASR::ttype_t* t) {
+                    llvm::BasicBlock* thenBB = llvm::BasicBlock::Create(context, "typeof.then", fn);
+                    llvm::BasicBlock* elseBB = llvm::BasicBlock::Create(context, "typeof.else", fn);
+                    builder->SetInsertPoint(currentBB);
+                    llvm::Value* cond = builder->CreateICmpEQ(
+                        type_id, llvm::ConstantInt::get(i64_type, llvm::APInt(64, id_value, true)));
+                    builder->CreateCondBr(cond, thenBB, elseBB);
+                    builder->SetInsertPoint(thenBB);
+                    int kind = ASRUtils::extract_kind_from_ttype_t(t);
+                    struct_api->create_type_info_for_intrinsic_type(t, kind, module.get());
+                    llvm::Value* value = as_i8_ptr(struct_api->intrinsic_type_info.at(
+                        ASRUtils::intrinsic_type_to_str_with_kind(t, kind)));
+                    builder->CreateBr(mergeBB);
+                    incoming.push_back({thenBB, value});
+                    currentBB = elseBB;
+                };
+                add_type_case(-((int)ASR::ttypeType::Integer) - 4, ASRUtils::TYPE(ASR::make_Integer_t(al, arg->base.loc, 4)));
+                add_type_case(-((int)ASR::ttypeType::Integer) - 8, ASRUtils::TYPE(ASR::make_Integer_t(al, arg->base.loc, 8)));
+                add_type_case(-((int)ASR::ttypeType::Real) - 4, ASRUtils::TYPE(ASR::make_Real_t(al, arg->base.loc, 4)));
+                add_type_case(-((int)ASR::ttypeType::Real) - 8, ASRUtils::TYPE(ASR::make_Real_t(al, arg->base.loc, 8)));
+                add_type_case(-((int)ASR::ttypeType::Logical) - 4, ASRUtils::TYPE(ASR::make_Logical_t(al, arg->base.loc, 4)));
+                add_type_case(-((int)ASR::ttypeType::String) - 1, ASRUtils::TYPE(ASR::make_String_t(al, arg->base.loc, 1, nullptr,
+                    ASR::string_length_kindType::DeferredLength, ASR::string_physical_typeType::DescriptorString)));
+                builder->SetInsertPoint(currentBB);
+                llvm::Value* fallback = make_synthetic_typeinfo(
+                    ASRUtils::TYPE(ASR::make_Integer_t(al, arg->base.loc, 8)), arg);
+                builder->CreateBr(mergeBB);
+                incoming.push_back({currentBB, fallback});
+                builder->SetInsertPoint(mergeBB);
+                llvm::PHINode* phi = builder->CreatePHI(i8_ptr, incoming.size(), "typeof.result");
+                for (auto &entry : incoming) {
+                    phi->addIncoming(entry.second, entry.first);
+                }
+                tmp = phi;
+                if (tmp->getType() != cptr_type) {
+                    tmp = builder->CreateBitCast(tmp, cptr_type);
+                }
+                break;
+            }
+            case ASRUtils::IntrinsicElementalFunctions::TypeName: {
+                llvm::Type* i8_ptr = llvm::Type::getInt8Ty(context)->getPointerTo();
+                llvm::Type* cptr_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                llvm::Type* i64_type = llvm::Type::getInt64Ty(context);
+                llvm::StructType* type_info_type = llvm::StructType::get(
+                    context, {i8_ptr, i8_ptr, i8_ptr}, false);
+                auto make_const_desc = [&](const std::string &name) {
+                    llvm::Value* data = LCompilers::create_global_string_ptr(
+                        context, *module, *builder, name);
+                    llvm::Value* len = llvm::ConstantInt::get(
+                        llvm::Type::getInt64Ty(context), llvm::APInt(64, name.size()));
+                    return llvm_utils->create_string_descriptor(data, len, "type_name_desc");
+                };
+                auto load_type_info_handle = [&](ASR::expr_t* arg_expr) -> llvm::Value* {
+                    this->visit_expr(*arg_expr);
+                    llvm::Value* value = tmp;
+                    llvm::Type* arg_type = llvm_utils->get_type_from_ttype_t_util(
+                        arg_expr, ASRUtils::expr_type(arg_expr), module.get());
+                    if ((ASR::is_a<ASR::Var_t>(*arg_expr) ||
+                         ASR::is_a<ASR::StructInstanceMember_t>(*arg_expr)) &&
+                        value->getType() != arg_type) {
+                        value = llvm_utils->CreateLoad2(arg_type, value);
+                    }
+                    if (value->getType() != cptr_type) {
+                        value = builder->CreateBitCast(value, cptr_type);
+                    }
+                    return value;
+                };
+                llvm::Value* ti_ptr = load_type_info_handle(x.m_args[0]);
+                ti_ptr = builder->CreateBitCast(ti_ptr, i8_ptr);
+                llvm::Value* out_desc = llvm_utils->CreateAlloca(*builder, string_descriptor->getPointerTo());
+                llvm::Value* is_null = builder->CreateICmpEQ(
+                    builder->CreatePtrToInt(ti_ptr, i64_type),
+                    llvm::ConstantInt::get(i64_type, 0));
+                llvm_utils->create_if_else(is_null, [&]() {
+                    builder->CreateStore(make_const_desc("~null_type"), out_desc);
+                }, [&]() {
+                    llvm::Value* ti_cast = builder->CreateBitCast(ti_ptr, type_info_type->getPointerTo());
+                    llvm::Value* name_ptr_ptr = llvm_utils->create_gep2(type_info_type, ti_cast, 0);
+                    llvm::Value* name_ptr = llvm_utils->CreateLoad2(i8_ptr, name_ptr_ptr);
+                    llvm::Value* type_tag = builder->CreatePtrToInt(name_ptr, i64_type);
+                    auto tag_eq = [&](ASR::ttypeType type, int kind) -> llvm::Value* {
+                        int64_t tag_value = static_cast<int64_t>(static_cast<int>(type) + kind);
+                        return builder->CreateICmpEQ(
+                            type_tag, llvm::ConstantInt::get(i64_type, llvm::APInt(64, tag_value, true)));
+                    };
+                    auto store_const_desc = [&](const std::string &name) {
+                        builder->CreateStore(make_const_desc(name), out_desc);
+                    };
+
+                    llvm::Value* is_intrinsic_tag = tag_eq(ASR::ttypeType::Integer, 1);
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::Integer, 2));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::Integer, 4));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::Integer, 8));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::Real, 4));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::Real, 8));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::Logical, 1));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::Logical, 2));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::Logical, 4));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::Logical, 8));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::Complex, 4));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::Complex, 8));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::String, 1));
+
+                    llvm_utils->create_if_else(is_intrinsic_tag, [&]() {
+                        llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Integer, 1), [&]() {
+                            store_const_desc("integer(1)");
+                        }, [&]() {
+                            llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Integer, 2), [&]() {
+                                store_const_desc("integer(2)");
+                            }, [&]() {
+                                llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Integer, 4), [&]() {
+                                    store_const_desc("integer(4)");
+                                }, [&]() {
+                                    llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Integer, 8), [&]() {
+                                        store_const_desc("integer(8)");
+                                    }, [&]() {
+                                        llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Real, 4), [&]() {
+                                            store_const_desc("real(4)");
+                                        }, [&]() {
+                                            llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Real, 8), [&]() {
+                                                store_const_desc("real(8)");
+                                            }, [&]() {
+                                                llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Logical, 1), [&]() {
+                                                    store_const_desc("logical(1)");
+                                                }, [&]() {
+                                                    llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Logical, 2), [&]() {
+                                                        store_const_desc("logical(2)");
+                                                    }, [&]() {
+                                                        llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Logical, 4), [&]() {
+                                                            store_const_desc("logical(4)");
+                                                        }, [&]() {
+                                                            llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Logical, 8), [&]() {
+                                                                store_const_desc("logical(8)");
+                                                            }, [&]() {
+                                                                llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Complex, 4), [&]() {
+                                                                    store_const_desc("complex(4)");
+                                                                }, [&]() {
+                                                                    llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Complex, 8), [&]() {
+                                                                        store_const_desc("complex(8)");
+                                                                    }, [&]() {
+                                                                        store_const_desc("character");
+                                                                    });
+                                                                });
+                                                            });
+                                                        });
+                                                    });
+                                                });
+                                            });
+                                        });
+                                    });
+                                });
+                            });
+                        });
+                    }, [&]() {
+                        llvm::Value* name_len = lfortran_str_len(nullptr, name_ptr);
+                        llvm::Value* desc = llvm_utils->create_string_descriptor(
+                            name_ptr, name_len, "type_name_desc");
+                        builder->CreateStore(desc, out_desc);
+                    });
+                });
+                tmp = llvm_utils->CreateLoad2(string_descriptor->getPointerTo(), out_desc);
+                break;
+            }
+            case ASRUtils::IntrinsicElementalFunctions::TypeSize: {
+                llvm::Type* i8_ptr = llvm::Type::getInt8Ty(context)->getPointerTo();
+                llvm::Type* cptr_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                llvm::StructType* type_info_type = llvm::StructType::get(
+                    context, {i8_ptr, i8_ptr, i8_ptr}, false);
+                auto load_type_info_handle = [&](ASR::expr_t* arg_expr) -> llvm::Value* {
+                    this->visit_expr(*arg_expr);
+                    llvm::Value* value = tmp;
+                    llvm::Type* arg_type = llvm_utils->get_type_from_ttype_t_util(
+                        arg_expr, ASRUtils::expr_type(arg_expr), module.get());
+                    if ((ASR::is_a<ASR::Var_t>(*arg_expr) ||
+                         ASR::is_a<ASR::StructInstanceMember_t>(*arg_expr)) &&
+                        value->getType() != arg_type) {
+                        value = llvm_utils->CreateLoad2(arg_type, value);
+                    }
+                    if (value->getType() != cptr_type) {
+                        value = builder->CreateBitCast(value, cptr_type);
+                    }
+                    return value;
+                };
+                llvm::Value* ti_ptr = load_type_info_handle(x.m_args[0]);
+                ti_ptr = builder->CreateBitCast(ti_ptr, i8_ptr);
+                llvm::Value* is_null = builder->CreateICmpEQ(
+                    builder->CreatePtrToInt(ti_ptr, llvm::Type::getInt64Ty(context)),
+                    llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), 0));
+                llvm::Value* out = llvm_utils->CreateAlloca(*builder, llvm::Type::getInt64Ty(context));
+                llvm_utils->create_if_else(is_null, [&]() {
+                    builder->CreateStore(llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), 0), out);
+                }, [&]() {
+                    llvm::Value* ti_cast = builder->CreateBitCast(ti_ptr, type_info_type->getPointerTo());
+                    llvm::Value* size_ptr_ptr = llvm_utils->create_gep2(type_info_type, ti_cast, 1);
+                    llvm::Value* size_ptr = llvm_utils->CreateLoad2(i8_ptr, size_ptr_ptr);
+                    llvm::Value* size = builder->CreatePtrToInt(size_ptr, llvm::Type::getInt64Ty(context));
+                    builder->CreateStore(size, out);
+                });
+                tmp = llvm_utils->CreateLoad2(llvm::Type::getInt64Ty(context), out);
+                break;
+            }
+            case ASRUtils::IntrinsicElementalFunctions::TypeParent: {
+                llvm::Type* i8_ptr = llvm::Type::getInt8Ty(context)->getPointerTo();
+                llvm::Type* cptr_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                llvm::StructType* type_info_type = llvm::StructType::get(
+                    context, {i8_ptr, i8_ptr, i8_ptr}, false);
+                auto load_type_info_handle = [&](ASR::expr_t* arg_expr) -> llvm::Value* {
+                    this->visit_expr(*arg_expr);
+                    llvm::Value* value = tmp;
+                    llvm::Type* arg_type = llvm_utils->get_type_from_ttype_t_util(
+                        arg_expr, ASRUtils::expr_type(arg_expr), module.get());
+                    if ((ASR::is_a<ASR::Var_t>(*arg_expr) ||
+                         ASR::is_a<ASR::StructInstanceMember_t>(*arg_expr)) &&
+                        value->getType() != arg_type) {
+                        value = llvm_utils->CreateLoad2(arg_type, value);
+                    }
+                    if (value->getType() != cptr_type) {
+                        value = builder->CreateBitCast(value, cptr_type);
+                    }
+                    return value;
+                };
+                llvm::Value* ti_ptr = load_type_info_handle(x.m_args[0]);
+                ti_ptr = builder->CreateBitCast(ti_ptr, i8_ptr);
+                llvm::Value* is_null = builder->CreateICmpEQ(
+                    builder->CreatePtrToInt(ti_ptr, llvm::Type::getInt64Ty(context)),
+                    llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), 0));
+                llvm::Value* out = llvm_utils->CreateAlloca(*builder, i8_ptr);
+                llvm_utils->create_if_else(is_null, [&]() {
+                    builder->CreateStore(llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(i8_ptr)), out);
+                }, [&]() {
+                    llvm::Value* ti_cast = builder->CreateBitCast(ti_ptr, type_info_type->getPointerTo());
+                    llvm::Value* parent_ptr = llvm_utils->create_gep2(type_info_type, ti_cast, 2);
+                    llvm::Value* parent = llvm_utils->CreateLoad2(i8_ptr, parent_ptr);
+                    builder->CreateStore(parent, out);
+                });
+                tmp = llvm_utils->CreateLoad2(i8_ptr, out);
+                if (tmp->getType() != cptr_type) {
+                    tmp = builder->CreateBitCast(tmp, cptr_type);
+                }
+                break;
+            }
+            case ASRUtils::IntrinsicElementalFunctions::TypeSame: {
+                llvm::Type* cptr_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                auto load_type_info_handle = [&](ASR::expr_t* arg_expr) -> llvm::Value* {
+                    this->visit_expr(*arg_expr);
+                    llvm::Value* value = tmp;
+                    llvm::Type* arg_type = llvm_utils->get_type_from_ttype_t_util(
+                        arg_expr, ASRUtils::expr_type(arg_expr), module.get());
+                    if ((ASR::is_a<ASR::Var_t>(*arg_expr) ||
+                         ASR::is_a<ASR::StructInstanceMember_t>(*arg_expr)) &&
+                        value->getType() != arg_type) {
+                        value = llvm_utils->CreateLoad2(arg_type, value);
+                    }
+                    if (value->getType() != cptr_type) {
+                        value = builder->CreateBitCast(value, cptr_type);
+                    }
+                    return value;
+                };
+                llvm::Value* lhs = load_type_info_handle(x.m_args[0]);
+                llvm::Value* rhs = load_type_info_handle(x.m_args[1]);
+                llvm::Value* lhs_i64 = builder->CreatePtrToInt(lhs, llvm::Type::getInt64Ty(context));
+                llvm::Value* rhs_i64 = builder->CreatePtrToInt(rhs, llvm::Type::getInt64Ty(context));
+                tmp = builder->CreateICmpEQ(lhs_i64, rhs_i64);
+                break;
+            }
+            case ASRUtils::IntrinsicElementalFunctions::TypeExtends: {
+                llvm::Type* i8_ptr = llvm::Type::getInt8Ty(context)->getPointerTo();
+                llvm::Type* cptr_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                llvm::StructType* type_info_type = llvm::StructType::get(
+                    context, {i8_ptr, i8_ptr, i8_ptr}, false);
+                auto load_type_info_handle = [&](ASR::expr_t* arg_expr) -> llvm::Value* {
+                    this->visit_expr(*arg_expr);
+                    llvm::Value* value = tmp;
+                    llvm::Type* arg_type = llvm_utils->get_type_from_ttype_t_util(
+                        arg_expr, ASRUtils::expr_type(arg_expr), module.get());
+                    if ((ASR::is_a<ASR::Var_t>(*arg_expr) ||
+                         ASR::is_a<ASR::StructInstanceMember_t>(*arg_expr)) &&
+                        value->getType() != arg_type) {
+                        value = llvm_utils->CreateLoad2(arg_type, value);
+                    }
+                    if (value->getType() != cptr_type) {
+                        value = builder->CreateBitCast(value, cptr_type);
+                    }
+                    return value;
+                };
+                llvm::Value* child_ti = builder->CreateBitCast(
+                    load_type_info_handle(x.m_args[0]), i8_ptr);
+                llvm::Value* base_ti = builder->CreateBitCast(
+                    load_type_info_handle(x.m_args[1]), i8_ptr);
+                llvm::Function* fn = builder->GetInsertBlock()->getParent();
+                llvm::BasicBlock* loopBB = llvm::BasicBlock::Create(context, "type_ext.loop", fn);
+                llvm::BasicBlock* foundBB = llvm::BasicBlock::Create(context, "type_ext.found", fn);
+                llvm::BasicBlock* nextBB = llvm::BasicBlock::Create(context, "type_ext.next", fn);
+                llvm::BasicBlock* mergeBB = llvm::BasicBlock::Create(context, "type_ext.merge", fn);
+                builder->CreateBr(loopBB);
+                builder->SetInsertPoint(loopBB);
+                llvm::PHINode* current = builder->CreatePHI(i8_ptr, 2, "type_ext.current");
+                current->addIncoming(child_ti, builder->GetInsertBlock()->getSinglePredecessor());
+                llvm::Value* is_null = builder->CreateICmpEQ(
+                    builder->CreatePtrToInt(current, llvm::Type::getInt64Ty(context)),
+                    llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), 0));
+                llvm::BasicBlock* cmpBB = llvm::BasicBlock::Create(context, "type_ext.cmp", fn);
+                builder->CreateCondBr(is_null, mergeBB, cmpBB);
+                builder->SetInsertPoint(cmpBB);
+                llvm::Value* is_eq = builder->CreateICmpEQ(
+                    builder->CreatePtrToInt(current, llvm::Type::getInt64Ty(context)),
+                    builder->CreatePtrToInt(base_ti, llvm::Type::getInt64Ty(context)));
+                builder->CreateCondBr(is_eq, foundBB, nextBB);
+                builder->SetInsertPoint(nextBB);
+                llvm::Value* current_cast = builder->CreateBitCast(current, type_info_type->getPointerTo());
+                llvm::Value* parent_ptr = llvm_utils->create_gep2(type_info_type, current_cast, 2);
+                llvm::Value* parent = llvm_utils->CreateLoad2(i8_ptr, parent_ptr);
+                builder->CreateBr(loopBB);
+                current->addIncoming(parent, nextBB);
+                builder->SetInsertPoint(foundBB);
+                builder->CreateBr(mergeBB);
+                builder->SetInsertPoint(mergeBB);
+                llvm::PHINode* result = builder->CreatePHI(llvm::Type::getInt1Ty(context), 2, "type_ext.result");
+                result->addIncoming(llvm::ConstantInt::getTrue(context), foundBB);
+                result->addIncoming(llvm::ConstantInt::getFalse(context), loopBB);
+                tmp = result;
+                break;
+            }
+            case ASRUtils::IntrinsicElementalFunctions::Repr: {
+                ASR::expr_t* arg = x.m_args[0];
+                if (!ASRUtils::is_unlimited_polymorphic_type(arg)) {
+                    throw CodeGenError("`repr` lowering fallback expected compile-time expression "
+                        "for non-polymorphic arguments", x.base.base.loc);
+                }
+
+                std::string var_name = "it";
+                if (ASR::is_a<ASR::Var_t>(*arg)) {
+                    ASR::Var_t* v = ASR::down_cast<ASR::Var_t>(arg);
+                    var_name = ASRUtils::symbol_name(v->m_v);
+                }
+
+                llvm::Value* type_desc = create_typeof_descriptor_from_expr(arg);
+                llvm::Value* type_data = builder->CreateLoad(
+                    character_type, llvm_utils->create_gep2(string_descriptor, type_desc, 0));
+                llvm::Value* type_len = builder->CreateLoad(
+                    llvm::Type::getInt64Ty(context),
+                    llvm_utils->create_gep2(string_descriptor, type_desc, 1));
+
+                std::string suffix = " :: " + var_name + " = ";
+                llvm::Value* suffix_data = LCompilers::create_global_string_ptr(
+                    context, *module, *builder, suffix);
+                llvm::Value* suffix_len = llvm::ConstantInt::get(
+                    llvm::Type::getInt64Ty(context),
+                    llvm::APInt(64, static_cast<uint64_t>(suffix.size())));
+                llvm::Value* prefix_data = lfortran_strConcat(
+                    type_data, type_len, suffix_data, suffix_len);
+                llvm::Value* prefix_len = builder->CreateAdd(type_len, suffix_len);
+
+                llvm::Value* value_desc = nullptr;
+                llvm::Value* value_cleanup = nullptr;
+                llvm::Value* wrap_with_type = nullptr;
+                std::tie(value_desc, value_cleanup, wrap_with_type) =
+                    create_runtime_polymorphic_value_descriptor(arg);
+                llvm::Value* value_data = builder->CreateLoad(
+                    character_type, llvm_utils->create_gep2(string_descriptor, value_desc, 0));
+                llvm::Value* value_len = builder->CreateLoad(
+                    llvm::Type::getInt64Ty(context),
+                    llvm_utils->create_gep2(string_descriptor, value_desc, 1));
+
+                llvm::Function* fn_repr = builder->GetInsertBlock()->getParent();
+                llvm::BasicBlock* wrapBB = llvm::BasicBlock::Create(context, "repr.wrap", fn_repr);
+                llvm::BasicBlock* nowrapBB = llvm::BasicBlock::Create(context, "repr.nowrap", fn_repr);
+                llvm::BasicBlock* mergeBB = llvm::BasicBlock::Create(context, "repr.wrap.merge", fn_repr);
+                builder->CreateCondBr(wrap_with_type, wrapBB, nowrapBB);
+
+                builder->SetInsertPoint(wrapBB);
+                llvm::Value* open_paren = LCompilers::create_global_string_ptr(
+                    context, *module, *builder, "(");
+                llvm::Value* open_paren_len = llvm::ConstantInt::get(
+                    llvm::Type::getInt64Ty(context), llvm::APInt(64, 1));
+                llvm::Value* close_paren = LCompilers::create_global_string_ptr(
+                    context, *module, *builder, ")");
+                llvm::Value* close_paren_len = llvm::ConstantInt::get(
+                    llvm::Type::getInt64Ty(context), llvm::APInt(64, 1));
+                llvm::Value* with_open = lfortran_strConcat(type_data, type_len, open_paren, open_paren_len);
+                llvm::Value* with_open_len = builder->CreateAdd(type_len, open_paren_len);
+                llvm::Value* with_value = lfortran_strConcat(with_open, with_open_len, value_data, value_len);
+                llvm::Value* with_value_len = builder->CreateAdd(with_open_len, value_len);
+                llvm::Value* wrapped_value = lfortran_strConcat(with_value, with_value_len, close_paren, close_paren_len);
+                llvm::Value* wrapped_value_len = builder->CreateAdd(with_value_len, close_paren_len);
+                builder->CreateBr(mergeBB);
+
+                builder->SetInsertPoint(nowrapBB);
+                builder->CreateBr(mergeBB);
+
+                builder->SetInsertPoint(mergeBB);
+                llvm::PHINode* final_value_data = builder->CreatePHI(
+                    character_type, 2, "repr.value.data");
+                final_value_data->addIncoming(wrapped_value, wrapBB);
+                final_value_data->addIncoming(value_data, nowrapBB);
+                llvm::PHINode* final_value_len = builder->CreatePHI(
+                    llvm::Type::getInt64Ty(context), 2, "repr.value.len");
+                final_value_len->addIncoming(wrapped_value_len, wrapBB);
+                final_value_len->addIncoming(value_len, nowrapBB);
+
+                llvm::Value* repr_data = lfortran_strConcat(
+                    prefix_data, prefix_len, final_value_data, final_value_len);
+                llvm::Value* repr_len = builder->CreateAdd(prefix_len, final_value_len);
+                llvm_utils->lfortran_free(value_cleanup);
+                tmp = llvm_utils->create_string_descriptor(repr_data, repr_len, "repr_desc");
                 break;
             }
             default: {
@@ -11064,11 +12086,16 @@ public:
             this->visit_expr_wrapper(x.m_value, true);
             return;
         }
+        bool left_is_string_format = ASR::is_a<ASR::StringFormat_t>(*x.m_left);
+        bool right_is_string_format = ASR::is_a<ASR::StringFormat_t>(*x.m_right);
         llvm::Value* left_val {}, *left_len {};
         llvm::Value* right_val {}, *right_len {};
         std::tie(left_val, left_len) = get_string_data_and_length(x.m_left);
         std::tie(right_val, right_len) = get_string_data_and_length(x.m_right);
         tmp = lfortran_strConcat(left_val, left_len, right_val, right_len);
+        if (left_is_string_format || right_is_string_format) {
+            llvm_utils->stringFormat_return.free();
+        }
         tmp = llvm_utils->create_string_descriptor(tmp,
             builder->CreateAdd(left_len, right_len), "strConcat_desc");
     }
