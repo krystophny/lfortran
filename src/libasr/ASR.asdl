@@ -219,6 +219,7 @@ ttype
     | Pointer(ttype type)
     | Allocatable(ttype type)
     | CPtr()
+    | TypeInfo()
     | SymbolicExpression()
     | TypeParameter(identifier param)
     | Array(ttype type, dimension* dims, array_physical_type physical_type)

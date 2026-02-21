@@ -3433,6 +3433,7 @@ RUN(NAME infer_walrus_struct_03 LABELS llvm_infer NO_STD_F23)
 RUN(NAME infer_walrus_shadow_01 LABELS llvm_infer NO_STD_F23)
 RUN(NAME infer_walrus_shadow_02 LABELS llvm_infer NO_STD_F23)
 RUN(NAME infer_walrus_shadow_03 LABELS llvm_infer NO_STD_F23)
+RUN(NAME typeof_01 LABELS llvm llvm_infer NO_STD_F23)
 
 # UTF-8 BOM handling
 RUN(NAME utf8_bom_01 LABELS gfortran llvm)

@@ -271,6 +271,9 @@ public:
             } case ASR::ttypeType::CPtr: {
                 r = "type(c_ptr)";
                 break;
+            } case ASR::ttypeType::TypeInfo: {
+                r = "type(type_info)";
+                break;
             } case ASR::ttypeType::FunctionType: {
                 r = "procedure(";
                 r += ASRUtils::symbol_name(type_decl);
