@@ -3364,10 +3364,11 @@ public:
                     llvm::BasicBlock* not_found_bb = llvm::BasicBlock::Create(context, "eto.notfound", fn);
                     llvm::BasicBlock* merge_bb = llvm::BasicBlock::Create(context, "eto.merge", fn);
 
+                    llvm::BasicBlock* preheader_bb = builder->GetInsertBlock();
                     builder->CreateBr(loop_bb);
                     builder->SetInsertPoint(loop_bb);
                     llvm::PHINode* ti_current = builder->CreatePHI(i8_ptr, 2, "eto.ti");
-                    ti_current->addIncoming(ti_a_init, loop_bb->getSinglePredecessor());
+                    ti_current->addIncoming(ti_a_init, preheader_bb);
 
                     // Compare current TypeInfo with MOLD's TypeInfo
                     llvm::Value* eq = builder->CreateICmpEQ(
@@ -8648,8 +8649,7 @@ public:
         } else if (compiler_options.new_classes &&
                     (is_target_class || is_target_struct) &&
                     (is_value_class || is_value_struct)) {
-            if (ASRUtils::is_allocatable(asr_target_type) && 
-                    !(is_target_class && is_value_class)) {
+            if (ASRUtils::is_allocatable(asr_target_type)) {
                 check_and_allocate_scalar(x.m_target, x.m_value, asr_value_type, true);
             }
             int64_t ptr_loads_copy = ptr_loads;

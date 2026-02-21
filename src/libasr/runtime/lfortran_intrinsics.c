@@ -8417,12 +8417,13 @@ void get_local_info_dwarfdump(struct Stacktrace *d) {
     }
     strcpy(filename, base_name);
     strcat(filename, "_lines.dat.txt");
-    int64_t fd = _lpython_open(filename, "r");
+    FILE *fp = fopen(filename, "r");
     free(base_name);
     free(filename);
-    if (fd < 0) {
+    if (fp == NULL) {
         return;
     }
+    int64_t fd = (int64_t)fp;
     uint32_t size = get_file_size(fd);
     if (size == 0) {
         _lpython_close(fd);
