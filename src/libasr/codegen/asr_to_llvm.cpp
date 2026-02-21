@@ -1735,6 +1735,31 @@ public:
                             dest_class_sym = ASRUtils::symbol_get_past_external(ASRUtils::get_struct_sym_from_struct_expr(m_source));
                             malloc_size = SizeOfTypeUtil(m_source, dest_asr_type, llvm_utils->getIntType(4),
                                 ASRUtils::TYPE(ASR::make_Integer_t(al, x.base.base.loc, 4)));
+                        } else if (curr_arg.m_type != nullptr) {
+                            // Explicit allocate type-spec (e.g. allocate(character(3) :: class(*)))
+                            // must drive the runtime payload type.
+                            dest_asr_type = curr_arg.m_type;
+                            if (ASR::is_a<ASR::StructType_t>(*dest_asr_type)) {
+                                dest_class_sym = ASRUtils::symbol_get_past_external(
+                                    ASRUtils::get_struct_sym_from_struct_expr(curr_arg.m_a));
+                            } else {
+                                dest_class_sym = nullptr;
+                            }
+                            malloc_size = SizeOfTypeUtil(curr_arg.m_a, dest_asr_type,
+                                llvm_utils->getIntType(4),
+                                ASRUtils::TYPE(ASR::make_Integer_t(al, x.base.base.loc, 4)));
+                        } else if (curr_arg.m_len_expr != nullptr &&
+                                   ASRUtils::is_unlimited_polymorphic_type(&src_struct_sym->base)) {
+                            // `allocate(character(n) :: class(*))` currently lowers with `m_len_expr`
+                            // set and `m_type == nullptr`. Materialize the intrinsic CHARACTER payload.
+                            dest_class_sym = nullptr;
+                            dest_asr_type = ASRUtils::TYPE(ASR::make_String_t(
+                                al, curr_arg.m_len_expr->base.loc, 1, nullptr,
+                                ASR::string_length_kindType::DeferredLength,
+                                ASR::string_physical_typeType::DescriptorString));
+                            malloc_size = SizeOfTypeUtil(curr_arg.m_a, dest_asr_type,
+                                llvm_utils->getIntType(4),
+                                ASRUtils::TYPE(ASR::make_Integer_t(al, x.base.base.loc, 4)));
                         } else if (curr_arg.m_sym_subclass == nullptr) {
                             dest_class_sym = ASRUtils::symbol_get_past_external(ASRUtils::get_struct_sym_from_struct_expr(curr_arg.m_a));
                             dest_asr_type = ASRUtils::make_StructType_t_util(al, curr_arg_m_a_type->base.loc, dest_class_sym, true);
@@ -1756,7 +1781,7 @@ public:
                             context, *module, *builder, malloc_size);
                         builder->CreateMemSet(malloc_ptr, llvm::ConstantInt::get(context, llvm::APInt(8, 0)),
                                     malloc_size, llvm::MaybeAlign());
-                        if(ASRUtils::is_string_only(dest_asr_type)) { // String type has a state to be cloned.
+                        if (m_source && ASRUtils::is_string_only(dest_asr_type)) { // String type has a state to be cloned.
                             // NOTE : dest_asr_type == source_type (They both refelect the type the class will be)
                             this->visit_expr_load_wrapper(m_source, 0);
                             auto* const dest__source_t = llvm_utils->get_type_from_ttype_t_util(m_source, dest_asr_type, module.get());
@@ -1857,6 +1882,17 @@ public:
 
                         if (ASR::is_a<ASR::StructType_t>(*dest_asr_type)) {
                             allocate_array_members_of_struct(ASR::down_cast<ASR::Struct_t>(dest_class_sym), x_arr, ASRUtils::symbol_type(dest_class_sym));
+                        } else if (!m_source && ASRUtils::is_string_only(dest_asr_type)) {
+                            llvm::Value* amount_to_allocate = nullptr;
+                            if (curr_arg.m_len_expr) {
+                                this->visit_expr_load_wrapper(curr_arg.m_len_expr, 1, true);
+                                amount_to_allocate = tmp;
+                                tmp = nullptr;
+                            }
+                            llvm_utils->allocate_allocatable_string(
+                                ASR::down_cast<ASR::String_t>(dest_asr_type),
+                                x_arr,
+                                amount_to_allocate);
                         }
                         if (m_source && !m_source_is_class && !curr_arg.m_type) {
                             llvm::Value* src = nullptr; {
