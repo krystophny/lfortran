@@ -185,6 +185,104 @@ static bool liric_is_object_file(const std::string &path)
     return endswith(path, ".o") || endswith(path, ".obj");
 }
 
+static bool liric_object_has_sidecars(const std::string &obj_path)
+{
+    return std::filesystem::exists(liric_blob_sidecar_path(obj_path)) &&
+           std::filesystem::exists(liric_ll_sidecar_path(obj_path));
+}
+
+static std::string liric_shell_quote(const std::string &s)
+{
+#ifdef _WIN32
+    std::string out = "\"";
+    for (char c : s) {
+        if (c == '"') out += "\\\"";
+        else out += c;
+    }
+    out += "\"";
+    return out;
+#else
+    std::string out = "'";
+    for (char c : s) {
+        if (c == '\'') out += "'\\''";
+        else out += c;
+    }
+    out += "'";
+    return out;
+#endif
+}
+
+static bool liric_resolve_c_source_for_object(const std::string &obj_path,
+                                               std::string &src_path_out)
+{
+    if (!endswith(obj_path, ".c.o")) return false;
+
+    std::filesystem::path obj = obj_path;
+    std::filesystem::path src_from_obj = obj;
+    src_from_obj.replace_extension("");
+    if (std::filesystem::exists(src_from_obj)) {
+        src_path_out = src_from_obj.string();
+        return true;
+    }
+
+    std::string src_name = src_from_obj.filename().string();
+    std::vector<std::filesystem::path> roots;
+    try {
+        std::filesystem::path cwd = std::filesystem::current_path();
+        roots.push_back(cwd);
+        if (!cwd.parent_path().empty()) roots.push_back(cwd.parent_path());
+        if (!cwd.parent_path().empty() &&
+            !cwd.parent_path().parent_path().empty()) {
+            roots.push_back(cwd.parent_path().parent_path());
+        }
+    } catch (...) {
+    }
+    if (!obj.parent_path().empty()) roots.push_back(obj.parent_path());
+    if (!obj.parent_path().empty() &&
+        !obj.parent_path().parent_path().empty()) {
+        roots.push_back(obj.parent_path().parent_path());
+    }
+
+    for (const auto &root : roots) {
+        if (root.empty()) continue;
+        std::filesystem::path candidate = root / src_name;
+        if (std::filesystem::exists(candidate)) {
+            src_path_out = candidate.string();
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool liric_generate_sidecars_for_c_object(const std::string &obj_path)
+{
+    std::string src_path;
+    if (!liric_resolve_c_source_for_object(obj_path, src_path)) {
+        std::cerr << "WITH_LIRIC AOT no-link mode could not resolve C source for object: "
+                  << obj_path << std::endl;
+        return false;
+    }
+
+    std::string ll_path = liric_ll_sidecar_path(obj_path);
+    std::string blob_path = liric_blob_sidecar_path(obj_path);
+    std::string cmd = "clang -S -emit-llvm -O0 -fno-discard-value-names "
+                      "-Xclang -opaque-pointers=0 -o " +
+                      liric_shell_quote(ll_path) + " " +
+                      liric_shell_quote(src_path);
+    int rc = std::system(cmd.c_str());
+    if (rc != 0 || !std::filesystem::exists(ll_path)) {
+        std::cerr << "WITH_LIRIC AOT no-link mode failed to generate LLVM sidecar from C source: "
+                  << src_path << std::endl;
+        return false;
+    }
+    if (!liric_write_bytes_file(blob_path, nullptr, 0)) {
+        std::cerr << "WITH_LIRIC AOT no-link mode failed to write empty blob sidecar: "
+                  << blob_path << std::endl;
+        return false;
+    }
+    return true;
+}
+
 static void liric_configure_runtime_lib_env(const std::string &runtime_library_dir)
 {
 #ifndef _WIN32
@@ -2970,10 +3068,9 @@ int main_app(int argc, char *argv[]) {
         if (opts.static_link || opts.shared_link ||
             !opts.arg_L.empty() || !opts.arg_l.empty() ||
             !opts.linker_flags.empty()) {
-            std::cerr << "WITH_LIRIC AOT no-link mode disallows -static/-shared, "
-                         "-L/-l, and explicit linker flags. Refusing linker fallback."
+            std::cerr << "WITH_LIRIC AOT no-link mode ignoring external linker flags "
+                         "(-static/-shared, -L/-l, and linker options)."
                       << std::endl;
-            return 10;
         }
 
         liric_configure_runtime_lib_env(runtime_library_dir);
@@ -3009,9 +3106,21 @@ int main_app(int argc, char *argv[]) {
                         compiler_options, lfortran_pass_manager);
                 } else if (endswith(arg_file, ".ll")) {
                     err = compile_llvm_to_object_file(arg_file, obj_path, compiler_options);
-                } else if (!liric_is_object_file(arg_file)) {
+                } else if (liric_is_object_file(arg_file)) {
+                    if (!liric_object_has_sidecars(obj_path)) {
+                        if (endswith(arg_file, ".c.o")) {
+                            if (!liric_generate_sidecars_for_c_object(obj_path)) {
+                                err = 10;
+                            }
+                        } else {
+                            std::cerr << "WITH_LIRIC AOT no-link mode requires sidecars for object input: "
+                                      << obj_path << std::endl;
+                            err = 10;
+                        }
+                    }
+                } else {
                     std::cerr << "WITH_LIRIC AOT no-link mode only supports Fortran sources, "
-                                 ".ll, and object-file inputs. Unsupported input: "
+                              << ".ll, and object-file inputs. Unsupported input: "
                               << arg_file << std::endl;
                     err = 10;
                 }
