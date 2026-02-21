@@ -1,5 +1,7 @@
 #include <iostream>
 #include <fstream>
+#include <cstdlib>
+#include <cstring>
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/ADT/STLExtras.h>
@@ -69,6 +71,7 @@
 #include <libasr/codegen/KaleidoscopeJIT.h>
 #else
 #define RM_OPTIONAL_TYPE std::optional
+#include <liric/liric_compat.h>
 #endif
 #include <libasr/codegen/evaluator.h>
 #include <libasr/codegen/asr_to_llvm.h>
@@ -83,6 +86,20 @@
 #endif
 
 namespace LCompilers {
+
+static bool runtime_bc_header_valid(const char *path) {
+    unsigned char magic[4] = {0, 0, 0, 0};
+    std::ifstream in(path, std::ios::binary);
+    if (!in.good())
+        return false;
+    in.read(reinterpret_cast<char *>(magic), 4);
+    if (!in.good())
+        return false;
+    return magic[0] == 'B' &&
+           magic[1] == 'C' &&
+           magic[2] == 0xC0 &&
+           magic[3] == 0xDE;
+}
 
 // Extracts the integer from APInt.
 // APInt does not seem to have this functionality, so we implement it here.
@@ -206,7 +223,17 @@ float _lfortran_stan(float x);
 LLVMEvaluator::LLVMEvaluator(const std::string &t)
 {
 #ifdef WITH_LIRIC
-    setenv("LIRIC_POLICY", "ir", 0);
+    /* WITH_LIRIC should default to AOT direct mode unless explicitly overridden. */
+    setenv("LIRIC_POLICY", "direct", 0);
+    setenv("LIRIC_COMPILE_MODE", "isel", 0);
+    {
+        const char *runtime_bc = getenv("LIRIC_RUNTIME_BC");
+        if (runtime_bc && runtime_bc[0] && !runtime_bc_header_valid(runtime_bc)) {
+            throw LCompilersException(
+                "LIRIC_RUNTIME_BC is not valid LLVM bitcode: " +
+                std::string(runtime_bc));
+        }
+    }
 #endif
     llvm::InitializeNativeTarget();
     llvm::InitializeNativeTargetAsmPrinter();
@@ -470,6 +497,27 @@ void LLVMEvaluator::save_object_file(llvm::Module &m, const std::string &filenam
     }
     pass.run(m);
     dest.flush();
+}
+
+void LLVMEvaluator::save_executable_file(llvm::Module &m, const std::string &filename) {
+#ifdef WITH_LIRIC
+    const char *compile_mode = getenv("LIRIC_COMPILE_MODE");
+    if (compile_mode && std::strcmp(compile_mode, "llvm") == 0) {
+        throw std::runtime_error(
+            "LIRIC_COMPILE_MODE=llvm is disallowed for WITH_LIRIC AOT no-link emission");
+    }
+    lc_module_compat_t *compat = m.getCompat();
+    if (!compat) {
+        throw std::runtime_error("liric compat module is missing");
+    }
+    if (lc_module_emit_executable(compat, filename.c_str(), nullptr, 0) != 0) {
+        throw std::runtime_error("liric executable emission failed");
+    }
+#else
+    (void)m;
+    (void)filename;
+    throw std::runtime_error("save_executable_file is only available with WITH_LIRIC");
+#endif
 }
 
 void LLVMEvaluator::create_empty_object_file(const std::string &filename) {

@@ -4,6 +4,9 @@
 #include <regex>
 #include <stdlib.h>
 #include <filesystem>
+#ifndef _WIN32
+#include <sys/stat.h>
+#endif
 #include <random>
 #ifndef CLI11_HAS_FILESYSTEM
 #define CLI11_HAS_FILESYSTEM 0
@@ -1156,7 +1159,8 @@ int compile_src_to_object_file(const std::string &infile,
         bool assembly,
         CompilerOptions &compiler_options,
         LCompilers::PassManager& lpm,
-        bool arg_c = false)
+        bool arg_c = false,
+        bool emit_executable_no_link = false)
 {
     int time_file_read=0;
     int time_src_to_asr=0;
@@ -1260,7 +1264,21 @@ int compile_src_to_object_file(const std::string &infile,
         e.save_asm_file(*(m->m_m), outfile);
     } else {
         t1 = std::chrono::high_resolution_clock::now();
-        e.save_object_file(*(m->m_m), outfile);
+        try {
+            if (emit_executable_no_link) {
+                e.save_executable_file(*(m->m_m), outfile);
+#ifndef _WIN32
+                if (chmod(outfile.c_str(), 0755) != 0) {
+                    std::cerr << "Warning: failed to mark executable bit on " << outfile << "\n";
+                }
+#endif
+            } else {
+                e.save_object_file(*(m->m_m), outfile);
+            }
+        } catch (const std::exception &ex) {
+            std::cerr << "Code emission failed: " << ex.what() << std::endl;
+            return 10;
+        }
         t2 = std::chrono::high_resolution_clock::now();
         time_llvm_to_bin = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
     }
@@ -2710,6 +2728,65 @@ int main_app(int argc, char *argv[]) {
         }
         return result;
     }
+
+#if defined(HAVE_LFORTRAN_LLVM) && defined(WITH_LIRIC)
+    if (backend == Backend::llvm) {
+        if (!(opts.arg_files.size() == 1 &&
+              (endswith(opts.arg_file, ".f90") || endswith(opts.arg_file, ".f") ||
+               endswith(opts.arg_file, ".F90") || endswith(opts.arg_file, ".F")) &&
+              !opts.static_link &&
+              !opts.shared_link &&
+              opts.arg_L.empty() &&
+              opts.arg_l.empty() &&
+              opts.linker_flags.empty())) {
+            std::cerr << "WITH_LIRIC AOT no-link mode does not support external linker inputs "
+                         "or multi-file link steps. Refusing linker fallback." << std::endl;
+            return 10;
+        }
+#ifndef _WIN32
+        if (!getenv("LIRIC_RUNTIME_LIB")) {
+            std::string runtime_so = runtime_library_dir + "/liblfortran_runtime.so";
+            std::string runtime_so0 = runtime_library_dir + "/liblfortran_runtime.so.0";
+            std::string runtime_dylib = runtime_library_dir + "/liblfortran_runtime.dylib";
+            if (std::filesystem::exists(runtime_so)) {
+                setenv("LIRIC_RUNTIME_LIB", runtime_so.c_str(), 0);
+            } else if (std::filesystem::exists(runtime_so0)) {
+                setenv("LIRIC_RUNTIME_LIB", runtime_so0.c_str(), 0);
+            } else if (std::filesystem::exists(runtime_dylib)) {
+                setenv("LIRIC_RUNTIME_LIB", runtime_dylib.c_str(), 0);
+            }
+        }
+#endif
+        int no_link_rc = compile_src_to_object_file(opts.arg_file, outfile,
+            compiler_options.time_report, false, compiler_options,
+            lfortran_pass_manager, false, true);
+        if (no_link_rc != 0) {
+            std::cerr << "WITH_LIRIC AOT no-link executable emission failed. "
+                         "Refusing linker fallback." << std::endl;
+            return no_link_rc;
+        }
+        int run_err = 0;
+        if (compiler_options.arg_o == "") {
+            std::string run_cmd = "./" + outfile;
+            run_err = system(run_cmd.c_str());
+            if (run_err != 0) {
+                if (0 < run_err && run_err < 256) {
+                    return run_err;
+                } else {
+                    return LCompilers::LFortran::get_exit_status(run_err);
+                }
+            }
+        }
+        if (compiler_options.time_report) {
+            auto end_time = std::chrono::high_resolution_clock::now();
+            int total_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
+            std::string message = "Total time: " + std::to_string(total_time / 1000) + "." + std::to_string(total_time % 1000) + " ms";
+            compiler_options.po.vector_of_time_report.push_back(message);
+            print_time_report(compiler_options.po.vector_of_time_report);
+        }
+        return 0;
+    }
+#endif
 
     int err_ = 0;
     std::vector<std::string> object_files;
