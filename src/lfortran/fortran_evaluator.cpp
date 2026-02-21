@@ -1,4 +1,6 @@
 #include <fstream>
+#include <iomanip>
+#include <sstream>
 
 #include <lfortran/fortran_evaluator.h>
 #include <libasr/codegen/asr_to_cpp.h>
@@ -51,6 +53,81 @@ FortranEvaluator::FortranEvaluator(CompilerOptions& compiler_options)
 }
 
 FortranEvaluator::~FortranEvaluator() = default;
+
+bool FortranEvaluator::eval_result_has_value(const EvalResult &r) {
+    return r.type != EvalResult::statement && r.type != EvalResult::none;
+}
+
+std::string FortranEvaluator::eval_result_type_name(const EvalResult &r) {
+    switch (r.type) {
+        case EvalResult::integer4: return "integer";
+        case EvalResult::integer8: return "integer(8)";
+        case EvalResult::real4: return "real";
+        case EvalResult::real8: return "real(8)";
+        case EvalResult::complex4: return "complex";
+        case EvalResult::complex8: return "complex(8)";
+        case EvalResult::boolean: return "logical";
+        case EvalResult::statement:
+        case EvalResult::none: return "none";
+        default: throw LCompilersException("Return type not supported");
+    }
+}
+
+std::string FortranEvaluator::render_eval_result_plain(const EvalResult &r) {
+    std::ostringstream ss;
+    switch (r.type) {
+        case EvalResult::integer4: return std::to_string(r.i32);
+        case EvalResult::integer8: return std::to_string(r.i64);
+        case EvalResult::real4: return std::to_string(r.f32);
+        case EvalResult::real8: return std::to_string(r.f64);
+        case EvalResult::complex4:
+            return "(" + std::to_string(r.c32.re) + ", " + std::to_string(r.c32.im) + ")";
+        case EvalResult::complex8:
+            return "(" + std::to_string(r.c64.re) + ", " + std::to_string(r.c64.im) + ")";
+        case EvalResult::boolean:
+            return r.b ? ".true." : ".false.";
+        case EvalResult::statement:
+        case EvalResult::none:
+            return "";
+        default:
+            throw LCompilersException("Return type not supported");
+    }
+}
+
+std::string FortranEvaluator::render_eval_result_repr(const EvalResult &r, const std::string &name) {
+    std::ostringstream ss;
+    switch (r.type) {
+        case EvalResult::integer4:
+            ss << "integer(4) :: " << name << " = " << r.i32;
+            break;
+        case EvalResult::integer8:
+            ss << "integer(8) :: " << name << " = " << r.i64;
+            break;
+        case EvalResult::real4:
+            ss << "real(4) :: " << name << " = " << std::setprecision(8) << r.f32;
+            break;
+        case EvalResult::real8:
+            ss << "real(8) :: " << name << " = " << std::setprecision(17) << r.f64;
+            break;
+        case EvalResult::complex4:
+            ss << "complex(4) :: " << name << " = "
+               << std::setprecision(8) << "(" << r.c32.re << ", " << r.c32.im << ")";
+            break;
+        case EvalResult::complex8:
+            ss << "complex(8) :: " << name << " = "
+               << std::setprecision(17) << "(" << r.c64.re << ", " << r.c64.im << ")";
+            break;
+        case EvalResult::boolean:
+            ss << "logical(4) :: " << name << " = " << (r.b ? ".true." : ".false.");
+            break;
+        case EvalResult::statement:
+        case EvalResult::none:
+            return "";
+        default:
+            throw LCompilersException("Return type not supported");
+    }
+    return ss.str();
+}
 
 Result<FortranEvaluator::EvalResult> FortranEvaluator::evaluate2(const std::string &code) {
     LocationManager lm;
