@@ -3150,7 +3150,7 @@ public:
         return builder->CreateCall(fn, args);
     }
 
-    std::tuple<llvm::Value*, llvm::Value*, bool, llvm::Value*> get_runtime_poly_tag_and_data(
+    std::tuple<llvm::Value*, llvm::Value*, bool, llvm::Value*, llvm::Value*> get_runtime_poly_tag_and_data(
             ASR::expr_t* arg) {
         int64_t ptr_loads_copy = ptr_loads;
         ptr_loads = 0;
@@ -3181,6 +3181,7 @@ public:
         bool uses_new_classes_tag = false;
         llvm::Value* type_id = nullptr;
         llvm::Value* type_size = llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), 0);
+        llvm::Value* type_info_ptr = llvm::ConstantPointerNull::get(llvm::cast<llvm::PointerType>(llvm_utils->i8_ptr));
         if (id_type->isPointerTy()) {
             uses_new_classes_tag = true;
             llvm::Type* i8_ptr = llvm_utils->i8_ptr;
@@ -3192,7 +3193,7 @@ public:
             llvm::Value* vptr_i8 = builder->CreateBitCast(vptr, i8_ptr->getPointerTo());
             llvm::Value* type_info_ptr_ptr = llvm_utils->create_ptr_gep2(
                 i8_ptr, vptr_i8, llvm::ConstantInt::get(i64_type, -1, true));
-            llvm::Value* type_info_ptr = llvm_utils->CreateLoad2(i8_ptr, type_info_ptr_ptr);
+            type_info_ptr = llvm_utils->CreateLoad2(i8_ptr, type_info_ptr_ptr);
             llvm::Value* ti_cast = builder->CreateBitCast(
                 type_info_ptr, type_info_type->getPointerTo());
             llvm::Value* tag_ptr_ptr = llvm_utils->create_gep2(type_info_type, ti_cast, 0);
@@ -3208,7 +3209,7 @@ public:
             }
         }
 
-        return std::make_tuple(type_id, data_ptr, uses_new_classes_tag, type_size);
+        return std::make_tuple(type_id, data_ptr, uses_new_classes_tag, type_size, type_info_ptr);
     }
 
     llvm::Value* create_typeof_descriptor_from_expr(ASR::expr_t* arg) {
@@ -3221,8 +3222,9 @@ public:
         llvm::Value* type_id = nullptr;
         llvm::Value* data_ptr = nullptr;
         llvm::Value* type_size = nullptr;
+        llvm::Value* type_info_ptr = nullptr;
         bool uses_new_classes_tag = false;
-        std::tie(type_id, data_ptr, uses_new_classes_tag, type_size) =
+        std::tie(type_id, data_ptr, uses_new_classes_tag, type_size, type_info_ptr) =
             get_runtime_poly_tag_and_data(arg);
         (void) data_ptr;
 
@@ -3278,10 +3280,40 @@ public:
         add_type_case(ASR::ttypeType::String, 1, character_desc_size, "character");
 
         builder->SetInsertPoint(currentBB);
-        llvm::Value* fallback = make_const_string_descriptor("~dynamic_polymorphic_type",
-            "typeof_fallback_desc");
-        builder->CreateBr(mergeBB);
-        incoming.push_back({currentBB, fallback});
+        if (uses_new_classes_tag) {
+            llvm::Type* i8_ptr = llvm_utils->i8_ptr;
+            llvm::Type* i64_type = llvm::Type::getInt64Ty(context);
+            llvm::StructType* type_info_type = llvm::StructType::get(
+                context, {i8_ptr, i8_ptr, i8_ptr}, false);
+
+            llvm::BasicBlock* nameBB = llvm::BasicBlock::Create(context, "typeof.name", fn);
+            llvm::BasicBlock* literalBB = llvm::BasicBlock::Create(context, "typeof.literal", fn);
+            llvm::Value* likely_name_ptr = builder->CreateICmpUGE(
+                type_id, llvm::ConstantInt::get(i64_type, llvm::APInt(64, 4096)));
+            builder->CreateCondBr(likely_name_ptr, nameBB, literalBB);
+
+            builder->SetInsertPoint(nameBB);
+            llvm::Value* ti_cast = builder->CreateBitCast(
+                type_info_ptr, type_info_type->getPointerTo());
+            llvm::Value* name_ptr_ptr = llvm_utils->create_gep2(type_info_type, ti_cast, 0);
+            llvm::Value* name_ptr = llvm_utils->CreateLoad2(i8_ptr, name_ptr_ptr);
+            llvm::Value* name_len = lfortran_str_len(character_type, name_ptr);
+            llvm::Value* name_desc = llvm_utils->create_string_descriptor(
+                name_ptr, name_len, "typeof_dynamic_name_desc");
+            builder->CreateBr(mergeBB);
+            incoming.push_back({nameBB, name_desc});
+
+            builder->SetInsertPoint(literalBB);
+            llvm::Value* fallback = make_const_string_descriptor("~dynamic_polymorphic_type",
+                "typeof_fallback_desc");
+            builder->CreateBr(mergeBB);
+            incoming.push_back({literalBB, fallback});
+        } else {
+            llvm::Value* fallback = make_const_string_descriptor("~dynamic_polymorphic_type",
+                "typeof_fallback_desc");
+            builder->CreateBr(mergeBB);
+            incoming.push_back({currentBB, fallback});
+        }
 
         builder->SetInsertPoint(mergeBB);
         llvm::PHINode* phi = builder->CreatePHI(string_descriptor->getPointerTo(),
@@ -3292,19 +3324,21 @@ public:
         return phi;
     }
 
-    std::pair<llvm::Value*, llvm::Value*> create_runtime_polymorphic_value_descriptor(
+    std::tuple<llvm::Value*, llvm::Value*, llvm::Value*> create_runtime_polymorphic_value_descriptor(
             ASR::expr_t* arg) {
         llvm::Value* type_id = nullptr;
         llvm::Value* data_ptr = nullptr;
         llvm::Value* type_size = nullptr;
+        llvm::Value* type_info_ptr = nullptr;
         bool uses_new_classes_tag = false;
-        std::tie(type_id, data_ptr, uses_new_classes_tag, type_size) =
+        std::tie(type_id, data_ptr, uses_new_classes_tag, type_size, type_info_ptr) =
             get_runtime_poly_tag_and_data(arg);
 
         llvm::Function* fn = builder->GetInsertBlock()->getParent();
         llvm::BasicBlock* repr_mergeBB = llvm::BasicBlock::Create(context, "repr.val.merge", fn);
         std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> repr_incoming;
         std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> cleanup_incoming;
+        std::vector<std::pair<llvm::BasicBlock*, llvm::Value*>> wrap_incoming;
         llvm::BasicBlock* currentBB = builder->GetInsertBlock();
         llvm::Type* i64_type = llvm::Type::getInt64Ty(context);
         llvm::Type* i32_type = llvm::Type::getInt32Ty(context);
@@ -3334,6 +3368,7 @@ public:
         repr_incoming.push_back({charBB, char_desc});
         cleanup_incoming.push_back({charBB, llvm::ConstantPointerNull::get(
             llvm::cast<llvm::PointerType>(i8_ptr_type))});
+        wrap_incoming.push_back({charBB, llvm::ConstantInt::getFalse(context)});
         currentBB = nonCharBB;
 
         struct FormatCase {
@@ -3341,6 +3376,7 @@ public:
             llvm::Value* serialization;
             llvm::Value* value_ptr;
             llvm::Value* supported;
+            llvm::Value* wrap_with_type;
         };
         std::vector<FormatCase> format_cases;
         llvm::BasicBlock* fmt_mergeBB = llvm::BasicBlock::Create(context, "repr.val.fmt.merge", fn);
@@ -3371,7 +3407,10 @@ public:
             llvm::Value* value_ptr = builder->CreateBitCast(typed_value_ptr, i8_ptr_type);
             llvm::Value* supported = llvm::ConstantInt::getTrue(context);
             builder->CreateBr(fmt_mergeBB);
-            format_cases.push_back({thenBB, fmt_data, value_ptr, supported});
+            format_cases.push_back({
+                thenBB, fmt_data, value_ptr, supported,
+                llvm::ConstantInt::getFalse(context)
+            });
             currentBB = elseBB;
         };
 
@@ -3407,7 +3446,10 @@ public:
             llvm::Value* value_ptr = builder->CreateBitCast(logical_ptr, i8_ptr_type);
             llvm::Value* supported = llvm::ConstantInt::getTrue(context);
             builder->CreateBr(fmt_mergeBB);
-            format_cases.push_back({thenBB, fmt_data, value_ptr, supported});
+            format_cases.push_back({
+                thenBB, fmt_data, value_ptr, supported,
+                llvm::ConstantInt::getFalse(context)
+            });
             currentBB = elseBB;
         };
 
@@ -3428,12 +3470,55 @@ public:
         add_logical_case(4);
         add_logical_case(8);
 
+        if (uses_new_classes_tag) {
+            for (auto &entry : struct_api->newclass2typeinfo) {
+                ASR::symbol_t* struct_sym = ASRUtils::symbol_get_past_external(entry.first);
+                if (!ASR::is_a<ASR::Struct_t>(*struct_sym)) {
+                    continue;
+                }
+
+                std::string struct_serialization;
+                try {
+                    struct_serialization = "(" + serialize_structType_symbols(struct_sym) + ")";
+                } catch (const LCompilersException&) {
+                    // Skip types whose runtime print serialization cannot be emitted.
+                    continue;
+                }
+
+                llvm::BasicBlock* thenBB = llvm::BasicBlock::Create(
+                    context, "repr.val.fmt.then", fn);
+                llvm::BasicBlock* elseBB = llvm::BasicBlock::Create(
+                    context, "repr.val.fmt.else", fn);
+                builder->SetInsertPoint(currentBB);
+                llvm::Value* expected_type_info = builder->CreateBitCast(
+                    entry.second, i8_ptr_type);
+                llvm::Value* is_this_struct = builder->CreateICmpEQ(
+                    type_info_ptr, expected_type_info);
+                builder->CreateCondBr(is_this_struct, thenBB, elseBB);
+
+                builder->SetInsertPoint(thenBB);
+                llvm::Value* fmt_data = LCompilers::create_global_string_ptr(
+                    context, *module, *builder, struct_serialization);
+                llvm::Value* supported = llvm::ConstantInt::getTrue(context);
+                builder->CreateBr(fmt_mergeBB);
+                format_cases.push_back({
+                    thenBB, fmt_data, data_ptr, supported,
+                    llvm::ConstantInt::getTrue(context)
+                });
+
+                currentBB = elseBB;
+            }
+        }
+
         builder->SetInsertPoint(currentBB);
         llvm::Value* null_ptr = llvm::ConstantPointerNull::get(
             llvm::cast<llvm::PointerType>(i8_ptr_type));
         llvm::Value* unsupported = llvm::ConstantInt::getFalse(context);
         builder->CreateBr(fmt_mergeBB);
-        format_cases.push_back({currentBB, null_ptr, null_ptr, unsupported});
+        format_cases.push_back({
+            currentBB, null_ptr, null_ptr, unsupported,
+            llvm::ConstantInt::getFalse(context)
+        });
 
         builder->SetInsertPoint(fmt_mergeBB);
         llvm::PHINode* serialization_phi = builder->CreatePHI(
@@ -3442,10 +3527,13 @@ public:
             i8_ptr_type, format_cases.size(), "repr.val.ptr");
         llvm::PHINode* supported_phi = builder->CreatePHI(
             llvm::Type::getInt1Ty(context), format_cases.size(), "repr.val.supported");
+        llvm::PHINode* wrap_with_type_phi = builder->CreatePHI(
+            llvm::Type::getInt1Ty(context), format_cases.size(), "repr.val.wrap_with_type");
         for (auto &entry : format_cases) {
             serialization_phi->addIncoming(entry.serialization, entry.bb);
             value_ptr_phi->addIncoming(entry.value_ptr, entry.bb);
             supported_phi->addIncoming(entry.supported, entry.bb);
+            wrap_with_type_phi->addIncoming(entry.wrap_with_type, entry.bb);
         }
 
         llvm::BasicBlock* formatBB = llvm::BasicBlock::Create(context, "repr.val.format", fn);
@@ -3454,8 +3542,13 @@ public:
 
         builder->SetInsertPoint(formatBB);
         std::vector<llvm::Value*> args;
-        args.push_back(null_ptr);
-        args.push_back(llvm::ConstantInt::get(i64_type, 0));
+        std::string repr_default_fmt = "(*(g0,:,\", \"))";
+        llvm::Value* repr_fmt_data = LCompilers::create_global_string_ptr(
+            context, *module, *builder, repr_default_fmt);
+        llvm::Value* repr_fmt_len = llvm::ConstantInt::get(
+            i64_type, llvm::APInt(64, static_cast<uint64_t>(repr_default_fmt.size())));
+        args.push_back(repr_fmt_data);
+        args.push_back(repr_fmt_len);
         args.push_back(serialization_phi);
         llvm::Value *result_size_ptr = llvm_utils->CreateAlloca(*builder, i64_type);
         args.push_back(result_size_ptr);
@@ -3469,6 +3562,7 @@ public:
         builder->CreateBr(repr_mergeBB);
         repr_incoming.push_back({formatBB, format_desc});
         cleanup_incoming.push_back({formatBB, formatted});
+        wrap_incoming.push_back({formatBB, wrap_with_type_phi});
 
         builder->SetInsertPoint(unsupportedBB);
         llvm::Value* fallback = make_const_string_descriptor("<unsupported-polymorphic-value>",
@@ -3476,6 +3570,7 @@ public:
         builder->CreateBr(repr_mergeBB);
         repr_incoming.push_back({unsupportedBB, fallback});
         cleanup_incoming.push_back({unsupportedBB, null_ptr});
+        wrap_incoming.push_back({unsupportedBB, llvm::ConstantInt::getFalse(context)});
 
         builder->SetInsertPoint(repr_mergeBB);
         llvm::PHINode* repr_phi = builder->CreatePHI(string_descriptor->getPointerTo(),
@@ -3488,7 +3583,12 @@ public:
         for (auto &entry : cleanup_incoming) {
             cleanup_phi->addIncoming(entry.second, entry.first);
         }
-        return std::make_pair(repr_phi, cleanup_phi);
+        llvm::PHINode* wrap_phi = builder->CreatePHI(
+            llvm::Type::getInt1Ty(context), wrap_incoming.size(), "repr.val.wrap");
+        for (auto &entry : wrap_incoming) {
+            wrap_phi->addIncoming(entry.second, entry.first);
+        }
+        return std::make_tuple(repr_phi, cleanup_phi, wrap_phi);
     }
 
     void visit_IntrinsicElementalFunction(const ASR::IntrinsicElementalFunction_t& x) {
@@ -3850,7 +3950,8 @@ public:
 
                 llvm::Value* value_desc = nullptr;
                 llvm::Value* value_cleanup = nullptr;
-                std::tie(value_desc, value_cleanup) =
+                llvm::Value* wrap_with_type = nullptr;
+                std::tie(value_desc, value_cleanup, wrap_with_type) =
                     create_runtime_polymorphic_value_descriptor(arg);
                 llvm::Value* value_data = builder->CreateLoad(
                     character_type, llvm_utils->create_gep2(string_descriptor, value_desc, 0));
@@ -3858,9 +3959,45 @@ public:
                     llvm::Type::getInt64Ty(context),
                     llvm_utils->create_gep2(string_descriptor, value_desc, 1));
 
+                llvm::Function* fn_repr = builder->GetInsertBlock()->getParent();
+                llvm::BasicBlock* wrapBB = llvm::BasicBlock::Create(context, "repr.wrap", fn_repr);
+                llvm::BasicBlock* nowrapBB = llvm::BasicBlock::Create(context, "repr.nowrap", fn_repr);
+                llvm::BasicBlock* mergeBB = llvm::BasicBlock::Create(context, "repr.wrap.merge", fn_repr);
+                builder->CreateCondBr(wrap_with_type, wrapBB, nowrapBB);
+
+                builder->SetInsertPoint(wrapBB);
+                llvm::Value* open_paren = LCompilers::create_global_string_ptr(
+                    context, *module, *builder, "(");
+                llvm::Value* open_paren_len = llvm::ConstantInt::get(
+                    llvm::Type::getInt64Ty(context), llvm::APInt(64, 1));
+                llvm::Value* close_paren = LCompilers::create_global_string_ptr(
+                    context, *module, *builder, ")");
+                llvm::Value* close_paren_len = llvm::ConstantInt::get(
+                    llvm::Type::getInt64Ty(context), llvm::APInt(64, 1));
+                llvm::Value* with_open = lfortran_strConcat(type_data, type_len, open_paren, open_paren_len);
+                llvm::Value* with_open_len = builder->CreateAdd(type_len, open_paren_len);
+                llvm::Value* with_value = lfortran_strConcat(with_open, with_open_len, value_data, value_len);
+                llvm::Value* with_value_len = builder->CreateAdd(with_open_len, value_len);
+                llvm::Value* wrapped_value = lfortran_strConcat(with_value, with_value_len, close_paren, close_paren_len);
+                llvm::Value* wrapped_value_len = builder->CreateAdd(with_value_len, close_paren_len);
+                builder->CreateBr(mergeBB);
+
+                builder->SetInsertPoint(nowrapBB);
+                builder->CreateBr(mergeBB);
+
+                builder->SetInsertPoint(mergeBB);
+                llvm::PHINode* final_value_data = builder->CreatePHI(
+                    character_type, 2, "repr.value.data");
+                final_value_data->addIncoming(wrapped_value, wrapBB);
+                final_value_data->addIncoming(value_data, nowrapBB);
+                llvm::PHINode* final_value_len = builder->CreatePHI(
+                    llvm::Type::getInt64Ty(context), 2, "repr.value.len");
+                final_value_len->addIncoming(wrapped_value_len, wrapBB);
+                final_value_len->addIncoming(value_len, nowrapBB);
+
                 llvm::Value* repr_data = lfortran_strConcat(
-                    prefix_data, prefix_len, value_data, value_len);
-                llvm::Value* repr_len = builder->CreateAdd(prefix_len, value_len);
+                    prefix_data, prefix_len, final_value_data, final_value_len);
+                llvm::Value* repr_len = builder->CreateAdd(prefix_len, final_value_len);
                 llvm_utils->lfortran_free(value_cleanup);
                 tmp = llvm_utils->create_string_descriptor(repr_data, repr_len, "repr_desc");
                 break;
