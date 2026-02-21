@@ -4,6 +4,7 @@
 #include <regex>
 #include <stdlib.h>
 #include <filesystem>
+#include <fstream>
 #ifndef _WIN32
 #include <sys/stat.h>
 #endif
@@ -50,6 +51,12 @@
 #include <libasr/asr_verify.h>
 #include <libasr/modfile.h>
 #include <libasr/config.h>
+#ifdef HAVE_LFORTRAN_LLVM
+#include <llvm/IR/Module.h>
+#endif
+#ifdef WITH_LIRIC
+#include <liric/liric_compat.h>
+#endif
 #include <lfortran/fortran_kernel.h>
 #include <libasr/string_utils.h>
 #include <lfortran/utils.h>
@@ -122,6 +129,205 @@ std::string LFORTRAN_TEMP_DIR = get_system_temp_dir();
 // The unique compilation ID for this invocation of the compiler.
 // Used in naming unique intermediate object files during both compilation modes.
 const std::string LCOMPILERS_UNIQUE_ID = LCompilers::get_unique_ID();
+
+#if defined(HAVE_LFORTRAN_LLVM) && defined(WITH_LIRIC)
+static std::string liric_blob_sidecar_path(const std::string &object_path)
+{
+    return object_path + ".liric_blob";
+}
+
+static std::string liric_ll_sidecar_path(const std::string &object_path)
+{
+    return object_path + ".liric_ll";
+}
+
+static bool liric_write_bytes_file(const std::string &path,
+                                   const uint8_t *data, size_t len)
+{
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out.is_open()) {
+        return false;
+    }
+    if (len > 0) {
+        out.write(reinterpret_cast<const char *>(data),
+                  static_cast<std::streamsize>(len));
+    }
+    return out.good();
+}
+
+static bool liric_read_bytes_file(const std::string &path,
+                                  std::vector<uint8_t> &out)
+{
+    std::ifstream in(path, std::ios::binary | std::ios::ate);
+    if (!in.is_open()) {
+        return false;
+    }
+    std::streamsize size = in.tellg();
+    if (size < 0) {
+        return false;
+    }
+    out.assign(static_cast<size_t>(size), 0);
+    in.seekg(0, std::ios::beg);
+    if (size > 0) {
+        in.read(reinterpret_cast<char *>(out.data()), size);
+    }
+    return in.good() || in.eof();
+}
+
+static bool liric_is_fortran_source(const std::string &path)
+{
+    return endswith(path, ".f90") || endswith(path, ".f")
+        || endswith(path, ".F90") || endswith(path, ".F");
+}
+
+static bool liric_is_object_file(const std::string &path)
+{
+    return endswith(path, ".o") || endswith(path, ".obj");
+}
+
+static void liric_configure_runtime_lib_env(const std::string &runtime_library_dir)
+{
+#ifndef _WIN32
+    if (getenv("LIRIC_RUNTIME_LIB")) {
+        return;
+    }
+    std::string runtime_so = runtime_library_dir + "/liblfortran_runtime.so";
+    std::string runtime_so0 = runtime_library_dir + "/liblfortran_runtime.so.0";
+    std::string runtime_dylib = runtime_library_dir + "/liblfortran_runtime.dylib";
+    if (std::filesystem::exists(runtime_so)) {
+        setenv("LIRIC_RUNTIME_LIB", runtime_so.c_str(), 0);
+    } else if (std::filesystem::exists(runtime_so0)) {
+        setenv("LIRIC_RUNTIME_LIB", runtime_so0.c_str(), 0);
+    } else if (std::filesystem::exists(runtime_dylib)) {
+        setenv("LIRIC_RUNTIME_LIB", runtime_dylib.c_str(), 0);
+    }
+#else
+    (void)runtime_library_dir;
+#endif
+}
+
+static int liric_export_blob_sidecar(llvm::Module &m,
+                                     const std::string &object_outfile)
+{
+    lc_module_compat_t *compat = m.getCompat();
+    uint8_t *blob_data = nullptr;
+    size_t blob_len = 0;
+    std::string blob_path = liric_blob_sidecar_path(object_outfile);
+    std::string ll_path = liric_ll_sidecar_path(object_outfile);
+    if (!compat) {
+        std::cerr << "WITH_LIRIC no-link sidecar export failed: missing compat module." << std::endl;
+        return 10;
+    }
+    if (lc_module_export_blob_package(compat, &blob_data, &blob_len) != 0) {
+        std::cerr << "WITH_LIRIC no-link sidecar export failed for " << object_outfile << std::endl;
+        return 10;
+    }
+    bool ok = liric_write_bytes_file(blob_path, blob_data, blob_len);
+    free(blob_data);
+    if (!ok) {
+        std::cerr << "WITH_LIRIC no-link sidecar write failed: " << blob_path << std::endl;
+        return 10;
+    }
+
+    std::string ll_text;
+    llvm::raw_string_ostream ll_os(ll_text);
+    m.print(ll_os, nullptr);
+    ll_os.flush();
+    if (!liric_write_bytes_file(ll_path,
+            reinterpret_cast<const uint8_t *>(ll_text.data()),
+            ll_text.size())) {
+        std::cerr << "WITH_LIRIC no-link sidecar write failed: " << ll_path << std::endl;
+        return 10;
+    }
+    return 0;
+}
+
+static int liric_emit_executable_from_object_sidecars(
+    const std::vector<std::string> &object_files, const std::string &outfile)
+{
+    lc_context_t *ctx = nullptr;
+    lc_module_compat_t *mod = nullptr;
+    int imported_blob_count = 0;
+    int rc = 0;
+
+    if (object_files.empty()) {
+        std::cerr << "WITH_LIRIC AOT no-link mode requires at least one object input." << std::endl;
+        return 10;
+    }
+
+    ctx = lc_context_create();
+    if (!ctx) {
+        std::cerr << "WITH_LIRIC no-link blob-link failed: unable to create context." << std::endl;
+        return 10;
+    }
+    mod = lc_module_create(ctx, "lfortran.no_link.link");
+    if (!mod) {
+        lc_context_destroy(ctx);
+        std::cerr << "WITH_LIRIC no-link blob-link failed: unable to create module." << std::endl;
+        return 10;
+    }
+
+    for (const std::string &obj_path : object_files) {
+        std::vector<uint8_t> blob_bytes;
+        std::vector<uint8_t> ll_bytes;
+        std::string blob_path = liric_blob_sidecar_path(obj_path);
+        std::string ll_path = liric_ll_sidecar_path(obj_path);
+        if (!liric_read_bytes_file(ll_path, ll_bytes)) {
+            std::cerr << "WITH_LIRIC AOT no-link mode requires sidecar IR: "
+                      << ll_path << std::endl;
+            rc = 10;
+            break;
+        }
+        if (!ll_bytes.empty()) {
+            if (lc_module_merge_ll_text(mod,
+                    reinterpret_cast<const char *>(ll_bytes.data()),
+                    ll_bytes.size()) != 0) {
+                std::cerr << "WITH_LIRIC no-link sidecar IR merge failed: "
+                          << ll_path << std::endl;
+                rc = 10;
+                break;
+            }
+        }
+        if (!liric_read_bytes_file(blob_path, blob_bytes)) {
+            std::cerr << "WITH_LIRIC AOT no-link mode requires sidecar blob package: "
+                      << blob_path << std::endl;
+            rc = 10;
+            break;
+        }
+        if (blob_bytes.empty()) {
+            continue;
+        }
+        if (lc_module_import_blob_package(mod, blob_bytes.data(),
+                                          blob_bytes.size()) != 0) {
+            std::cerr << "WITH_LIRIC no-link sidecar import failed: "
+                      << blob_path << std::endl;
+            rc = 10;
+            break;
+        }
+        imported_blob_count++;
+    }
+
+    if (rc == 0 && imported_blob_count == 0) {
+        std::cerr << "WITH_LIRIC AOT no-link mode found only empty object sidecars; "
+                     "no executable code to emit." << std::endl;
+        rc = 10;
+    }
+
+    if (rc == 0 && lc_module_emit_executable(mod, outfile.c_str(), nullptr, 0) != 0) {
+        std::cerr << "WITH_LIRIC no-link executable emission from sidecar blobs failed." << std::endl;
+        rc = 10;
+    }
+#ifndef _WIN32
+    if (rc == 0 && chmod(outfile.c_str(), 0755) != 0) {
+        std::cerr << "Warning: failed to mark executable bit on " << outfile << "\n";
+    }
+#endif
+
+    lc_module_destroy(mod);
+    lc_context_destroy(ctx);
+    return rc;
+}
+#endif
 
 void print_one_component(std::string component) {
     std::istringstream ss(component);
@@ -1225,6 +1431,20 @@ int compile_src_to_object_file(const std::string &infile,
         // Create an empty object file (things will be actually
         // compiled and linked when the main program is present):
         e.create_empty_object_file(outfile);
+#if defined(HAVE_LFORTRAN_LLVM) && defined(WITH_LIRIC)
+        if (!emit_executable_no_link) {
+            if (!liric_write_bytes_file(liric_blob_sidecar_path(outfile), nullptr, 0)) {
+                std::cerr << "WITH_LIRIC no-link sidecar write failed: "
+                          << liric_blob_sidecar_path(outfile) << std::endl;
+                return 10;
+            }
+            if (!liric_write_bytes_file(liric_ll_sidecar_path(outfile), nullptr, 0)) {
+                std::cerr << "WITH_LIRIC no-link sidecar write failed: "
+                          << liric_ll_sidecar_path(outfile) << std::endl;
+                return 10;
+            }
+        }
+#endif
         return 0;
     }
 
@@ -1238,6 +1458,11 @@ int compile_src_to_object_file(const std::string &infile,
     diagnostics.diagnostics.clear();
     if (compiler_options.emit_debug_info) {
 #ifndef HAVE_RUNTIME_STACKTRACE
+#ifdef WITH_LIRIC
+        /* WITH_LIRIC no-link currently does not ship runtime stacktrace support.
+           Keep -g builds functional by continuing without debug stacktrace data. */
+        compiler_options.emit_debug_info = false;
+#else
         diagnostics.add(LCompilers::diag::Diagnostic(
             "The `runtime stacktrace` is not enabled. To get the stack traces "
             "or debugging information, please re-build LFortran with "
@@ -1247,6 +1472,7 @@ int compile_src_to_object_file(const std::string &infile,
         );
         std::cerr << diagnostics.render(lm, compiler_options);
         return 1;
+#endif
 #endif
     }
     LCompilers::Result<std::unique_ptr<LCompilers::LLVMModule>>
@@ -1274,6 +1500,11 @@ int compile_src_to_object_file(const std::string &infile,
 #endif
             } else {
                 e.save_object_file(*(m->m_m), outfile);
+#if defined(HAVE_LFORTRAN_LLVM) && defined(WITH_LIRIC)
+                if (liric_export_blob_sidecar(*(m->m_m), outfile) != 0) {
+                    return 10;
+                }
+#endif
             }
         } catch (const std::exception &ex) {
             std::cerr << "Code emission failed: " << ex.what() << std::endl;
@@ -1340,6 +1571,11 @@ int compile_llvm_to_object_file(const std::string& infile,
 
     std::unique_ptr<LCompilers::LLVMModule> m = e.parse_module2(input, infile);
     e.save_object_file(*(m->m_m), outfile);
+#if defined(HAVE_LFORTRAN_LLVM) && defined(WITH_LIRIC)
+    if (liric_export_blob_sidecar(*(m->m_m), outfile) != 0) {
+        return 10;
+    }
+#endif
 
     return 0;
 }
@@ -2731,35 +2967,95 @@ int main_app(int argc, char *argv[]) {
 
 #if defined(HAVE_LFORTRAN_LLVM) && defined(WITH_LIRIC)
     if (backend == Backend::llvm) {
-        if (!(opts.arg_files.size() == 1 &&
-              (endswith(opts.arg_file, ".f90") || endswith(opts.arg_file, ".f") ||
-               endswith(opts.arg_file, ".F90") || endswith(opts.arg_file, ".F")) &&
-              !opts.static_link &&
-              !opts.shared_link &&
-              opts.arg_L.empty() &&
-              opts.arg_l.empty() &&
-              opts.linker_flags.empty())) {
-            std::cerr << "WITH_LIRIC AOT no-link mode does not support external linker inputs "
-                         "or multi-file link steps. Refusing linker fallback." << std::endl;
+        if (opts.static_link || opts.shared_link ||
+            !opts.arg_L.empty() || !opts.arg_l.empty() ||
+            !opts.linker_flags.empty()) {
+            std::cerr << "WITH_LIRIC AOT no-link mode disallows -static/-shared, "
+                         "-L/-l, and explicit linker flags. Refusing linker fallback."
+                      << std::endl;
             return 10;
         }
-#ifndef _WIN32
-        if (!getenv("LIRIC_RUNTIME_LIB")) {
-            std::string runtime_so = runtime_library_dir + "/liblfortran_runtime.so";
-            std::string runtime_so0 = runtime_library_dir + "/liblfortran_runtime.so.0";
-            std::string runtime_dylib = runtime_library_dir + "/liblfortran_runtime.dylib";
-            if (std::filesystem::exists(runtime_so)) {
-                setenv("LIRIC_RUNTIME_LIB", runtime_so.c_str(), 0);
-            } else if (std::filesystem::exists(runtime_so0)) {
-                setenv("LIRIC_RUNTIME_LIB", runtime_so0.c_str(), 0);
-            } else if (std::filesystem::exists(runtime_dylib)) {
-                setenv("LIRIC_RUNTIME_LIB", runtime_dylib.c_str(), 0);
+
+        liric_configure_runtime_lib_env(runtime_library_dir);
+
+        int no_link_rc = 0;
+        bool can_direct_emit_single_source =
+            (opts.arg_files.size() == 1 && liric_is_fortran_source(opts.arg_file));
+
+        if (can_direct_emit_single_source) {
+            no_link_rc = compile_src_to_object_file(opts.arg_file, outfile,
+                compiler_options.time_report, false, compiler_options,
+                lfortran_pass_manager, false, true);
+        } else {
+            int err_ = 0;
+            std::vector<std::string> object_files;
+            std::vector<std::string> temp_object_files;
+
+            for (const auto &arg_file : opts.arg_files) {
+                int err = 0;
+                bool is_temp_object = false;
+                std::string obj_path = arg_file;
+                if (liric_is_fortran_source(arg_file) || endswith(arg_file, ".ll")) {
+                    obj_path = (std::filesystem::path(LFORTRAN_TEMP_DIR)
+                        / std::filesystem::path(arg_file).filename()
+                              .replace_extension(".tmp_" + LCOMPILERS_UNIQUE_ID + ".o"))
+                                   .string();
+                    is_temp_object = true;
+                }
+
+                if (liric_is_fortran_source(arg_file)) {
+                    err = compile_src_to_object_file(arg_file, obj_path,
+                        compiler_options.time_report, false,
+                        compiler_options, lfortran_pass_manager);
+                } else if (endswith(arg_file, ".ll")) {
+                    err = compile_llvm_to_object_file(arg_file, obj_path, compiler_options);
+                } else if (!liric_is_object_file(arg_file)) {
+                    std::cerr << "WITH_LIRIC AOT no-link mode only supports Fortran sources, "
+                                 ".ll, and object-file inputs. Unsupported input: "
+                              << arg_file << std::endl;
+                    err = 10;
+                }
+
+                if (is_temp_object) {
+                    temp_object_files.push_back(obj_path);
+                }
+                if (err && !compiler_options.continue_compilation) {
+                    for (const std::string &tmp : temp_object_files) {
+                        std::remove(tmp.c_str());
+                        std::string tmp_blob = liric_blob_sidecar_path(tmp);
+                        std::remove(tmp_blob.c_str());
+                        std::string tmp_ll = liric_ll_sidecar_path(tmp);
+                        std::remove(tmp_ll.c_str());
+                    }
+                    return err;
+                }
+                err_ = err;
+                if (!err && liric_is_object_file(obj_path)) {
+                    object_files.push_back(obj_path);
+                }
+            }
+
+            no_link_rc = err_;
+            if (object_files.empty()) {
+                if (no_link_rc == 0) {
+                    std::cerr << "WITH_LIRIC AOT no-link mode received no compilable inputs."
+                              << std::endl;
+                    no_link_rc = 10;
+                }
+            } else {
+                no_link_rc +=
+                    liric_emit_executable_from_object_sidecars(object_files, outfile);
+            }
+
+            for (const std::string &tmp : temp_object_files) {
+                std::remove(tmp.c_str());
+                std::string tmp_blob = liric_blob_sidecar_path(tmp);
+                std::remove(tmp_blob.c_str());
+                std::string tmp_ll = liric_ll_sidecar_path(tmp);
+                std::remove(tmp_ll.c_str());
             }
         }
-#endif
-        int no_link_rc = compile_src_to_object_file(opts.arg_file, outfile,
-            compiler_options.time_report, false, compiler_options,
-            lfortran_pass_manager, false, true);
+
         if (no_link_rc != 0) {
             std::cerr << "WITH_LIRIC AOT no-link executable emission failed. "
                          "Refusing linker fallback." << std::endl;
