@@ -83,6 +83,7 @@ public:
     std::string get_asm(llvm::Module &m);
     void save_asm_file(llvm::Module &m, const std::string &filename);
     void save_object_file(llvm::Module &m, const std::string &filename);
+    void save_executable_file(llvm::Module &m, const std::string &filename);
     void create_empty_object_file(const std::string &filename);
     void opt(llvm::Module &m);
     static std::string module_to_string(llvm::Module &m);
