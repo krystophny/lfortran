@@ -5200,11 +5200,6 @@ namespace Repr {
         return ASRUtils::EXPR(ASR::make_StringConstant_t(al, loc, s2c(al, s), string_type));
     }
 
-    static inline bool is_type_info_like_string(ASR::expr_t* arg) {
-        ASR::ttype_t* t = ASRUtils::expr_type(arg);
-        return ASRUtils::is_allocatable(t) && ASRUtils::is_deferredLength_string(t);
-    }
-
     static inline ASR::asr_t* create_Repr(Allocator& al, const Location& loc,
             Vec<ASR::expr_t*>& args, diag::Diagnostics& diag) {
         if (args.size() != 1) {
@@ -5218,12 +5213,6 @@ namespace Repr {
             return ASR::make_IntrinsicElementalFunction_t(al, loc,
                 static_cast<int64_t>(IntrinsicElementalFunctions::Repr),
                 args.p, args.n, 0, allocatable_deferred_string(), nullptr);
-        }
-
-        // `type(type_info)` is currently represented as a deferred allocatable
-        // descriptor string, so repr(type_info) should return raw type text.
-        if (is_type_info_like_string(args[0])) {
-            return (ASR::asr_t*) args[0];
         }
 
         std::string var_name = "it";
