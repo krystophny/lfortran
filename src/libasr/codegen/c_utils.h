@@ -298,7 +298,7 @@ namespace CUtils {
                 break;
             }
             case ASR::ttypeType::TypeInfo: {
-                type_src = "void*";
+                type_src = "lfortran_type_info*";
                 break;
             }
             case ASR::ttypeType::StructType: {

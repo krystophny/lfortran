@@ -394,8 +394,10 @@ public:
                     sub = format_type_c("", "struct " + der_type_name + ptr_char,
                                         v.m_name, use_ref, dummy);
                 }
-            } else if(ASR::is_a<ASR::CPtr_t>(*t2) || ASR::is_a<ASR::TypeInfo_t>(*t2)) {
+            } else if (ASR::is_a<ASR::CPtr_t>(*t2)) {
                 sub = format_type_c("", "void**", v.m_name, false, false);
+            } else if (ASR::is_a<ASR::TypeInfo_t>(*t2)) {
+                sub = format_type_c("", "lfortran_type_info**", v.m_name, false, false);
             } else {
                 diag.codegen_error_label("Type '"
                     + ASRUtils::type_to_str_python_symbol(t2, v.m_type_declaration)
@@ -557,8 +559,10 @@ public:
                 }
                 sub = format_type_c("", dict_type_c, name,
                                     false, false);
-            } else if (ASR::is_a<ASR::CPtr_t>(*v_m_type) || ASR::is_a<ASR::TypeInfo_t>(*v_m_type)) {
+            } else if (ASR::is_a<ASR::CPtr_t>(*v_m_type)) {
                 sub = format_type_c("", "void*", v.m_name, false, false);
+            } else if (ASR::is_a<ASR::TypeInfo_t>(*v_m_type)) {
+                sub = format_type_c("", "lfortran_type_info*", v.m_name, false, false);
             } else if (ASR::is_a<ASR::EnumType_t>(*v_m_type)) {
                 ASR::EnumType_t* enum_ = ASR::down_cast<ASR::EnumType_t>(v_m_type);
                 ASR::Enum_t* enum_type = ASR::down_cast<ASR::Enum_t>(enum_->m_enum_type);

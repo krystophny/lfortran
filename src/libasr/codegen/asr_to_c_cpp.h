@@ -486,9 +486,10 @@ R"(#include <stdio.h>
                     }
                 }
             }
-        } else if (ASR::is_a<ASR::CPtr_t>(*return_var->m_type) ||
-                   ASR::is_a<ASR::TypeInfo_t>(*return_var->m_type)) {
+        } else if (ASR::is_a<ASR::CPtr_t>(*return_var->m_type)) {
             sub = "void* ";
+        } else if (ASR::is_a<ASR::TypeInfo_t>(*return_var->m_type)) {
+            sub = "lfortran_type_info* ";
         } else if (ASR::is_a<ASR::List_t>(*return_var->m_type)) {
             ASR::List_t* list_type = ASR::down_cast<ASR::List_t>(return_var->m_type);
             sub = c_ds_api->get_list_type(list_type) + " ";

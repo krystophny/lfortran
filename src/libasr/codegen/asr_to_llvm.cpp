@@ -16584,11 +16584,14 @@ public:
                                          ASR::is_a<ASR::TypeInfo_t>(*arg->m_type))) {
                                 if ( orig_arg_intent != ASRUtils::intent_out &&
                                         arg->m_intent == intent_local ) {
-                                    // Local variable of type
-                                    // CPtr is a void**, so we
-                                    // have to load it
-                                    llvm::Type* cptr_type = llvm::Type::getVoidTy(context)->getPointerTo();
-                                    tmp = llvm_utils->CreateLoad2(cptr_type, tmp);
+                                    if (ASR::is_a<ASR::CPtr_t>(*arg->m_type)) {
+                                        // Local CPtr variable is represented as void**, load one level.
+                                        llvm::Type* cptr_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                                        tmp = llvm_utils->CreateLoad2(cptr_type, tmp);
+                                    } else {
+                                        // Local type_info variable is represented as type_info**, load one level.
+                                        tmp = llvm_utils->CreateLoad2(llvm_utils->get_type_info_ptr_type(), tmp);
+                                    }
                                 }
                             } else if ( x_abi == ASR::abiType::BindC && orig_arg != nullptr ) {
                                 if (orig_arg->m_abi == ASR::abiType::BindC && orig_arg->m_value_attr) {
@@ -16631,11 +16634,14 @@ public:
                                                is_a<ASR::TypeInfo_t>(*arg_type)) {
                                         if ( arg->m_intent == intent_local ||
                                                 arg->m_intent == ASRUtils::intent_out) {
-                                            // Local variable or Dummy out argument
-                                            // of type CPtr is a void**, so we
-                                            // have to load it
-                                            llvm::Type* cptr_type = llvm::Type::getVoidTy(context)->getPointerTo();
-                                            tmp = llvm_utils->CreateLoad2(cptr_type, tmp);
+                                            if (is_a<ASR::CPtr_t>(*arg_type)) {
+                                                // Local/out CPtr argument is represented as void**, load one level.
+                                                llvm::Type* cptr_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                                                tmp = llvm_utils->CreateLoad2(cptr_type, tmp);
+                                            } else {
+                                                // Local/out type_info argument is represented as type_info**, load one level.
+                                                tmp = llvm_utils->CreateLoad2(llvm_utils->get_type_info_ptr_type(), tmp);
+                                            }
                                         }
                                     } else {
                                         if (!arg->m_value_attr && !ASR::is_a<ASR::String_t>(*arg_type)) {
@@ -16937,8 +16943,10 @@ public:
                     case (ASR::ttypeType::StructType) :
                         break;
                     case (ASR::ttypeType::CPtr) :
-                    case (ASR::ttypeType::TypeInfo) :
                         target_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                        break;
+                    case (ASR::ttypeType::TypeInfo) :
+                        target_type = llvm_utils->get_type_info_ptr_type();
                         break;
                     case ASR::ttypeType::Allocatable:
                     case (ASR::ttypeType::Pointer) : {
