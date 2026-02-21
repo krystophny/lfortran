@@ -5151,13 +5151,6 @@ namespace TypeOf {
         return ASRUtils::TYPE(ASR::make_CPtr_t(al, loc));
     }
 
-    static inline void verify_args(const ASR::IntrinsicElementalFunction_t& x,
-            diag::Diagnostics& diagnostics) {
-        ASRUtils::require_impl(x.n_args == 1,
-            "typeof expects exactly 1 argument",
-            x.base.base.loc, diagnostics);
-    }
-
     static inline ASR::asr_t* create_TypeOf(Allocator& al, const Location& loc,
             Vec<ASR::expr_t*>& args, diag::Diagnostics& diag) {
         if (args.size() != 1) {
@@ -5377,13 +5370,6 @@ namespace Repr {
         }
         shape += ")";
         return shape;
-    }
-
-    static inline void verify_args(const ASR::IntrinsicElementalFunction_t& x,
-            diag::Diagnostics& diagnostics) {
-        ASRUtils::require_impl(x.n_args == 1,
-            "repr expects exactly 1 argument",
-            x.base.base.loc, diagnostics);
     }
 
     static inline bool is_type_info_handle(ASR::expr_t* arg) {

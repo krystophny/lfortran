@@ -10,16 +10,18 @@ program typeof_repr_01
     type(point) :: p
     character(:), allocatable :: s
     type(type_info) :: t
+    type(type_info) :: t_x
 
     x = 3.0_8
     a = [1, 2, 3]
     p = point(1, 2)
 
     t = typeof(x)
+    t_x = typeof(x)
     if (repr(t) /= "real(8)") error stop 1
     if (type_name(t) /= "real(8)") error stop 5
     if (type_size(t) /= 8_8) error stop 6
-    if (.not. type_same(t, typeof(x))) error stop 7
+    if (.not. type_same(t, t_x)) error stop 7
     if (type_name(type_parent(t)) /= "~null_type") error stop 8
 
     s = repr(x)

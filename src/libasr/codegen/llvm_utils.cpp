@@ -8883,12 +8883,9 @@ llvm::Value* LLVMUtils::handle_global_nonallocatable_stringArray(Allocator& al, 
         std::vector<llvm::Constant*> type_info_member_values;
         type_info_member_values.reserve(3); // A type-info object has 3 members.
 
-        // Human-readable type name (used by type_name/repr on type_info handles).
-        const std::string type_name_str = ASRUtils::type_to_str_with_kind(ttype, nullptr);
-        type_info_member_values.push_back(llvm::ConstantExpr::getBitCast(
-            LCompilers::create_global_string_ptr(
-                context, *module, *builder, type_name_str,
-                "_Name_" + ASRUtils::intrinsic_type_to_str_with_kind(ttype, kind)),
+        // Intrinsic type ttype number + kind (used as a unique tag)
+        type_info_member_values.push_back(llvm::ConstantExpr::getIntToPtr(
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), (int) ttype->type + kind),
             llvm_utils->i8_ptr));
 
         llvm::Type* llvm_type = llvm_utils->get_type_from_ttype_t_util(nullptr, ttype, module);

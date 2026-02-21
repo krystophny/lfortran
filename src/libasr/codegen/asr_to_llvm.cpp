@@ -4063,6 +4063,7 @@ public:
             case ASRUtils::IntrinsicElementalFunctions::TypeName: {
                 llvm::Type* i8_ptr = llvm::Type::getInt8Ty(context)->getPointerTo();
                 llvm::Type* cptr_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                llvm::Type* i64_type = llvm::Type::getInt64Ty(context);
                 llvm::StructType* type_info_type = llvm::StructType::get(
                     context, {i8_ptr, i8_ptr, i8_ptr}, false);
                 auto make_const_desc = [&](const std::string &name) {
@@ -4091,17 +4092,94 @@ public:
                 ti_ptr = builder->CreateBitCast(ti_ptr, i8_ptr);
                 llvm::Value* out_desc = llvm_utils->CreateAlloca(*builder, string_descriptor->getPointerTo());
                 llvm::Value* is_null = builder->CreateICmpEQ(
-                    builder->CreatePtrToInt(ti_ptr, llvm::Type::getInt64Ty(context)),
-                    llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), 0));
+                    builder->CreatePtrToInt(ti_ptr, i64_type),
+                    llvm::ConstantInt::get(i64_type, 0));
                 llvm_utils->create_if_else(is_null, [&]() {
                     builder->CreateStore(make_const_desc("~null_type"), out_desc);
                 }, [&]() {
                     llvm::Value* ti_cast = builder->CreateBitCast(ti_ptr, type_info_type->getPointerTo());
                     llvm::Value* name_ptr_ptr = llvm_utils->create_gep2(type_info_type, ti_cast, 0);
                     llvm::Value* name_ptr = llvm_utils->CreateLoad2(i8_ptr, name_ptr_ptr);
-                    llvm::Value* name_len = lfortran_str_len(nullptr, name_ptr);
-                    llvm::Value* desc = llvm_utils->create_string_descriptor(name_ptr, name_len, "type_name_desc");
-                    builder->CreateStore(desc, out_desc);
+                    llvm::Value* type_tag = builder->CreatePtrToInt(name_ptr, i64_type);
+                    auto tag_eq = [&](ASR::ttypeType type, int kind) -> llvm::Value* {
+                        int64_t tag_value = static_cast<int64_t>(static_cast<int>(type) + kind);
+                        return builder->CreateICmpEQ(
+                            type_tag, llvm::ConstantInt::get(i64_type, llvm::APInt(64, tag_value, true)));
+                    };
+                    auto store_const_desc = [&](const std::string &name) {
+                        builder->CreateStore(make_const_desc(name), out_desc);
+                    };
+
+                    llvm::Value* is_intrinsic_tag = tag_eq(ASR::ttypeType::Integer, 1);
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::Integer, 2));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::Integer, 4));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::Integer, 8));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::Real, 4));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::Real, 8));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::Logical, 1));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::Logical, 2));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::Logical, 4));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::Logical, 8));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::Complex, 4));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::Complex, 8));
+                    is_intrinsic_tag = builder->CreateOr(is_intrinsic_tag, tag_eq(ASR::ttypeType::String, 1));
+
+                    llvm_utils->create_if_else(is_intrinsic_tag, [&]() {
+                        llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Integer, 1), [&]() {
+                            store_const_desc("integer(1)");
+                        }, [&]() {
+                            llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Integer, 2), [&]() {
+                                store_const_desc("integer(2)");
+                            }, [&]() {
+                                llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Integer, 4), [&]() {
+                                    store_const_desc("integer(4)");
+                                }, [&]() {
+                                    llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Integer, 8), [&]() {
+                                        store_const_desc("integer(8)");
+                                    }, [&]() {
+                                        llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Real, 4), [&]() {
+                                            store_const_desc("real(4)");
+                                        }, [&]() {
+                                            llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Real, 8), [&]() {
+                                                store_const_desc("real(8)");
+                                            }, [&]() {
+                                                llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Logical, 1), [&]() {
+                                                    store_const_desc("logical(1)");
+                                                }, [&]() {
+                                                    llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Logical, 2), [&]() {
+                                                        store_const_desc("logical(2)");
+                                                    }, [&]() {
+                                                        llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Logical, 4), [&]() {
+                                                            store_const_desc("logical(4)");
+                                                        }, [&]() {
+                                                            llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Logical, 8), [&]() {
+                                                                store_const_desc("logical(8)");
+                                                            }, [&]() {
+                                                                llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Complex, 4), [&]() {
+                                                                    store_const_desc("complex(4)");
+                                                                }, [&]() {
+                                                                    llvm_utils->create_if_else(tag_eq(ASR::ttypeType::Complex, 8), [&]() {
+                                                                        store_const_desc("complex(8)");
+                                                                    }, [&]() {
+                                                                        store_const_desc("character");
+                                                                    });
+                                                                });
+                                                            });
+                                                        });
+                                                    });
+                                                });
+                                            });
+                                        });
+                                    });
+                                });
+                            });
+                        });
+                    }, [&]() {
+                        llvm::Value* name_len = lfortran_str_len(nullptr, name_ptr);
+                        llvm::Value* desc = llvm_utils->create_string_descriptor(
+                            name_ptr, name_len, "type_name_desc");
+                        builder->CreateStore(desc, out_desc);
+                    });
                 });
                 tmp = llvm_utils->CreateLoad2(string_descriptor->getPointerTo(), out_desc);
                 break;
