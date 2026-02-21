@@ -8614,14 +8614,11 @@ uint32_t get_file_size(int64_t fp) {
 }
 
 /*
- * `lines_dat.txt` file must be created before calling this function,
- * The file can be created using the command:
- *     ./src/bin/dat_convert.py lines.dat
- * This function fills in the `addresses` and `line_numbers`
- * from the `lines_dat.txt` file.
+ * Fills in the `addresses` and `line_numbers` from the packed binary
+ * debug-map file (`*_lines.dat`), where each entry is:
+ *     (address:uint64, line:uint64, file_id:uint64)
  */
-void get_local_info_dwarfdump(struct Stacktrace *d) {
-    // TODO: Read the contents of lines.dat from here itself.
+void get_local_info_debug_map(struct Stacktrace *d) {
     d->stack_size = 0;
     const char *exe_path = binary_executable_path;
     if (d != NULL) {
@@ -8634,51 +8631,27 @@ void get_local_info_dwarfdump(struct Stacktrace *d) {
     }
     char filename[LFORTRAN_DEBUG_MAP_PATH_MAX];
     if (_lfortran_debug_map_path_from_exe(exe_path,
-            LFORTRAN_DEBUG_MAP_SUFFIX_LINES_DAT_TXT,
+            LFORTRAN_DEBUG_MAP_SUFFIX_LINES_DAT,
             filename, LFORTRAN_DEBUG_MAP_PATH_MAX) != 0) {
         return;
     }
 
-    int64_t fd = _lpython_open(filename, "r");
-    if (fd < 0) {
-        return;
-    }
-    uint32_t size = get_file_size(fd);
-    if (size == 0) {
-        _lpython_close(fd);
-        return;
-    }
-    char *file_contents = _lpython_read(fd, size);
-    _lpython_close(fd);
-    if (file_contents == NULL) {
+    FILE *fp = fopen(filename, "rb");
+    if (fp == NULL) {
         return;
     }
 
-    char s[LCOMPILERS_MAX_STACKTRACE_LENGTH];
-    bool address = true;
-    uint32_t j = 0;
-    for (uint32_t i = 0; i < size; i++) {
-        if (file_contents[i] == '\n') {
-            memset(s, '\0', sizeof(s));
-            j = 0;
-            d->stack_size++;
-            continue;
-        } else if (file_contents[i] == ' ') {
-            s[j] = '\0';
-            j = 0;
-            if (address) {
-                d->addresses[d->stack_size] = strtol(s, NULL, 10);
-                address = false;
-            } else {
-                d->line_numbers[d->stack_size] = strtol(s, NULL, 10);
-                address = true;
-            }
-            memset(s, '\0', sizeof(s));
+    uint64_t entry[3];
+    while (d->stack_size < LCOMPILERS_MAX_STACKTRACE_LENGTH &&
+            fread(entry, sizeof(uint64_t), 3, fp) == 3) {
+        if (entry[1] == 0) {
             continue;
         }
-        s[j++] = file_contents[i];
+        d->addresses[d->stack_size] = entry[0];
+        d->line_numbers[d->stack_size] = entry[1];
+        d->stack_size++;
     }
-    free(file_contents);
+    fclose(fp);
 }
 
 char *read_line_from_file(char *filename, uint32_t line_number, int64_t *out_len) {
@@ -8753,7 +8726,7 @@ LFORTRAN_API void print_stacktrace_addresses(char *filename, bool use_colors) {
     source_filename = filename;
     struct Stacktrace d = get_stacktrace_addresses();
     get_local_address(&d);
-    get_local_info_dwarfdump(&d);
+    get_local_info_debug_map(&d);
     if (d.stack_size == 0) {
         print_stacktrace_raw_addresses(&d, use_colors);
         return;
