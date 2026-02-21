@@ -108,7 +108,17 @@ void pass_wrap_global_stmts(Allocator &al,
                 target = return_var_ref;
                 idx++;
             } else {
-                throw LCompilersException("Return type not supported in interactive mode");
+                // Non-scalar interactive expressions (for example arrays) cannot be
+                // lowered as function return values. Lower them centrally to a print
+                // statement instead of throwing in frontend-specific code.
+                Vec<ASR::expr_t*> print_args;
+                print_args.reserve(al, 1);
+                print_args.push_back(al, value);
+                ASR::stmt_t* asr_stmt = ASRUtils::STMT(
+                    ASRUtils::make_print_t_util(al, loc, print_args.p, print_args.n));
+                body.push_back(al, asr_stmt);
+                return_var = nullptr;
+                continue;
             }
             ASR::stmt_t* asr_stmt = ASRUtils::STMT(ASRUtils::make_Assignment_t_util(al, loc, target, value, nullptr, false, false));
             body.push_back(al, asr_stmt);
