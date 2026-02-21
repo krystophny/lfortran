@@ -11346,11 +11346,16 @@ public:
             this->visit_expr_wrapper(x.m_value, true);
             return;
         }
+        bool left_is_string_format = ASR::is_a<ASR::StringFormat_t>(*x.m_left);
+        bool right_is_string_format = ASR::is_a<ASR::StringFormat_t>(*x.m_right);
         llvm::Value* left_val {}, *left_len {};
         llvm::Value* right_val {}, *right_len {};
         std::tie(left_val, left_len) = get_string_data_and_length(x.m_left);
         std::tie(right_val, right_len) = get_string_data_and_length(x.m_right);
         tmp = lfortran_strConcat(left_val, left_len, right_val, right_len);
+        if (left_is_string_format || right_is_string_format) {
+            llvm_utils->stringFormat_return.free();
+        }
         tmp = llvm_utils->create_string_descriptor(tmp,
             builder->CreateAdd(left_len, right_len), "strConcat_desc");
     }

@@ -1713,6 +1713,7 @@ public:
         {"type_name", IntrinsicSignature({"t"}, 1, 1)},
         {"type_size", IntrinsicSignature({"t"}, 1, 1)},
         {"type_same", IntrinsicSignature({"a", "b"}, 2, 2)},
+        {"repr", IntrinsicSignature({"x"}, 1, 1)},
 
 
         // LFortran-specific intrinsics
@@ -11839,6 +11840,8 @@ public:
                     std::vector<std::string> inquiry_functions = {"epsilon", "radix", "range", "precision", "rank", "tiny", "huge", "bit_size", "new_line", "digits",
                         "maxexponent", "minexponent", "storage_size", "kind", "is_contiguous", "loc", "typeof",
                         "type_name", "type_size", "type_same"};
+                        "maxexponent", "minexponent", "storage_size", "kind", "is_contiguous", "loc", "typeof",
+                        "type_name", "type_size", "type_same", "repr"};
                     if (are_all_args_evaluated &&
                         (std::find(inquiry_functions.begin(), inquiry_functions.end(), var_name) == inquiry_functions.end()) &&
                         !array_indices_in_args.empty())
