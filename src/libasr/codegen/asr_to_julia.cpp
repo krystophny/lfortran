@@ -472,7 +472,8 @@ public:
                 } else {
                     ret_type = "ComplexF64";
                 }
-            } else if (ASR::is_a<ASR::CPtr_t>(*return_var->m_type)) {
+            } else if (ASR::is_a<ASR::CPtr_t>(*return_var->m_type) ||
+                       ASR::is_a<ASR::TypeInfo_t>(*return_var->m_type)) {
                 ret_type = "Ptr{Cvoid}";
             } else {
                 throw CodeGenError("Return type not supported in function '" + std::string(x.m_name)
