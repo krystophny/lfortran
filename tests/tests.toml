@@ -3931,6 +3931,10 @@ filename = "errors/sealed_02.f90"
 asr = true
 
 [[test]]
+filename = "errors/sealed_03.f90"
+asr = true
+
+[[test]]
 filename = "errors/array_01.f90"
 asr = true
 

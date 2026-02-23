@@ -4172,6 +4172,14 @@ public:
                         } else if (sa->m_attr == AST::simple_attributeType
                                 ::AttrSequence) {
                             // TODO: Implement it for CPP backend
+                        } else if (sa->m_attr == AST::simple_attributeType
+                                ::AttrSealed) {
+                            diag.add(Diagnostic(
+                                "Attribute `sealed` is only valid for derived type definitions",
+                                Level::Error, Stage::Semantic, {
+                                    Label("",{x.base.base.loc})
+                                }));
+                            throw SemanticAbort();
                         } else {
                             diag.add(Diagnostic(
                                 "Attribute declaration not supported yet",
@@ -4529,6 +4537,14 @@ public:
                                         ASR::presenceType::Required, false, false));
                                     current_scope->add_symbol(s2c(al, to_lower(x.m_syms[i].m_name)), sym);
                                     enum_init_val++;
+                                } else if (sa->m_attr == AST::simple_attributeType
+                                        ::AttrSealed) {
+                                    diag.add(Diagnostic(
+                                        "Attribute `sealed` is only valid for derived type definitions",
+                                        Level::Error, Stage::Semantic, {
+                                            Label("",{x.base.base.loc})
+                                        }));
+                                    throw SemanticAbort();
                                 } else {
                                     diag.add(Diagnostic(
                                         "Attribute declaration not supported",
@@ -5527,6 +5543,13 @@ public:
                                 is_volatile = true;
                             } else if (sa->m_attr == AST::simple_attributeType::AttrProtected) {
                                 is_protected = true;
+                            } else if (sa->m_attr == AST::simple_attributeType::AttrSealed) {
+                                diag.add(Diagnostic(
+                                    "Attribute `sealed` is only valid for derived type definitions",
+                                    Level::Error, Stage::Semantic, {
+                                        Label("",{x.base.base.loc})
+                                    }));
+                                throw SemanticAbort();
                             } else {
                                 diag.add(Diagnostic(
                                     "Attribute type not implemented yet " + std::to_string(sa->m_attr),
