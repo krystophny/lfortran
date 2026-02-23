@@ -3469,25 +3469,8 @@ public:
                 llvm::Value* id1 = llvm_utils->CreateLoad2(field0_type, id1_ptr);
 
                 if (field0_type->isPointerTy()) {
-                    // new_classes: walk parent chain via TypeInfo
-                    // TypeInfo layout: { i8* name, i8* size, i8* parent_typeinfo }
-                    // vptr[-1] = TypeInfo pointer
-                    llvm::Type* i8_ptr = llvm::Type::getInt8Ty(context)->getPointerTo();
-                    llvm::Type* i64_type = llvm::Type::getInt64Ty(context);
-                    llvm::StructType* type_info_type = llvm::StructType::get(
-                        context, {i8_ptr, i8_ptr, i8_ptr}, false);
-
-                    // Get TypeInfo for MOLD (arg1)
-                    llvm::Value* vptr1_i8 = builder->CreateBitCast(id1, i8_ptr->getPointerTo());
-                    llvm::Value* ti1_ptr_ptr = llvm_utils->create_ptr_gep2(
-                        i8_ptr, vptr1_i8, llvm::ConstantInt::get(i64_type, -1, true));
-                    llvm::Value* ti_mold = llvm_utils->CreateLoad2(i8_ptr, ti1_ptr_ptr);
-
-                    // Get TypeInfo for A (arg0)
-                    llvm::Value* vptr0_i8 = builder->CreateBitCast(id0, i8_ptr->getPointerTo());
-                    llvm::Value* ti0_ptr_ptr = llvm_utils->create_ptr_gep2(
-                        i8_ptr, vptr0_i8, llvm::ConstantInt::get(i64_type, -1, true));
-                    llvm::Value* ti_a_init = llvm_utils->CreateLoad2(i8_ptr, ti0_ptr_ptr);
+                    llvm::Value* ti_mold = load_type_info_from_vptr(id1);
+                    llvm::Value* ti_a_init = load_type_info_from_vptr(id0);
 
                     // Create loop to walk A's parent chain
                     llvm::Function* fn = builder->GetInsertBlock()->getParent();
@@ -3498,24 +3481,19 @@ public:
 
                     builder->CreateBr(loop_bb);
                     builder->SetInsertPoint(loop_bb);
-                    llvm::PHINode* ti_current = builder->CreatePHI(i8_ptr, 2, "eto.ti");
+                    llvm::PHINode* ti_current = builder->CreatePHI(
+                        llvm_utils->get_type_info_ptr_type(), 2, "eto.ti");
                     ti_current->addIncoming(ti_a_init, loop_bb->getSinglePredecessor());
 
                     // Compare current TypeInfo with MOLD's TypeInfo
-                    llvm::Value* eq = builder->CreateICmpEQ(
-                        builder->CreatePtrToInt(ti_current, i64_type),
-                        builder->CreatePtrToInt(ti_mold, i64_type));
+                    llvm::Value* eq = builder->CreateICmpEQ(ti_current, ti_mold);
                     builder->CreateCondBr(eq, found_bb, not_found_bb);
 
                     // Not equal: check parent
                     builder->SetInsertPoint(not_found_bb);
-                    llvm::Value* ti_cast = builder->CreateBitCast(
-                        ti_current, type_info_type->getPointerTo());
-                    llvm::Value* parent_ptr = llvm_utils->create_gep2(type_info_type, ti_cast, 2);
-                    llvm::Value* parent_ti = llvm_utils->CreateLoad2(i8_ptr, parent_ptr);
-                    llvm::Value* parent_null = builder->CreateICmpEQ(
-                        parent_ti, llvm::ConstantPointerNull::get(
-                            llvm::cast<llvm::PointerType>(i8_ptr)));
+                    llvm::Value* parent_ti = llvm_utils->get_type_info_parent(ti_current);
+                    llvm::Value* parent_null = builder->CreateICmpEQ(parent_ti,
+                        llvm::ConstantPointerNull::get(llvm_utils->get_type_info_ptr_type()));
                     // If parent is null, no more ancestors -> false
                     // Otherwise, continue loop with parent
                     builder->CreateCondBr(parent_null, merge_bb, loop_bb);
@@ -3565,12 +3543,11 @@ public:
                         llvm::Constant* name_ptr = llvm::dyn_cast<llvm::Constant>(
                             LCompilers::create_global_string_ptr(
                                 context, *module, *builder, tname, "_Type_Name_" + key));
+                        llvm::Constant* parent_ptr = llvm::ConstantPointerNull::get(
+                            llvm_utils->get_type_info_ptr_type());
                         llvm::Constant* init = llvm::ConstantStruct::get(
                             llvm_utils->get_type_info_type(),
-                            {name_ptr,
-                             llvm::ConstantExpr::getIntToPtr(
-                                 llvm::ConstantInt::get(i64_type, tsize), llvm_utils->i8_ptr),
-                             llvm::ConstantPointerNull::get(llvm_utils->i8_ptr)});
+                            {name_ptr, llvm::ConstantInt::get(i64_type, tsize), parent_ptr});
                         gv = new llvm::GlobalVariable(
                             *module, llvm_utils->get_type_info_type(), true,
                             llvm::GlobalValue::LinkOnceODRLinkage, init, gv_name);

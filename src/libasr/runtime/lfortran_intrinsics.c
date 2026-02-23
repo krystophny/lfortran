@@ -9784,9 +9784,10 @@ is_equal(const type_info* x, const type_info* y)
  *
  * Our type-info object in LLVM looks like:
  *
- *     `@_Type_Info_circle = linkonce_odr unnamed_addr constant { i8*, i8* } {
+ *     `@_Type_Info_circle = linkonce_odr unnamed_addr constant { i8*, i64, i8* } {
  *         i8* getelementptr inbounds ([7 x i8], [7 x i8]* @_Name_circle, i32 0, i32 0),
- *         i8* bitcast ({ i8* }* @_Type_Info_shape to i8*)
+ *         i64 16,
+ *         i8* bitcast ({ i8*, i64, i8* }* @_Type_Info_shape to i8*)
  *      }, align 8`
  *
  * The `__si_class_type_info` struct portrays this layout, with field `__base_type == NULL` for
