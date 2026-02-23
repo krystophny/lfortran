@@ -26,6 +26,7 @@ inline std::string get_intrinsic_name(int64_t x) {
         INTRINSIC_NAME_CASE(TypeSame)
         INTRINSIC_NAME_CASE(TypeParent)
         INTRINSIC_NAME_CASE(TypeExtends)
+        INTRINSIC_NAME_CASE(TypeId)
         INTRINSIC_NAME_CASE(Repr)
         INTRINSIC_NAME_CASE(Sin)
         INTRINSIC_NAME_CASE(Cos)
@@ -423,6 +424,8 @@ namespace IntrinsicElementalFunctionRegistry {
             {nullptr, &TypeParent::verify_args}},
         {static_cast<int64_t>(IntrinsicElementalFunctions::TypeExtends),
             {nullptr, &TypeExtends::verify_args}},
+        {static_cast<int64_t>(IntrinsicElementalFunctions::TypeId),
+            {nullptr, &TypeId::verify_args}},
         {static_cast<int64_t>(IntrinsicElementalFunctions::Repr),
             {nullptr, &Repr::verify_args}},
         {static_cast<int64_t>(IntrinsicElementalFunctions::Digits),

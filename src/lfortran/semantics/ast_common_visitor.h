@@ -12096,8 +12096,62 @@ public:
         } else if (var_name == "shifta") {
             visit_expr_list(x.m_args, x.n_args, args);
             asr_node = create_Shifta(x.base.base.loc, args);
+        } else if (var_name == "typeid") {
+            asr_node = handle_intrinsic_typeid(x, al);
         }
         return asr_node;
+    }
+
+    ASR::asr_t* handle_intrinsic_typeid(
+        const AST::FuncCallOrArray_t &x,
+        Allocator &al
+    ) {
+        const Location& loc = x.base.base.loc;
+        if (x.n_args != 1 || x.n_keywords != 0) {
+            diag.add(diag::Diagnostic(
+                "typeid() takes exactly one argument (a type name)",
+                diag::Level::Error, diag::Stage::Semantic, {
+                    diag::Label("", {loc})}));
+            throw SemanticAbort();
+        }
+        AST::expr_t* arg_ast = x.m_args[0].m_end;
+        if (!arg_ast || !AST::is_a<AST::Name_t>(*arg_ast)) {
+            diag.add(diag::Diagnostic(
+                "typeid() argument must be a type name",
+                diag::Level::Error, diag::Stage::Semantic, {
+                    diag::Label("", {loc})}));
+            throw SemanticAbort();
+        }
+        std::string type_name = to_lower(AST::down_cast<AST::Name_t>(arg_ast)->m_id);
+        ASR::symbol_t* type_sym = current_scope->resolve_symbol(type_name);
+        if (!type_sym) {
+            diag.add(diag::Diagnostic(
+                "typeid(): type '" + type_name + "' not found",
+                diag::Level::Error, diag::Stage::Semantic, {
+                    diag::Label("", {loc})}));
+            throw SemanticAbort();
+        }
+        if (!ASR::is_a<ASR::Struct_t>(*ASRUtils::symbol_get_past_external(type_sym))) {
+            diag.add(diag::Diagnostic(
+                "typeid() argument must be a derived type name",
+                diag::Level::Error, diag::Stage::Semantic, {
+                    diag::Label("", {loc})}));
+            throw SemanticAbort();
+        }
+        ASR::ttype_t* struct_type = ASRUtils::make_StructType_t_util(
+            al, loc, type_sym, false);
+        Vec<ASR::call_arg_t> ctor_args;
+        ctor_args.reserve(al, 0);
+        ASR::expr_t* synthetic_expr = ASRUtils::EXPR(
+            ASR::make_StructConstructor_t(al, loc, type_sym,
+                ctor_args.p, ctor_args.n, struct_type, nullptr));
+        Vec<ASR::expr_t*> intrinsic_args;
+        intrinsic_args.reserve(al, 1);
+        intrinsic_args.push_back(al, synthetic_expr);
+        return ASR::make_IntrinsicElementalFunction_t(al, loc,
+            static_cast<int64_t>(ASRUtils::IntrinsicElementalFunctions::TypeId),
+            intrinsic_args.p, intrinsic_args.n, 0,
+            ASRUtils::TYPE(ASR::make_TypeInfo_t(al, loc)), nullptr);
     }
 
     ASR::asr_t* handle_intrinsic_dble(Allocator &al, Vec<ASR::call_arg_t> args,
