@@ -1,0 +1,13 @@
+{
+    "basename": "asr-sealed_02-992ea0b",
+    "cmd": "lfortran --show-asr --no-color {infile} -o {outfile}",
+    "infile": "tests/errors/sealed_02.f90",
+    "infile_hash": "3445531f62bddd4695733cb33d360e4986aba89ba4e6bef3b2f6a0fe",
+    "outfile": null,
+    "outfile_hash": null,
+    "stdout": null,
+    "stdout_hash": null,
+    "stderr": "asr-sealed_02-992ea0b.stderr",
+    "stderr_hash": "0d6def11a373e5d7753be95847d2263b57e059a7d75e8b7b92a54dc3",
+    "returncode": 2
+}

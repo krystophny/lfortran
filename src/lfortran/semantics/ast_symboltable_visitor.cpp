@@ -2095,6 +2095,7 @@ public:
     void visit_DerivedType(const AST::DerivedType_t &x) {
         dt_name = to_lower(x.m_name);
         bool is_abstract = false;
+        bool is_sealed = false;
         bool is_deferred = false;
         AST::AttrExtends_t *attr_extend = nullptr;
         for( size_t i = 0; i < x.n_attrtype; i++ ) {
@@ -2114,6 +2115,7 @@ public:
                     AST::SimpleAttribute_t* simple_attr =
                         AST::down_cast<AST::SimpleAttribute_t>(x.m_attrtype[i]);
                     if (!is_abstract) is_abstract = simple_attr->m_attr == AST::simple_attributeType::AttrAbstract;
+                    if (!is_sealed) is_sealed = simple_attr->m_attr == AST::simple_attributeType::AttrSealed;
                     if (!is_deferred) is_deferred = simple_attr->m_attr == AST::simple_attributeType::AttrDeferred;
                 }
                 default:
@@ -2163,6 +2165,17 @@ public:
                 throw SemanticAbort();
             }
             parent_sym = parent_scope->get_symbol(parent_sym_name);
+            ASR::symbol_t* parent_sym_unwrapped = ASRUtils::symbol_get_past_external(parent_sym);
+            if (ASR::is_a<ASR::Struct_t>(*parent_sym_unwrapped)) {
+                ASR::Struct_t* parent_struct = ASR::down_cast<ASR::Struct_t>(parent_sym_unwrapped);
+                if (parent_struct->m_is_sealed) {
+                    diag.add(diag::Diagnostic(
+                        "Cannot extend sealed derived type `" + parent_sym_name + "`",
+                        diag::Level::Error, diag::Stage::Semantic, {
+                            diag::Label("", {x.base.base.loc})}));
+                    throw SemanticAbort();
+                }
+            }
         }
         SetChar struct_dependencies;
         struct_dependencies.reserve(al, 1);
@@ -2195,7 +2208,7 @@ public:
         tmp = ASR::make_Struct_t(al, x.base.base.loc, current_scope,
             s2c(al, to_lower(x.m_name)), nullptr, struct_dependencies.p, struct_dependencies.size(),
             data_member_names.p, data_member_names.size(), nullptr, 0,
-            ASR::abiType::Source, dflt_access, false, is_abstract, nullptr, 0, nullptr, parent_sym);
+            ASR::abiType::Source, dflt_access, false, is_abstract, is_sealed, nullptr, 0, nullptr, parent_sym);
 
         ASR::symbol_t* derived_type_sym = ASR::down_cast<ASR::symbol_t>(tmp);
         ASR::ttype_t* struct_signature = ASRUtils::make_StructType_t_util(al, x.base.base.loc, derived_type_sym, true);

@@ -1513,6 +1513,7 @@ public:
             ATTRTYPE(Pure)
             ATTRTYPE(Recursive)
             ATTRTYPE(Save)
+            ATTRTYPE(Sealed)
             ATTRTYPE(Sequence)
             ATTRTYPE(Target)
             ATTRTYPE(Value)

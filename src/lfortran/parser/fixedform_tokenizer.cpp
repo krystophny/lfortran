@@ -236,6 +236,7 @@ const std::unordered_map<std::string, yytokentype> identifiers_map = {
     {"return", KW_RETURN},
     {"rewind", KW_REWIND},
     {"save", KW_SAVE},
+    {"sealed", KW_SEALED},
     {"select", KW_SELECT},
     {"select_case", KW_SELECT_CASE},
     {"select_rank", KW_SELECT_RANK},
