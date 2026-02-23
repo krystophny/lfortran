@@ -5312,6 +5312,13 @@ namespace TypeExtends {
 
 namespace Repr {
 
+    static inline void verify_args(const ASR::IntrinsicElementalFunction_t& x,
+            diag::Diagnostics& diagnostics) {
+        ASRUtils::require_impl(x.n_args == 1,
+            "repr expects exactly 1 argument",
+            x.base.base.loc, diagnostics);
+    }
+
     static inline bool is_var_like_name(ASR::expr_t* arg, std::string &name) {
         if (ASR::is_a<ASR::Var_t>(*arg)) {
             ASR::Var_t* v = ASR::down_cast<ASR::Var_t>(arg);

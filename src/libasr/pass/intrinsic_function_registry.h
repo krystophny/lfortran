@@ -424,7 +424,7 @@ namespace IntrinsicElementalFunctionRegistry {
         {static_cast<int64_t>(IntrinsicElementalFunctions::TypeExtends),
             {nullptr, &TypeExtends::verify_args}},
         {static_cast<int64_t>(IntrinsicElementalFunctions::Repr),
-            {nullptr, nullptr}},
+            {nullptr, &Repr::verify_args}},
         {static_cast<int64_t>(IntrinsicElementalFunctions::Digits),
             {&Digits::instantiate_Digits, &Digits::verify_args}},
         {static_cast<int64_t>(IntrinsicElementalFunctions::Rrspacing),
@@ -591,8 +591,6 @@ namespace IntrinsicElementalFunctionRegistry {
             {nullptr, &SymbolicSinQ::verify_args}},
         {static_cast<int64_t>(IntrinsicElementalFunctions::SymbolicGetArgument),
             {nullptr, &SymbolicGetArgument::verify_args}},
-        {static_cast<int64_t>(IntrinsicElementalFunctions::CommandArgumentCount),
-            {&CommandArgumentCount::instantiate_CommandArgumentCount, &CommandArgumentCount::verify_args}},
         {static_cast<int64_t>(IntrinsicElementalFunctions::Int),
             {&Int::instantiate_Int, &Int::verify_args}},
         };

@@ -6,14 +6,7 @@
 #include <libasr/pass/wrap_global_stmts.h>
 #include <libasr/pass/pass_utils.h>
 
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-function"
-#endif
 #include <libasr/pass/intrinsic_functions.h>
-#if defined(__GNUC__) || defined(__clang__)
-#pragma GCC diagnostic pop
-#endif
 
 
 namespace LCompilers {
