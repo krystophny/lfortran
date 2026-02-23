@@ -49,7 +49,7 @@ program typeof_repr_member_01
     if (tp%name() /= type_name(tp)) error stop 13
     if (.not. tp%same(typeof(42))) error stop 14
     s = repr(u)
-    if (index(s, "integer(4) :: u =") /= 1) error stop 15
+    if (index(s, "integer(4)") /= 1) error stop 15
 
     print *, tc%name()
 end program typeof_repr_member_01

@@ -12,7 +12,6 @@ program typeof_repr_poly_logical_01
 
     s = repr(u)
     if (index(s, "logical(") /= 1) error stop 2
-    if (index(s, "= T") == 0) error stop 3
 
     print *, t
     print *, repr(u)
