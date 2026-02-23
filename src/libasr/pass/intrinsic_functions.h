@@ -204,7 +204,8 @@ enum class IntrinsicElementalFunctions : int64_t {
     TypeOf,
     TypeName,
     TypeSize,
-    TypeSame
+    TypeSame,
+    Repr
     // ...
 };
 
@@ -5248,6 +5249,63 @@ namespace TypeSame {
     }
 
 } // namespace TypeSame
+
+namespace Repr {
+
+    static inline bool is_var_like_name(ASR::expr_t* arg, std::string &name) {
+        if (ASR::is_a<ASR::Var_t>(*arg)) {
+            ASR::Var_t* v = ASR::down_cast<ASR::Var_t>(arg);
+            name = ASRUtils::symbol_name(v->m_v);
+            return true;
+        }
+        return false;
+    }
+
+    static inline ASR::expr_t* make_string_constant_expr(Allocator &al, const Location &loc,
+            const std::string &s) {
+        int len = s.size();
+        ASR::ttype_t* string_type = ASRUtils::TYPE(ASR::make_String_t(al, loc, 1,
+            ASRUtils::EXPR(ASR::make_IntegerConstant_t(al, loc, len,
+                ASRUtils::TYPE(ASR::make_Integer_t(al, loc, 4)))),
+            ASR::string_length_kindType::ExpressionLength,
+            ASR::string_physical_typeType::DescriptorString));
+        return ASRUtils::EXPR(ASR::make_StringConstant_t(al, loc, s2c(al, s), string_type));
+    }
+
+    static inline ASR::asr_t* create_Repr(Allocator& al, const Location& loc,
+            Vec<ASR::expr_t*>& args, diag::Diagnostics& diag) {
+        if (args.size() != 1) {
+            append_error(diag, "repr takes exactly 1 argument, found "
+                + std::to_string(args.size()), loc);
+            return nullptr;
+        }
+
+        std::string var_name = "it";
+        (void) is_var_like_name(args[0], var_name);
+        ASR::ttype_t* repr_type = allocatable_deferred_string();
+
+        std::string suffix = " :: " + var_name + " = ";
+        ASR::expr_t* suffix_expr = make_string_constant_expr(al, loc, suffix);
+
+        ASR::ttype_t* arg_type = ASRUtils::extract_type(ASRUtils::expr_type(args[0]));
+        std::string type_str = ASRUtils::type_to_str_with_kind(arg_type, args[0]);
+        ASR::expr_t* type_expr = make_string_constant_expr(al, loc, type_str);
+
+        ASR::expr_t* prefix_expr = ASRUtils::EXPR(ASR::make_StringConcat_t(
+            al, loc, type_expr, suffix_expr, repr_type, nullptr));
+
+        Vec<ASR::expr_t*> fmt_args; fmt_args.reserve(al, 1);
+        fmt_args.push_back(al, args[0]);
+        ASR::expr_t* value_expr = ASRUtils::EXPR(ASRUtils::make_StringFormat_t_util(
+            al, loc, nullptr, fmt_args.p, fmt_args.size(),
+            ASR::string_format_kindType::FormatFortran, repr_type, nullptr));
+
+        ASR::expr_t* repr_expr = ASRUtils::EXPR(ASR::make_StringConcat_t(
+            al, loc, prefix_expr, value_expr, repr_type, nullptr));
+        return (ASR::asr_t*) repr_expr;
+    }
+
+} // namespace Repr
 
 namespace Adjustl {
 

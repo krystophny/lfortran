@@ -24,6 +24,7 @@ inline std::string get_intrinsic_name(int64_t x) {
         INTRINSIC_NAME_CASE(TypeName)
         INTRINSIC_NAME_CASE(TypeSize)
         INTRINSIC_NAME_CASE(TypeSame)
+        INTRINSIC_NAME_CASE(Repr)
         INTRINSIC_NAME_CASE(Sin)
         INTRINSIC_NAME_CASE(Cos)
         INTRINSIC_NAME_CASE(Tan)
@@ -416,6 +417,8 @@ namespace IntrinsicElementalFunctionRegistry {
             {nullptr, &TypeSize::verify_args}},
         {static_cast<int64_t>(IntrinsicElementalFunctions::TypeSame),
             {nullptr, &TypeSame::verify_args}},
+        {static_cast<int64_t>(IntrinsicElementalFunctions::Repr),
+            {nullptr, &Repr::verify_args}},
         {static_cast<int64_t>(IntrinsicElementalFunctions::Digits),
             {&Digits::instantiate_Digits, &Digits::verify_args}},
         {static_cast<int64_t>(IntrinsicElementalFunctions::Rrspacing),
@@ -695,6 +698,7 @@ namespace IntrinsicElementalFunctionRegistry {
                 {"type_name", {&TypeName::create_TypeName, nullptr}},
                 {"type_size", {&TypeSize::create_TypeSize, nullptr}},
                 {"type_same", {&TypeSame::create_TypeSame, nullptr}},
+                {"repr", {&Repr::create_Repr, nullptr}},
                 {"digits", {&Digits::create_Digits, &Digits::eval_Digits}},
                 {"rrspacing", {&Rrspacing::create_Rrspacing, &Rrspacing::eval_Rrspacing}},
                 {"repeat", {&Repeat::create_Repeat, &Repeat::eval_Repeat}},
