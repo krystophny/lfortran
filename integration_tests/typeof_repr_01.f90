@@ -22,7 +22,7 @@ program typeof_repr_01
     if (type_name(t) /= "real(8)") error stop 5
     if (type_size(t) /= 8_8) error stop 6
     if (.not. type_same(t, t_x)) error stop 7
-    if (type_name(type_parent(t)) /= "~null_type") error stop 8
+    if (type_name(type_parent(t)) /= "") error stop 8
 
     s = repr(x)
     if (index(s, "real(8) :: x =") /= 1) error stop 2
