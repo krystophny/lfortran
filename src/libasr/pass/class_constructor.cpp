@@ -5,6 +5,7 @@
 #include <libasr/asr_verify.h>
 #include <libasr/pass/replace_class_constructor.h>
 #include <libasr/pass/pass_utils.h>
+#include <libasr/pass/intrinsic_functions.h>
 
 
 namespace LCompilers {
@@ -100,8 +101,18 @@ class StructConstructorVisitor : public ASR::CallReplacerOnExpressionsVisitor<St
                 return ;
             }
 
+            // typeid() carries a synthetic StructConstructor as a type-symbol
+            // reference. It must not be expanded by this pass.
+            if (ASR::is_a<ASR::IntrinsicElementalFunction_t>(*x.m_value) &&
+                static_cast<ASRUtils::IntrinsicElementalFunctions>(
+                    ASR::down_cast<ASR::IntrinsicElementalFunction_t>(
+                        x.m_value)->m_intrinsic_id
+                ) == ASRUtils::IntrinsicElementalFunctions::TypeId) {
+                return;
+            }
+
             ASR::ttype_t* target_type = ASRUtils::expr_type(x.m_target);
-            if (ASR::is_a<ASR::Allocatable_t>(*target_type) && 
+            if (ASR::is_a<ASR::Allocatable_t>(*target_type) &&
                     ASR::is_a<ASR::StructType_t>(*ASRUtils::extract_type(target_type))) {
                 replacer.result_var = nullptr;
             } else {

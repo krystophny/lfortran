@@ -207,7 +207,8 @@ enum class IntrinsicElementalFunctions : int64_t {
     TypeSize,
     TypeParent,
     TypeSame,
-    TypeExtends
+    TypeExtends,
+    TypeId
     // ...
 };
 
@@ -5309,6 +5310,29 @@ namespace TypeExtends {
     }
 
 } // namespace TypeExtends
+
+namespace TypeId {
+
+    static inline void verify_args(const ASR::IntrinsicElementalFunction_t& x,
+            diag::Diagnostics& diagnostics) {
+        ASRUtils::require_impl(x.n_args == 1,
+            "typeid expects exactly 1 argument",
+            x.base.base.loc, diagnostics);
+    }
+
+    static inline ASR::asr_t* create_TypeId(Allocator& al, const Location& loc,
+            Vec<ASR::expr_t*>& args, diag::Diagnostics& diag) {
+        if (args.size() != 1) {
+            append_error(diag, "typeid takes exactly 1 argument, found "
+                + std::to_string(args.size()), loc);
+            return nullptr;
+        }
+        return ASR::make_IntrinsicElementalFunction_t(al, loc,
+            static_cast<int64_t>(IntrinsicElementalFunctions::TypeId),
+            args.p, args.n, 0, TypeOf::type_info_handle_type(al, loc), nullptr);
+    }
+
+} // namespace TypeId
 
 namespace Repr {
 
