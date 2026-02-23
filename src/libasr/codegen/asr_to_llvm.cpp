@@ -332,7 +332,10 @@ public:
     }
 
     llvm::Value* load_type_info_handle_expr(ASR::expr_t* arg_expr) {
+        int64_t ptr_loads_copy = ptr_loads;
+        ptr_loads = 0;
         this->visit_expr(*arg_expr);
+        ptr_loads = ptr_loads_copy;
         llvm::Value* value = tmp;
         llvm::Type* arg_type = llvm_utils->get_type_from_ttype_t_util(
             arg_expr, ASRUtils::expr_type(arg_expr), module.get());
@@ -3680,7 +3683,7 @@ public:
                     llvm::ConstantPointerNull::get(llvm_utils->get_type_info_ptr_type()));
                 llvm_utils->create_if_else(is_null, [&]() {
                     builder->CreateStore(
-                        make_constant_type_name_descriptor("~null_type"), out_desc);
+                        make_constant_type_name_descriptor(""), out_desc);
                 }, [&]() {
                     llvm::Value* name_ptr = llvm_utils->get_type_info_name_ptr(ti_ptr);
                     llvm::Value* type_tag = builder->CreatePtrToInt(name_ptr, i64_type);
@@ -6664,6 +6667,24 @@ public:
                     uint32_t h = get_hash((ASR::asr_t*)arg);
                     std::string arg_s = arg->m_name;
                     llvm_arg.setName(arg_s);
+                    // CPtr and TypeInfo parameters are pointer-typed values
+                    // (like {i8*, i8*, i8*}*) but are passed directly as
+                    // function arguments without an alloca. All downstream
+                    // codegen (fetch_val, assignment) expects symtab entries
+                    // to be allocas it can load from. Without this, loading
+                    // through the raw arg reinterprets struct data as a
+                    // pointer, corrupting the value.
+                    ASR::ttype_t* arg_type_raw = ASRUtils::type_get_past_array(
+                        ASRUtils::type_get_past_allocatable(
+                            ASRUtils::type_get_past_pointer(arg->m_type)));
+                    if (ASR::is_a<ASR::CPtr_t>(*arg_type_raw) ||
+                            ASR::is_a<ASR::TypeInfo_t>(*arg_type_raw)) {
+                        llvm::Type* arg_llvm_type = llvm_arg.getType();
+                        llvm::AllocaInst* alloca = builder->CreateAlloca(
+                            arg_llvm_type, nullptr, arg_s + ".addr");
+                        builder->CreateStore(&llvm_arg, alloca);
+                        llvm_sym = alloca;
+                    }
                     llvm_symtab[h] = llvm_sym;
                 }
             }
