@@ -797,6 +797,23 @@ public:
         s = r;
     }
 
+    void visit_InitialName(const InitialName_t &x) {
+        std::string r;
+        r += syn(gr::String);
+        r.append("initial :: ");
+        r += syn();
+        for (size_t i = 0; i < x.n_names; i++) {
+            r.append(x.m_names[i]);
+            if (i < x.n_names - 1) r.append(", ");
+        }
+        if (x.m_trivia) {
+            r += print_trivia_after(*x.m_trivia);
+        } else {
+            r.append("\n");
+        }
+        s = r;
+    }
+
     void visit_FinalName(const FinalName_t &x) {
         std::string r;
         r += syn(gr::String);

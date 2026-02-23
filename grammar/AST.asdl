@@ -274,6 +274,7 @@ procedure_decl
     | GenericName(decl_attribute* attr, identifier name, identifier* names, trivia? trivia)
     | GenericWrite(decl_attribute* attr, identifier id, identifier* names, trivia? trivia)
     | GenericRead(decl_attribute* attr, identifier id, identifier* names, trivia? trivia)
+    | InitialName(identifier* names, trivia? trivia)
     | FinalName(identifier name, trivia? trivia)
     | Private(trivia? trivia)
 

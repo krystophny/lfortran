@@ -2364,6 +2364,7 @@ public:
         this->visit_expr(*(x.m_value));
         ASR::expr_t* value = ASRUtils::EXPR(tmp);
         ASR::ttype_t* value_type = ASRUtils::expr_type(value);
+        tmp = nullptr;
         bool is_target_pointer = ASRUtils::is_pointer(target_type);
         if (ASR::is_a<ASR::ArraySection_t>(*target)) {
             ASR::ArraySection_t* array_section = ASR::down_cast<ASR::ArraySection_t>(target);
@@ -2396,8 +2397,22 @@ public:
             if (ASRUtils::is_derived_type_similar(target_struct, value_struct)) {
                 tmp = ASRUtils::make_Associate_t_util(al, x.base.base.loc, target, value);
             }
+        } else if (ASR::is_a<ASR::FunctionType_t>(*target_type) &&
+                   ASR::is_a<ASR::FunctionType_t>(*value_type)) {
+            tmp = ASRUtils::make_Associate_t_util(al, x.base.base.loc, target, value);
+        } else if (ASR::is_a<ASR::FunctionType_t>(*ASRUtils::type_get_past_pointer(target_type)) &&
+                   ASR::is_a<ASR::StructStaticMember_t>(*value)) {
+            tmp = ASRUtils::make_Associate_t_util(al, x.base.base.loc, target, value);
         } else if (ASRUtils::types_equal(target_type, value_type, target, value)) {
             tmp = ASRUtils::make_Associate_t_util(al, x.base.base.loc, target, value);
+        }
+        if (tmp == nullptr) {
+            diag.add(Diagnostic(
+                "Incompatible pointer association",
+                Level::Error, Stage::Semantic, {
+                    Label("", {x.base.base.loc})
+                }));
+            throw SemanticAbort();
         }
     }
 

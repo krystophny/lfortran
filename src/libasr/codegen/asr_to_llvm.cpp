@@ -12287,6 +12287,21 @@ public:
                 }
             break;
             }
+            case ASR::symbolType::StructMethodDeclaration: {
+                ASR::StructMethodDeclaration_t *method
+                    = ASR::down_cast<ASR::StructMethodDeclaration_t>(x_m_v);
+                ASR::symbol_t *proc = ASRUtils::symbol_get_past_external(method->m_proc);
+                const uint32_t h = get_hash((ASR::asr_t*)proc);
+                if (llvm_symtab_fn_arg.find(h) != llvm_symtab_fn_arg.end()) {
+                    tmp = llvm_symtab_fn_arg[h];
+                } else if (llvm_symtab_fn.find(h) != llvm_symtab_fn.end()) {
+                    tmp = llvm_symtab_fn[h];
+                } else {
+                    throw CodeGenError(std::string("Can't resolve var to Function '")
+                        + ASRUtils::symbol_name(proc) + "'");
+                }
+            break;
+            }
             default: {
                 throw CodeGenError("Only function and variables supported so far");
             }

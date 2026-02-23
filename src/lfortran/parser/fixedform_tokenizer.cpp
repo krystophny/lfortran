@@ -183,6 +183,7 @@ const std::unordered_map<std::string, yytokentype> identifiers_map = {
     {"import", KW_IMPORT},
     {"impure", KW_IMPURE},
     {"in", KW_IN},
+    {"initial", KW_INITIAL},
     {"include", KW_INCLUDE},
     {"inout", KW_INOUT},
     {"in_out", KW_IN_OUT},
