@@ -37,6 +37,16 @@ class ReplaceStructConstructor: public ASR::BaseExprReplacer<ReplaceStructConstr
             x, this, false, remove_original_statement, result_vec, false,
         ASR::cast_kindType::IntegerToInteger, nullptr, realloc_lhs);
     }
+
+    // typeid() carries a synthetic StructConstructor as a type-symbol
+    // reference. Do not descend into its arguments.
+    void replace_IntrinsicElementalFunction(ASR::IntrinsicElementalFunction_t* x) {
+        if (static_cast<ASRUtils::IntrinsicElementalFunctions>(x->m_intrinsic_id)
+                == ASRUtils::IntrinsicElementalFunctions::TypeId) {
+            return;
+        }
+        BaseExprReplacer::replace_IntrinsicElementalFunction(x);
+    }
 };
 
 class StructConstructorVisitor : public ASR::CallReplacerOnExpressionsVisitor<StructConstructorVisitor>
@@ -94,21 +104,25 @@ class StructConstructorVisitor : public ASR::CallReplacerOnExpressionsVisitor<St
             // Do nothing, already handled in init_expr pass
         }
 
+        // typeid() carries a synthetic StructConstructor as a type-symbol
+        // reference. Skip any expression tree rooted at a TypeId intrinsic.
+        void visit_IntrinsicElementalFunction(
+                const ASR::IntrinsicElementalFunction_t& x) {
+            if (static_cast<ASRUtils::IntrinsicElementalFunctions>(
+                    x.m_intrinsic_id)
+                    == ASRUtils::IntrinsicElementalFunctions::TypeId) {
+                return;
+            }
+            ASR::CallReplacerOnExpressionsVisitor<
+                StructConstructorVisitor>::
+                    visit_IntrinsicElementalFunction(x);
+        }
+
         void visit_Assignment(const ASR::Assignment_t &x) {
             if (x.m_overloaded) {
                 this->visit_stmt(*x.m_overloaded);
                 remove_original_statement = false;
                 return ;
-            }
-
-            // typeid() carries a synthetic StructConstructor as a type-symbol
-            // reference. It must not be expanded by this pass.
-            if (ASR::is_a<ASR::IntrinsicElementalFunction_t>(*x.m_value) &&
-                static_cast<ASRUtils::IntrinsicElementalFunctions>(
-                    ASR::down_cast<ASR::IntrinsicElementalFunction_t>(
-                        x.m_value)->m_intrinsic_id
-                ) == ASRUtils::IntrinsicElementalFunctions::TypeId) {
-                return;
             }
 
             ASR::ttype_t* target_type = ASRUtils::expr_type(x.m_target);
