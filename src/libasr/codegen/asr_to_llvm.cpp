@@ -339,10 +339,19 @@ public:
         llvm::Value* value = tmp;
         llvm::Type* arg_type = llvm_utils->get_type_from_ttype_t_util(
             arg_expr, ASRUtils::expr_type(arg_expr), module.get());
-        if ((ASR::is_a<ASR::Var_t>(*arg_expr)
-             || ASR::is_a<ASR::StructInstanceMember_t>(*arg_expr))
-            && value->getType() != arg_type) {
+        bool is_lvalue_expr = ASR::is_a<ASR::Var_t>(*arg_expr)
+            || ASR::is_a<ASR::StructInstanceMember_t>(*arg_expr);
+        if (is_lvalue_expr) {
+#if LLVM_VERSION_MAJOR >= 15
+            // With opaque pointers, both "ptr to TypeInfo value" and
+            // "TypeInfo value" appear as `ptr`, so type comparison cannot
+            // detect whether we still need one load.
             value = llvm_utils->CreateLoad2(arg_type, value);
+#else
+            if (value->getType() != arg_type) {
+                value = llvm_utils->CreateLoad2(arg_type, value);
+            }
+#endif
         }
         return cast_to_type_info_ptr(value);
     }
@@ -6667,18 +6676,21 @@ public:
                     uint32_t h = get_hash((ASR::asr_t*)arg);
                     std::string arg_s = arg->m_name;
                     llvm_arg.setName(arg_s);
-                    // CPtr and TypeInfo parameters are pointer-typed values
-                    // (like {i8*, i8*, i8*}*) but are passed directly as
-                    // function arguments without an alloca. All downstream
-                    // codegen (fetch_val, assignment) expects symtab entries
-                    // to be allocas it can load from. Without this, loading
-                    // through the raw arg reinterprets struct data as a
-                    // pointer, corrupting the value.
+                    // TypeInfo parameters are pointer-typed values
+                    // ({i8*, i8*, i8*}*) but can be passed directly as
+                    // function arguments without an alloca. Downstream
+                    // codegen paths often expect a memory slot in llvm_symtab.
+                    //
+                    // For CPtr dummies, keep pass-by-value arguments as raw
+                    // values because fetch_val() handles them specially and
+                    // intentionally avoids an extra load.
                     ASR::ttype_t* arg_type_raw = ASRUtils::type_get_past_array(
                         ASRUtils::type_get_past_allocatable(
                             ASRUtils::type_get_past_pointer(arg->m_type)));
-                    if (ASR::is_a<ASR::CPtr_t>(*arg_type_raw) ||
-                            ASR::is_a<ASR::TypeInfo_t>(*arg_type_raw)) {
+                    bool needs_cptr_slot = ASR::is_a<ASR::CPtr_t>(*arg_type_raw) &&
+                        !is_cptr_dummy_passed_by_value(arg);
+                    bool needs_type_info_slot = ASR::is_a<ASR::TypeInfo_t>(*arg_type_raw);
+                    if (needs_cptr_slot || needs_type_info_slot) {
                         llvm::Type* arg_llvm_type = llvm_arg.getType();
                         llvm::AllocaInst* alloca = builder->CreateAlloca(
                             arg_llvm_type, nullptr, arg_s + ".addr");
