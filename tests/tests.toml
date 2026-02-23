@@ -1509,6 +1509,10 @@ filename = "internal_proc_ptr_host_assoc_01.f90"
 run = true
 
 [[test]]
+filename = "internal_proc_ptr_host_assoc_02.f90"
+run = true
+
+[[test]]
 filename = "../integration_tests/modules_01.f90"
 ast = true
 asr = true
