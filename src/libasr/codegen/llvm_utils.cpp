@@ -8943,9 +8943,9 @@ llvm::Value* LLVMUtils::handle_global_nonallocatable_stringArray(Allocator& al, 
         std::vector<llvm::Constant*> type_info_member_values;
         type_info_member_values.reserve(3); // A type-info object has 3 members.
 
-        // Intrinsic type ttype number + kind (used as a unique tag)
+        // Intrinsic type ttype number * 16 + kind (used as a unique tag)
         type_info_member_values.push_back(llvm::ConstantExpr::getIntToPtr(
-            llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), (int) ttype->type + kind),
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), (int) ttype->type * 16 + kind),
             llvm_utils->i8_ptr));
 
         llvm::Type* llvm_type = llvm_utils->get_type_from_ttype_t_util(nullptr, ttype, module);

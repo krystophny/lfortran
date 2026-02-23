@@ -320,7 +320,7 @@ public:
     };
 
     static int64_t get_intrinsic_type_tag(ASR::ttypeType type, int kind) {
-        return static_cast<int64_t>(static_cast<int>(type) + kind);
+        return static_cast<int64_t>(static_cast<int>(type)) * 16 + kind;
     }
 
     llvm::Value* cast_to_type_info_ptr(llvm::Value* value) {
