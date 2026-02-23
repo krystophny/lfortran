@@ -12131,8 +12131,7 @@ public:
                     diag::Label("", {loc})}));
             throw SemanticAbort();
         }
-        type_sym = ASRUtils::symbol_get_past_external(type_sym);
-        if (!ASR::is_a<ASR::Struct_t>(*type_sym)) {
+        if (!ASR::is_a<ASR::Struct_t>(*ASRUtils::symbol_get_past_external(type_sym))) {
             diag.add(diag::Diagnostic(
                 "typeid() argument must be a derived type name",
                 diag::Level::Error, diag::Stage::Semantic, {
