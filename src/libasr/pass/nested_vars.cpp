@@ -939,6 +939,17 @@ public:
     bool calls_present = false;
     bool calls_in_loop_condition = false;
 
+    bool is_procedure_variable_symbol(ASR::symbol_t *sym) {
+        ASR::symbol_t *sym_past = ASRUtils::symbol_get_past_external(sym);
+        if (!ASR::is_a<ASR::Variable_t>(*sym_past)) {
+            return false;
+        }
+        ASR::ttype_t *sym_type = ASRUtils::symbol_type(sym_past);
+        sym_type = ASRUtils::type_get_past_pointer(
+            ASRUtils::type_get_past_allocatable(sym_type));
+        return ASR::is_a<ASR::FunctionType_t>(*sym_type);
+    }
+
     void mark_nested_procedure_arg(ASR::expr_t *arg_expr) {
         if (!arg_expr) {
             return;
@@ -1314,7 +1325,9 @@ public:
     }
 
     void visit_FunctionCall(const ASR::FunctionCall_t &x) {
-        calls_present = calls_present || is_nested_call_symbol(current_scope, x.m_name);
+        calls_present = calls_present ||
+                        is_nested_call_symbol(current_scope, x.m_name) ||
+                        is_procedure_variable_symbol(x.m_name);
         for (size_t i=0; i<x.n_args; i++) {
             mark_nested_procedure_arg(x.m_args[i].m_value);
             visit_call_arg(x.m_args[i]);
@@ -1327,13 +1340,22 @@ public:
     }
 
     void visit_SubroutineCall(const ASR::SubroutineCall_t &x) {
-        calls_present = calls_present || is_nested_call_symbol(current_scope, x.m_name);
+        calls_present = calls_present ||
+                        is_nested_call_symbol(current_scope, x.m_name) ||
+                        is_procedure_variable_symbol(x.m_name);
         for (size_t i=0; i<x.n_args; i++) {
             mark_nested_procedure_arg(x.m_args[i].m_value);
             visit_call_arg(x.m_args[i]);
         }
         if (x.m_dt)
             visit_expr(*x.m_dt);
+    }
+
+    void visit_Associate(const ASR::Associate_t &x) {
+        if (ASR::is_a<ASR::FunctionType_t>(*ASRUtils::expr_type(x.m_target))) {
+            mark_nested_procedure_arg(x.m_value);
+        }
+        PassUtils::PassVisitor<AssignNestedVars>::visit_Associate(x);
     }
 
     void visit_Array(const ASR::Array_t& /*x*/) {

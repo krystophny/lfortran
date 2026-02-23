@@ -2380,24 +2380,6 @@ public:
                 }));
             throw SemanticAbort();
         }
-        if (ASR::is_a<ASR::FunctionType_t>(*target_type) &&
-            ASR::is_a<ASR::Var_t>(*value)) {
-            ASR::symbol_t* value_sym = ASR::down_cast<ASR::Var_t>(value)->m_v;
-            ASR::symbol_t* value_sym_unwrapped = ASRUtils::symbol_get_past_external(value_sym);
-            if (ASR::is_a<ASR::Function_t>(*value_sym_unwrapped) &&
-                ASRUtils::symbol_parent_symtab(value_sym_unwrapped) == current_scope &&
-                current_scope->asr_owner != nullptr &&
-                ASR::is_a<ASR::symbol_t>(*current_scope->asr_owner) &&
-                ASR::is_a<ASR::Function_t>(*ASR::down_cast<ASR::symbol_t>(current_scope->asr_owner))) {
-                diag.add(Diagnostic(
-                    "Internal procedures cannot be assigned to procedure pointers yet",
-                    Level::Error, Stage::Semantic, {
-                        Label("",{x.base.base.loc})
-                    }));
-                throw SemanticAbort();
-            }
-        }
-
         if (ASR::is_a<ASR::StructType_t>(*ASRUtils::extract_type(target_type))
             && ASR::is_a<ASR::StructType_t>(*ASRUtils::extract_type(value_type))) {
             ASR::Struct_t* target_struct = ASR::down_cast<ASR::Struct_t>(
