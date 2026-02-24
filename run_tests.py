@@ -21,10 +21,15 @@ def single_test(test: Dict, verbose: bool, no_llvm: bool, skip_run_with_dbg: boo
                 update_reference: bool, verify_hash: bool,
                 no_color: bool, specific_backends=None,
                 excluded_backends=None) -> None:
+    effective_excluded = set(excluded_backends or [])
+    # The implicit-interface LLVM lane is semantically part of the LLVM backend family.
+    if "llvm" in effective_excluded:
+        effective_excluded.add("asr_implicit_interface_and_typing_with_llvm")
+
     def is_included(backend):
         return test.get(backend, False) \
             and (specific_backends is None or backend in specific_backends) \
-            and (excluded_backends is None or backend not in excluded_backends)
+            and backend not in effective_excluded
 
     filename = test["filename"]
     show_verbose = "" if not verbose else "-v"
