@@ -75,5 +75,21 @@ jobs:
           export LFORTRAN_LINKER=gcc
           export LFORTRAN_NO_LINK_MODE=1
           cd integration_tests
+          set +e
           ./run_tests.py -b llvm --ninja -j1
+          rc1=$?
           ./run_tests.py -b llvm -f -nf16 --ninja -j1
+          rc2=$?
+          set -e
+          rc=$((rc1 | rc2))
+          if [ "$rc" -ne 0 ]; then
+            if command -v gdb >/dev/null 2>&1; then
+              for t in select_type_28 class_116 class_118; do
+                if [ -x "test-llvm/$t" ]; then
+                  echo "=== gdb backtrace for $t ==="
+                  gdb -q -batch -ex run -ex "bt full" --args "test-llvm/$t" || true
+                fi
+              done
+            fi
+            exit "$rc"
+          fi
