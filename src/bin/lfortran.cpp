@@ -3067,14 +3067,6 @@ int main_app(int argc, char *argv[]) {
 
 #if defined(HAVE_LFORTRAN_LLVM) && defined(WITH_LIRIC)
     if (backend == Backend::llvm) {
-        if (opts.static_link || opts.shared_link ||
-            !opts.arg_L.empty() || !opts.arg_l.empty() ||
-            !opts.linker_flags.empty()) {
-            std::cerr << "WITH_LIRIC AOT no-link mode ignoring external linker flags "
-                         "(-static/-shared, -L/-l, and linker options)."
-                      << std::endl;
-        }
-
         liric_configure_runtime_lib_env(runtime_library_dir);
 
         int no_link_rc = 0;
@@ -3185,13 +3177,6 @@ int main_app(int argc, char *argv[]) {
                     return LCompilers::LFortran::get_exit_status(run_err);
                 }
             }
-        }
-        if (compiler_options.time_report) {
-            auto end_time = std::chrono::high_resolution_clock::now();
-            int total_time = std::chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
-            std::string message = "Total time: " + std::to_string(total_time / 1000) + "." + std::to_string(total_time % 1000) + " ms";
-            compiler_options.po.vector_of_time_report.push_back(message);
-            print_time_report(compiler_options.po.vector_of_time_report);
         }
         return 0;
     }
