@@ -346,6 +346,7 @@ static int liric_emit_executable_from_object_sidecars(
     lc_context_t *ctx = nullptr;
     lc_module_compat_t *mod = nullptr;
     int imported_blob_count = 0;
+    int merged_ll_count = 0;
     int rc = 0;
 
     if (object_files.empty()) {
@@ -385,6 +386,7 @@ static int liric_emit_executable_from_object_sidecars(
                 rc = 10;
                 break;
             }
+            merged_ll_count++;
         }
         if (!liric_read_bytes_file(blob_path, blob_bytes)) {
             std::cerr << "WITH_LIRIC AOT no-link mode requires sidecar blob package: "
@@ -405,7 +407,7 @@ static int liric_emit_executable_from_object_sidecars(
         imported_blob_count++;
     }
 
-    if (rc == 0 && imported_blob_count == 0) {
+    if (rc == 0 && imported_blob_count == 0 && merged_ll_count == 0) {
         std::cerr << "WITH_LIRIC AOT no-link mode found only empty object sidecars; "
                      "no executable code to emit." << std::endl;
         rc = 10;
