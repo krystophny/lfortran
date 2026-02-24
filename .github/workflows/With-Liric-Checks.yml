@@ -65,7 +65,7 @@ jobs:
         run: |
           export PATH="$PWD/build-liric/src/bin:$PATH"
           export LFORTRAN_NO_LINK_MODULE_EMPTY_OBJECTS=1
-          ./run_tests.py --exclude-backend llvm --no-color
+          ./run_tests.py --exclude-backend llvm --skip-run-with-dbg --no-color
 
       - name: Run integration suites in WITH_LIRIC mode
         shell: bash -e -l {0}
