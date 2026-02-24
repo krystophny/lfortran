@@ -21,7 +21,7 @@ jobs:
       - uses: mamba-org/setup-micromamba@v2.0.2
         with:
           micromamba-version: "2.0.4-0"
-          environment-file: ci/environment_linux.yml
+          environment-file: ci/environment.yml
           create-args: >-
             python=3.10
             llvmdev=21
@@ -41,7 +41,7 @@ jobs:
       - name: Fetch and build liric
         shell: bash -e -l {0}
         run: |
-          git clone --depth 1 https://github.com/krystophny/liric.git /tmp/liric
+          git clone --depth 1 --branch fix/lfortran-runtime-exe-emission https://github.com/krystophny/liric.git /tmp/liric
           cmake -S /tmp/liric -B /tmp/liric/build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build /tmp/liric/build -j"$(nproc)"
 
