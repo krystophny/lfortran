@@ -3168,8 +3168,10 @@ int main_app(int argc, char *argv[]) {
         }
 
         if (no_link_rc != 0) {
-            std::cerr << "WITH_LIRIC AOT no-link executable emission failed. "
-                         "Refusing linker fallback." << std::endl;
+            if (no_link_rc == 10) {
+                std::cerr << "WITH_LIRIC AOT no-link executable emission failed. "
+                             "Refusing linker fallback." << std::endl;
+            }
             return no_link_rc;
         }
         int run_err = 0;
