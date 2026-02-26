@@ -297,6 +297,10 @@ namespace CUtils {
                 type_src = "void*";
                 break;
             }
+            case ASR::ttypeType::TypeInfo: {
+                type_src = "lfortran_type_info*";
+                break;
+            }
             case ASR::ttypeType::StructType: {
                 // TODO: StructType
                 // ASR::StructType_t* der_type = ASR::down_cast<ASR::StructType_t>(t);
@@ -511,6 +515,9 @@ class CCPPDSUtils {
                     return "%s";
                 }
                 case ASR::ttypeType::CPtr: {
+                    return "%p";
+                }
+                case ASR::ttypeType::TypeInfo: {
                     return "%p";
                 }
                 case ASR::ttypeType::Complex: {

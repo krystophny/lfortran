@@ -339,6 +339,9 @@ static inline int extract_kind_from_ttype_t(const ASR::ttype_t* type) {
         case ASR::ttypeType::StructType: {
             return 4;
         }
+        case ASR::ttypeType::TypeInfo: {
+            return 8;
+        }
         default : {
             return -1;
         }
@@ -962,6 +965,9 @@ static inline std::string type_to_str_fortran_symbol(const ASR::ttype_t* t,
         }
         case ASR::ttypeType::CPtr: {
             return "type(c_ptr)";
+        }
+        case ASR::ttypeType::TypeInfo: {
+            return "type(type_info)";
         }
         case ASR::ttypeType::SymbolicExpression: {
             return "type(symbolic)";
@@ -2091,6 +2097,9 @@ static inline std::string get_type_code(const ASR::ttype_t *t, bool use_undersco
         case ASR::ttypeType::CPtr: {
             return "CPtr";
         }
+        case ASR::ttypeType::TypeInfo: {
+            return "TypeInfo";
+        }
         case ASR::ttypeType::StructType: {
             // TODO: StructType
             // ASR::StructType_t* d = ASR::down_cast<ASR::StructType_t>(t);
@@ -2251,6 +2260,9 @@ static inline std::string type_to_str_python_symbol(const ASR::ttype_t *t, ASR::
         }
         case ASR::ttypeType::CPtr: {
             return "CPtr";
+        }
+        case ASR::ttypeType::TypeInfo: {
+            return "TypeInfo";
         }
         case ASR::ttypeType::StructType: {
             return ASRUtils::symbol_name(struct_sym);
@@ -2851,6 +2863,7 @@ inline size_t extract_dimensions_from_ttype(ASR::ttype_t *x,
         case ASR::ttypeType::Dict:
         case ASR::ttypeType::Set:
         case ASR::ttypeType::CPtr:
+        case ASR::ttypeType::TypeInfo:
         case ASR::ttypeType::TypeParameter:
         case ASR::ttypeType::FunctionType: {
             n_dims = 0;
@@ -3414,6 +3427,9 @@ static inline ASR::ttype_t* duplicate_type(Allocator& al, const ASR::ttype_t* t,
             ASR::CPtr_t* ptr = ASR::down_cast<ASR::CPtr_t>(t);
             return ASRUtils::TYPE(ASR::make_CPtr_t(al, ptr->base.base.loc));
         }
+        case ASR::ttypeType::TypeInfo: {
+            return ASRUtils::TYPE(ASR::make_TypeInfo_t(al, t->base.loc));
+        }
         case ASR::ttypeType::List: {
             ASR::List_t* l = ASR::down_cast<ASR::List_t>(t);
             ASR::ttype_t* dup_type = duplicate_type(al, l->m_type);
@@ -3694,6 +3710,9 @@ static inline ASR::ttype_t* duplicate_type_without_dims(Allocator& al, const ASR
         }
         case ASR::ttypeType::CPtr: {
             return ASRUtils::TYPE(ASR::make_CPtr_t(al, loc));
+        }
+        case ASR::ttypeType::TypeInfo: {
+            return ASRUtils::TYPE(ASR::make_TypeInfo_t(al, loc));
         }
         default : throw LCompilersException("Not implemented " + std::to_string(t->type));
     }
@@ -4151,6 +4170,9 @@ inline bool types_equal(ASR::ttype_t *a, ASR::ttype_t *b, ASR::expr_t* a_expr, A
             case ASR::ttypeType::CPtr: {
                 return true;
             }
+            case ASR::ttypeType::TypeInfo: {
+                return true;
+            }
             case ASR::ttypeType::SymbolicExpression: {
                 return true;
             }
@@ -4342,6 +4364,9 @@ inline bool types_equal_with_substitution(ASR::ttype_t *a, ASR::ttype_t *b,
                 return (a2->m_kind == b2->m_kind);
             }
             case ASR::ttypeType::CPtr: {
+                return true;
+            }
+            case ASR::ttypeType::TypeInfo: {
                 return true;
             }
             case ASR::ttypeType::SymbolicExpression: {
@@ -7649,7 +7674,8 @@ static inline bool is_simd_array(ASR::expr_t *v) {
 
 static inline bool is_argument_of_type_CPtr(ASR::expr_t *var) {
     bool is_argument = false;
-    if (ASR::is_a<ASR::CPtr_t>(*expr_type(var))) {
+    if (ASR::is_a<ASR::CPtr_t>(*expr_type(var)) ||
+        ASR::is_a<ASR::TypeInfo_t>(*expr_type(var))) {
         if (ASR::is_a<ASR::Var_t>(*var)) {
             ASR::symbol_t *var_sym = ASR::down_cast<ASR::Var_t>(var)->m_v;
             if (ASR::is_a<ASR::Variable_t>(*var_sym)) {

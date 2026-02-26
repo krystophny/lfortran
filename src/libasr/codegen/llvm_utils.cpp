@@ -150,11 +150,46 @@ namespace LCompilers {
             llvm::PointerType *fnPtrTy = llvm::PointerType::get(fnTy, 0);
             llvm::PointerType *fnPtrPtrTy = llvm::PointerType::get(fnPtrTy, 0);
             vptr_type = fnPtrPtrTy;  // i32 (...)**
+            type_info_type = llvm::StructType::get(context, {i8_ptr, i8_ptr, i8_ptr}, false);
             fnTy = llvm::FunctionType::get(
                 llvm::Type::getVoidTy(context), {character_type, character_type}, false);
             struct_copy_functype = fnTy;  // void (i8*, i8*)
             string_descriptor = llvm::StructType::create(context,string_descriptor_members, "string_descriptor", true);
         }
+
+    llvm::StructType* LLVMUtils::get_type_info_type() {
+        return type_info_type;
+    }
+
+    llvm::PointerType* LLVMUtils::get_type_info_ptr_type() {
+        return type_info_type->getPointerTo();
+    }
+
+    llvm::Value* LLVMUtils::get_type_info_name_ptr(llvm::Value* type_info_ptr) {
+        if (type_info_ptr->getType() != get_type_info_ptr_type()) {
+            type_info_ptr = builder->CreateBitCast(type_info_ptr, get_type_info_ptr_type());
+        }
+        llvm::Value* name_ptr = create_gep2(type_info_type, type_info_ptr, 0);
+        return CreateLoad2(i8_ptr, name_ptr);
+    }
+
+    llvm::Value* LLVMUtils::get_type_info_size(llvm::Value* type_info_ptr) {
+        if (type_info_ptr->getType() != get_type_info_ptr_type()) {
+            type_info_ptr = builder->CreateBitCast(type_info_ptr, get_type_info_ptr_type());
+        }
+        llvm::Value* size_ptr = create_gep2(type_info_type, type_info_ptr, 1);
+        llvm::Value* size_i8 = CreateLoad2(i8_ptr, size_ptr);
+        return builder->CreatePtrToInt(size_i8, llvm::Type::getInt64Ty(context));
+    }
+
+    llvm::Value* LLVMUtils::get_type_info_parent(llvm::Value* type_info_ptr) {
+        if (type_info_ptr->getType() != get_type_info_ptr_type()) {
+            type_info_ptr = builder->CreateBitCast(type_info_ptr, get_type_info_ptr_type());
+        }
+        llvm::Value* parent_ptr = create_gep2(type_info_type, type_info_ptr, 2);
+        llvm::Value* parent_i8 = CreateLoad2(i8_ptr, parent_ptr);
+        return builder->CreateBitCast(parent_i8, get_type_info_ptr_type());
+    }
 
     llvm::Value* LLVMUtils::lfortran_free(llvm::Value* ptr) {
         std::string func_name = "_lfortran_free";
@@ -254,6 +289,10 @@ namespace LCompilers {
             }
             case ASR::ttypeType::CPtr: {
                 llvm_mem_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                break;
+            }
+            case ASR::ttypeType::TypeInfo: {
+                llvm_mem_type = get_type_info_ptr_type();
                 break;
             }
             default:
@@ -504,6 +543,10 @@ namespace LCompilers {
             }
             case ASR::ttypeType::CPtr: {
                 el_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                break;
+            }
+            case ASR::ttypeType::TypeInfo: {
+                el_type = get_type_info_ptr_type();
                 break;
             }
             case ASR::ttypeType::StructType: {
@@ -839,6 +882,10 @@ namespace LCompilers {
                 type = llvm::Type::getVoidTy(context)->getPointerTo();
                 break;
             }
+            case (ASR::ttypeType::TypeInfo) : {
+                type = get_type_info_ptr_type();
+                break;
+            }
             case (ASR::ttypeType::Tuple) : {
                 type = get_type_from_ttype_t_util(arg_expr, asr_type, module)->getPointerTo();
                 break;
@@ -1019,7 +1066,8 @@ namespace LCompilers {
                 if( (arg->m_intent == ASRUtils::intent_out ||
                      arg->m_intent == ASRUtils::intent_inout ||
                      (arg->m_intent == ASRUtils::intent_unspecified && !arg->m_value_attr)) &&
-                    ASR::is_a<ASR::CPtr_t>(*arg->m_type) ) {
+                    (ASR::is_a<ASR::CPtr_t>(*arg->m_type) ||
+                     ASR::is_a<ASR::TypeInfo_t>(*arg->m_type)) ) {
                     type = type->getPointerTo();
                 }
                 std::uint32_t m_h;
@@ -1117,6 +1165,9 @@ namespace LCompilers {
                     break;
                 case (ASR::ttypeType::CPtr) :
                     return_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                    break;
+                case (ASR::ttypeType::TypeInfo) :
+                    return_type = get_type_info_ptr_type();
                     break;
                 case (ASR::ttypeType::Pointer) : {
                     return_type = get_type_from_ttype_t_util(x.m_return_var, ASRUtils::get_contained_type(return_var_type0), module)->getPointerTo();
@@ -1467,6 +1518,11 @@ namespace LCompilers {
             case (ASR::ttypeType::CPtr) : {
                 a_kind = 8;
                 llvm_type = llvm::Type::getVoidTy(context)->getPointerTo();
+                break;
+            }
+            case (ASR::ttypeType::TypeInfo) : {
+                a_kind = 8;
+                llvm_type = get_type_info_ptr_type();
                 break;
             }
             case (ASR::ttypeType::EnumType) : {
@@ -3108,6 +3164,10 @@ llvm::Value* LLVMUtils::handle_global_nonallocatable_stringArray(Allocator& al, 
                 break;
             case ASR::ttypeType::FunctionType:
             case ASR::ttypeType::CPtr: {
+                LLVM::CreateStore(*builder, src, dest);
+                break ;
+            }
+            case ASR::ttypeType::TypeInfo: {
                 LLVM::CreateStore(*builder, src, dest);
                 break ;
             }
@@ -8883,9 +8943,9 @@ llvm::Value* LLVMUtils::handle_global_nonallocatable_stringArray(Allocator& al, 
         std::vector<llvm::Constant*> type_info_member_values;
         type_info_member_values.reserve(3); // A type-info object has 3 members.
 
-        // Intrinsic type ttype number + kind (used as a unique tag)
+        // Intrinsic type ttype number * 16 + kind (used as a unique tag)
         type_info_member_values.push_back(llvm::ConstantExpr::getIntToPtr(
-            llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), (int) ttype->type + kind),
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(context), (int) ttype->type * 16 + kind),
             llvm_utils->i8_ptr));
 
         llvm::Type* llvm_type = llvm_utils->get_type_from_ttype_t_util(nullptr, ttype, module);
@@ -8898,7 +8958,7 @@ llvm::Value* LLVMUtils::handle_global_nonallocatable_stringArray(Allocator& al, 
         type_info_member_values.push_back(llvm::ConstantPointerNull::get(llvm_utils->i8_ptr));
 
         llvm::StructType* type_info_struct_type = llvm::StructType::get(context, type_info_member_types, false);
-        
+
         llvm::Constant* type_info_init = llvm::ConstantStruct::get(
             type_info_struct_type, type_info_member_values);
 
@@ -9045,7 +9105,7 @@ llvm::Value* LLVMUtils::handle_global_nonallocatable_stringArray(Allocator& al, 
         }
 
         llvm::StructType* type_info_struct_type = llvm::StructType::get(context, type_info_member_types, false);
-        
+
         llvm::Constant* type_info_init = llvm::ConstantStruct::get(
             type_info_struct_type, type_info_member_values);
 
