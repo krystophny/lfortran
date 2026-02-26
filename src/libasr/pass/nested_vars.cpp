@@ -993,23 +993,64 @@ public:
     std::map<ASR::symbol_t*, std::pair<std::string, ASR::symbol_t*>> &nested_var_to_ext_var;
     std::map<ASR::symbol_t*, std::set<ASR::symbol_t*>> &nesting_map;
     std::map<ASR::symbol_t*, ASR::symbol_t*> module_var_to_external;
+    std::set<ASR::symbol_t*> nested_proc_pointer_vars;
 
     ASR::symbol_t *cur_func_sym = nullptr;
     bool calls_present = false;
     bool calls_in_loop_condition = false;
 
-    void mark_nested_procedure_arg(ASR::expr_t *arg_expr) {
-        if (!arg_expr) {
+    ASR::symbol_t* get_var_symbol_from_expr(ASR::expr_t *expr) {
+        if (!expr) {
+            return nullptr;
+        }
+        if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*expr)) {
+            expr = ASR::down_cast<ASR::ArrayPhysicalCast_t>(expr)->m_arg;
+        }
+        if (!ASR::is_a<ASR::Var_t>(*expr)) {
+            return nullptr;
+        }
+        return ASRUtils::symbol_get_past_external(ASR::down_cast<ASR::Var_t>(expr)->m_v);
+    }
+
+    bool is_tracked_nested_proc_pointer_var(ASR::symbol_t *sym) {
+        if (!sym) {
+            return false;
+        }
+        sym = ASRUtils::symbol_get_past_external(sym);
+        return nested_proc_pointer_vars.find(sym) != nested_proc_pointer_vars.end();
+    }
+
+    bool is_nested_procedure_value(ASR::expr_t *expr) {
+        ASR::symbol_t *sym = get_var_symbol_from_expr(expr);
+        if (!sym) {
+            return false;
+        }
+        return is_nested_call_symbol(current_scope, sym);
+    }
+
+    void update_nested_proc_pointer_tracking(const ASR::Associate_t &x) {
+        if (!ASR::is_a<ASR::FunctionType_t>(*ASRUtils::expr_type(x.m_target))) {
             return;
         }
-        if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*arg_expr)) {
-            arg_expr = ASR::down_cast<ASR::ArrayPhysicalCast_t>(arg_expr)->m_arg;
+        ASR::symbol_t *target_sym = get_var_symbol_from_expr(x.m_target);
+        if (!target_sym) {
+            return;
         }
-        if (ASR::is_a<ASR::Var_t>(*arg_expr)) {
-            ASR::Var_t *var = ASR::down_cast<ASR::Var_t>(arg_expr);
-            if (is_nested_call_symbol(current_scope, var->m_v)) {
-                calls_present = true;
-            }
+        ASR::symbol_t *value_sym = get_var_symbol_from_expr(x.m_value);
+        bool track_target = is_nested_procedure_value(x.m_value) ||
+            (value_sym && is_tracked_nested_proc_pointer_var(value_sym));
+        if (track_target) {
+            nested_proc_pointer_vars.insert(target_sym);
+        } else {
+            nested_proc_pointer_vars.erase(target_sym);
+        }
+    }
+
+    void mark_nested_procedure_arg(ASR::expr_t *arg_expr) {
+        ASR::symbol_t *arg_sym = get_var_symbol_from_expr(arg_expr);
+        if (arg_sym && (is_nested_call_symbol(current_scope, arg_sym) ||
+                        is_tracked_nested_proc_pointer_var(arg_sym))) {
+            calls_present = true;
         }
     }
 
@@ -1291,6 +1332,8 @@ public:
         ASR::Function_t &xx = const_cast<ASR::Function_t&>(x);
         SymbolTable* current_scope_copy = current_scope;
         ASR::symbol_t *sym_copy = cur_func_sym;
+        std::set<ASR::symbol_t*> nested_proc_pointer_vars_copy = nested_proc_pointer_vars;
+        nested_proc_pointer_vars.clear();
         cur_func_sym = (ASR::symbol_t*)&xx;
         current_scope = xx.m_symtab;
         transform_stmts(xx.m_body, xx.n_body);
@@ -1310,6 +1353,7 @@ public:
             }
         }
         cur_func_sym = sym_copy;
+        nested_proc_pointer_vars = nested_proc_pointer_vars_copy;
         current_scope = current_scope_copy;
     }
 
@@ -1318,6 +1362,8 @@ public:
         SymbolTable* current_scope_copy = current_scope;
         current_scope = xx.m_symtab;
         ASR::symbol_t *sym_copy = cur_func_sym;
+        std::set<ASR::symbol_t*> nested_proc_pointer_vars_copy = nested_proc_pointer_vars;
+        nested_proc_pointer_vars.clear();
         cur_func_sym = (ASR::symbol_t*)&xx;
         transform_stmts(xx.m_body, xx.n_body);
 
@@ -1350,6 +1396,7 @@ public:
         }
         current_scope = current_scope_copy;
         cur_func_sym = sym_copy;
+        nested_proc_pointer_vars = nested_proc_pointer_vars_copy;
     }
 
     void visit_Module(const ASR::Module_t &x) {
@@ -1373,7 +1420,9 @@ public:
     }
 
     void visit_FunctionCall(const ASR::FunctionCall_t &x) {
-        calls_present = calls_present || is_nested_call_symbol(current_scope, x.m_name);
+        calls_present = calls_present ||
+                        is_nested_call_symbol(current_scope, x.m_name) ||
+                        is_tracked_nested_proc_pointer_var(x.m_name);
         for (size_t i=0; i<x.n_args; i++) {
             mark_nested_procedure_arg(x.m_args[i].m_value);
             visit_call_arg(x.m_args[i]);
@@ -1386,13 +1435,23 @@ public:
     }
 
     void visit_SubroutineCall(const ASR::SubroutineCall_t &x) {
-        calls_present = calls_present || is_nested_call_symbol(current_scope, x.m_name);
+        calls_present = calls_present ||
+                        is_nested_call_symbol(current_scope, x.m_name) ||
+                        is_tracked_nested_proc_pointer_var(x.m_name);
         for (size_t i=0; i<x.n_args; i++) {
             mark_nested_procedure_arg(x.m_args[i].m_value);
             visit_call_arg(x.m_args[i]);
         }
         if (x.m_dt)
             visit_expr(*x.m_dt);
+    }
+
+    void visit_Associate(const ASR::Associate_t &x) {
+        if (ASR::is_a<ASR::FunctionType_t>(*ASRUtils::expr_type(x.m_target))) {
+            update_nested_proc_pointer_tracking(x);
+            mark_nested_procedure_arg(x.m_value);
+        }
+        PassUtils::PassVisitor<AssignNestedVars>::visit_Associate(x);
     }
 
     void visit_Array(const ASR::Array_t& /*x*/) {
