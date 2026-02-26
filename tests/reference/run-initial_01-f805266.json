@@ -1,0 +1,13 @@
+{
+    "basename": "run-initial_01-f805266",
+    "cmd": "lfortran --no-color {infile}",
+    "infile": "tests/../integration_tests/initial_01.f90",
+    "infile_hash": "9c3bc2863c4e6cd0bf16d3d2867ebfa85eea80936beda8b7d8304f77",
+    "outfile": null,
+    "outfile_hash": null,
+    "stdout": null,
+    "stdout_hash": null,
+    "stderr": null,
+    "stderr_hash": null,
+    "returncode": 0
+}

@@ -2714,6 +2714,9 @@ ast_t* TYPEPARAMETER0(Allocator &al,
         VEC_CAST(attr, decl_attribute), attr.size(), name2char(id), \
         REDUCE_ARGS(p.m_a, namelist), namelist.size(), \
         trivia_cast(trivia))
+#define INITIAL_NAME(namelist, trivia, l) make_InitialName_t(p.m_a, l, \
+        REDUCE_ARGS(p.m_a, namelist), namelist.size(), \
+        trivia_cast(trivia))
 #define FINAL_NAME(name, trivia, l) make_FinalName_t(p.m_a, l, name2char(name), \
         trivia_cast(trivia))
 #define PRIVATE(syms, trivia, l) make_Private_t(p.m_a, l, trivia_cast(trivia))

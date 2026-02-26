@@ -284,6 +284,7 @@ void yyerror(YYLTYPE *yyloc, LCompilers::LFortran::Parser &p,
 %token <string> KW_IMPORT
 %token <string> KW_IMPURE
 %token <string> KW_IN
+%token <string> KW_INITIAL
 %token <string> KW_INCLUDE
 %token <string> KW_INOUT
 %token <string> KW_IN_OUT
@@ -853,6 +854,8 @@ procedure_decl
             $$ = GENERIC_WRITE($2, $5, $8, TRIVIA_AFTER($9, @$), @$); }
     | KW_GENERIC access_spec_list KW_READ "(" id ")" "=>" id_list sep {
             $$ = GENERIC_READ($2, $5, $8, TRIVIA_AFTER($9, @$), @$); }
+    | KW_INITIAL "::" id_list sep {
+            $$ = INITIAL_NAME($3, TRIVIA_AFTER($4, @$), @$); }
     | KW_FINAL "::" id sep { $$ = FINAL_NAME($3, TRIVIA_AFTER($4, @$), @$); }
     | KW_PRIVATE sep { $$ = PRIVATE(Private, TRIVIA_AFTER($2, @$), @$); }
     ;
@@ -2685,6 +2688,7 @@ id
     | KW_IMPORT { $$ = SYMBOL($1, @$); }
     | KW_IMPURE { $$ = SYMBOL($1, @$); }
     | KW_IN { $$ = SYMBOL($1, @$); }
+    | KW_INITIAL { $$ = SYMBOL($1, @$); }
     | KW_INCLUDE { $$ = SYMBOL($1, @$); }
     | KW_INOUT { $$ = SYMBOL($1, @$); }
     | KW_INQUIRE { $$ = SYMBOL($1, @$); }
