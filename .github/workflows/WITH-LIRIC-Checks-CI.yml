@@ -1,0 +1,71 @@
+name: WITH_LIRIC checks
+
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  with-liric-api-compat:
+    name: WITH_LIRIC API compat (unit + integration)
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout lfortran
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          path: lfortran
+
+      - name: Checkout liric
+        uses: actions/checkout@v6
+        with:
+          repository: krystophny/liric
+          ref: main
+          path: liric
+          fetch-depth: 0
+
+      - name: Install Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build cmake bison re2c zstd jq python3 git \
+            clang libunwind-dev
+
+      - name: Run LFortran full suites in WITH_LIRIC mode
+        env:
+          LIRIC_COMPILE_MODE: isel
+          LIRIC_POLICY: direct
+        run: |
+          set -euo pipefail
+          cd "${GITHUB_WORKSPACE}/liric"
+
+          bash tools/lfortran_mass/lfortran_api_compat.sh \
+            --workspace "${GITHUB_WORKSPACE}/liric/build/deps" \
+            --output-root "${GITHUB_WORKSPACE}/liric/build/deps/lfortran_api_compat_out" \
+            --lfortran-dir "${GITHUB_WORKSPACE}/lfortran" \
+            --skip-checkout \
+            --run-ref-tests yes \
+            --run-itests yes \
+            --workers "$(nproc)" \
+            --itest-workers 1 \
+            --itest-timeout-sec 900 \
+            --itest-memory-max 8G \
+            --itest-tasks-max 512
+
+      - name: Upload WITH_LIRIC artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: with-liric-api-compat
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            ${{ github.workspace }}/liric/build/deps/lfortran_api_compat_out/summary.json
+            ${{ github.workspace }}/liric/build/deps/lfortran_api_compat_out/logs/*.log
