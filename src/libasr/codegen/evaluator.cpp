@@ -87,6 +87,7 @@
 
 namespace LCompilers {
 
+#ifdef WITH_LIRIC
 static bool runtime_bc_header_valid(const char *path) {
     unsigned char magic[4] = {0, 0, 0, 0};
     std::ifstream in(path, std::ios::binary);
@@ -100,6 +101,7 @@ static bool runtime_bc_header_valid(const char *path) {
            magic[2] == 0xC0 &&
            magic[3] == 0xDE;
 }
+#endif
 
 // Extracts the integer from APInt.
 // APInt does not seem to have this functionality, so we implement it here.
