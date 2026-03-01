@@ -7,6 +7,14 @@
 
 namespace LCompilers {
 
+    static inline llvm::Type* cptr_llvm_ptr_type(llvm::LLVMContext& context) {
+#ifdef WITH_LIRIC
+        return llvm::Type::getInt8Ty(context)->getPointerTo();
+#else
+        return llvm::Type::getVoidTy(context)->getPointerTo();
+#endif
+    }
+
     namespace LLVM {
 
         static bool memory_debug_enabled = false;
@@ -408,7 +416,7 @@ namespace LCompilers {
                 break;
             }
             case ASR::ttypeType::CPtr: {
-                llvm_mem_type = llvm::Type::getInt8Ty(context)->getPointerTo();
+                llvm_mem_type = cptr_llvm_ptr_type(context);
                 break;
             }
             default:
@@ -656,7 +664,7 @@ namespace LCompilers {
                 break;
             }
             case ASR::ttypeType::CPtr: {
-                el_type = llvm::Type::getInt8Ty(context)->getPointerTo();
+                el_type = cptr_llvm_ptr_type(context);
                 break;
             }
             case ASR::ttypeType::StructType: {
@@ -990,7 +998,7 @@ namespace LCompilers {
                 break;
             }
             case (ASR::ttypeType::CPtr) : {
-                type = llvm::Type::getInt8Ty(context)->getPointerTo();
+                type = cptr_llvm_ptr_type(context);
                 break;
             }
             case (ASR::ttypeType::Tuple) : {
@@ -1273,7 +1281,7 @@ namespace LCompilers {
                     break;
                 }
                 case (ASR::ttypeType::CPtr) :
-                    return_type = llvm::Type::getInt8Ty(context)->getPointerTo();
+                    return_type = cptr_llvm_ptr_type(context);
                     break;
                 case (ASR::ttypeType::Pointer) : {
                     return_type = get_type_from_ttype_t_util(x.m_return_var, ASRUtils::get_contained_type(return_var_type0), module)->getPointerTo();
@@ -1625,7 +1633,7 @@ namespace LCompilers {
             }
             case (ASR::ttypeType::CPtr) : {
                 a_kind = 8;
-                llvm_type = llvm::Type::getInt8Ty(context)->getPointerTo();
+                llvm_type = cptr_llvm_ptr_type(context);
                 break;
             }
             case (ASR::ttypeType::EnumType) : {
