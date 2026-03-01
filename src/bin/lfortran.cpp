@@ -51,9 +51,6 @@
 #ifdef HAVE_LFORTRAN_LLVM
 #include <llvm/IR/Module.h>
 #endif
-#ifdef WITH_LIRIC
-#include <liric/liric_compat.h>
-#endif
 #include <lfortran/fortran_kernel.h>
 #include <libasr/string_utils.h>
 #include <lfortran/utils.h>
@@ -147,69 +144,6 @@ static void liric_configure_runtime_lib_env(const std::string &runtime_library_d
 #else
     (void)runtime_library_dir;
 #endif
-}
-
-static int liric_write_empty_sidecar_files(const std::string &object_outfile)
-{
-    char err[512] = {0};
-    if (lc_write_empty_sidecar_files(object_outfile.c_str(),
-            err, sizeof(err)) != 0) {
-        if (err[0]) {
-            std::cerr << err << std::endl;
-        } else {
-            std::cerr << "WITH_LIRIC no-link sidecar write failed: "
-                      << object_outfile << std::endl;
-        }
-        return 10;
-    }
-    return 0;
-}
-
-static int liric_export_blob_sidecar(llvm::Module &m,
-                                     const std::string &object_outfile)
-{
-    lc_module_compat_t *compat = m.getCompat();
-    char err[512] = {0};
-    if (!compat) {
-        std::cerr << "WITH_LIRIC no-link sidecar export failed: missing compat module." << std::endl;
-        return 10;
-    }
-    if (lc_module_export_sidecar_files(compat, object_outfile.c_str(),
-            err, sizeof(err)) != 0) {
-        if (err[0]) {
-            std::cerr << err << std::endl;
-        } else {
-            std::cerr << "WITH_LIRIC no-link sidecar export failed for "
-                      << object_outfile << std::endl;
-        }
-        return 10;
-    }
-    return 0;
-}
-
-static int liric_emit_executable_from_object_sidecars(
-    const std::vector<std::string> &object_files, const std::string &outfile)
-{
-    if (object_files.empty()) {
-        std::cerr << "WITH_LIRIC AOT no-link mode requires at least one object input." << std::endl;
-        return 10;
-    }
-    std::vector<const char *> object_ptrs;
-    object_ptrs.reserve(object_files.size());
-    for (const auto &obj : object_files) {
-        object_ptrs.push_back(obj.c_str());
-    }
-    char err[512] = {0};
-    if (lc_emit_executable_from_object_sidecars(object_ptrs.data(),
-            object_ptrs.size(), outfile.c_str(), err, sizeof(err)) != 0) {
-        if (err[0]) {
-            std::cerr << err << std::endl;
-        } else {
-            std::cerr << "WITH_LIRIC no-link executable emission from sidecar blobs failed." << std::endl;
-        }
-        return 10;
-    }
-    return 0;
 }
 #endif
 
@@ -1313,12 +1247,12 @@ int compile_src_to_object_file(const std::string &infile,
         && !LCompilers::ASRUtils::global_function_present(*asr)) {
         // Create an empty object file (things will be actually
         // compiled and linked when the main program is present):
-        e.create_empty_object_file(outfile);
-#if defined(HAVE_LFORTRAN_LLVM) && defined(WITH_LIRIC)
-        if (liric_write_empty_sidecar_files(outfile) != 0) {
+        try {
+            e.create_empty_object_file(outfile);
+        } catch (const std::exception &ex) {
+            std::cerr << "Code emission failed: " << ex.what() << std::endl;
             return 10;
         }
-#endif
         return 0;
     }
 
@@ -1366,11 +1300,6 @@ int compile_src_to_object_file(const std::string &infile,
         t1 = std::chrono::high_resolution_clock::now();
         try {
             e.save_object_file(*(m->m_m), outfile);
-#if defined(HAVE_LFORTRAN_LLVM) && defined(WITH_LIRIC)
-            if (liric_export_blob_sidecar(*(m->m_m), outfile) != 0) {
-                return 10;
-            }
-#endif
         } catch (const std::exception &ex) {
             std::cerr << "Code emission failed: " << ex.what() << std::endl;
             return 10;
@@ -1435,12 +1364,12 @@ int compile_llvm_to_object_file(const std::string& infile,
     LCompilers::LLVMEvaluator e(compiler_options.target);
 
     std::unique_ptr<LCompilers::LLVMModule> m = e.parse_module2(input, infile);
-    e.save_object_file(*(m->m_m), outfile);
-#if defined(HAVE_LFORTRAN_LLVM) && defined(WITH_LIRIC)
-    if (liric_export_blob_sidecar(*(m->m_m), outfile) != 0) {
+    try {
+        e.save_object_file(*(m->m_m), outfile);
+    } catch (const std::exception &ex) {
+        std::cerr << "Code emission failed: " << ex.what() << std::endl;
         return 10;
     }
-#endif
 
     return 0;
 }
@@ -2041,11 +1970,13 @@ int link_executable(const std::vector<std::string> &infiles,
                       << std::endl;
         }
         liric_configure_runtime_lib_env(runtime_library_dir);
-        int no_link_rc = liric_emit_executable_from_object_sidecars(infiles, outfile);
-        if (no_link_rc != 0) {
-            std::cerr << "WITH_LIRIC AOT no-link executable emission failed. "
-                         "Refusing linker fallback." << std::endl;
-            return no_link_rc;
+        try {
+            llvm::Module::emitExecutableFromObjects(infiles, outfile);
+        } catch (const std::exception &ex) {
+            std::cerr << "WITH_LIRIC AOT no-link executable emission failed: "
+                      << ex.what() << std::endl;
+            std::cerr << "Refusing linker fallback." << std::endl;
+            return 10;
         }
         if ( compiler_options.arg_o != "" ) {
             return 0;

@@ -71,7 +71,6 @@
 #include <libasr/codegen/KaleidoscopeJIT.h>
 #else
 #define RM_OPTIONAL_TYPE std::optional
-#include <liric/liric_compat.h>
 #endif
 #include <libasr/codegen/evaluator.h>
 #include <libasr/codegen/asr_to_llvm.h>
@@ -505,6 +504,9 @@ void LLVMEvaluator::save_object_file(llvm::Module &m, const std::string &filenam
     }
     pass.run(m);
     dest.flush();
+#ifdef WITH_LIRIC
+    m.emitObjectCompanionFiles(filename);
+#endif
 }
 
 void LLVMEvaluator::save_executable_file(llvm::Module &m, const std::string &filename) {
@@ -514,13 +516,7 @@ void LLVMEvaluator::save_executable_file(llvm::Module &m, const std::string &fil
         throw std::runtime_error(
             "LIRIC_COMPILE_MODE=llvm is disallowed for WITH_LIRIC AOT no-link emission");
     }
-    lc_module_compat_t *compat = m.getCompat();
-    if (!compat) {
-        throw std::runtime_error("liric compat module is missing");
-    }
-    if (lc_module_emit_executable(compat, filename.c_str(), nullptr, 0) != 0) {
-        throw std::runtime_error("liric executable emission failed");
-    }
+    m.emitExecutable(filename);
 #else
     (void)m;
     (void)filename;
