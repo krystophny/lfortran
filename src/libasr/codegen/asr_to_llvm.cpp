@@ -17878,7 +17878,12 @@ public:
                                     // Local variable of type
                                     // CPtr is a void**, so we
                                     // have to load it
-                                    llvm::Type* cptr_type = llvm::Type::getInt8Ty(context)->getPointerTo();
+                                    llvm::Type* cptr_type =
+#ifdef WITH_LIRIC
+                                        llvm::Type::getInt8Ty(context)->getPointerTo();
+#else
+                                        llvm::Type::getVoidTy(context)->getPointerTo();
+#endif
                                     tmp = llvm_utils->CreateLoad2(cptr_type, tmp);
                                 }
                             } else if ( x_abi == ASR::abiType::BindC && orig_arg != nullptr ) {
@@ -17926,7 +17931,12 @@ public:
                                             // Local variable or Dummy out argument
                                             // of type CPtr is a void**, so we
                                             // have to load it
-                                            llvm::Type* cptr_type = llvm::Type::getInt8Ty(context)->getPointerTo();
+                                            llvm::Type* cptr_type =
+#ifdef WITH_LIRIC
+                                                llvm::Type::getInt8Ty(context)->getPointerTo();
+#else
+                                                llvm::Type::getVoidTy(context)->getPointerTo();
+#endif
                                             tmp = llvm_utils->CreateLoad2(cptr_type, tmp);
                                         }
                                     } else {
@@ -18281,7 +18291,12 @@ public:
                     case (ASR::ttypeType::StructType) :
                         break;
                     case (ASR::ttypeType::CPtr) :
-                        target_type = llvm::Type::getInt8Ty(context)->getPointerTo();
+                        target_type =
+#ifdef WITH_LIRIC
+                            llvm::Type::getInt8Ty(context)->getPointerTo();
+#else
+                            llvm::Type::getVoidTy(context)->getPointerTo();
+#endif
                         break;
                     case ASR::ttypeType::Allocatable:
                     case (ASR::ttypeType::Pointer) : {
