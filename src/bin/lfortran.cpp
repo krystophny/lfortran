@@ -5,9 +5,6 @@
 #include <stdlib.h>
 #include <filesystem>
 #include <fstream>
-#ifndef _WIN32
-#include <sys/stat.h>
-#endif
 #include <random>
 #ifndef CLI11_HAS_FILESYSTEM
 #define CLI11_HAS_FILESYSTEM 0
