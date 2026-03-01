@@ -36,7 +36,32 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             ninja-build cmake bison re2c zstd jq python3 git \
-            clang libunwind-dev
+            clang llvm libunwind-dev
+
+      - name: Ensure llvm-dwarfdump in PATH
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v llvm-dwarfdump >/dev/null 2>&1; then
+            exit 0
+          fi
+
+          for cand in \
+            llvm-dwarfdump-22 llvm-dwarfdump-21 llvm-dwarfdump-20 \
+            llvm-dwarfdump-19 llvm-dwarfdump-18 llvm-dwarfdump-17 \
+            llvm-dwarfdump-16 llvm-dwarfdump-15 llvm-dwarfdump-14 \
+            llvm-dwarfdump-13 llvm-dwarfdump-12 llvm-dwarfdump-11; do
+            if command -v "$cand" >/dev/null 2>&1; then
+              mkdir -p "$HOME/.local/bin"
+              ln -sf "$(command -v "$cand")" "$HOME/.local/bin/llvm-dwarfdump"
+              echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+              break
+            fi
+          done
+
+          command -v llvm-dwarfdump >/dev/null 2>&1 || \
+            command -v "$HOME/.local/bin/llvm-dwarfdump" >/dev/null 2>&1 || \
+            { echo "llvm-dwarfdump not found after install/fallback"; exit 1; }
 
       - name: Run LFortran full suites in WITH_LIRIC mode
         env:
