@@ -78,6 +78,7 @@ jobs:
             --skip-checkout \
             --run-ref-tests yes \
             --run-itests yes \
+            --unsafe-itests \
             --workers "$(nproc)" \
             --itest-workers 1 \
             --itest-timeout-sec 2700 \
