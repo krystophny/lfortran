@@ -7,10 +7,6 @@
 
 namespace LCompilers {
 
-    static inline llvm::Type* cptr_llvm_ptr_type(llvm::LLVMContext& context) {
-        return llvm::Type::getVoidTy(context)->getPointerTo();
-    }
-
     namespace LLVM {
 
         static bool memory_debug_enabled = false;
@@ -412,7 +408,7 @@ namespace LCompilers {
                 break;
             }
             case ASR::ttypeType::CPtr: {
-                llvm_mem_type = cptr_llvm_ptr_type(context);
+                llvm_mem_type = llvm::Type::getVoidTy(context)->getPointerTo();
                 break;
             }
             default:
@@ -660,7 +656,7 @@ namespace LCompilers {
                 break;
             }
             case ASR::ttypeType::CPtr: {
-                el_type = cptr_llvm_ptr_type(context);
+                el_type = llvm::Type::getVoidTy(context)->getPointerTo();
                 break;
             }
             case ASR::ttypeType::StructType: {
@@ -994,7 +990,7 @@ namespace LCompilers {
                 break;
             }
             case (ASR::ttypeType::CPtr) : {
-                type = cptr_llvm_ptr_type(context);
+                type = llvm::Type::getVoidTy(context)->getPointerTo();
                 break;
             }
             case (ASR::ttypeType::Tuple) : {
@@ -1277,7 +1273,7 @@ namespace LCompilers {
                     break;
                 }
                 case (ASR::ttypeType::CPtr) :
-                    return_type = cptr_llvm_ptr_type(context);
+                    return_type = llvm::Type::getVoidTy(context)->getPointerTo();
                     break;
                 case (ASR::ttypeType::Pointer) : {
                     return_type = get_type_from_ttype_t_util(x.m_return_var, ASRUtils::get_contained_type(return_var_type0), module)->getPointerTo();
@@ -1629,7 +1625,7 @@ namespace LCompilers {
             }
             case (ASR::ttypeType::CPtr) : {
                 a_kind = 8;
-                llvm_type = cptr_llvm_ptr_type(context);
+                llvm_type = llvm::Type::getVoidTy(context)->getPointerTo();
                 break;
             }
             case (ASR::ttypeType::EnumType) : {
