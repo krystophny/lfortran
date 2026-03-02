@@ -8,11 +8,7 @@
 namespace LCompilers {
 
     static inline llvm::Type* cptr_llvm_ptr_type(llvm::LLVMContext& context) {
-#ifdef WITH_LIRIC
-        return llvm::Type::getInt8Ty(context)->getPointerTo();
-#else
         return llvm::Type::getVoidTy(context)->getPointerTo();
-#endif
     }
 
     namespace LLVM {
