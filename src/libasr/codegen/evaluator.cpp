@@ -1,6 +1,5 @@
 #include <iostream>
 #include <fstream>
-#include <optional>
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/ADT/STLExtras.h>
@@ -84,14 +83,6 @@
 #endif
 
 namespace LCompilers {
-
-#ifndef RM_OPTIONAL_TYPE
-#if LLVM_VERSION_MAJOR >= 16
-#define RM_OPTIONAL_TYPE std::optional
-#else
-#define RM_OPTIONAL_TYPE llvm::Optional
-#endif
-#endif
 
 // Extracts the integer from APInt.
 // APInt does not seem to have this functionality, so we implement it here.
@@ -357,6 +348,7 @@ void LLVMEvaluator::add_module(std::unique_ptr<llvm::Module> mod) {
         if (msg[msg.size()-1] == '\n') msg = msg.substr(0, msg.size()-1);
         throw LCompilersException("addModule() returned an error: " + msg);
     }
+
 }
 
 void LLVMEvaluator::add_module(std::unique_ptr<LLVMModule> m) {
