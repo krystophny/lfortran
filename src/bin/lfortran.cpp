@@ -4,7 +4,6 @@
 #include <regex>
 #include <stdlib.h>
 #include <filesystem>
-#include <fstream>
 #include <random>
 #ifndef CLI11_HAS_FILESYSTEM
 #define CLI11_HAS_FILESYSTEM 0

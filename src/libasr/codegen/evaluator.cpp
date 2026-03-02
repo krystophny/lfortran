@@ -1,7 +1,6 @@
 #include <iostream>
 #include <fstream>
-#include <cstdlib>
-#include <cstring>
+#include <optional>
 
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/ADT/STLExtras.h>
@@ -70,7 +69,7 @@
 #ifndef WITH_LIRIC
 #include <libasr/codegen/KaleidoscopeJIT.h>
 #else
-#define RM_OPTIONAL_TYPE std::optional
+#include <llvm/ExecutionEngine/Orc/KaleidoscopeJIT.h>
 #endif
 #include <libasr/codegen/evaluator.h>
 #include <libasr/codegen/asr_to_llvm.h>
@@ -86,20 +85,12 @@
 
 namespace LCompilers {
 
-#ifdef WITH_LIRIC
-static bool runtime_bc_header_valid(const char *path) {
-    unsigned char magic[4] = {0, 0, 0, 0};
-    std::ifstream in(path, std::ios::binary);
-    if (!in.good())
-        return false;
-    in.read(reinterpret_cast<char *>(magic), 4);
-    if (!in.good())
-        return false;
-    return magic[0] == 'B' &&
-           magic[1] == 'C' &&
-           magic[2] == 0xC0 &&
-           magic[3] == 0xDE;
-}
+#ifndef RM_OPTIONAL_TYPE
+#if LLVM_VERSION_MAJOR >= 16
+#define RM_OPTIONAL_TYPE std::optional
+#else
+#define RM_OPTIONAL_TYPE llvm::Optional
+#endif
 #endif
 
 // Extracts the integer from APInt.
@@ -223,19 +214,6 @@ float _lfortran_stan(float x);
 
 LLVMEvaluator::LLVMEvaluator(const std::string &t)
 {
-#ifdef WITH_LIRIC
-    /* WITH_LIRIC should default to AOT direct mode unless explicitly overridden. */
-    setenv("LIRIC_POLICY", "direct", 0);
-    setenv("LIRIC_COMPILE_MODE", "isel", 0);
-    {
-        const char *runtime_bc = getenv("LIRIC_RUNTIME_BC");
-        if (runtime_bc && runtime_bc[0] && !runtime_bc_header_valid(runtime_bc)) {
-            throw LCompilersException(
-                "LIRIC_RUNTIME_BC is not valid LLVM bitcode: " +
-                std::string(runtime_bc));
-        }
-    }
-#endif
     llvm::InitializeNativeTarget();
     llvm::InitializeNativeTargetAsmPrinter();
     llvm::InitializeNativeTargetAsmParser();
@@ -298,19 +276,15 @@ LLVMEvaluator::LLVMEvaluator(const std::string &t)
     }
 #endif
 
-#ifndef WITH_LIRIC
     // For some reason the JIT requires a different TargetMachine
     jit = cantFail(llvm::orc::KaleidoscopeJIT::Create());
-#endif
 
     _lfortran_stan(0.5);
 }
 
 LLVMEvaluator::~LLVMEvaluator()
 {
-#ifndef WITH_LIRIC
     jit.reset();
-#endif
     context.reset();
 }
 
@@ -362,9 +336,6 @@ void LLVMEvaluator::add_module(const std::string &source) {
 }
 
 void LLVMEvaluator::add_module(std::unique_ptr<llvm::Module> mod) {
-#ifdef WITH_LIRIC
-    throw LCompilersException("add_module() is not supported with liric backend");
-#else
     // These are already set in parse_module(), but we set it here again for
     // cases when the Module was constructed directly, not via parse_module().
 #if LLVM_VERSION_MAJOR >= 21
@@ -372,7 +343,11 @@ void LLVMEvaluator::add_module(std::unique_ptr<llvm::Module> mod) {
 #else
     mod->setTargetTriple(target_triple);
 #endif
+#ifdef WITH_LIRIC
+    mod->setDataLayout(TM->createDataLayout());
+#else
     mod->setDataLayout(jit->getDataLayout());
+#endif
     llvm::Error err = jit->addModule(std::move(mod), context);
     if (err) {
         llvm::SmallVector<char, 128> buf;
@@ -382,7 +357,6 @@ void LLVMEvaluator::add_module(std::unique_ptr<llvm::Module> mod) {
         if (msg[msg.size()-1] == '\n') msg = msg.substr(0, msg.size()-1);
         throw LCompilersException("addModule() returned an error: " + msg);
     }
-#endif
 }
 
 void LLVMEvaluator::add_module(std::unique_ptr<LLVMModule> m) {
@@ -390,9 +364,6 @@ void LLVMEvaluator::add_module(std::unique_ptr<LLVMModule> m) {
 }
 
 intptr_t LLVMEvaluator::get_symbol_address(const std::string &name) {
-#ifdef WITH_LIRIC
-    throw LCompilersException("get_symbol_address() is not supported with liric backend");
-#else
 #if LLVM_VERSION_MAJOR < 8
     // LLVM 7: Use findSymbol which returns JITSymbol
     llvm::JITSymbol s = jit->findSymbol(name);
@@ -443,7 +414,6 @@ intptr_t LLVMEvaluator::get_symbol_address(const std::string &name) {
         throw LCompilersException("JITSymbol::getAddress() returned an error: " + msg);
     }
     return (intptr_t)cantFail(std::move(addr0));
-#endif
 #endif
 }
 
@@ -506,21 +476,6 @@ void LLVMEvaluator::save_object_file(llvm::Module &m, const std::string &filenam
     dest.flush();
 #ifdef WITH_LIRIC
     m.emitObjectCompanionFiles(filename);
-#endif
-}
-
-void LLVMEvaluator::save_executable_file(llvm::Module &m, const std::string &filename) {
-#ifdef WITH_LIRIC
-    const char *compile_mode = getenv("LIRIC_COMPILE_MODE");
-    if (compile_mode && std::strcmp(compile_mode, "llvm") == 0) {
-        throw std::runtime_error(
-            "LIRIC_COMPILE_MODE=llvm is disallowed for WITH_LIRIC AOT no-link emission");
-    }
-    m.emitExecutable(filename);
-#else
-    (void)m;
-    (void)filename;
-    throw std::runtime_error("save_executable_file is only available with WITH_LIRIC");
 #endif
 }
 
