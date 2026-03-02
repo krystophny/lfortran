@@ -1246,7 +1246,12 @@ int compile_src_to_object_file(const std::string &infile,
         && !LCompilers::ASRUtils::global_function_present(*asr)) {
         // Create an empty object file (things will be actually
         // compiled and linked when the main program is present):
-        e.create_empty_object_file(outfile);
+        try {
+            e.create_empty_object_file(outfile);
+        } catch (const std::exception &ex) {
+            std::cerr << "Code emission failed: " << ex.what() << std::endl;
+            return 10;
+        }
         return 0;
     }
 
@@ -1292,7 +1297,12 @@ int compile_src_to_object_file(const std::string &infile,
         e.save_asm_file(*(m->m_m), outfile);
     } else {
         t1 = std::chrono::high_resolution_clock::now();
-        e.save_object_file(*(m->m_m), outfile);
+        try {
+            e.save_object_file(*(m->m_m), outfile);
+        } catch (const std::exception &ex) {
+            std::cerr << "Code emission failed: " << ex.what() << std::endl;
+            return 10;
+        }
         t2 = std::chrono::high_resolution_clock::now();
         time_llvm_to_bin = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
     }
@@ -1353,7 +1363,12 @@ int compile_llvm_to_object_file(const std::string& infile,
     LCompilers::LLVMEvaluator e(compiler_options.target);
 
     std::unique_ptr<LCompilers::LLVMModule> m = e.parse_module2(input, infile);
-    e.save_object_file(*(m->m_m), outfile);
+    try {
+        e.save_object_file(*(m->m_m), outfile);
+    } catch (const std::exception &ex) {
+        std::cerr << "Code emission failed: " << ex.what() << std::endl;
+        return 10;
+    }
 
     return 0;
 }
