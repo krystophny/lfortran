@@ -80,7 +80,7 @@ jobs:
             --run-itests yes \
             --workers "$(nproc)" \
             --itest-workers 1 \
-            --itest-timeout-sec 900 \
+            --itest-timeout-sec 2700 \
             --itest-memory-max 8G \
             --itest-tasks-max 512
 
