@@ -337,7 +337,7 @@ jobs:
         with:
           repository: krystophny/liric
           # Pin to liric/main commit containing WITH_LIRIC integration family-set support
-          ref: 611525e3323659c2aae0221229ae6cd5011ccece
+          ref: a351e202f7c48ea74a421d7d3071ce84e9dc9fb1
           path: liric
           fetch-depth: 0
 
