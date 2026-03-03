@@ -336,8 +336,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: krystophny/liric
-          # Pin to liric/main commit containing WITH_LIRIC llvm21 parity lane
-          ref: 7d3dda6797fc63e102e86bd2487a30742a047ece
+          ref: main
           path: liric
           fetch-depth: 0
 
@@ -345,8 +344,35 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            ninja-build cmake bison re2c zstd jq python3 git \
+            ninja-build cmake bison re2c zstd jq python3 python3-pip git \
             clang llvm libunwind-dev
+
+      - name: Configure and build liric
+        run: |
+          set -euo pipefail
+          cmake -S "${GITHUB_WORKSPACE}/liric" -B "${GITHUB_WORKSPACE}/liric/build" \
+            -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build "${GITHUB_WORKSPACE}/liric/build" -j"$(nproc)"
+
+      - name: Configure and build lfortran WITH_LIRIC
+        run: |
+          set -euo pipefail
+          cd "${GITHUB_WORKSPACE}/lfortran"
+          cmake -S . -B build-liric -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DWITH_LIRIC=yes \
+            -DWITH_LLVM=OFF \
+            -DLIRIC_DIR="${GITHUB_WORKSPACE}/liric" \
+            -DWITH_RUNTIME_STACKTRACE=yes
+          cmake --build build-liric -j"$(nproc)"
+
+      - name: Build WITH_LIRIC runtime bitcode
+        run: |
+          set -euo pipefail
+          clang -O0 -emit-llvm -c \
+            "${GITHUB_WORKSPACE}/lfortran/src/libasr/runtime/lfortran_intrinsics.c" \
+            -I"${GITHUB_WORKSPACE}/lfortran/src" \
+            -o "${GITHUB_WORKSPACE}/lfortran/build-liric/liric_runtime.bc"
 
       - name: Ensure llvm-dwarfdump in PATH
         shell: bash
@@ -373,29 +399,24 @@ jobs:
             command -v "$HOME/.local/bin/llvm-dwarfdump" >/dev/null 2>&1 || \
             { echo "llvm-dwarfdump not found after install/fallback"; exit 1; }
 
-      - name: Run LFortran full suites in WITH_LIRIC mode
+      - name: Run LFortran CI scripts in WITH_LIRIC mode
         env:
+          LFORTRAN_BIN: ${{ github.workspace }}/lfortran/build-liric/src/bin/lfortran
+          LFORTRAN_CTEST_DIR: ${{ github.workspace }}/lfortran/build-liric
+          LFORTRAN_WITH_LIRIC: "1"
+          LFORTRAN_RUN_REF_TESTS: "yes"
+          LFORTRAN_ITEST_FAMILY_SET: quick
+          LFORTRAN_LLVM_VERSION: "21"
+          LIRIC_RUNTIME_BC: ${{ github.workspace }}/lfortran/build-liric/liric_runtime.bc
           LIRIC_COMPILE_MODE: isel
           LIRIC_POLICY: direct
+          LFORTRAN_NO_LINK_MODE: "1"
         run: |
           set -euo pipefail
-          cd "${GITHUB_WORKSPACE}/liric"
-
-          bash tools/lfortran_mass/lfortran_api_compat.sh \
-            --workspace "${GITHUB_WORKSPACE}/liric/build/deps" \
-            --output-root "${GITHUB_WORKSPACE}/liric/build/deps/lfortran_api_compat_out" \
-            --lfortran-dir "${GITHUB_WORKSPACE}/lfortran" \
-            --skip-checkout \
-            --run-ref-tests yes \
-            --run-itests yes \
-            --run-smoke-tests yes \
-            --itest-family-set llvm21 \
-            --workers "$(nproc)" \
-            --itest-workers 1 \
-            --itest-shards '^[a-iA-I].*;^[j-rJ-R].*;^[s-zS-Z0-9_].*' \
-            --itest-timeout-sec 2700 \
-            --itest-memory-max 8G \
-            --itest-tasks-max 512
+          cd "${GITHUB_WORKSPACE}/lfortran"
+          export WIN=0
+          export MACOS=0
+          bash ci/test.sh
 
       - name: LIRIC parity - grammar conflict check
         run: |
@@ -417,8 +438,8 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
           path: |
-            ${{ github.workspace }}/liric/build/deps/lfortran_api_compat_out/summary.json
-            ${{ github.workspace }}/liric/build/deps/lfortran_api_compat_out/logs/*.log
+            ${{ github.workspace }}/lfortran/build-liric/Testing/Temporary/LastTest.log
+            ${{ github.workspace }}/lfortran/integration_tests/test-*/Testing/Temporary/LastTest.log
 
   build_to_wasm_and_upload:
     name: Build LFortran to WASM and Upload

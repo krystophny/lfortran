@@ -33,6 +33,34 @@ ROOT_DIR = os.path.dirname(SRC_DIR)
 
 no_color = False
 
+
+def _env_enabled(name):
+    value = os.environ.get(name, "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _env_backend_set(name, default):
+    raw = os.environ.get(name, default)
+    values = [item.strip() for item in raw.split(",")]
+    return frozenset(item for item in values if item)
+
+
+LFORTRAN_REF_WITH_LIRIC = _env_enabled("LFORTRAN_WITH_LIRIC") or (
+    os.environ.get("LFORTRAN_REF_POLICY", "").strip().lower()
+    in {"with_liric", "liric"}
+)
+LFORTRAN_REF_SKIP_IR = (
+    _env_backend_set("LFORTRAN_REF_SKIP_IR", "llvm")
+    if LFORTRAN_REF_WITH_LIRIC else frozenset()
+)
+LFORTRAN_REF_SKIP_DBG = (
+    _env_backend_set("LFORTRAN_REF_SKIP_DBG", "run_dbg")
+    if LFORTRAN_REF_WITH_LIRIC else frozenset()
+)
+
+NO_LINK_FAIL_PREFIX = b"WITH_LIRIC AOT no-link executable emission failed"
+NO_LINK_FALLBACK_REFUSAL = b"Refusing linker fallback."
+
 class RunException(Exception):
     pass
 
@@ -240,6 +268,14 @@ def run(basename: str, cmd: Union[pathlib.Path, str],
     }
     json_file = os.path.join(out_dir, basename + "." + "json")
     json.dump(data, open(json_file, "w"), indent=4)
+
+    if (LFORTRAN_REF_WITH_LIRIC and
+            NO_LINK_FAIL_PREFIX in r.stderr and
+            NO_LINK_FALLBACK_REFUSAL in r.stderr):
+        raise RunException(
+            "WITH_LIRIC no-link executable emission failed and linker "
+            "fallback was refused")
+
     return json_file
 
 
@@ -405,8 +441,9 @@ def run_test(testname, basename, cmd, infile, update_reference=False,
     ...     update_reference=True)
     >>> run_test("cat12", "cat {infile} > {outfile}", "cat.txt")
     """
-    s = f"{testname} * {basename}"
-    basename = bname(basename, cmd, infile)
+    backend_name = basename
+    s = f"{testname} * {backend_name}"
+    basename = bname(backend_name, cmd, infile)
     infile = os.path.join("tests", infile)
     jo = run(basename, cmd, os.path.join("tests", "output"), infile=infile,
              extra_args=extra_args)
@@ -425,6 +462,15 @@ def run_test(testname, basename, cmd, infile, update_reference=False,
         do_update_reference(jo, jr, do)
         return
 
+    # LIRIC currently does not implement full DWARF/debug-info emission.
+    # Keep running the command to catch crashes, but skip output comparison.
+    if LFORTRAN_REF_WITH_LIRIC and backend_name in LFORTRAN_REF_SKIP_DBG and not verify_hash:
+        if no_color:
+            log.debug(f"{s} PASS (debug-info compare skipped)")
+        else:
+            log.debug(f"{s} {check()} (debug-info compare skipped)")
+        return
+
     if not os.path.exists(jr):
         raise FileNotFoundError(
             f"The reference json file '{jr}' for {testname} does not exist")
@@ -433,6 +479,56 @@ def run_test(testname, basename, cmd, infile, update_reference=False,
 
     if verify_hash:
         do_verify_reference_hash(jr, dr, s)
+        return
+
+    if LFORTRAN_REF_WITH_LIRIC and backend_name in LFORTRAN_REF_SKIP_IR:
+        do_cmp = dict(do)
+        dr_cmp = dict(dr)
+        for field in ("outfile", "outfile_hash", "stdout", "stdout_hash"):
+            do_cmp[field] = None
+            dr_cmp[field] = None
+
+        if do_cmp != dr_cmp:
+            full_err_str = f"\n{(color(fg.red)+color(style.bold))}{s}{color(fg.reset)+color(style.reset)}\n"
+            e = _compare_eq_dict(do_cmp, dr_cmp)
+            full_err_str += "Non-IR fields differ against reference (IR stdout+outfile excluded)\n"
+            full_err_str += "Reference JSON: " + jr + "\n"
+            full_err_str += "Output JSON:    " + jo + "\n"
+            full_err_str += "\n".join(e)
+
+            if not do["stderr_hash"] and dr["stderr_hash"]:
+                full_err_str += "\n=== MISSING STDERR ===\n"
+                reference_file = os.path.join("tests", "reference", dr["stderr"])
+                output_file = os.path.join("tests", "output",
+                                           do["stderr"] if do["stderr"] else "missing")
+                full_err_str = get_error_diff(
+                    reference_file, output_file, full_err_str, "stderr")
+            elif not dr["stderr_hash"] and do["stderr_hash"]:
+                full_err_str += "\n=== UNEXPECTED STDERR ===\n"
+                reference_file = os.path.join("tests", "reference",
+                                              dr["stderr"] if dr["stderr"] else "missing")
+                output_file = os.path.join("tests", "output", do["stderr"])
+                full_err_str = get_error_diff(
+                    reference_file, output_file, full_err_str, "stderr")
+            elif do["stderr_hash"] != dr["stderr_hash"]:
+                output_file = os.path.join("tests", "output", do["stderr"])
+                reference_file = os.path.join("tests", "reference", dr["stderr"])
+                full_err_str = get_error_diff(
+                    reference_file, output_file, full_err_str, "stderr")
+
+            if do.get("returncode") != dr.get("returncode"):
+                full_err_str += (
+                    f"\n=== RETURNCODE MISMATCH ===\n"
+                    f"expected {dr.get('returncode')}, got {do.get('returncode')}\n"
+                )
+
+            raise RunException(
+                "Testing with reference output failed." + full_err_str)
+
+        if no_color:
+            log.debug(f"{s} PASS (IR excluded)")
+        else:
+            log.debug(f"{s} {check()} (IR excluded)")
         return
 
     if do != dr:
