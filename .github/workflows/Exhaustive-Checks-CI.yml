@@ -179,7 +179,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: krystophny/liric
-          ref: 54518ef89eab613463f26fed3ef04054d5d0f0d7
+          ref: 54518ef2eaf09992e356bc302e70d95509882ed3
           path: liric
           fetch-depth: 0
 
