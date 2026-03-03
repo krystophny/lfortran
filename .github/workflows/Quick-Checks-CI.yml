@@ -337,7 +337,7 @@ jobs:
         with:
           repository: krystophny/liric
           # Pin to liric/main commit containing WITH_LIRIC llvm21 parity lane
-          ref: 1d934529b5176d6fe1c28dcbe8391f2e5a968065
+          ref: 7d3dda6797fc63e102e86bd2487a30742a047ece
           path: liric
           fetch-depth: 0
 
@@ -389,7 +389,6 @@ jobs:
             --run-ref-tests yes \
             --run-itests yes \
             --run-smoke-tests yes \
-            --run-third-party no \
             --itest-family-set llvm21 \
             --workers "$(nproc)" \
             --itest-workers 1 \
