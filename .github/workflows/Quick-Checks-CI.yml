@@ -320,6 +320,92 @@ jobs:
         run: |
           python3 check_binary_file_in_git_history.py
 
+  liric_api_compat:
+    name: LFortran CI (OS=ubuntu-latest, LIRIC)
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout lfortran
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          path: lfortran
+
+      - name: Checkout liric
+        uses: actions/checkout@v6
+        with:
+          repository: krystophny/liric
+          # Pin to merged liric/main commit containing llvm/ExecutionEngine/Orc/KaleidoscopeJIT.h
+          ref: c33276d0a82679b5648a52110a27d5260f25a4a0
+          path: liric
+          fetch-depth: 0
+
+      - name: Install Linux deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build cmake bison re2c zstd jq python3 git \
+            clang llvm libunwind-dev
+
+      - name: Ensure llvm-dwarfdump in PATH
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v llvm-dwarfdump >/dev/null 2>&1; then
+            exit 0
+          fi
+
+          for cand in \
+            llvm-dwarfdump-22 llvm-dwarfdump-21 llvm-dwarfdump-20 \
+            llvm-dwarfdump-19 llvm-dwarfdump-18 llvm-dwarfdump-17 \
+            llvm-dwarfdump-16 llvm-dwarfdump-15 llvm-dwarfdump-14 \
+            llvm-dwarfdump-13 llvm-dwarfdump-12 llvm-dwarfdump-11; do
+            if command -v "$cand" >/dev/null 2>&1; then
+              mkdir -p "$HOME/.local/bin"
+              ln -sf "$(command -v "$cand")" "$HOME/.local/bin/llvm-dwarfdump"
+              echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+              break
+            fi
+          done
+
+          command -v llvm-dwarfdump >/dev/null 2>&1 || \
+            command -v "$HOME/.local/bin/llvm-dwarfdump" >/dev/null 2>&1 || \
+            { echo "llvm-dwarfdump not found after install/fallback"; exit 1; }
+
+      - name: Run LFortran full suites in WITH_LIRIC mode
+        env:
+          LIRIC_COMPILE_MODE: isel
+          LIRIC_POLICY: direct
+        run: |
+          set -euo pipefail
+          cd "${GITHUB_WORKSPACE}/liric"
+
+          bash tools/lfortran_mass/lfortran_api_compat.sh \
+            --workspace "${GITHUB_WORKSPACE}/liric/build/deps" \
+            --output-root "${GITHUB_WORKSPACE}/liric/build/deps/lfortran_api_compat_out" \
+            --lfortran-dir "${GITHUB_WORKSPACE}/lfortran" \
+            --skip-checkout \
+            --run-ref-tests yes \
+            --run-itests yes \
+            --workers "$(nproc)" \
+            --itest-workers 1 \
+            --itest-shards '^[a-iA-I].*;^[j-rJ-R].*;^[s-zS-Z0-9_].*' \
+            --itest-timeout-sec 2700 \
+            --itest-memory-max 8G \
+            --itest-tasks-max 512
+
+      - name: Upload LIRIC artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: liric-api-compat
+          retention-days: 14
+          if-no-files-found: warn
+          path: |
+            ${{ github.workspace }}/liric/build/deps/lfortran_api_compat_out/summary.json
+            ${{ github.workspace }}/liric/build/deps/lfortran_api_compat_out/logs/*.log
+
   build_to_wasm_and_upload:
     name: Build LFortran to WASM and Upload
     runs-on: "ubuntu-latest"
