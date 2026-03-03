@@ -144,6 +144,59 @@ static void liric_configure_runtime_lib_env(const std::string &runtime_library_d
     (void)runtime_library_dir;
 #endif
 }
+
+static void liric_env_set(const char *key, const char *value)
+{
+#ifdef _WIN32
+    _putenv_s(key, value);
+#else
+    setenv(key, value, 1);
+#endif
+}
+
+static void liric_env_unset(const char *key)
+{
+#ifdef _WIN32
+    _putenv_s(key, "");
+#else
+    unsetenv(key);
+#endif
+}
+
+class LiricScopedUnsetEnvVar {
+private:
+    const char *m_key;
+    bool m_active;
+    bool m_had_previous;
+    std::string m_previous_value;
+
+public:
+    LiricScopedUnsetEnvVar(const char *key, bool active)
+        : m_key(key), m_active(active), m_had_previous(false)
+    {
+        if (!m_active) {
+            return;
+        }
+        const char *previous = std::getenv(m_key);
+        if (previous != nullptr) {
+            m_had_previous = true;
+            m_previous_value = previous;
+        }
+        liric_env_unset(m_key);
+    }
+
+    ~LiricScopedUnsetEnvVar()
+    {
+        if (!m_active) {
+            return;
+        }
+        if (m_had_previous) {
+            liric_env_set(m_key, m_previous_value.c_str());
+        } else {
+            liric_env_unset(m_key);
+        }
+    }
+};
 #endif
 
 void print_one_component(std::string component) {
@@ -1184,6 +1237,32 @@ int compile_src_to_object_file(const std::string &infile,
         LCompilers::PassManager& lpm,
         bool arg_c = false)
 {
+#if defined(HAVE_LFORTRAN_LLVM) && defined(WITH_LIRIC)
+    bool disable_liric_no_link_for_compile = false;
+    if (const char *no_link_mode = std::getenv("LFORTRAN_NO_LINK_MODE")) {
+        disable_liric_no_link_for_compile = std::string(no_link_mode) == "1";
+    }
+    const bool has_liric_runtime_env =
+        (std::getenv("LIRIC_RUNTIME_BC") != nullptr) ||
+        (std::getenv("LIRIC_RUNTIME_LIB") != nullptr);
+    // No-link mode is for executable emission only; compile-only steps must
+    // always produce regular object files.
+    LiricScopedUnsetEnvVar scoped_no_link_mode("LFORTRAN_NO_LINK_MODE",
+        disable_liric_no_link_for_compile);
+    LiricScopedUnsetEnvVar scoped_no_link_empty("LFORTRAN_NO_LINK_MODULE_EMPTY_OBJECTS",
+        disable_liric_no_link_for_compile);
+    // Runtime injection is only needed for final executable emission.
+    LiricScopedUnsetEnvVar scoped_runtime_bc("LIRIC_RUNTIME_BC",
+        has_liric_runtime_env);
+    LiricScopedUnsetEnvVar scoped_runtime_lib("LIRIC_RUNTIME_LIB",
+        has_liric_runtime_env);
+    if (disable_liric_no_link_for_compile && compiler_options.emit_debug_info) {
+        // WITH_LIRIC no-link does not generate *_lines.dat sidecars; keep
+        // runtime behavior consistent by not emitting debug-info mode objects.
+        compiler_options.emit_debug_info = false;
+    }
+#endif
+
     int time_file_read=0;
     int time_src_to_asr=0;
     int time_save_mod=0;
