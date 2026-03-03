@@ -161,7 +161,7 @@ jobs:
             test -f inst/man/O/man/man1/lfortran.1
 
   liric_api_compat_extended:
-    name: LFortran CI (OS=ubuntu-latest, LIRIC Extended)
+    name: LFortran CI (OS=ubuntu-latest, LIRIC Internal Extended)
     runs-on: ubuntu-latest
     timeout-minutes: 360
     if: >-
@@ -179,7 +179,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: krystophny/liric
-          ref: 1d934529b5176d6fe1c28dcbe8391f2e5a968065
+          ref: 7d3dda6797fc63e102e86bd2487a30742a047ece
           path: liric
           fetch-depth: 0
 
@@ -215,7 +215,7 @@ jobs:
             command -v "$HOME/.local/bin/llvm-dwarfdump" >/dev/null 2>&1 || \
             { echo "llvm-dwarfdump not found after install/fallback"; exit 1; }
 
-      - name: Run LFortran full suites in WITH_LIRIC extended mode
+      - name: Run LFortran full suites in WITH_LIRIC internal extended mode
         env:
           LIRIC_COMPILE_MODE: isel
           LIRIC_POLICY: direct
@@ -231,8 +231,6 @@ jobs:
             --run-ref-tests yes \
             --run-itests yes \
             --run-smoke-tests yes \
-            --run-third-party yes \
-            --third-party-lapack-mode full \
             --itest-family-set llvm21 \
             --workers "$(nproc)" \
             --itest-workers 1 \
@@ -241,7 +239,7 @@ jobs:
             --itest-memory-max 8G \
             --itest-tasks-max 512
 
-      - name: Upload LIRIC extended artifacts
+      - name: Upload LIRIC internal extended artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
