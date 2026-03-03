@@ -35,6 +35,7 @@ public:
     std::vector<std::pair<std::string,Location>> simd_variables;
     std::map<std::string, std::vector<AST::arg_t>> entry_function_args;
     std::set<std::string> loaded_submodules;
+    std::set<ASR::symbol_t*> sealed_derived_types;
     std::string dt_name;
     bool in_submodule = false;
     bool is_interface = false;
@@ -2229,6 +2230,7 @@ public:
     void visit_DerivedType(const AST::DerivedType_t &x) {
         dt_name = to_lower(x.m_name);
         bool is_abstract = false;
+        bool is_sealed = false;
         bool is_deferred = false;
         AST::AttrExtends_t *attr_extend = nullptr;
         for( size_t i = 0; i < x.n_attrtype; i++ ) {
@@ -2248,6 +2250,7 @@ public:
                     AST::SimpleAttribute_t* simple_attr =
                         AST::down_cast<AST::SimpleAttribute_t>(x.m_attrtype[i]);
                     if (!is_abstract) is_abstract = simple_attr->m_attr == AST::simple_attributeType::AttrAbstract;
+                    if (!is_sealed) is_sealed = simple_attr->m_attr == AST::simple_attributeType::AttrSealed;
                     if (!is_deferred) is_deferred = simple_attr->m_attr == AST::simple_attributeType::AttrDeferred;
                 }
                 default:
@@ -2298,6 +2301,14 @@ public:
                 throw SemanticAbort();
             }
             parent_sym = parent_scope->get_symbol(parent_sym_name);
+            ASR::symbol_t* parent_sym_unwrapped = ASRUtils::symbol_get_past_external(parent_sym);
+            if (sealed_derived_types.find(parent_sym_unwrapped) != sealed_derived_types.end()) {
+                diag.add(diag::Diagnostic(
+                    "Cannot extend sealed derived type `" + parent_sym_name + "`",
+                    diag::Level::Error, diag::Stage::Semantic, {
+                        diag::Label("", {x.base.base.loc})}));
+                throw SemanticAbort();
+            }
         }
         SetChar struct_dependencies;
         struct_dependencies.reserve(al, 1);
@@ -2343,6 +2354,9 @@ public:
             parent_scope->add_or_overwrite_symbol(sym_name, derived_type_sym);
         } else {
             parent_scope->add_symbol(sym_name, derived_type_sym);
+        }
+        if (is_sealed) {
+            sealed_derived_types.insert(ASRUtils::symbol_get_past_external(derived_type_sym));
         }
 
         // Resolve type-declaration for self-pointing variable declarations inside structs and

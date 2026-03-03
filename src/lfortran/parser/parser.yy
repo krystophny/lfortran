@@ -15,7 +15,7 @@ see the documentation in that script for details and motivation.
 %locations
 %glr-parser
 %expect    237 // shift/reduce conflicts
-%expect-rr 175 // reduce/reduce conflicts
+%expect-rr 180 // reduce/reduce conflicts
 
 // Uncomment this to get verbose error messages
 //%define parse.error verbose
@@ -338,6 +338,7 @@ void yyerror(YYLTYPE *yyloc, LCompilers::LFortran::Parser &p,
 %token <string> KW_RETURN
 %token <string> KW_REWIND
 %token <string> KW_SAVE
+%token <string> KW_SEALED
 %token <string> KW_SELECT
 %token <string> KW_SELECT_CASE
 %token <string> KW_SELECT_RANK
@@ -1531,6 +1532,7 @@ var_modifier
     | KW_OPTIONAL { $$ = SIMPLE_ATTR(Optional, @$); }
     | KW_PROTECTED { $$ = SIMPLE_ATTR(Protected, @$); }
     | KW_SAVE { $$ = SIMPLE_ATTR(Save, @$); }
+    | KW_SEALED { $$ = SIMPLE_ATTR(Sealed, @$); }
     | KW_SEQUENCE { $$ = SIMPLE_ATTR(Sequence, @$); }
     | KW_CONTIGUOUS { $$ = SIMPLE_ATTR(Contiguous, @$); }
     | KW_NOPASS { $$ = SIMPLE_ATTR(NoPass, @$); }
@@ -2740,6 +2742,7 @@ id
     | KW_RETURN { $$ = SYMBOL($1, @$); }
     | KW_REWIND { $$ = SYMBOL($1, @$); }
     | KW_SAVE { $$ = SYMBOL($1, @$); }
+    | KW_SEALED { $$ = SYMBOL($1, @$); }
     | KW_SELECT { $$ = SYMBOL($1, @$); }
     | KW_SELECT_CASE { $$ = SYMBOL($1, @$); }
     | KW_SELECT_RANK { $$ = SYMBOL($1, @$); }
