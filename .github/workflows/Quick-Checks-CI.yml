@@ -339,8 +339,8 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: krystophny/liric
-          # Pin to merged liric/main commit containing llvm/ExecutionEngine/Orc/KaleidoscopeJIT.h
-          ref: c33276d0a82679b5648a52110a27d5260f25a4a0
+          # Pin to liric/main commit containing WITH_LIRIC integration family-set support
+          ref: 54518ef89eab613463f26fed3ef04054d5d0f0d7
           path: liric
           fetch-depth: 0
 
@@ -391,6 +391,7 @@ jobs:
             --skip-checkout \
             --run-ref-tests yes \
             --run-itests yes \
+            --itest-family-set quick \
             --workers "$(nproc)" \
             --itest-workers 1 \
             --itest-shards '^[a-iA-I].*;^[j-rJ-R].*;^[s-zS-Z0-9_].*' \
