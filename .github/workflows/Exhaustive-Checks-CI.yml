@@ -179,7 +179,7 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: krystophny/liric
-          ref: a351e202f7c48ea74a421d7d3071ce84e9dc9fb1
+          ref: 1d934529b5176d6fe1c28dcbe8391f2e5a968065
           path: liric
           fetch-depth: 0
 
@@ -230,7 +230,10 @@ jobs:
             --skip-checkout \
             --run-ref-tests yes \
             --run-itests yes \
-            --itest-family-set extended \
+            --run-smoke-tests yes \
+            --run-third-party yes \
+            --third-party-lapack-mode full \
+            --itest-family-set llvm21 \
             --workers "$(nproc)" \
             --itest-workers 1 \
             --itest-shards '^[a-iA-I].*;^[j-rJ-R].*;^[s-zS-Z0-9_].*' \

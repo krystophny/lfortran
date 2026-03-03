@@ -339,8 +339,8 @@ jobs:
         uses: actions/checkout@v6
         with:
           repository: krystophny/liric
-          # Pin to liric/main commit containing WITH_LIRIC integration family-set support
-          ref: a351e202f7c48ea74a421d7d3071ce84e9dc9fb1
+          # Pin to liric/main commit containing WITH_LIRIC llvm21 parity lane
+          ref: 1d934529b5176d6fe1c28dcbe8391f2e5a968065
           path: liric
           fetch-depth: 0
 
@@ -391,13 +391,27 @@ jobs:
             --skip-checkout \
             --run-ref-tests yes \
             --run-itests yes \
-            --itest-family-set quick \
+            --run-smoke-tests yes \
+            --run-third-party no \
+            --itest-family-set llvm21 \
             --workers "$(nproc)" \
             --itest-workers 1 \
             --itest-shards '^[a-iA-I].*;^[j-rJ-R].*;^[s-zS-Z0-9_].*' \
             --itest-timeout-sec 2700 \
             --itest-memory-max 8G \
             --itest-tasks-max 512
+
+      - name: LIRIC parity - grammar conflict check
+        run: |
+          set -euo pipefail
+          cd "${GITHUB_WORKSPACE}/lfortran"
+          ./ci/grammar_conflicts.sh
+
+      - name: LIRIC parity - binary history check
+        run: |
+          set -euo pipefail
+          cd "${GITHUB_WORKSPACE}/lfortran"
+          python3 check_binary_file_in_git_history.py
 
       - name: Upload LIRIC artifacts
         if: always()
