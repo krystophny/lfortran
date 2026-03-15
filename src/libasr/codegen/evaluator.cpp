@@ -65,7 +65,11 @@
 #    include <llvm/Support/Host.h>
 #endif
 
+#ifndef WITH_LIRIC
 #include <libasr/codegen/KaleidoscopeJIT.h>
+#else
+#include <llvm/ExecutionEngine/Orc/KaleidoscopeJIT.h>
+#endif
 #include <libasr/codegen/evaluator.h>
 #include <libasr/codegen/asr_to_llvm.h>
 #include <libasr/codegen/asr_to_cpp.h>
@@ -297,7 +301,11 @@ std::unique_ptr<llvm::Module> LLVMEvaluator::parse_module(const std::string &sou
 #else
     module->setTargetTriple(target_triple);
 #endif
+#ifdef WITH_LIRIC
+    module->setDataLayout(TM->createDataLayout());
+#else
     module->setDataLayout(jit->getDataLayout());
+#endif
     return module;
 }
 
@@ -326,7 +334,11 @@ void LLVMEvaluator::add_module(std::unique_ptr<llvm::Module> mod) {
 #else
     mod->setTargetTriple(target_triple);
 #endif
+#ifdef WITH_LIRIC
+    mod->setDataLayout(TM->createDataLayout());
+#else
     mod->setDataLayout(jit->getDataLayout());
+#endif
     llvm::Error err = jit->addModule(std::move(mod), context);
     if (err) {
         llvm::SmallVector<char, 128> buf;
@@ -454,6 +466,9 @@ void LLVMEvaluator::save_object_file(llvm::Module &m, const std::string &filenam
     }
     pass.run(m);
     dest.flush();
+#ifdef WITH_LIRIC
+    m.emitObjectCompanionFiles(filename);
+#endif
 }
 
 void LLVMEvaluator::create_empty_object_file(const std::string &filename) {
@@ -536,7 +551,12 @@ llvm::LLVMContext &LLVMEvaluator::get_context()
 }
 
 const llvm::DataLayout &LLVMEvaluator::get_jit_data_layout() {
+#ifdef WITH_LIRIC
+    static llvm::DataLayout DL = TM->createDataLayout();
+    return DL;
+#else
     return jit->getDataLayout();
+#endif
 }
 
 void LLVMEvaluator::print_targets()

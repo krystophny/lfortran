@@ -47,6 +47,9 @@
 #include <libasr/asr_verify.h>
 #include <libasr/modfile.h>
 #include <libasr/config.h>
+#ifdef HAVE_LFORTRAN_LLVM
+#include <llvm/IR/Module.h>
+#endif
 #include <lfortran/fortran_kernel.h>
 #include <libasr/string_utils.h>
 #include <lfortran/utils.h>
@@ -119,6 +122,82 @@ std::string LFORTRAN_TEMP_DIR = get_system_temp_dir();
 // The unique compilation ID for this invocation of the compiler.
 // Used in naming unique intermediate object files during both compilation modes.
 const std::string LCOMPILERS_UNIQUE_ID = LCompilers::get_unique_ID();
+
+#if defined(HAVE_LFORTRAN_LLVM) && defined(WITH_LIRIC)
+static void liric_configure_runtime_lib_env(const std::string &runtime_library_dir)
+{
+#ifndef _WIN32
+    if (getenv("LIRIC_RUNTIME_LIB")) {
+        return;
+    }
+    std::string runtime_so = runtime_library_dir + "/liblfortran_runtime.so";
+    std::string runtime_so0 = runtime_library_dir + "/liblfortran_runtime.so.0";
+    std::string runtime_dylib = runtime_library_dir + "/liblfortran_runtime.dylib";
+    if (std::filesystem::exists(runtime_so)) {
+        setenv("LIRIC_RUNTIME_LIB", runtime_so.c_str(), 0);
+    } else if (std::filesystem::exists(runtime_so0)) {
+        setenv("LIRIC_RUNTIME_LIB", runtime_so0.c_str(), 0);
+    } else if (std::filesystem::exists(runtime_dylib)) {
+        setenv("LIRIC_RUNTIME_LIB", runtime_dylib.c_str(), 0);
+    }
+#else
+    (void)runtime_library_dir;
+#endif
+}
+
+static void liric_env_set(const char *key, const char *value)
+{
+#ifdef _WIN32
+    _putenv_s(key, value);
+#else
+    setenv(key, value, 1);
+#endif
+}
+
+static void liric_env_unset(const char *key)
+{
+#ifdef _WIN32
+    _putenv_s(key, "");
+#else
+    unsetenv(key);
+#endif
+}
+
+class LiricScopedUnsetEnvVar {
+private:
+    const char *m_key;
+    bool m_active;
+    bool m_had_previous;
+    std::string m_previous_value;
+
+public:
+    LiricScopedUnsetEnvVar(const char *key, bool active)
+        : m_key(key), m_active(active), m_had_previous(false)
+    {
+        if (!m_active) {
+            return;
+        }
+        const char *previous = std::getenv(m_key);
+        if (previous != nullptr) {
+            m_had_previous = true;
+            m_previous_value = previous;
+        }
+        liric_env_unset(m_key);
+    }
+
+    ~LiricScopedUnsetEnvVar()
+    {
+        if (!m_active) {
+            return;
+        }
+        if (m_had_previous) {
+            liric_env_set(m_key, m_previous_value.c_str());
+        } else {
+            liric_env_unset(m_key);
+        }
+    }
+};
+#endif
 
 void print_one_component(std::string component) {
     std::istringstream ss(component);
@@ -1158,6 +1237,32 @@ int compile_src_to_object_file(const std::string &infile,
         LCompilers::PassManager& lpm,
         bool arg_c = false)
 {
+#if defined(HAVE_LFORTRAN_LLVM) && defined(WITH_LIRIC)
+    bool disable_liric_no_link_for_compile = false;
+    if (const char *no_link_mode = std::getenv("LFORTRAN_NO_LINK_MODE")) {
+        disable_liric_no_link_for_compile = std::string(no_link_mode) == "1";
+    }
+    const bool has_liric_runtime_env =
+        (std::getenv("LIRIC_RUNTIME_BC") != nullptr) ||
+        (std::getenv("LIRIC_RUNTIME_LIB") != nullptr);
+    // No-link mode is for executable emission only; compile-only steps must
+    // always produce regular object files.
+    LiricScopedUnsetEnvVar scoped_no_link_mode("LFORTRAN_NO_LINK_MODE",
+        disable_liric_no_link_for_compile);
+    LiricScopedUnsetEnvVar scoped_no_link_empty("LFORTRAN_NO_LINK_MODULE_EMPTY_OBJECTS",
+        disable_liric_no_link_for_compile);
+    // Runtime injection is only needed for final executable emission.
+    LiricScopedUnsetEnvVar scoped_runtime_bc("LIRIC_RUNTIME_BC",
+        has_liric_runtime_env);
+    LiricScopedUnsetEnvVar scoped_runtime_lib("LIRIC_RUNTIME_LIB",
+        has_liric_runtime_env);
+    if (disable_liric_no_link_for_compile && compiler_options.emit_debug_info) {
+        // WITH_LIRIC no-link does not generate *_lines.dat sidecars; keep
+        // runtime behavior consistent by not emitting debug-info mode objects.
+        compiler_options.emit_debug_info = false;
+    }
+#endif
+
     int time_file_read=0;
     int time_src_to_asr=0;
     int time_save_mod=0;
@@ -1220,7 +1325,12 @@ int compile_src_to_object_file(const std::string &infile,
         && !LCompilers::ASRUtils::global_function_present(*asr)) {
         // Create an empty object file (things will be actually
         // compiled and linked when the main program is present):
-        e.create_empty_object_file(outfile);
+        try {
+            e.create_empty_object_file(outfile);
+        } catch (const std::exception &ex) {
+            std::cerr << "Code emission failed: " << ex.what() << std::endl;
+            return 10;
+        }
         return 0;
     }
 
@@ -1234,6 +1344,11 @@ int compile_src_to_object_file(const std::string &infile,
     diagnostics.diagnostics.clear();
     if (compiler_options.emit_debug_info) {
 #ifndef HAVE_RUNTIME_STACKTRACE
+#ifdef WITH_LIRIC
+        /* WITH_LIRIC no-link currently does not ship runtime stacktrace support.
+           Keep -g builds functional by continuing without debug stacktrace data. */
+        compiler_options.emit_debug_info = false;
+#else
         diagnostics.add(LCompilers::diag::Diagnostic(
             "The `runtime stacktrace` is not enabled. To get the stack traces "
             "or debugging information, please re-build LFortran with "
@@ -1243,6 +1358,7 @@ int compile_src_to_object_file(const std::string &infile,
         );
         std::cerr << diagnostics.render(lm, compiler_options);
         return 1;
+#endif
 #endif
     }
     LCompilers::Result<std::unique_ptr<LCompilers::LLVMModule>>
@@ -1260,7 +1376,12 @@ int compile_src_to_object_file(const std::string &infile,
         e.save_asm_file(*(m->m_m), outfile);
     } else {
         t1 = std::chrono::high_resolution_clock::now();
-        e.save_object_file(*(m->m_m), outfile);
+        try {
+            e.save_object_file(*(m->m_m), outfile);
+        } catch (const std::exception &ex) {
+            std::cerr << "Code emission failed: " << ex.what() << std::endl;
+            return 10;
+        }
         t2 = std::chrono::high_resolution_clock::now();
         time_llvm_to_bin = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
     }
@@ -1321,7 +1442,12 @@ int compile_llvm_to_object_file(const std::string& infile,
     LCompilers::LLVMEvaluator e(compiler_options.target);
 
     std::unique_ptr<LCompilers::LLVMModule> m = e.parse_module2(input, infile);
-    e.save_object_file(*(m->m_m), outfile);
+    try {
+        e.save_object_file(*(m->m_m), outfile);
+    } catch (const std::exception &ex) {
+        std::cerr << "Code emission failed: " << ex.what() << std::endl;
+        return 10;
+    }
 
     return 0;
 }
@@ -1913,6 +2039,44 @@ int link_executable(const std::vector<std::string> &infiles,
         std::cout << "Cannot use static_executable and shared_executable together" << std::endl;
         return 10;
     }
+#if defined(HAVE_LFORTRAN_LLVM) && defined(WITH_LIRIC)
+    if (backend == Backend::llvm) {
+        if (static_executable || shared_executable ||
+            !lib_dirs.empty() || !libraries.empty() || !linker_flags.empty()) {
+            std::cerr << "WITH_LIRIC AOT no-link mode ignoring external linker flags "
+                         "(-static/-shared, -L/-l, and linker options)."
+                      << std::endl;
+        }
+        liric_configure_runtime_lib_env(runtime_library_dir);
+        try {
+            llvm::Module::emitExecutableFromObjects(infiles, outfile);
+        } catch (const std::exception &ex) {
+            std::cerr << "WITH_LIRIC AOT no-link executable emission failed: "
+                      << ex.what() << std::endl;
+            std::cerr << "Refusing linker fallback." << std::endl;
+            return 10;
+        }
+        if ( compiler_options.arg_o != "" ) {
+            return 0;
+        }
+        std::string run_cmd = "./" + outfile;
+        int err = system(run_cmd.c_str());
+        if (err != 0) {
+            if (0 < err && err < 256) {
+                return err;
+            } else {
+                return LCompilers::LFortran::get_exit_status(err);
+            }
+        }
+        auto t2 = std::chrono::high_resolution_clock::now();
+        int time_total = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
+        if (time_report) {
+            std::string message = "Linking time:  " + std::to_string(time_total / 1000) + "." + std::to_string(time_total % 1000) + " ms";
+            compiler_options.po.vector_of_time_report.push_back(message);
+        }
+        return 0;
+    }
+#endif
     if (backend == Backend::llvm || backend == Backend::mlir) {
         std::string run_cmd = "", compile_cmd = "";
         if (t == "x86_64-pc-windows-msvc") {
