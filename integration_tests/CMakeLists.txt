@@ -3466,12 +3466,7 @@ RUN(NAME precision_03 LABELS gfortran llvm)
 RUN(NAME array_unbounded_01 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc llvmStackArray)
 RUN(NAME array_unbounded_02 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc llvmStackArray)
 
-if("$ENV{LFORTRAN_WITH_LIRIC}" STREQUAL "1")
-    # WITH_LIRIC currently has a numerical mismatch in the FAST matmul_01 lane.
-    RUN(NAME matmul_01 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc llvm_nopragma NO_FAST)
-else()
-    RUN(NAME matmul_01 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc llvm_nopragma)
-endif()
+RUN(NAME matmul_01 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc llvm_nopragma)
 RUN(NAME matmul_02 LABELS gfortran)
 RUN(NAME matmul_03 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME matmul_04 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc EXTRA_ARGS --realloc-lhs-arrays)
