@@ -242,24 +242,39 @@ jobs:
             command -v "$HOME/.local/bin/llvm-dwarfdump" >/dev/null 2>&1 || \
             { echo "llvm-dwarfdump not found after install/fallback"; exit 1; }
 
-      - name: Run LFortran CI scripts in WITH_LIRIC extended mode
+      - name: Run WITH_LIRIC extended parity suite
         env:
-          LFORTRAN_BIN: ${{ github.workspace }}/lfortran/build-liric/src/bin/lfortran
-          LFORTRAN_CTEST_DIR: ${{ github.workspace }}/lfortran/build-liric
-          LFORTRAN_WITH_LIRIC: "1"
-          LFORTRAN_RUN_REF_TESTS: "yes"
-          LFORTRAN_ITEST_FAMILY_SET: llvm21
-          LFORTRAN_LLVM_VERSION: "21"
+          PATH: ${{ github.workspace }}/lfortran/build-liric/src/bin:${{ env.PATH }}
           LIRIC_RUNTIME_BC: ${{ github.workspace }}/lfortran/build-liric/liric_runtime.bc
+          LIRIC_RUNTIME_LIB: ${{ github.workspace }}/lfortran/build-liric/src/runtime/liblfortran_runtime.so
           LIRIC_COMPILE_MODE: isel
           LIRIC_POLICY: direct
           LFORTRAN_NO_LINK_MODE: "1"
         run: |
           set -euo pipefail
           cd "${GITHUB_WORKSPACE}/lfortran"
-          export WIN=0
-          export MACOS=0
-          bash ci/test.sh
+          "${GITHUB_WORKSPACE}/lfortran/build-liric/src/lfortran/tests/test_lfortran" \
+            --source-file-exclude='*test_llvm.cpp'
+          ctest --test-dir "${GITHUB_WORKSPACE}/lfortran/build-liric" \
+            --output-on-failure -E '^test_lfortran$'
+          ./run_tests.py
+          ./run_tests.py -vh
+          cd integration_tests
+          ./run_tests.py -m
+          rm -rf build-lfortran-llvm
+          FC=lfortran cmake -DLFORTRAN_BACKEND=llvm -DCURRENT_BINARY_DIR=. \
+            -S . -B build-lfortran-llvm
+          cmake --build build-lfortran-llvm -j"$(nproc)"
+          ctest --test-dir build-lfortran-llvm -L llvm -j"$(nproc)" --output-on-failure
+          ./run_tests.py -b llvm llvm2 llvm_rtlib llvm_nopragma llvm_integer_8 llvmImplicit
+          ./run_tests.py -b llvm -sc
+          ./run_tests.py -b llvm2 llvm_rtlib llvm_nopragma llvm_integer_8 -f
+          ./run_tests.py -b llvm llvmImplicit -f
+          ./run_tests.py -b llvm_submodule
+          ./run_tests.py -b llvm_submodule -sc
+          ./run_tests.py -b llvm_single_invocation
+          ./run_tests.py -b llvm --std=f23
+          ./run_tests.py -b llvm -f --std=f23
 
       - name: Upload LIRIC internal extended artifacts
         if: always()

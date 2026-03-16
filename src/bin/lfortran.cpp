@@ -124,27 +124,6 @@ std::string LFORTRAN_TEMP_DIR = get_system_temp_dir();
 const std::string LCOMPILERS_UNIQUE_ID = LCompilers::get_unique_ID();
 
 #if defined(HAVE_LFORTRAN_LLVM) && defined(WITH_LIRIC)
-static void liric_configure_runtime_lib_env(const std::string &runtime_library_dir)
-{
-#ifndef _WIN32
-    if (getenv("LIRIC_RUNTIME_LIB")) {
-        return;
-    }
-    std::string runtime_so = runtime_library_dir + "/liblfortran_runtime.so";
-    std::string runtime_so0 = runtime_library_dir + "/liblfortran_runtime.so.0";
-    std::string runtime_dylib = runtime_library_dir + "/liblfortran_runtime.dylib";
-    if (std::filesystem::exists(runtime_so)) {
-        setenv("LIRIC_RUNTIME_LIB", runtime_so.c_str(), 0);
-    } else if (std::filesystem::exists(runtime_so0)) {
-        setenv("LIRIC_RUNTIME_LIB", runtime_so0.c_str(), 0);
-    } else if (std::filesystem::exists(runtime_dylib)) {
-        setenv("LIRIC_RUNTIME_LIB", runtime_dylib.c_str(), 0);
-    }
-#else
-    (void)runtime_library_dir;
-#endif
-}
-
 static void liric_env_set(const char *key, const char *value)
 {
 #ifdef _WIN32
@@ -1256,11 +1235,6 @@ int compile_src_to_object_file(const std::string &infile,
         has_liric_runtime_env);
     LiricScopedUnsetEnvVar scoped_runtime_lib("LIRIC_RUNTIME_LIB",
         has_liric_runtime_env);
-    if (disable_liric_no_link_for_compile && compiler_options.emit_debug_info) {
-        // WITH_LIRIC no-link does not generate *_lines.dat sidecars; keep
-        // runtime behavior consistent by not emitting debug-info mode objects.
-        compiler_options.emit_debug_info = false;
-    }
 #endif
 
     int time_file_read=0;
@@ -1344,11 +1318,6 @@ int compile_src_to_object_file(const std::string &infile,
     diagnostics.diagnostics.clear();
     if (compiler_options.emit_debug_info) {
 #ifndef HAVE_RUNTIME_STACKTRACE
-#ifdef WITH_LIRIC
-        /* WITH_LIRIC no-link currently does not ship runtime stacktrace support.
-           Keep -g builds functional by continuing without debug stacktrace data. */
-        compiler_options.emit_debug_info = false;
-#else
         diagnostics.add(LCompilers::diag::Diagnostic(
             "The `runtime stacktrace` is not enabled. To get the stack traces "
             "or debugging information, please re-build LFortran with "
@@ -1358,7 +1327,6 @@ int compile_src_to_object_file(const std::string &infile,
         );
         std::cerr << diagnostics.render(lm, compiler_options);
         return 1;
-#endif
 #endif
     }
     LCompilers::Result<std::unique_ptr<LCompilers::LLVMModule>>
@@ -2047,7 +2015,6 @@ int link_executable(const std::vector<std::string> &infiles,
                          "(-static/-shared, -L/-l, and linker options)."
                       << std::endl;
         }
-        liric_configure_runtime_lib_env(runtime_library_dir);
         try {
             llvm::Module::emitExecutableFromObjects(infiles, outfile);
         } catch (const std::exception &ex) {
