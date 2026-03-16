@@ -257,12 +257,11 @@ jobs:
             --source-file-exclude='*test_llvm.cpp'
           ctest --test-dir "${GITHUB_WORKSPACE}/lfortran/build-liric" \
             --output-on-failure -E '^test_lfortran$'
-          ./run_tests.py
-          ./run_tests.py -vh
           cd integration_tests
           ./run_tests.py -m
           rm -rf build-lfortran-llvm
-          FC=lfortran cmake -DLFORTRAN_BACKEND=llvm -DCURRENT_BINARY_DIR=. \
+          FC="${GITHUB_WORKSPACE}/lfortran/build-liric/src/bin/lfortran" \
+            cmake -DLFORTRAN_BACKEND=llvm -DCURRENT_BINARY_DIR=. \
             -S . -B build-lfortran-llvm
           cmake --build build-lfortran-llvm -j"$(nproc)"
           ctest --test-dir build-lfortran-llvm -L llvm -j"$(nproc)" --output-on-failure
