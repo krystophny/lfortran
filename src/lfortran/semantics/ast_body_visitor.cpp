@@ -2902,6 +2902,7 @@ public:
                 if (ASRUtils::is_assumed_rank_array(ASRUtils::expr_type(source)) &&
                         ASR::is_a<ASR::Var_t>(*source)) {
                     std::string var_name = ASRUtils::symbol_name(ASR::down_cast<ASR::Var_t>(source)->m_v);
+                    auto &assumed_rank_arrays = get_assumed_rank_arrays();
                     if (assumed_rank_arrays.find(var_name) != assumed_rank_arrays.end()) {
                         size_t rank = assumed_rank_arrays[var_name];
                         ASR::ttype_t* elem_type = ASRUtils::extract_type(ASRUtils::expr_type(source));
@@ -2991,6 +2992,7 @@ public:
                                             ASR::is_a<ASR::Var_t>(*mold)) {
                                         std::string var_name = ASRUtils::symbol_name(
                                             ASR::down_cast<ASR::Var_t>(mold)->m_v);
+                                        auto &assumed_rank_arrays = get_assumed_rank_arrays();
                                         auto it = assumed_rank_arrays.find(var_name);
                                         if (it != assumed_rank_arrays.end()) {
                                             n_dims = it->second;
@@ -3527,7 +3529,7 @@ public:
                         throw SemanticAbort();
                     }
                     int rank = ASR::down_cast<ASR::IntegerConstant_t>(rank_expr_value)->m_n;
-                    assumed_rank_arrays[array_var_name] = rank;
+                    get_assumed_rank_arrays()[array_var_name] = rank;
                     Vec<ASR::stmt_t*> rank_body; rank_body.reserve(al, rank_expr->n_body);
                     if (x.m_assoc_name) {
                         ASR::ttype_t* variable_type = ASRUtils::extract_type(selector_type);
@@ -3724,6 +3726,7 @@ public:
 
                 if (is_assumed_rank) {
                     int known_rank = selector_variable ? [&]() {
+                        auto &assumed_rank_arrays = get_assumed_rank_arrays();
                         auto it = assumed_rank_arrays.find(selector_variable->m_name);
                         return it != assumed_rank_arrays.end() ? it->second : 0;
                     }() : 0;
@@ -5393,6 +5396,7 @@ public:
         ASR::expr_t *target = ASRUtils::EXPR(tmp);
         if (ASRUtils::is_assumed_rank_array(ASRUtils::expr_type(target))) {
             std::string array_name = ASRUtils::symbol_name(ASR::down_cast<ASR::Var_t>(target)->m_v);
+            auto &assumed_rank_arrays = get_assumed_rank_arrays();
             if (assumed_rank_arrays.find(array_name) == assumed_rank_arrays.end()) {
                 diag.add(Diagnostic(
                     "Assumed-rank array '" + array_name + "' must be a dummy argument",
@@ -5457,6 +5461,7 @@ public:
         if (ASRUtils::is_assumed_rank_array(ASRUtils::expr_type(value)) &&
                 ASR::is_a<ASR::Var_t>(*value)) {
             std::string var_name = ASRUtils::symbol_name(ASR::down_cast<ASR::Var_t>(value)->m_v);
+            auto &assumed_rank_arrays = get_assumed_rank_arrays();
             if (assumed_rank_arrays.find(var_name) != assumed_rank_arrays.end()) {
                 size_t rank = assumed_rank_arrays[var_name];
                 ASR::ttype_t* elem_type = ASRUtils::extract_type(ASRUtils::expr_type(value));
@@ -7382,6 +7387,7 @@ public:
                 ASR::Var_t* v = ASR::down_cast<ASR::Var_t>(expr);
                 ASR::Variable_t *var = ASR::down_cast<ASR::Variable_t>(v->m_v);
                 std::string var_name = var->m_name;
+                auto &assumed_rank_arrays = get_assumed_rank_arrays();
                 if (assumed_rank_arrays.find(var_name) == assumed_rank_arrays.end()) {
                     diag.add(diag::Diagnostic(
                         "Assumed-rank arrays are not supported in print statements",

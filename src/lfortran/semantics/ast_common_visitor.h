@@ -29,9 +29,19 @@ using LCompilers::diag::Diagnostic;
 
 namespace LCompilers::LFortran {
 
-static std::map<std::string, std::vector<ASR::Variable_t*>> vars_with_deferred_struct_declaration;
-static std::map<std::string, int> assumed_rank_arrays;
-static int PDT_SENTINEL = 1000;
+inline std::map<std::string, std::vector<ASR::Variable_t*>> &
+get_vars_with_deferred_struct_declaration() {
+    static auto *vars =
+        new std::map<std::string, std::vector<ASR::Variable_t*>>();
+    return *vars;
+}
+
+inline std::map<std::string, int> &get_assumed_rank_arrays() {
+    static auto *arrays = new std::map<std::string, int>();
+    return *arrays;
+}
+
+static constexpr int PDT_SENTINEL = 1000;
 
 template <typename T>
 void extract_bind(T &x, ASR::abiType &abi_type, char *&bindc_name, diag::Diagnostics &diag) {
@@ -7561,17 +7571,19 @@ public:
                         && ASR::down_cast<ASR::ExternalSymbol_t>(
                                variable_added_to_symtab->m_type_declaration)
                                    ->m_external == nullptr) {
-                        if (vars_with_deferred_struct_declaration.find(
+                        auto &deferred_struct_declarations =
+                            get_vars_with_deferred_struct_declaration();
+                        if (deferred_struct_declarations.find(
                                 ASRUtils::symbol_name(variable_added_to_symtab->m_type_declaration))
-                            != vars_with_deferred_struct_declaration.end()) {
-                            vars_with_deferred_struct_declaration[ASRUtils::symbol_name(
+                            != deferred_struct_declarations.end()) {
+                            deferred_struct_declarations[ASRUtils::symbol_name(
                                                                       variable_added_to_symtab
                                                                           ->m_type_declaration)]
                                 .push_back(variable_added_to_symtab);
                         } else {
                             std::vector<ASR::Variable_t*> var_vector;
                             var_vector.push_back(variable_added_to_symtab);
-                            vars_with_deferred_struct_declaration[ASRUtils::symbol_name(
+                            deferred_struct_declarations[ASRUtils::symbol_name(
                                 variable_added_to_symtab->m_type_declaration)]
                                 = var_vector;
                         }
@@ -8935,6 +8947,7 @@ public:
         if (ASRUtils::is_assumed_rank_array(root_v_type)) {
             is_assumed_rank = true;
             std::string var_name = ASRUtils::symbol_name(v);
+            auto &assumed_rank_arrays = get_assumed_rank_arrays();
             if (assumed_rank_arrays.find(var_name) == assumed_rank_arrays.end()) {
                 diag.add(Diagnostic(
                     "Assumed-rank array `" + var_name +
@@ -11485,6 +11498,7 @@ public:
                 if (ASR::is_a<ASR::Variable_t>(*var->m_v)) {
                     ASR::Variable_t* variable = ASR::down_cast<ASR::Variable_t>(var->m_v);
                     std::string var_name = variable->m_name;
+                    auto &assumed_rank_arrays = get_assumed_rank_arrays();
                     if (assumed_rank_arrays.find(var_name) != assumed_rank_arrays.end()) {
                         // TODO: Use Array Physical Cast to convert assumed rank to descriptor array
                         int rank = assumed_rank_arrays[var_name];
@@ -11938,6 +11952,7 @@ public:
         }
         if (ASRUtils::is_assumed_rank_array(ASRUtils::expr_type(array))) {
             ASR::Variable_t* var = ASRUtils::EXPR2VAR(array);
+            auto &assumed_rank_arrays = get_assumed_rank_arrays();
             if (assumed_rank_arrays.find(var->m_name) == assumed_rank_arrays.end()) {
                 diag.add(Diagnostic("Assumed rank arrays cannot be used as `source` argument to reshape intrinsic",
                                     Level::Error, Stage::Semantic, {Label("", {array->base.loc})}));
@@ -16797,6 +16812,7 @@ public:
         ASR::expr_t *right = ASRUtils::EXPR(tmp);
         if (ASRUtils::is_assumed_rank_array(ASRUtils::expr_type(left))) {
             std::string array_name = ASRUtils::symbol_name(ASR::down_cast<ASR::Var_t>(left)->m_v);
+            auto &assumed_rank_arrays = get_assumed_rank_arrays();
             if (assumed_rank_arrays.find(array_name) == assumed_rank_arrays.end()) {
                 diag.add(Diagnostic("Comparison operations are not allowed on assumed-rank arrays ('" + array_name + "')",
                     Level::Error, Stage::Semantic, {Label("", {x.base.base.loc})}));
