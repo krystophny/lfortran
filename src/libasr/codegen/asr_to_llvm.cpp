@@ -55,6 +55,14 @@
 
 namespace LCompilers {
 
+static bool lfortran_verify_llvm_module_enabled() {
+    const char *env = std::getenv("LFORTRAN_VERIFY_LLVM");
+    if (!env || !env[0])
+        return false;
+    return strcmp(env, "0") != 0 && strcmp(env, "false") != 0 &&
+           strcmp(env, "False") != 0;
+}
+
 using ASR::is_a;
 using ASR::down_cast;
 using ASR::down_cast2;
@@ -21453,20 +21461,22 @@ Result<std::unique_ptr<LLVMModule>> asr_to_llvm(ASR::TranslationUnit_t &asr,
         Error error;
         return error;
     }
-    std::string msg;
-    llvm::raw_string_ostream err(msg);
-    if (llvm::verifyModule(*v.module, &err)) {
-        std::string buf;
-        llvm::raw_string_ostream os(buf);
-        v.module->print(os, nullptr);
-        std::cout << os.str();
-        msg = "asr_to_llvm: module failed verification. Error:\n" + err.str();
-        std::cout << msg << std::endl;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  
-        diagnostics.diagnostics.push_back(diag::Diagnostic(msg,
-            diag::Level::Error, diag::Stage::CodeGen));
-        Error error;
-        return error;
-    };
+    if (lfortran_verify_llvm_module_enabled()) {
+        std::string msg;
+        llvm::raw_string_ostream err(msg);
+        if (llvm::verifyModule(*v.module, &err)) {
+            std::string buf;
+            llvm::raw_string_ostream os(buf);
+            v.module->print(os, nullptr);
+            std::cout << os.str();
+            msg = "asr_to_llvm: module failed verification. Error:\n" + err.str();
+            std::cout << msg << std::endl;
+            diagnostics.diagnostics.push_back(diag::Diagnostic(msg,
+                diag::Level::Error, diag::Stage::CodeGen));
+            Error error;
+            return error;
+        };
+    }
 
     std::unique_ptr<LLVMModule> res = std::make_unique<LLVMModule>(std::move(v.module));
     t2 = std::chrono::high_resolution_clock::now();

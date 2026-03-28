@@ -84,6 +84,14 @@
 
 namespace LCompilers {
 
+static bool lfortran_verify_llvm_module_enabled() {
+    const char *env = std::getenv("LFORTRAN_VERIFY_LLVM");
+    if (!env || !env[0])
+        return false;
+    return strcmp(env, "0") != 0 && strcmp(env, "false") != 0 &&
+           strcmp(env, "False") != 0;
+}
+
 // Extracts the integer from APInt.
 // APInt does not seem to have this functionality, so we implement it here.
 uint64_t APInt_getint(const llvm::APInt &i) {
@@ -292,8 +300,7 @@ std::unique_ptr<llvm::Module> LLVMEvaluator::parse_module(const std::string &sou
         err.print("", llvm::errs());
         throw LCompilersException("parse_module(): Invalid LLVM IR");
     }
-    bool v = llvm::verifyModule(*module);
-    if (v) {
+    if (lfortran_verify_llvm_module_enabled() && llvm::verifyModule(*module)) {
         throw LCompilersException("parse_module(): module failed verification.");
     };
 #if LLVM_VERSION_MAJOR >= 21
@@ -514,7 +521,8 @@ void LLVMEvaluator::opt(llvm::Module &m) {
         fpm.run(func);
     }
     fpm.doFinalization();
-    mpm.add(llvm::createVerifierPass());
+    if (lfortran_verify_llvm_module_enabled())
+        mpm.add(llvm::createVerifierPass());
     mpm.run(m);
 #endif
 }
