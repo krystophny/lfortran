@@ -329,18 +329,25 @@ jobs:
     timeout-minutes: 360
 
     steps:
+      - name: Checkout meta repo
+        uses: actions/checkout@v6
+        with:
+          repository: krystophny/lfortran-dev
+          fetch-depth: 0
+          path: lfortran-dev
+
       - name: Checkout lfortran
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          path: lfortran
+          path: lfortran-dev/lfortran
 
       - name: Checkout liric
         uses: actions/checkout@v6
         with:
           repository: krystophny/liric
           ref: main
-          path: liric
+          path: lfortran-dev/liric
           fetch-depth: 0
 
       - name: Install Linux deps
@@ -350,98 +357,11 @@ jobs:
             ninja-build cmake bison re2c zstd jq python3 python3-pip git \
             clang llvm libunwind-dev
 
-      - name: Configure and build liric
-        run: |
-          set -euo pipefail
-          cmake -S "${GITHUB_WORKSPACE}/liric" -B "${GITHUB_WORKSPACE}/liric/build" \
-            -G Ninja -DCMAKE_BUILD_TYPE=Release
-          cmake --build "${GITHUB_WORKSPACE}/liric/build" -j"$(nproc)"
-
-      - name: Configure and build lfortran WITH_LIRIC
-        run: |
-          set -euo pipefail
-          cd "${GITHUB_WORKSPACE}/lfortran"
-          cmake -S . -B build-liric -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DWITH_LIRIC=yes \
-            -DWITH_LLVM=OFF \
-            -DLIRIC_DIR="${GITHUB_WORKSPACE}/liric" \
-            -DWITH_RUNTIME_STACKTRACE=yes
-          cmake --build build-liric -j"$(nproc)"
-
-      - name: Build WITH_LIRIC runtime archive
-        run: |
-          set -euo pipefail
-          clang -O0 -emit-llvm -c \
-            "${GITHUB_WORKSPACE}/lfortran/src/libasr/runtime/lfortran_intrinsics.c" \
-            -I"${GITHUB_WORKSPACE}/lfortran/src" \
-            -o "${GITHUB_WORKSPACE}/lfortran/build-liric/liric_runtime.bc"
-          "${GITHUB_WORKSPACE}/liric/build/liric_runtime_archive" \
-            --input-bc "${GITHUB_WORKSPACE}/lfortran/build-liric/liric_runtime.bc" \
-            --output "${GITHUB_WORKSPACE}/lfortran/build-liric/liric_runtime.lrarch" \
-            --backend copy_patch
-
-      - name: Ensure llvm-dwarfdump in PATH
-        shell: bash
-        run: |
-          set -euo pipefail
-          if command -v llvm-dwarfdump >/dev/null 2>&1; then
-            exit 0
-          fi
-
-          for cand in \
-            llvm-dwarfdump-22 llvm-dwarfdump-21 llvm-dwarfdump-20 \
-            llvm-dwarfdump-19 llvm-dwarfdump-18 llvm-dwarfdump-17 \
-            llvm-dwarfdump-16 llvm-dwarfdump-15 llvm-dwarfdump-14 \
-            llvm-dwarfdump-13 llvm-dwarfdump-12 llvm-dwarfdump-11; do
-            if command -v "$cand" >/dev/null 2>&1; then
-              mkdir -p "$HOME/.local/bin"
-              ln -sf "$(command -v "$cand")" "$HOME/.local/bin/llvm-dwarfdump"
-              echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-              break
-            fi
-          done
-
-          command -v llvm-dwarfdump >/dev/null 2>&1 || \
-            command -v "$HOME/.local/bin/llvm-dwarfdump" >/dev/null 2>&1 || \
-            { echo "llvm-dwarfdump not found after install/fallback"; exit 1; }
-
       - name: Run WITH_LIRIC quick parity suite
-        env:
-          PATH: ${{ github.workspace }}/lfortran/build-liric/src/bin:${{ env.PATH }}
         run: |
           set -euo pipefail
-          cd "${GITHUB_WORKSPACE}/lfortran"
-          "${GITHUB_WORKSPACE}/lfortran/build-liric/src/lfortran/tests/test_lfortran" \
-            --source-file-exclude='*test_llvm.cpp'
-          ctest --test-dir "${GITHUB_WORKSPACE}/lfortran/build-liric" \
-            --output-on-failure -E '^test_lfortran$'
-          cd integration_tests
-          ./run_tests.py -m
-          rm -rf build-lfortran-llvm
-          FC="${GITHUB_WORKSPACE}/lfortran/build-liric/src/bin/lfortran" \
-            cmake -DLFORTRAN_BACKEND=llvm -DCURRENT_BINARY_DIR=. \
-            -S . -B build-lfortran-llvm
-          cmake --build build-lfortran-llvm -j"$(nproc)"
-          ctest --test-dir build-lfortran-llvm -L llvm -j"$(nproc)" --output-on-failure
-          ./run_tests.py -b llvm llvm2 llvm_rtlib llvm_nopragma llvm_integer_8 llvmImplicit
-          ./run_tests.py -b llvm -sc
-          ./run_tests.py -b llvm2 llvm_rtlib llvm_nopragma llvm_integer_8 -f
-          ./run_tests.py -b llvm llvmImplicit -f
-          ./run_tests.py -b llvm_submodule
-          ./run_tests.py -b llvm_submodule -sc
-
-      - name: LIRIC parity - grammar conflict check
-        run: |
-          set -euo pipefail
-          cd "${GITHUB_WORKSPACE}/lfortran"
-          ./ci/grammar_conflicts.sh
-
-      - name: LIRIC parity - binary history check
-        run: |
-          set -euo pipefail
-          cd "${GITHUB_WORKSPACE}/lfortran"
-          python3 check_binary_file_in_git_history.py
+          cd "${GITHUB_WORKSPACE}/lfortran-dev"
+          ./scripts/liric-parity.sh quick
 
       - name: Upload LIRIC artifacts
         if: always()
@@ -451,8 +371,8 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
           path: |
-            ${{ github.workspace }}/lfortran/build-liric/Testing/Temporary/LastTest.log
-            ${{ github.workspace }}/lfortran/integration_tests/test-*/Testing/Temporary/LastTest.log
+            ${{ github.workspace }}/lfortran-dev/lfortran/build-liric/Testing/Temporary/LastTest.log
+            ${{ github.workspace }}/lfortran-dev/lfortran/integration_tests/test-*/Testing/Temporary/LastTest.log
 
   build_to_wasm_and_upload:
     name: Build LFortran to WASM and Upload

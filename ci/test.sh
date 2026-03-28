@@ -64,16 +64,24 @@ if [[ $WIN != "1" ]]; then
     ctest -L llvm -j${NPROC}
     cd ..
 
-    ./run_tests.py -b llvm llvm2 llvm_rtlib llvm_nopragma llvm_integer_8 llvmImplicit
-    ./run_tests.py -b llvm -sc
-    ./run_tests.py -b llvm2 llvm_rtlib llvm_nopragma llvm_integer_8 -f
-    if [[ $LFORTRAN_LLVM_VERSION == "11" ]]; then
-        ./run_tests.py -b llvm llvmImplicit -f -nf16
-    else
-        ./run_tests.py -b llvm llvmImplicit -f
+    ./run_tests.py -b llvm llvm2 llvm_rtlib llvm_nopragma llvm_integer_8 llvmImplicit -j${NPROC}
+    if [[ $MACOS != "1" ]]; then
+        ./run_tests.py -b llvm -sc -j${NPROC}
+        ./run_tests.py -b llvm2 llvm_rtlib llvm_nopragma llvm_integer_8 -f -j${NPROC}
     fi
-    ./run_tests.py -b llvm_submodule
-    ./run_tests.py -b llvm_submodule -sc
+    if [[ $LFORTRAN_LLVM_VERSION == "11" ]]; then
+        if [[ $MACOS != "1" ]]; then
+            ./run_tests.py -b llvm llvmImplicit -f -nf16 -j${NPROC}
+        fi
+    else
+        if [[ $MACOS != "1" ]]; then
+            ./run_tests.py -b llvm llvmImplicit -f -j${NPROC}
+        fi
+    fi
+    ./run_tests.py -b llvm_submodule -j${NPROC}
+    if [[ $MACOS != "1" ]]; then
+        ./run_tests.py -b llvm_submodule -sc -j${NPROC}
+    fi
     cd ..
 
     pip install src/server/tests tests/server
