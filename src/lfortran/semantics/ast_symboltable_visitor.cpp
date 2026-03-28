@@ -2603,11 +2603,11 @@ public:
         // variables declared with deferred struct declarations. For an example, see
         // `integration_tests/modules_37.f90` for declaration of `ptr` inside struct
         // `build_target_ptr`.
-        auto &vars_with_deferred_struct_declaration =
+        auto &deferred_struct_declarations =
             get_vars_with_deferred_struct_declaration();
-        if (vars_with_deferred_struct_declaration.find(to_lower(x.m_name))
-            != vars_with_deferred_struct_declaration.end()) {
-            for (ASR::Variable_t* var : vars_with_deferred_struct_declaration[to_lower(x.m_name)]) {
+        if (deferred_struct_declarations.find(to_lower(x.m_name))
+            != deferred_struct_declarations.end()) {
+            for (ASR::Variable_t* var : deferred_struct_declarations[to_lower(x.m_name)]) {
                 ASR::ttype_t* var_type = var->m_type;
                 if (ASR::is_a<ASR::Pointer_t>(*var_type) || ASR::is_a<ASR::Allocatable_t>(*var_type)) {
                     ASR::StructType_t* stype = ASR::down_cast<ASR::StructType_t>(ASRUtils::extract_type(var_type));
@@ -2625,7 +2625,7 @@ public:
                 }
                 var->m_type_declaration = ASR::down_cast<ASR::symbol_t>(tmp);
             }
-            vars_with_deferred_struct_declaration.erase(to_lower(x.m_name));
+            deferred_struct_declarations.erase(to_lower(x.m_name));
         }
 
 
