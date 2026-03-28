@@ -1,6 +1,8 @@
 #ifndef LCOMPILERS_PASS_MANAGER_H
 #define LCOMPILERS_PASS_MANAGER_H
 
+#include <cstdlib>
+#include <cstring>
 #include <iostream>
 
 #include <libasr/asr.h>
@@ -69,6 +71,16 @@
 #include <fstream>
 
 namespace LCompilers {
+
+    inline bool lfortran_verify_asr_passes_enabled() {
+        const char *env = std::getenv("LFORTRAN_VERIFY_ASR");
+        if (!env || !env[0]) {
+            return false;
+        }
+        return std::strcmp(env, "0") != 0 &&
+               std::strcmp(env, "false") != 0 &&
+               std::strcmp(env, "False") != 0;
+    }
 
     typedef void (*pass_function)(Allocator&, ASR::TranslationUnit_t&,
                                   const LCompilers::PassOptions&);
@@ -188,7 +200,8 @@ namespace LCompilers {
                 auto t1 = std::chrono::high_resolution_clock::now();
                 _passes_db[passes[i]](al, *asr, pass_options);
 #if defined(WITH_LFORTRAN_ASSERT)
-                if (!asr_verify(*asr, true, diagnostics)) {
+                if (lfortran_verify_asr_passes_enabled() &&
+                    !asr_verify(*asr, true, diagnostics)) {
                     std::cerr << diagnostics.render2();
                     throw LCompilersException("Verify failed in the pass: "
                         + passes[i]);
@@ -402,7 +415,8 @@ namespace LCompilers {
                     outfile.close();
                 }
 #if defined(WITH_LFORTRAN_ASSERT)
-                if (!asr_verify(*asr, true, diagnostics)) {
+                if (lfortran_verify_asr_passes_enabled() &&
+                    !asr_verify(*asr, true, diagnostics)) {
                     std::cerr << diagnostics.render2();
                     throw LCompilersException("Verify failed in the pass: "
                         + passes[i]);
