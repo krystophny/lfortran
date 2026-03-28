@@ -110,18 +110,20 @@ std::string LLVMModule::str()
 
 llvm::Function *LLVMModule::get_function(const std::string &fn_name) {
     llvm::Module *m = m_m.get();
-    return m->getFunction(fn_name);
+    return m->getFunction(llvm::StringRef(fn_name.c_str(), fn_name.size()));
 }
 
 llvm::GlobalVariable *LLVMModule::get_global(const std::string &global_name) {
     llvm::Module *m = m_m.get();
-    return m->getNamedGlobal(global_name);
+    return m->getNamedGlobal(
+        llvm::StringRef(global_name.c_str(), global_name.size()));
 }
 
 std::string LLVMModule::get_return_type(const std::string &fn_name)
 {
     llvm::Module *m = m_m.get();
-    llvm::Function *fn = m->getFunction(fn_name);
+    llvm::Function *fn =
+        m->getFunction(llvm::StringRef(fn_name.c_str(), fn_name.size()));
     if (!fn) {
         return "none";
     }

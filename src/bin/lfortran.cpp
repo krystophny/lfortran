@@ -1940,6 +1940,36 @@ int compile_to_binary_fortran(const std::string &infile,
     return 0;
 }
 
+static int generate_runtime_stacktrace_artifacts(const std::string &outfile,
+        const std::string &file_name) {
+#ifdef HAVE_RUNTIME_STACKTRACE
+    std::string cmd;
+#ifdef HAVE_LFORTRAN_MACHO
+    cmd += "dsymutil " + outfile + " && llvm-dwarfdump --debug-line "
+        + outfile + ".dSYM > ";
+#else
+    cmd += "llvm-dwarfdump --debug-line " + outfile + " > ";
+#endif
+    std::string dwarf_scripts_path = LCompilers::LFortran::get_dwarf_scripts_dir();
+    cmd += file_name + "_ldd.txt && (" + dwarf_scripts_path + "/dwarf_convert.py "
+        + file_name + "_ldd.txt " + file_name + "_lines.txt "
+        + file_name + "_lines.dat && " + dwarf_scripts_path + "/dat_convert.py "
+        + file_name + "_lines.dat)";
+    int status = system(cmd.c_str());
+    if (status != 0) {
+        std::cerr << "Error in creating the files used to generate "
+            "the debug information. This might be caused because either"
+            " `llvm-dwarfdump` or `Python` are not available. "
+            "Please activate the CONDA environment and compile again.\n";
+    }
+    return status;
+#else
+    (void)outfile;
+    (void)file_name;
+    return 0;
+#endif
+}
+
 // infile is an object file
 // outfile will become the executable
 int link_executable(const std::vector<std::string> &infiles,
@@ -2078,6 +2108,12 @@ int link_executable(const std::vector<std::string> &infiles,
                       << ex.what() << std::endl;
             std::cerr << "Refusing linker fallback." << std::endl;
             return 10;
+        }
+        if (compiler_options.emit_debug_info) {
+            int status = generate_runtime_stacktrace_artifacts(outfile, file_name);
+            if (status != 0) {
+                return status;
+            }
         }
         if ( compiler_options.arg_o != "" ) {
             return 0;
@@ -2236,31 +2272,12 @@ int link_executable(const std::vector<std::string> &infiles,
             return 10;
         }
 
-#ifdef HAVE_RUNTIME_STACKTRACE
         if (compiler_options.emit_debug_info) {
-            // TODO: Replace the following hardcoded part
-            std::string cmd = "";
-#ifdef HAVE_LFORTRAN_MACHO
-            cmd += "dsymutil " + outfile + " && llvm-dwarfdump --debug-line "
-                + outfile + ".dSYM > ";
-#else
-            cmd += "llvm-dwarfdump --debug-line " + outfile + " > ";
-#endif
-            std::string dwarf_scripts_path = LCompilers::LFortran::get_dwarf_scripts_dir();
-            cmd += file_name + "_ldd.txt && (" + dwarf_scripts_path + "/dwarf_convert.py "
-                + file_name + "_ldd.txt " + file_name + "_lines.txt "
-                + file_name + "_lines.dat && " + dwarf_scripts_path + "/dat_convert.py "
-                + file_name + "_lines.dat)";
-            int status = system(cmd.c_str());
-            if ( status != 0 ) {
-                std::cerr << "Error in creating the files used to generate "
-                    "the debug information. This might be caused because either"
-                    " `llvm-dwarfdump` or `Python` are not available. "
-                    "Please activate the CONDA environment and compile again.\n";
+            int status = generate_runtime_stacktrace_artifacts(outfile, file_name);
+            if (status != 0) {
                 return status;
             }
         }
-#endif
     } else if (backend == Backend::c) {
         std::string CXX = "gcc";
         std::string cmd = CXX + " -o " + outfile + " ";
