@@ -369,13 +369,17 @@ jobs:
             -DWITH_RUNTIME_STACKTRACE=yes
           cmake --build build-liric -j"$(nproc)"
 
-      - name: Build WITH_LIRIC runtime bitcode
+      - name: Build WITH_LIRIC runtime archive
         run: |
           set -euo pipefail
           clang -O0 -emit-llvm -c \
             "${GITHUB_WORKSPACE}/lfortran/src/libasr/runtime/lfortran_intrinsics.c" \
             -I"${GITHUB_WORKSPACE}/lfortran/src" \
             -o "${GITHUB_WORKSPACE}/lfortran/build-liric/liric_runtime.bc"
+          "${GITHUB_WORKSPACE}/liric/build/liric_runtime_archive" \
+            --input-bc "${GITHUB_WORKSPACE}/lfortran/build-liric/liric_runtime.bc" \
+            --output "${GITHUB_WORKSPACE}/lfortran/build-liric/liric_runtime.lrarch" \
+            --backend copy_patch
 
       - name: Ensure llvm-dwarfdump in PATH
         shell: bash
@@ -405,11 +409,6 @@ jobs:
       - name: Run WITH_LIRIC quick parity suite
         env:
           PATH: ${{ github.workspace }}/lfortran/build-liric/src/bin:${{ env.PATH }}
-          LIRIC_RUNTIME_BC: ${{ github.workspace }}/lfortran/build-liric/liric_runtime.bc
-          LIRIC_RUNTIME_LIB: ${{ github.workspace }}/lfortran/build-liric/src/runtime/liblfortran_runtime.so
-          LIRIC_COMPILE_MODE: isel
-          LIRIC_POLICY: direct
-          LFORTRAN_NO_LINK_MODE: "1"
         run: |
           set -euo pipefail
           cd "${GITHUB_WORKSPACE}/lfortran"

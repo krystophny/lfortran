@@ -176,6 +176,41 @@ public:
         }
     }
 };
+
+class LiricScopedSetEnvVar {
+private:
+    const char *m_key;
+    bool m_active;
+    bool m_had_previous;
+    std::string m_previous_value;
+
+public:
+    LiricScopedSetEnvVar(const char *key, const std::string &value, bool active)
+        : m_key(key), m_active(active), m_had_previous(false)
+    {
+        if (!m_active) {
+            return;
+        }
+        const char *previous = std::getenv(m_key);
+        if (previous != nullptr) {
+            m_had_previous = true;
+            m_previous_value = previous;
+        }
+        liric_env_set(m_key, value.c_str());
+    }
+
+    ~LiricScopedSetEnvVar()
+    {
+        if (!m_active) {
+            return;
+        }
+        if (m_had_previous) {
+            liric_env_set(m_key, m_previous_value.c_str());
+        } else {
+            liric_env_unset(m_key);
+        }
+    }
+};
 #endif
 
 void print_one_component(std::string component) {
@@ -1221,9 +1256,8 @@ int compile_src_to_object_file(const std::string &infile,
     if (const char *no_link_mode = std::getenv("LFORTRAN_NO_LINK_MODE")) {
         disable_liric_no_link_for_compile = std::string(no_link_mode) == "1";
     }
-    const bool has_liric_runtime_env =
-        (std::getenv("LIRIC_RUNTIME_BC") != nullptr) ||
-        (std::getenv("LIRIC_RUNTIME_LIB") != nullptr);
+    const bool has_liric_runtime_archive =
+        std::getenv("LIRIC_RUNTIME_ARCHIVE") != nullptr;
     // No-link mode is for executable emission only; compile-only steps must
     // always produce regular object files.
     LiricScopedUnsetEnvVar scoped_no_link_mode("LFORTRAN_NO_LINK_MODE",
@@ -1231,10 +1265,8 @@ int compile_src_to_object_file(const std::string &infile,
     LiricScopedUnsetEnvVar scoped_no_link_empty("LFORTRAN_NO_LINK_MODULE_EMPTY_OBJECTS",
         disable_liric_no_link_for_compile);
     // Runtime injection is only needed for final executable emission.
-    LiricScopedUnsetEnvVar scoped_runtime_bc("LIRIC_RUNTIME_BC",
-        has_liric_runtime_env);
-    LiricScopedUnsetEnvVar scoped_runtime_lib("LIRIC_RUNTIME_LIB",
-        has_liric_runtime_env);
+    LiricScopedUnsetEnvVar scoped_runtime_archive("LIRIC_RUNTIME_ARCHIVE",
+        has_liric_runtime_archive);
 #endif
 
     int time_file_read=0;
@@ -2009,12 +2041,36 @@ int link_executable(const std::vector<std::string> &infiles,
     }
 #if defined(HAVE_LFORTRAN_LLVM) && defined(WITH_LIRIC)
     if (backend == Backend::llvm) {
+        const bool has_runtime_archive =
+            std::getenv("LIRIC_RUNTIME_ARCHIVE") != nullptr;
+        const std::string runtime_archive = has_runtime_archive
+            ? std::string()
+            : LCompilers::LFortran::get_liric_runtime_archive();
         if (static_executable || shared_executable ||
             !lib_dirs.empty() || !libraries.empty() || !linker_flags.empty()) {
             std::cerr << "WITH_LIRIC AOT no-link mode ignoring external linker flags "
                          "(-static/-shared, -L/-l, and linker options)."
                       << std::endl;
         }
+        if (!has_runtime_archive) {
+            if (runtime_archive.empty()) {
+                std::cerr << "WITH_LIRIC AOT no-link executable emission requires "
+                             "a prepared runtime archive, but no default build-tree "
+                             "location is available in this execution mode."
+                          << std::endl;
+                return 10;
+            }
+            if (!std::filesystem::is_regular_file(runtime_archive)) {
+                std::cerr << "WITH_LIRIC AOT no-link executable emission requires "
+                             "runtime archive: "
+                          << runtime_archive << std::endl;
+                std::cerr << "Run scripts/lf.sh --with-liric build to prepare it."
+                          << std::endl;
+                return 10;
+            }
+        }
+        LiricScopedSetEnvVar scoped_runtime_archive("LIRIC_RUNTIME_ARCHIVE",
+            runtime_archive, !has_runtime_archive);
         try {
             llvm::Module::emitExecutableFromObjects(infiles, outfile);
         } catch (const std::exception &ex) {
