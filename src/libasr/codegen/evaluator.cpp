@@ -65,7 +65,11 @@
 #    include <llvm/Support/Host.h>
 #endif
 
+#ifndef WITH_LIRIC
 #include <libasr/codegen/KaleidoscopeJIT.h>
+#else
+#include <llvm/ExecutionEngine/Orc/KaleidoscopeJIT.h>
+#endif
 #include <libasr/codegen/evaluator.h>
 #include <libasr/codegen/asr_to_llvm.h>
 #include <libasr/codegen/asr_to_cpp.h>
@@ -291,8 +295,7 @@ std::unique_ptr<llvm::Module> LLVMEvaluator::parse_module(const std::string &sou
         err.print("", llvm::errs());
         throw LCompilersException("parse_module(): Invalid LLVM IR");
     }
-    bool v = llvm::verifyModule(*module);
-    if (v) {
+    if (llvm::verifyModule(*module)) {
         throw LCompilersException("parse_module(): module failed verification.");
     };
 #if LLVM_VERSION_MAJOR >= 21
