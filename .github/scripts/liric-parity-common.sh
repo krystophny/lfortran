@@ -41,8 +41,19 @@ ensure_linux_deps() {
     require_command cmake
     require_command ninja
     require_command python3
+    require_command python
     require_command clang
     require_command ctest
+    require_command re2c
+    require_command bison
+}
+
+bootstrap_lfortran_sources() {
+    liric_step "Bootstrap lfortran generated sources"
+    (
+        cd "${LFORTRAN_DIR}"
+        ./build0.sh
+    )
 }
 
 ensure_llvm_dwarfdump() {
@@ -77,6 +88,7 @@ build_liric_release() {
 
 build_lfortran_with_liric() {
     liric_step "Configure and build lfortran WITH_LIRIC"
+    bootstrap_lfortran_sources
     cmake -S "${LFORTRAN_DIR}" -B "${LFORTRAN_BUILD_DIR}" -G Ninja \
         -DCMAKE_BUILD_TYPE=Release \
         -DWITH_LIRIC=yes \
