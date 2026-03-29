@@ -262,7 +262,6 @@ namespace LCompilers {
                 "array_op",
                 "pass_array_by_data",
                 "array_passed_in_function_call",
-                "print_struct_type",
                 "print_arr",
                 "print_list_tuple",
                 "print_struct_type",
