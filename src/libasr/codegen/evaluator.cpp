@@ -470,9 +470,6 @@ void LLVMEvaluator::save_object_file(llvm::Module &m, const std::string &filenam
     }
     pass.run(m);
     dest.flush();
-#ifdef WITH_LIRIC
-    m.emitObjectCompanionFiles(filename);
-#endif
 }
 
 void LLVMEvaluator::create_empty_object_file(const std::string &filename) {
