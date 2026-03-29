@@ -169,25 +169,17 @@ jobs:
           (github.event_name == 'pull_request' &&
            contains(github.event.pull_request.labels.*.name, 'Tests::Run-Exhaustive')) }}
     steps:
-      - name: Checkout meta repo
-        uses: actions/checkout@v6
-        with:
-          repository: krystophny/lfortran-dev
-          fetch-depth: 0
-          path: lfortran-dev
-
       - name: Checkout lfortran
         uses: actions/checkout@v6
         with:
           fetch-depth: 0
-          path: lfortran-dev/lfortran
 
       - name: Checkout liric
         uses: actions/checkout@v6
         with:
           repository: krystophny/liric
           ref: main
-          path: lfortran-dev/liric
+          path: liric
           fetch-depth: 0
 
       - name: Install Linux deps
@@ -200,8 +192,8 @@ jobs:
       - name: Run WITH_LIRIC extended parity suite
         run: |
           set -euo pipefail
-          cd "${GITHUB_WORKSPACE}/lfortran-dev"
-          ./scripts/liric-parity.sh exhaustive
+          cd "${GITHUB_WORKSPACE}"
+          ./.github/scripts/liric-parity.sh exhaustive
 
       - name: Upload LIRIC internal extended artifacts
         if: always()
@@ -211,8 +203,8 @@ jobs:
           retention-days: 14
           if-no-files-found: warn
           path: |
-            ${{ github.workspace }}/lfortran-dev/lfortran/build-liric/Testing/Temporary/LastTest.log
-            ${{ github.workspace }}/lfortran-dev/lfortran/integration_tests/test-*/Testing/Temporary/LastTest.log
+            ${{ github.workspace }}/build-liric/Testing/Temporary/LastTest.log
+            ${{ github.workspace }}/integration_tests/test-*/Testing/Temporary/LastTest.log
 
 # Commented out to save CI runners:
 #  test-pixi:

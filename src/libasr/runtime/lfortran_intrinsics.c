@@ -274,14 +274,14 @@ struct Stacktrace {
     uint64_t stack_size;
 };
 
+#endif // HAVE_RUNTIME_STACKTRACE
+
 // Styles and Colors
 #define DIM "\033[2m"
 #define BOLD "\033[1m"
 #define S_RESET "\033[0m"
 #define MAGENTA "\033[35m"
 #define C_RESET "\033[39m"
-
-#endif // HAVE_RUNTIME_STACKTRACE
 
 #ifdef HAVE_LFORTRAN_MACHO
     #define INT64 "%lld"

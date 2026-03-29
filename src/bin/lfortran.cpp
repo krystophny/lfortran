@@ -142,6 +142,21 @@ static void liric_env_unset(const char *key)
 #endif
 }
 
+static std::string liric_append_env_path(const char *key,
+    const std::string &value)
+{
+    const char *previous = std::getenv(key);
+    if (previous == nullptr || previous[0] == '\0') {
+        return value;
+    }
+#ifdef _WIN32
+    const char separator = ';';
+#else
+    const char separator = ':';
+#endif
+    return value + separator + std::string(previous);
+}
+
 class LiricScopedUnsetEnvVar {
 private:
     const char *m_key;
@@ -2102,6 +2117,14 @@ int link_executable(const std::vector<std::string> &infiles,
         }
         LiricScopedSetEnvVar scoped_runtime_archive("LIRIC_RUNTIME_ARCHIVE",
             runtime_archive, !has_runtime_archive);
+        const std::string runtime_c_header_dir =
+            LCompilers::LFortran::get_runtime_library_c_header_dir();
+        LiricScopedSetEnvVar scoped_cpath("CPATH",
+            liric_append_env_path("CPATH", runtime_c_header_dir),
+            !runtime_c_header_dir.empty());
+        LiricScopedSetEnvVar scoped_c_include_path("C_INCLUDE_PATH",
+            liric_append_env_path("C_INCLUDE_PATH", runtime_c_header_dir),
+            !runtime_c_header_dir.empty());
         try {
             llvm::Module::emitExecutableFromObjects(infiles, outfile);
         } catch (const std::exception &ex) {
