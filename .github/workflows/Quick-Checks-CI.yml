@@ -342,18 +342,28 @@ jobs:
           path: liric
           fetch-depth: 0
 
+      - name: Checkout meta repo
+        uses: actions/checkout@v6
+        with:
+          repository: krystophny/lfortran-dev
+          ref: main
+          path: lfortran-dev
+          fetch-depth: 0
+
       - name: Install Linux deps
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            ninja-build cmake bison re2c zstd jq python3 python3-pip git \
+            ninja-build cmake bison re2c zstd jq python3 python3-pip python-is-python3 git \
             clang llvm libunwind-dev
 
       - name: Run WITH_LIRIC quick parity suite
         run: |
           set -euo pipefail
           cd "${GITHUB_WORKSPACE}"
-          ./.github/scripts/liric-parity.sh quick
+          LFORTRAN_DIR="${GITHUB_WORKSPACE}" \
+          LIRIC_DIR="${GITHUB_WORKSPACE}/liric" \
+            "${GITHUB_WORKSPACE}/lfortran-dev/scripts/liric-parity.sh" quick
 
       - name: Upload LIRIC artifacts
         if: always()
