@@ -27,6 +27,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 ),
                             fcn:
                                 (Function
@@ -53,6 +55,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     fcn
@@ -121,6 +125,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 )
                         })
                     hybrd
@@ -146,8 +152,8 @@
                     )]
                     ()
                     Public
-                    .false.
-                    .false.
+                    .true.
+                    .true.
                     ()
                 )
         })

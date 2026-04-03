@@ -32,6 +32,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             inner1:
                                                 (Function
@@ -72,8 +74,8 @@
                                                     )]
                                                     ()
                                                     Public
-                                                    .false.
-                                                    .false.
+                                                    .true.
+                                                    .true.
                                                     ()
                                                 ),
                                             inner2:
@@ -115,8 +117,8 @@
                                                     )]
                                                     ()
                                                     Public
-                                                    .false.
-                                                    .false.
+                                                    .true.
+                                                    .true.
                                                     ()
                                                 )
                                         })
@@ -160,8 +162,8 @@
                                     )]
                                     ()
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 )
                         })

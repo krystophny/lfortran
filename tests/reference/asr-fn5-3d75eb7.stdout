@@ -32,6 +32,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             line:
                                                 (Variable
@@ -53,6 +55,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             pattern:
                                                 (Variable
@@ -74,6 +78,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             strout:
                                                 (Variable
@@ -115,6 +121,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     atleast
@@ -227,8 +235,8 @@
                                     )]
                                     (Var 3 strout)
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             print_dictionary:
@@ -256,6 +264,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             i:
                                                 (Variable
@@ -277,6 +287,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             keywords:
                                                 (Variable
@@ -305,6 +317,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             lfortran_iomsg:
                                                 (Variable
@@ -326,6 +340,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             lfortran_iomsg1:
                                                 (Variable
@@ -347,48 +363,8 @@
                                                     ()
                                                     .false.
                                                     .false.
-                                                ),
-                                            lfortran_tmp_iostat:
-                                                (Variable
-                                                    4
-                                                    lfortran_tmp_iostat
-                                                    []
-                                                    Local
+                                                    NotMethod
                                                     ()
-                                                    ()
-                                                    Default
-                                                    (Integer 4)
-                                                    ()
-                                                    Source
-                                                    Public
-                                                    Required
-                                                    .false.
-                                                    .false.
-                                                    .false.
-                                                    ()
-                                                    .false.
-                                                    .false.
-                                                ),
-                                            lfortran_tmp_iostat1:
-                                                (Variable
-                                                    4
-                                                    lfortran_tmp_iostat1
-                                                    []
-                                                    Local
-                                                    ()
-                                                    ()
-                                                    Default
-                                                    (Integer 4)
-                                                    ()
-                                                    Source
-                                                    Public
-                                                    Required
-                                                    .false.
-                                                    .false.
-                                                    .false.
-                                                    ()
-                                                    .false.
-                                                    .false.
                                                 ),
                                             present_in:
                                                 (Variable
@@ -417,6 +393,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             shorts:
                                                 (Variable
@@ -445,6 +423,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             stop:
                                                 (Variable
@@ -466,6 +446,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             values:
                                                 (Variable
@@ -494,6 +476,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     print_dictionary
@@ -633,6 +617,7 @@
                                         ()
                                         ()
                                         .true.
+                                        ()
                                         ()
                                         ()
                                     )
@@ -894,11 +879,12 @@
                                         .true.
                                         ()
                                         ()
+                                        ()
                                     )]
                                     ()
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 )
                         })

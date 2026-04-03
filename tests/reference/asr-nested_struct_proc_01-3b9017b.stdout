@@ -117,6 +117,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 ),
                             initial_team:
                                 (ExternalSymbol
@@ -211,13 +213,13 @@
                                                     ()
                                                     Default
                                                     (StructType
-                                                        [(Complex 4)
-                                                        (StructType
+                                                        [(StructType
                                                             []
                                                             []
                                                             .true.
                                                             .false.
-                                                        )]
+                                                        )
+                                                        (Complex 4)]
                                                         []
                                                         .true.
                                                         .false.
@@ -232,18 +234,20 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     integer32complex32orderedmap
                                     (StructType
                                         [(StructType
-                                            [(Complex 4)
-                                            (StructType
+                                            [(StructType
                                                 []
                                                 []
                                                 .true.
                                                 .false.
-                                            )]
+                                            )
+                                            (Complex 4)]
                                             []
                                             .true.
                                             .false.
@@ -262,6 +266,7 @@
                                     []
                                     ()
                                     ()
+                                    []
                                 ),
                             integer_kinds:
                                 (ExternalSymbol
@@ -398,6 +403,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             rc:
                                                 (Variable
@@ -419,6 +426,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             res:
                                                 (Variable
@@ -442,6 +451,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             this:
                                                 (Variable
@@ -453,13 +464,13 @@
                                                     ()
                                                     Default
                                                     (StructType
-                                                        [(Complex 4)
-                                                        (StructType
+                                                        [(StructType
                                                             []
                                                             []
                                                             .true.
                                                             .false.
-                                                        )]
+                                                        )
+                                                        (Complex 4)]
                                                         []
                                                         .false.
                                                         .false.
@@ -474,18 +485,20 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     omap_i_at_rc
                                     (FunctionType
                                         [(StructType
-                                            [(Complex 4)
-                                            (StructType
+                                            [(StructType
                                                 []
                                                 []
                                                 .true.
                                                 .false.
-                                            )]
+                                            )
+                                            (Complex 4)]
                                             []
                                             .false.
                                             .false.
@@ -528,8 +541,8 @@
                                     )]
                                     (Var 10 res)
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             omap_i_set:
@@ -556,6 +569,7 @@
                                     []
                                     ()
                                     ()
+                                    []
                                 ),
                             omap_insert_key_value:
                                 (Function
@@ -612,6 +626,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             status:
                                                 (Variable
@@ -633,6 +649,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             this:
                                                 (Variable
@@ -645,13 +663,13 @@
                                                     Default
                                                     (StructType
                                                         [(StructType
-                                                            [(Complex 4)
-                                                            (StructType
+                                                            [(StructType
                                                                 []
                                                                 []
                                                                 .true.
                                                                 .false.
-                                                            )]
+                                                            )
+                                                            (Complex 4)]
                                                             []
                                                             .true.
                                                             .false.
@@ -670,6 +688,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             tmp:
                                                 (Variable
@@ -693,6 +713,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             tol:
                                                 (Variable
@@ -720,6 +742,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             value:
                                                 (Variable
@@ -741,19 +765,21 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     omap_insert_key_value
                                     (FunctionType
                                         [(StructType
                                             [(StructType
-                                                [(Complex 4)
-                                                (StructType
+                                                [(StructType
                                                     []
                                                     []
                                                     .true.
                                                     .false.
-                                                )]
+                                                )
+                                                (Complex 4)]
                                                 []
                                                 .true.
                                                 .false.
@@ -786,13 +812,13 @@
                                                 (Var 11 this)
                                                 11 1_integer32complex32orderedmap_map
                                                 (StructType
-                                                    [(Complex 4)
-                                                    (StructType
+                                                    [(StructType
                                                         []
                                                         []
                                                         .true.
                                                         .false.
-                                                    )]
+                                                    )
+                                                    (Complex 4)]
                                                     []
                                                     .true.
                                                     .false.
@@ -813,7 +839,24 @@
                                         (FunctionCall
                                             11 1_omap_map_omap_i_at_rc
                                             ()
-                                            [((Var 11 key))
+                                            [((StructInstanceMember
+                                                (Var 11 this)
+                                                11 1_integer32complex32orderedmap_map
+                                                (StructType
+                                                    [(StructType
+                                                        []
+                                                        []
+                                                        .true.
+                                                        .false.
+                                                    )
+                                                    (Complex 4)]
+                                                    []
+                                                    .true.
+                                                    .false.
+                                                )
+                                                ()
+                                            ))
+                                            ((Var 11 key))
                                             ((Var 11 status))]
                                             (Pointer
                                                 (Complex 4)
@@ -823,13 +866,13 @@
                                                 (Var 11 this)
                                                 11 1_integer32complex32orderedmap_map
                                                 (StructType
-                                                    [(Complex 4)
-                                                    (StructType
+                                                    [(StructType
                                                         []
                                                         []
                                                         .true.
                                                         .false.
-                                                    )]
+                                                    )
+                                                    (Complex 4)]
                                                     []
                                                     .true.
                                                     .false.
@@ -967,6 +1010,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             tree:
                                                 (Variable
@@ -993,17 +1038,19 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     omap_map
                                     (StructType
-                                        [(Complex 4)
-                                        (StructType
+                                        [(StructType
                                             []
                                             []
                                             .true.
                                             .false.
-                                        )]
+                                        )
+                                        (Complex 4)]
                                         []
                                         .true.
                                         .false.
@@ -1019,6 +1066,7 @@
                                     []
                                     ()
                                     ()
+                                    []
                                 ),
                             output_unit:
                                 (ExternalSymbol
@@ -1060,6 +1108,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 ),
                             real128:
                                 (ExternalSymbol
@@ -1437,6 +1487,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 ),
                             logical16:
                                 (ExternalSymbol
@@ -1499,13 +1551,13 @@
                                     Default
                                     (StructType
                                         [(StructType
-                                            [(Complex 4)
-                                            (StructType
+                                            [(StructType
                                                 []
                                                 []
                                                 .true.
                                                 .false.
-                                            )]
+                                            )
+                                            (Complex 4)]
                                             []
                                             .true.
                                             .false.
@@ -1524,6 +1576,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 ),
                             numeric_storage_size:
                                 (ExternalSymbol
@@ -1735,6 +1789,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 )
                         })
                     nested_struct_proc_01
@@ -1771,7 +1827,8 @@
                     (SubroutineCall
                         12 1_integer32complex32orderedmap_omap_insert_key_value
                         12 1_insert
-                        [((Var 12 key))
+                        [((Var 12 my_map))
+                        ((Var 12 key))
                         ((Var 12 value))]
                         (Var 12 my_map)
                         .false.

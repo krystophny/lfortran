@@ -32,6 +32,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             x:
                                                 (Variable
@@ -53,6 +55,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             y:
                                                 (Variable
@@ -74,6 +78,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     add_integer
@@ -110,8 +116,8 @@
                                     )]
                                     (Var 3 result)
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             max_integer:
@@ -139,6 +145,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             x:
                                                 (Variable
@@ -160,6 +168,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             y:
                                                 (Variable
@@ -181,6 +191,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     max_integer
@@ -218,8 +230,8 @@
                                     )]
                                     (Var 5 result)
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             min_integer:
@@ -247,6 +259,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             x:
                                                 (Variable
@@ -268,6 +282,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             y:
                                                 (Variable
@@ -289,6 +305,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     min_integer
@@ -326,8 +344,8 @@
                                     )]
                                     (Var 6 result)
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             minus_integer:
@@ -355,6 +373,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             x:
                                                 (Variable
@@ -376,6 +396,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             y:
                                                 (Variable
@@ -397,6 +419,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     minus_integer
@@ -433,8 +457,8 @@
                                     )]
                                     (Var 4 result)
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             one_integer:
@@ -462,6 +486,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     one_integer
@@ -490,8 +516,8 @@
                                     )]
                                     (Var 8 result)
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             zero_integer:
@@ -519,6 +545,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     zero_integer
@@ -547,8 +575,8 @@
                                     )]
                                     (Var 7 result)
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 )
                         })
@@ -589,6 +617,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             x:
                                                 (Variable
@@ -610,6 +640,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             y:
                                                 (Variable
@@ -631,6 +663,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     add_real
@@ -667,8 +701,8 @@
                                     )]
                                     (Var 10 result)
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             max_real:
@@ -696,6 +730,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             x:
                                                 (Variable
@@ -717,6 +753,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             y:
                                                 (Variable
@@ -738,6 +776,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     max_real
@@ -775,8 +815,8 @@
                                     )]
                                     (Var 13 result)
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             min_real:
@@ -804,6 +844,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             x:
                                                 (Variable
@@ -825,6 +867,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             y:
                                                 (Variable
@@ -846,6 +890,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     min_real
@@ -883,8 +929,8 @@
                                     )]
                                     (Var 14 result)
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             minus_real:
@@ -912,6 +958,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             x:
                                                 (Variable
@@ -933,6 +981,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             y:
                                                 (Variable
@@ -954,6 +1004,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     minus_real
@@ -990,8 +1042,8 @@
                                     )]
                                     (Var 11 result)
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             one_real:
@@ -1019,6 +1071,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     one_real
@@ -1050,8 +1104,8 @@
                                     )]
                                     (Var 16 result)
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             slash_real:
@@ -1079,6 +1133,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             x:
                                                 (Variable
@@ -1100,6 +1156,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             y:
                                                 (Variable
@@ -1121,6 +1179,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     slash_real
@@ -1157,8 +1217,8 @@
                                     )]
                                     (Var 12 result)
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             zero_real:
@@ -1186,6 +1246,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     zero_real
@@ -1217,8 +1279,8 @@
                                     )]
                                     (Var 15 result)
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 )
                         })
@@ -1479,6 +1541,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 ),
                                                             r:
                                                                 (Variable
@@ -1502,6 +1566,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 ),
                                                             total:
                                                                 (Variable
@@ -1525,6 +1591,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 )
                                                         })
                                                     plus_t
@@ -1555,8 +1623,8 @@
                                                     []
                                                     (Var 19 total)
                                                     Private
-                                                    .false.
-                                                    .false.
+                                                    .true.
+                                                    .true.
                                                     ()
                                                 ),
                                             t:
@@ -1581,6 +1649,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     magma_r
@@ -1620,6 +1690,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 ),
                                                             r:
                                                                 (Variable
@@ -1643,6 +1715,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 ),
                                                             total:
                                                                 (Variable
@@ -1666,6 +1740,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 )
                                                         })
                                                     plus_t
@@ -1696,8 +1772,8 @@
                                                     []
                                                     (Var 21 total)
                                                     Private
-                                                    .false.
-                                                    .false.
+                                                    .true.
+                                                    .true.
                                                     ()
                                                 ),
                                             t:
@@ -1722,6 +1798,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             triple_l:
                                                 (Function
@@ -1750,6 +1828,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 ),
                                                             t:
                                                                 (Variable
@@ -1773,6 +1853,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 )
                                                         })
                                                     triple_l
@@ -1825,8 +1907,8 @@
                                                     )]
                                                     (Var 22 result)
                                                     Public
-                                                    .false.
-                                                    .false.
+                                                    .true.
+                                                    .true.
                                                     ()
                                                 ),
                                             triple_r:
@@ -1856,6 +1938,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 ),
                                                             t:
                                                                 (Variable
@@ -1879,6 +1963,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 )
                                                         })
                                                     triple_r
@@ -1931,8 +2017,8 @@
                                                     )]
                                                     (Var 23 result)
                                                     Public
-                                                    .false.
-                                                    .false.
+                                                    .true.
+                                                    .true.
                                                     ()
                                                 )
                                         })
@@ -2103,6 +2189,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             tar:
                                                 (Variable
@@ -2124,6 +2212,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             triple_add_l:
                                                 (Function
@@ -2150,6 +2240,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 ),
                                                             t:
                                                                 (Variable
@@ -2171,6 +2263,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 )
                                                         })
                                                     triple_add_l
@@ -2215,8 +2309,8 @@
                                                     )]
                                                     (Var 26 result)
                                                     Public
-                                                    .false.
-                                                    .false.
+                                                    .true.
+                                                    .true.
                                                     ()
                                                 ),
                                             triple_add_r:
@@ -2244,6 +2338,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 ),
                                                             t:
                                                                 (Variable
@@ -2265,6 +2361,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 )
                                                         })
                                                     triple_add_r
@@ -2309,8 +2407,8 @@
                                                     )]
                                                     (Var 27 result)
                                                     Public
-                                                    .false.
-                                                    .false.
+                                                    .true.
+                                                    .true.
                                                     ()
                                                 )
                                         })
@@ -2410,6 +2508,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             tmaxr:
                                                 (Variable
@@ -2431,6 +2531,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             triple_max_l:
                                                 (Function
@@ -2457,6 +2559,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 ),
                                                             t:
                                                                 (Variable
@@ -2478,6 +2582,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 )
                                                         })
                                                     triple_max_l
@@ -2522,8 +2628,8 @@
                                                     )]
                                                     (Var 32 result)
                                                     Public
-                                                    .false.
-                                                    .false.
+                                                    .true.
+                                                    .true.
                                                     ()
                                                 ),
                                             triple_max_r:
@@ -2551,6 +2657,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 ),
                                                             t:
                                                                 (Variable
@@ -2572,6 +2680,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 )
                                                         })
                                                     triple_max_r
@@ -2616,8 +2726,8 @@
                                                     )]
                                                     (Var 33 result)
                                                     Public
-                                                    .false.
-                                                    .false.
+                                                    .true.
+                                                    .true.
                                                     ()
                                                 )
                                         })
@@ -2723,6 +2833,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             tmr:
                                                 (Variable
@@ -2744,6 +2856,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             triple_minus_l:
                                                 (Function
@@ -2770,6 +2884,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 ),
                                                             t:
                                                                 (Variable
@@ -2791,6 +2907,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 )
                                                         })
                                                     triple_minus_l
@@ -2835,8 +2953,8 @@
                                                     )]
                                                     (Var 29 result)
                                                     Public
-                                                    .false.
-                                                    .false.
+                                                    .true.
+                                                    .true.
                                                     ()
                                                 ),
                                             triple_minus_r:
@@ -2864,6 +2982,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 ),
                                                             t:
                                                                 (Variable
@@ -2885,6 +3005,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 )
                                                         })
                                                     triple_minus_r
@@ -2929,8 +3051,8 @@
                                                     )]
                                                     (Var 30 result)
                                                     Public
-                                                    .false.
-                                                    .false.
+                                                    .true.
+                                                    .true.
                                                     ()
                                                 )
                                         })
