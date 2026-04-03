@@ -21,6 +21,7 @@
 #include <libasr/codegen/asr_to_cpp.h>
 #include <libasr/codegen/asr_to_py.h>
 #include <libasr/codegen/asr_to_x86.h>
+#include <libasr/codegen/asr_to_liric.h>
 #include <libasr/codegen/asr_to_wasm.h>
 #include <lfortran/ast_to_src.h>
 #include <lfortran/fortran_evaluator.h>
@@ -96,7 +97,7 @@ namespace lsi = LCompilers::LLanguageServer::Interface;
 #endif
 
 enum Backend {
-    llvm, c, cpp, x86, wasm, fortran, mlir
+    llvm, c, cpp, x86, wasm, fortran, mlir, liric
 };
 
 std::string get_system_temp_dir()
@@ -1461,6 +1462,62 @@ int compile_to_binary_x86(const std::string &infile, const std::string &outfile,
     return 0;
 }
 
+int compile_to_object_file_liric(const std::string &infile,
+        const std::string &outfile,
+        bool time_report,
+        CompilerOptions &compiler_options,
+        int liric_backend)
+{
+    std::string input = read_file_ok(infile);
+
+    LCompilers::FortranEvaluator fe(compiler_options);
+    Allocator al(64*1024*1024);
+    LCompilers::LocationManager lm;
+    {
+        LCompilers::LocationManager::FileLocations fl;
+        fl.in_filename = infile;
+        lm.files.push_back(fl);
+        lm.file_ends.push_back(input.size());
+    }
+    LCompilers::diag::Diagnostics diagnostics;
+
+    // Src -> AST -> ASR
+    LCompilers::Result<LCompilers::ASR::TranslationUnit_t*>
+        r = fe.get_asr2(input, lm, diagnostics);
+    std::cerr << diagnostics.render(lm, compiler_options);
+    if (!r.ok) {
+        LCOMPILERS_ASSERT(diagnostics.has_error())
+        return 2;
+    }
+    diagnostics.diagnostics.clear();
+    LCompilers::ASR::TranslationUnit_t* asr = r.result;
+
+    // Save .mod files
+    {
+        int err = save_mod_files(*asr, compiler_options, lm);
+        if (err) return err;
+    }
+
+    // ASR -> liric -> object file
+    {
+        auto t1 = std::chrono::high_resolution_clock::now();
+        LCompilers::Result<int> result = LCompilers::asr_to_liric(
+            *asr, al, outfile, compiler_options, diagnostics, liric_backend);
+        auto t2 = std::chrono::high_resolution_clock::now();
+        std::cerr << diagnostics.render(lm, compiler_options);
+        if (!result.ok) {
+            LCOMPILERS_ASSERT(diagnostics.has_error())
+            return 3;
+        }
+        if (time_report) {
+            int ms = std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1).count();
+            std::cout << "ASR -> liric: " << std::setw(5) << ms << std::endl;
+        }
+    }
+
+    return 0;
+}
+
 int compile_to_binary_wasm(const std::string &infile, const std::string &outfile,
         bool time_report,
         CompilerOptions &compiler_options)
@@ -2516,8 +2573,10 @@ int main_app(int argc, char *argv[]) {
         backend = Backend::fortran;
     } else if (opts.arg_backend == "mlir") {
         backend = Backend::mlir;
+    } else if (opts.arg_backend == "liric") {
+        backend = Backend::liric;
     } else {
-        std::cerr << "The backend must be one of: llvm, cpp, x86, wasm, fortran, mlir." << std::endl;
+        std::cerr << "The backend must be one of: llvm, cpp, x86, wasm, fortran, mlir, liric." << std::endl;
         return 1;
     }
 
@@ -2721,6 +2780,9 @@ int main_app(int argc, char *argv[]) {
                 << std::endl;
             return 1;
 #endif
+        } else if (backend == Backend::liric) {
+            result = compile_to_object_file_liric(opts.arg_file, outfile,
+                compiler_options.time_report, compiler_options, 0);
         } else {
             throw LCompilers::LCompilersException("Unsupported backend.");
         }
@@ -2778,6 +2840,9 @@ int main_app(int argc, char *argv[]) {
                     "Recompile with `WITH_MLIR=yes`." << std::endl;
                 return 1;
 #endif
+            } else if (backend == Backend::liric) {
+                err = compile_to_object_file_liric(arg_file, tmp_o,
+                    compiler_options.time_report, compiler_options, 0);
             } else {
                 throw LCompilers::LCompilersException("Backend not supported");
             }
