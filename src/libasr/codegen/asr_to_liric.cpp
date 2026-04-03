@@ -811,9 +811,18 @@ public:
             visit_expr(*x.m_value);
             return;
         }
-        throw CodeGenError("liric: IntrinsicImpureFunction id="
-            + std::to_string(x.m_impure_intrinsic_id)
-            + " not yet implemented");
+        int64_t id = x.m_impure_intrinsic_id;
+        if (id == 2) { /* Allocated */
+            /* Check if the pointer is non-NULL */
+            visit_expr(*x.m_args[0]);
+            uint32_t ptr_val = tmp;
+            lr_type_t *ptr = lr_type_ptr_s(s);
+            tmp = lr_emit_icmp(s, LR_CMP_NE,
+                V(ptr_val, ptr), LR_NULL(ptr));
+        } else {
+            throw CodeGenError("liric: IntrinsicImpureFunction id="
+                + std::to_string(id) + " not yet implemented");
+        }
     }
 
     /* ---- Var ----------------------------------------------------------- */
