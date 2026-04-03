@@ -297,9 +297,12 @@ public:
         /* Build parameter type array */
         std::vector<lr_type_t *> param_types;
         for (size_t i = 0; i < x.n_args; i++) {
+            if (!ASR::is_a<ASR::Var_t>(*x.m_args[i])) {
+                param_types.push_back(lr_type_ptr_s(s));
+                continue;
+            }
             ASR::Variable_t *arg = ASRUtils::EXPR2VAR(x.m_args[i]);
             lr_type_t *ty = get_type(arg->m_type);
-            /* Pass by pointer for intent(in/out/inout) */
             if (arg->m_intent == ASR::intentType::In ||
                 arg->m_intent == ASR::intentType::Out ||
                 arg->m_intent == ASR::intentType::InOut ||
@@ -332,10 +335,10 @@ public:
 
         /* Map parameters to allocas */
         for (size_t i = 0; i < x.n_args; i++) {
+            if (!ASR::is_a<ASR::Var_t>(*x.m_args[i])) continue;
             ASR::Variable_t *arg = ASRUtils::EXPR2VAR(x.m_args[i]);
             uint64_t h = get_hash((ASR::asr_t *)arg);
             uint32_t param_vreg = lr_session_param(s, (uint32_t)i);
-            /* Parameter is already a pointer, store it for use */
             lr_symtab[h] = param_vreg;
         }
 
@@ -410,8 +413,6 @@ public:
         lr_error_t err;
         std::vector<lr_type_t *> param_types;
         for (size_t i = 0; i < fn->n_args; i++) {
-            ASR::Variable_t *arg = ASRUtils::EXPR2VAR(fn->m_args[i]);
-            (void)arg;
             param_types.push_back(lr_type_ptr_s(s));
         }
         lr_type_t *ret_ty;
@@ -426,9 +427,35 @@ public:
         return lr_session_intern(s, fname.c_str());
     }
 
+    ASR::Function_t *resolve_function(ASR::symbol_t *sym) {
+        sym = ASRUtils::symbol_get_past_external(sym);
+        if (ASR::is_a<ASR::Function_t>(*sym)) {
+            return ASR::down_cast<ASR::Function_t>(sym);
+        }
+        if (ASR::is_a<ASR::GenericProcedure_t>(*sym)) {
+            ASR::GenericProcedure_t *gp =
+                ASR::down_cast<ASR::GenericProcedure_t>(sym);
+            if (gp->n_procs > 0) {
+                return resolve_function(gp->m_procs[0]);
+            }
+        }
+        if (ASR::is_a<ASR::StructMethodDeclaration_t>(*sym)) {
+            ASR::StructMethodDeclaration_t *smd =
+                ASR::down_cast<ASR::StructMethodDeclaration_t>(sym);
+            return resolve_function(smd->m_proc);
+        }
+        if (ASR::is_a<ASR::Variable_t>(*sym)) {
+            /* Function pointer stored in a variable - cannot resolve
+               at compile time */
+            throw CodeGenError(
+                "liric: function pointer calls not yet implemented");
+        }
+        throw CodeGenError("liric: cannot resolve function from symbol type "
+            + std::to_string(sym->type));
+    }
+
     void visit_SubroutineCall(const ASR::SubroutineCall_t &x) {
-        ASR::Function_t *fn = ASR::down_cast<ASR::Function_t>(
-            ASRUtils::symbol_get_past_external(x.m_name));
+        ASR::Function_t *fn = resolve_function(x.m_name);
         uint32_t fn_id = ensure_function_declared(fn);
 
         /* Evaluate arguments (Fortran pass-by-reference) */
@@ -450,8 +477,7 @@ public:
             visit_expr(*x.m_value);
             return;
         }
-        ASR::Function_t *fn = ASR::down_cast<ASR::Function_t>(
-            ASRUtils::symbol_get_past_external(x.m_name));
+        ASR::Function_t *fn = resolve_function(x.m_name);
 
         lr_type_t *ret_ty = get_type(x.m_type);
         uint32_t fn_id = ensure_function_declared(fn);
