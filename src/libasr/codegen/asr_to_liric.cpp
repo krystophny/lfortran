@@ -773,19 +773,111 @@ public:
 
     /* ---- Print (basic: calls _lfortran_printf) ------------------------- */
 
-    void visit_Print(const ASR::Print_t &x) {
-        if (!x.m_text) return;
-        visit_expr(*x.m_text);
-        /* tmp now holds the formatted string.
-           For now, we handle only StringFormat with integer values. */
-        /* TODO: implement full Print via _lfortran_printf */
-        throw CodeGenError("liric: Print not yet implemented "
-                           "(need StringFormat support)");
+    /* ---- Print (via printf from lfortran runtime's libc) --------------- */
+
+    /* Declare printf as a varargs function */
+    uint32_t get_printf_id() {
+        lr_error_t err;
+        lr_module_t *mod = lr_session_module(s);
+        if (mod && lr_module_lookup_function(mod, "printf")) {
+            return lr_session_intern(s, "printf");
+        }
+        lr_type_t *i32 = lr_type_i32_s(s);
+        lr_type_t *params[1] = {lr_type_ptr_s(s)};
+        lr_session_declare(s, "printf", i32, params, 1, true, &err);
+        return lr_session_intern(s, "printf");
     }
 
-    void visit_StringFormat(const ASR::StringFormat_t & /* x */) {
-        /* TODO: implement StringFormat */
-        throw CodeGenError("liric: StringFormat not yet implemented");
+    void visit_Print(const ASR::Print_t &x) {
+        if (!x.m_text) return;
+
+        /* Extract StringFormat args */
+        if (!ASR::is_a<ASR::StringFormat_t>(*x.m_text)) {
+            throw CodeGenError("liric: Print only supports StringFormat");
+        }
+        ASR::StringFormat_t *sf = ASR::down_cast<ASR::StringFormat_t>(x.m_text);
+
+        uint32_t printf_id = get_printf_id();
+        lr_type_t *ptr = lr_type_ptr_s(s);
+
+        /* Build format string and collect args */
+        std::string fmt;
+        std::vector<lr_operand_desc_t> call_args;
+        call_args.push_back(LR_NULL(ptr)); /* placeholder for fmt string */
+
+        for (size_t i = 0; i < sf->n_args; i++) {
+            if (i > 0) fmt += " ";
+            ASR::ttype_t *t = ASRUtils::extract_type(
+                ASRUtils::expr_type(sf->m_args[i]));
+            int kind = ASRUtils::extract_kind_from_ttype_t(t);
+
+            visit_expr(*sf->m_args[i]);
+
+            if (ASRUtils::is_integer(*t)) {
+                lr_type_t *ty = get_type(t);
+                switch (kind) {
+                    case 1: fmt += "%hhi"; break;
+                    case 2: fmt += "%hi"; break;
+                    case 4: fmt += "%d"; break;
+                    case 8: fmt += "%lld"; break;
+                    default: fmt += "%d"; break;
+                }
+                call_args.push_back(V(tmp, ty));
+            } else if (ASRUtils::is_real(*t)) {
+                /* printf needs double for %f/%e */
+                lr_type_t *f64 = lr_type_f64_s(s);
+                uint32_t val = tmp;
+                if (kind == 4) {
+                    val = lr_emit_fpext(s, f64, V(val, lr_type_f32_s(s)));
+                }
+                fmt += "%13.4e"; /* Fortran default real format */
+                call_args.push_back(V(val, f64));
+            } else if (ASRUtils::is_logical(*t)) {
+                fmt += "%s";
+                /* Convert logical to "T"/"F" string pointer */
+                lr_type_t *i1 = lr_type_i1_s(s);
+                uint32_t t_str = lr_emit_globalstringptr(s, "T");
+                uint32_t f_str = lr_emit_globalstringptr(s, "F");
+                uint32_t str = lr_emit_select(s, ptr,
+                    V(tmp, i1), V(t_str, ptr), V(f_str, ptr));
+                call_args.push_back(V(str, ptr));
+            } else {
+                throw CodeGenError("liric: Print unsupported type");
+            }
+        }
+        fmt += "\n";
+
+        /* Create format string global */
+        uint32_t fmt_gid = lr_emit_globalstringptr(s, fmt.c_str());
+        call_args[0] = V(fmt_gid, ptr);
+
+        /* Call printf (varargs — need to set call_vararg + call_fixed_args) */
+        {
+            lr_inst_desc_t d; memset(&d, 0, sizeof(d));
+            uint32_t nops = 1 + (uint32_t)call_args.size();
+            lr_operand_desc_t ops[64];
+            ops[0] = LR_GLOBAL(printf_id, ptr);
+            for (size_t j = 0; j < call_args.size(); j++)
+                ops[1 + j] = call_args[j];
+            d.op = LR_OP_CALL;
+            d.type = lr_type_i32_s(s);
+            d.operands = ops;
+            d.num_operands = nops;
+            d.call_vararg = true;
+            d.call_fixed_args = 1; /* first arg (format string) is fixed */
+            lr_session_emit(s, &d, NULL);
+        }
+    }
+
+    void visit_StringFormat(const ASR::StringFormat_t &x) {
+        /* StringFormat is handled inline by visit_Print.
+           If we get here from another context, evaluate args and
+           concatenate (not yet implemented for general use). */
+        if (x.m_value) {
+            visit_expr(*x.m_value);
+            return;
+        }
+        throw CodeGenError("liric: StringFormat outside Print not yet implemented");
     }
 
     /* ---- Stop / ErrorStop ---------------------------------------------- */
