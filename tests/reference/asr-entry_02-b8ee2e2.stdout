@@ -27,6 +27,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 )
                         })
                     entry_02
@@ -91,6 +93,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 )
                         })
                     x
@@ -120,8 +124,8 @@
                     )]
                     ()
                     Public
-                    .false.
-                    .false.
+                    .true.
+                    .true.
                     ()
                 ),
             x_main__lcompilers:
@@ -149,6 +153,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 ),
                             entry__lcompilers:
                                 (Variable
@@ -170,6 +176,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 )
                         })
                     x_main__lcompilers
@@ -384,8 +392,8 @@
                     (Return)]
                     ()
                     Public
-                    .false.
-                    .false.
+                    .true.
+                    .true.
                     ()
                 ),
             y:
@@ -413,6 +421,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 )
                         })
                     y
@@ -442,8 +452,8 @@
                     )]
                     ()
                     Public
-                    .false.
-                    .false.
+                    .true.
+                    .true.
                     ()
                 )
         })
