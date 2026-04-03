@@ -436,6 +436,79 @@ public:
         }
     }
 
+    /* ---- Intrinsic functions ------------------------------------------- */
+
+    void visit_IntrinsicElementalFunction(
+            const ASR::IntrinsicElementalFunction_t &x) {
+        if (x.m_value) {
+            visit_expr(*x.m_value);
+            return;
+        }
+        /* Runtime intrinsics without compile-time value.
+           ID 62 = Abs, 2 = Mod, 74 = Modulo (from intrinsic_functions.h) */
+        int64_t id = x.m_intrinsic_id;
+        if (id == 62) { /* Abs */
+            visit_expr(*x.m_args[0]);
+            uint32_t arg = tmp;
+            ASR::ttype_t *t = ASRUtils::expr_type(x.m_args[0]);
+            lr_type_t *ty = get_type(t);
+            if (ASRUtils::is_integer(*t)) {
+                uint32_t neg = lr_emit_neg(s, ty, V(arg, ty));
+                uint32_t cond = lr_emit_icmp(s, LR_CMP_SGE,
+                    V(arg, ty), I(0, ty));
+                tmp = lr_emit_select(s, ty,
+                    V(cond, lr_type_i1_s(s)),
+                    V(arg, ty), V(neg, ty));
+            } else {
+                throw CodeGenError("liric: abs() for non-integer "
+                                   "not yet implemented");
+            }
+        } else if (id == 2 || id == 74) { /* Mod, Modulo */
+            visit_expr(*x.m_args[0]);
+            uint32_t a = tmp;
+            visit_expr(*x.m_args[1]);
+            uint32_t b = tmp;
+            lr_type_t *ty = get_type(x.m_type);
+            if (ASRUtils::is_integer(*x.m_type)) {
+                tmp = lr_emit_srem(s, ty, V(a, ty), V(b, ty));
+            } else {
+                tmp = lr_emit_frem(s, ty, V(a, ty), V(b, ty));
+            }
+        } else {
+            throw CodeGenError("liric: IntrinsicElementalFunction id="
+                + std::to_string(id) + " not yet implemented");
+        }
+    }
+
+    void visit_IntrinsicImpureSubroutine(
+            const ASR::IntrinsicImpureSubroutine_t &x) {
+        throw CodeGenError("liric: IntrinsicImpureSubroutine id="
+            + std::to_string(x.m_sub_intrinsic_id)
+            + " not yet implemented");
+    }
+
+    void visit_IntrinsicArrayFunction(
+            const ASR::IntrinsicArrayFunction_t &x) {
+        if (x.m_value) {
+            visit_expr(*x.m_value);
+            return;
+        }
+        throw CodeGenError("liric: IntrinsicArrayFunction id="
+            + std::to_string(x.m_arr_intrinsic_id)
+            + " not yet implemented");
+    }
+
+    void visit_IntrinsicImpureFunction(
+            const ASR::IntrinsicImpureFunction_t &x) {
+        if (x.m_value) {
+            visit_expr(*x.m_value);
+            return;
+        }
+        throw CodeGenError("liric: IntrinsicImpureFunction id="
+            + std::to_string(x.m_impure_intrinsic_id)
+            + " not yet implemented");
+    }
+
     /* ---- Var ----------------------------------------------------------- */
 
     void visit_Var(const ASR::Var_t &x) {
