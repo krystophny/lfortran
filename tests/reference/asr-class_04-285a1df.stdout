@@ -92,6 +92,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     bar_a
@@ -111,6 +113,7 @@
                                     []
                                     ()
                                     ()
+                                    []
                                 ),
                             bar_b:
                                 (Struct
@@ -137,6 +140,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     bar_b
@@ -156,6 +161,7 @@
                                     []
                                     ()
                                     2 bar_a
+                                    []
                                 ),
                             bar_c:
                                 (Struct
@@ -182,6 +188,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     bar_c
@@ -201,6 +209,7 @@
                                     []
                                     ()
                                     2 bar_b
+                                    []
                                 ),
                             foo:
                                 (Variable
@@ -232,6 +241,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 ),
                             foo_a:
                                 (Struct
@@ -263,6 +274,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     foo_a
@@ -287,6 +300,7 @@
                                     []
                                     ()
                                     ()
+                                    []
                                 ),
                             foo_b:
                                 (Struct
@@ -318,6 +332,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     foo_b
@@ -342,6 +358,7 @@
                                     []
                                     ()
                                     2 foo_a
+                                    []
                                 ),
                             foo_c:
                                 (Struct
@@ -373,6 +390,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     foo_c
@@ -397,6 +416,7 @@
                                     []
                                     ()
                                     2 foo_b
+                                    []
                                 )
                         })
                     main

@@ -73,6 +73,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     add
@@ -127,8 +129,8 @@
                                     )]
                                     (Var 4 self)
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             subtract:
@@ -171,6 +173,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     subtract
@@ -225,8 +229,8 @@
                                     )]
                                     (Var 5 self)
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             t_1:
@@ -254,6 +258,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     t_1
@@ -273,6 +279,7 @@
                                     []
                                     ()
                                     ()
+                                    []
                                 )
                         })
                     derived_types_17_module_1

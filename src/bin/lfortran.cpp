@@ -1211,6 +1211,7 @@ int compile_src_to_object_file(const std::string &infile,
         return 1;
 #endif
     }
+
     LCompilers::Result<std::unique_ptr<LCompilers::LLVMModule>>
         res = fe.get_llvm3(*asr, lpm, diagnostics, lm, infile, &time_opt);
     std::cerr << diagnostics.render(lm, compiler_options);
@@ -1996,6 +1997,24 @@ int link_executable(const std::vector<std::string> &infiles,
                     compile_cmd += omp_cmd;
                 }
             }
+            if (compiler_options.gpu_backend == "metal") {
+                // Compile the Metal runtime and link it
+                std::string metal_runtime_src = runtime_library_dir
+                    + "/../libasr/runtime/lfortran_gpu_metal.m";
+                std::string metal_runtime_obj = LFORTRAN_TEMP_DIR
+                    + "/lfortran_gpu_metal_" + LCOMPILERS_UNIQUE_ID + ".o";
+                std::string metal_compile_cmd = "clang -c -O2 -fobjc-arc"
+                    " -o " + metal_runtime_obj
+                    + " " + metal_runtime_src;
+                int metal_err = system(metal_compile_cmd.c_str());
+                if (metal_err) {
+                    std::cerr << "Failed to compile Metal runtime: "
+                        << metal_compile_cmd << std::endl;
+                    return 10;
+                }
+                compile_cmd += " " + metal_runtime_obj
+                    + " -framework Metal -framework Foundation";
+            }
             run_cmd = "./" + outfile;
         }
         if (verbose) {
@@ -2378,6 +2397,7 @@ int main_app(int argc, char *argv[]) {
     if (opts.arg_version) {
         std::string version = LFORTRAN_VERSION;
         std::cout << "LFortran version: " << version << std::endl;
+        std::cout << "Status: alpha (expected to fail on third-party codes)" << std::endl;
         std::cout << "Platform: " << pf2s(compiler_options.platform) << std::endl;
 #ifdef HAVE_LFORTRAN_LLVM
         std::cout << "LLVM: " << LCompilers::LLVMEvaluator::llvm_version() << std::endl;
@@ -2392,6 +2412,9 @@ int main_app(int argc, char *argv[]) {
         return 0;
     }
     compiler_options.po.time_report = compiler_options.time_report;
+#ifdef HAVE_INTERNAL_ALLOC_CHECK
+    compiler_options.internal_alloc_check = true;
+#endif
 
     if (opts.print_targets) {
 #ifdef HAVE_LFORTRAN_LLVM

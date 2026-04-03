@@ -80,6 +80,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     r
@@ -136,6 +138,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 ),
                                                             r:
                                                                 (Variable
@@ -159,6 +163,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 )
                                                         })
                                                     get_fst
@@ -206,8 +212,8 @@
                                                     )]
                                                     (Var 6 r)
                                                     Private
-                                                    .false.
-                                                    .false.
+                                                    .true.
+                                                    .true.
                                                     ()
                                                 ),
                                             get_snd:
@@ -255,6 +261,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 ),
                                                             r:
                                                                 (Variable
@@ -278,6 +286,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 )
                                                         })
                                                     get_snd
@@ -325,8 +335,8 @@
                                                     )]
                                                     (Var 7 r)
                                                     Private
-                                                    .false.
-                                                    .false.
+                                                    .true.
+                                                    .true.
                                                     ()
                                                 ),
                                             t:
@@ -351,6 +361,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             tuple:
                                                 (Struct
@@ -379,6 +391,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 ),
                                                             snd:
                                                                 (Variable
@@ -402,6 +416,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 )
                                                         })
                                                     tuple
@@ -427,6 +443,7 @@
                                                     []
                                                     ()
                                                     ()
+                                                    []
                                                 )
                                         })
                                     struct_t
@@ -521,6 +538,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 ),
                                                             r:
                                                                 (Variable
@@ -542,6 +561,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 )
                                                         })
                                                     get_int_fst
@@ -580,8 +601,8 @@
                                                     )]
                                                     (Var 10 r)
                                                     Private
-                                                    .false.
-                                                    .false.
+                                                    .true.
+                                                    .true.
                                                     ()
                                                 ),
                                             get_int_snd:
@@ -624,6 +645,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 ),
                                                             r:
                                                                 (Variable
@@ -645,6 +668,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 )
                                                         })
                                                     get_int_snd
@@ -683,8 +708,8 @@
                                                     )]
                                                     (Var 11 r)
                                                     Private
-                                                    .false.
-                                                    .false.
+                                                    .true.
+                                                    .true.
                                                     ()
                                                 ),
                                             get_real_fst:
@@ -727,6 +752,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 ),
                                                             r:
                                                                 (Variable
@@ -748,6 +775,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 )
                                                         })
                                                     get_real_fst
@@ -786,8 +815,8 @@
                                                     )]
                                                     (Var 13 r)
                                                     Private
-                                                    .false.
-                                                    .false.
+                                                    .true.
+                                                    .true.
                                                     ()
                                                 ),
                                             get_real_snd:
@@ -830,6 +859,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 ),
                                                             r:
                                                                 (Variable
@@ -851,6 +882,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 )
                                                         })
                                                     get_real_snd
@@ -889,8 +922,8 @@
                                                     )]
                                                     (Var 14 r)
                                                     Private
-                                                    .false.
-                                                    .false.
+                                                    .true.
+                                                    .true.
                                                     ()
                                                 ),
                                             int_tuple:
@@ -918,6 +951,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 ),
                                                             snd:
                                                                 (Variable
@@ -939,6 +974,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 )
                                                         })
                                                     int_tuple
@@ -959,6 +996,7 @@
                                                     []
                                                     ()
                                                     ()
+                                                    []
                                                 ),
                                             real_tuple:
                                                 (Struct
@@ -985,6 +1023,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 ),
                                                             snd:
                                                                 (Variable
@@ -1006,6 +1046,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 )
                                                         })
                                                     real_tuple
@@ -1026,6 +1068,7 @@
                                                     []
                                                     ()
                                                     ()
+                                                    []
                                                 ),
                                             ti:
                                                 (Variable
@@ -1052,6 +1095,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             tr:
                                                 (Variable
@@ -1078,6 +1123,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     test_template
