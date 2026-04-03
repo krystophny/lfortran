@@ -1433,7 +1433,170 @@ public:
             int prec = (kind == 4) ? 6 : 15;
             tmp = lr_emit_add(s, res_ty, I(prec, res_ty), I(0, res_ty));
         } else if (id == 156) { /* NewLine */
-            tmp = emit_global_string( "\n");
+            tmp = emit_global_string("\n");
+        } else if (id == 101) { /* Adjustl */
+            visit_expr(*x.m_args[0]); uint32_t str = tmp;
+            lr_type_t *i64 = lr_type_i64_s(s);
+            lr_type_t *i8 = lr_type_i8_s(s);
+            lr_type_t *i1 = lr_type_i1_s(s);
+            uint32_t strlen_id = get_strlen_id();
+            uint32_t malloc_id = get_malloc_id();
+            uint32_t memcpy_id = get_memcpy_id();
+            lr_operand_desc_t sl[1] = {V(str, ptr)};
+            uint32_t len = lr_emit_call(s, i64,
+                LR_GLOBAL(strlen_id, ptr), sl, 1);
+            uint32_t start_alloca = lr_emit_alloca(s, i64);
+            lr_emit_store(s, I(0, i64), V(start_alloca, ptr));
+            lr_error_t err;
+            uint32_t scan_blk = lr_session_block(s);
+            uint32_t scan_body = lr_session_block(s);
+            uint32_t scan_end = lr_session_block(s);
+            lr_emit_br(s, scan_blk);
+            lr_session_set_block(s, scan_blk, &err);
+            uint32_t cur_start = lr_emit_load(s, i64,
+                V(start_alloca, ptr));
+            uint32_t lt_len = lr_emit_icmp(s, LR_CMP_SLT,
+                V(cur_start, i64), V(len, i64));
+            lr_operand_desc_t gi[1] = {V(cur_start, i64)};
+            uint32_t cp = lr_emit_gep(s, i8, V(str, ptr), gi, 1);
+            uint32_t ch = lr_emit_load(s, i8, V(cp, ptr));
+            uint32_t is_space = lr_emit_icmp(s, LR_CMP_EQ,
+                V(ch, i8), I(32, i8));
+            uint32_t cont = lr_emit_and(s, i1, V(lt_len, i1),
+                V(is_space, i1));
+            lr_emit_condbr(s, V(cont, i1), scan_body, scan_end);
+            lr_session_set_block(s, scan_body, &err);
+            uint32_t next_start = lr_emit_add(s, i64, V(cur_start, i64),
+                I(1, i64));
+            lr_emit_store(s, V(next_start, i64), V(start_alloca, ptr));
+            lr_emit_br(s, scan_blk);
+            lr_session_set_block(s, scan_end, &err);
+            uint32_t trim_start = lr_emit_load(s, i64,
+                V(start_alloca, ptr));
+            uint32_t bs = lr_emit_add(s, i64, V(len, i64), I(1, i64));
+            lr_operand_desc_t ma[1] = {V(bs, i64)};
+            uint32_t buf = lr_emit_call(s, ptr,
+                LR_GLOBAL(malloc_id, ptr), ma, 1);
+            uint32_t rem_len = lr_emit_sub(s, i64, V(len, i64),
+                V(trim_start, i64));
+            lr_operand_desc_t src_idx[1] = {V(trim_start, i64)};
+            uint32_t src = lr_emit_gep(s, i8, V(str, ptr), src_idx, 1);
+            lr_operand_desc_t mc[3] = {V(buf, ptr), V(src, ptr),
+                V(rem_len, i64)};
+            lr_emit_call_void(s, LR_GLOBAL(memcpy_id, ptr), mc, 3);
+            lr_operand_desc_t ni[1] = {V(rem_len, i64)};
+            uint32_t np = lr_emit_gep(s, i8, V(buf, ptr), ni, 1);
+            lr_emit_store(s, I(0, i8), V(np, ptr));
+            tmp = buf;
+        } else if (id == 102) { /* Adjustr */
+            visit_expr(*x.m_args[0]); uint32_t str = tmp;
+            lr_type_t *i64 = lr_type_i64_s(s);
+            lr_type_t *i8 = lr_type_i8_s(s);
+            lr_type_t *i1 = lr_type_i1_s(s);
+            uint32_t strlen_id = get_strlen_id();
+            uint32_t malloc_id = get_malloc_id();
+            uint32_t memcpy_id = get_memcpy_id();
+            lr_operand_desc_t sl[1] = {V(str, ptr)};
+            uint32_t len = lr_emit_call(s, i64,
+                LR_GLOBAL(strlen_id, ptr), sl, 1);
+            uint32_t end_alloca = lr_emit_alloca(s, i64);
+            lr_emit_store(s, V(len, i64), V(end_alloca, ptr));
+            lr_error_t err;
+            uint32_t scan_blk = lr_session_block(s);
+            uint32_t scan_body = lr_session_block(s);
+            uint32_t scan_end = lr_session_block(s);
+            lr_emit_br(s, scan_blk);
+            lr_session_set_block(s, scan_blk, &err);
+            uint32_t cur_end = lr_emit_load(s, i64, V(end_alloca, ptr));
+            uint32_t gt0 = lr_emit_icmp(s, LR_CMP_SGT,
+                V(cur_end, i64), I(0, i64));
+            uint32_t prev = lr_emit_sub(s, i64, V(cur_end, i64),
+                I(1, i64));
+            lr_operand_desc_t gi[1] = {V(prev, i64)};
+            uint32_t cp = lr_emit_gep(s, i8, V(str, ptr), gi, 1);
+            uint32_t ch = lr_emit_load(s, i8, V(cp, ptr));
+            uint32_t is_space = lr_emit_icmp(s, LR_CMP_EQ,
+                V(ch, i8), I(32, i8));
+            uint32_t cont = lr_emit_and(s, i1, V(gt0, i1),
+                V(is_space, i1));
+            lr_emit_condbr(s, V(cont, i1), scan_body, scan_end);
+            lr_session_set_block(s, scan_body, &err);
+            lr_emit_store(s, V(prev, i64), V(end_alloca, ptr));
+            lr_emit_br(s, scan_blk);
+            lr_session_set_block(s, scan_end, &err);
+            uint32_t trim_len = lr_emit_load(s, i64, V(end_alloca, ptr));
+            uint32_t bs = lr_emit_add(s, i64, V(len, i64), I(1, i64));
+            lr_operand_desc_t ma[1] = {V(bs, i64)};
+            uint32_t buf = lr_emit_call(s, ptr,
+                LR_GLOBAL(malloc_id, ptr), ma, 1);
+            lr_operand_desc_t mc[3] = {V(buf, ptr), V(str, ptr),
+                V(trim_len, i64)};
+            lr_emit_call_void(s, LR_GLOBAL(memcpy_id, ptr), mc, 3);
+            lr_operand_desc_t tn[1] = {V(trim_len, i64)};
+            uint32_t np = lr_emit_gep(s, i8, V(buf, ptr), tn, 1);
+            lr_emit_store(s, I(0, i8), V(np, ptr));
+            tmp = buf;
+        } else if (id == 95) { /* SubstrIndex */
+            /* Simplified: use runtime _lfortran_str_index */
+            visit_expr(*x.m_args[0]); uint32_t str = tmp;
+            visit_expr(*x.m_args[1]); uint32_t sub = tmp;
+            lr_type_t *i32 = lr_type_i32_s(s);
+            lr_type_t *params[2] = {ptr, ptr};
+            uint32_t fn_id = ensure_runtime_func(
+                "_lfortran_str_index", i32, params, 2);
+            lr_operand_desc_t args[2] = {V(str, ptr), V(sub, ptr)};
+            uint32_t result = lr_emit_call(s, i32,
+                LR_GLOBAL(fn_id, ptr), args, 2);
+            lr_type_t *res_ty = get_type(x.m_type);
+            if (res_ty != i32)
+                tmp = lr_emit_sextortrunc(s, res_ty, V(result, i32));
+            else
+                tmp = result;
+        } else if (id == 126) { /* IsContiguous */
+            lr_type_t *i1 = lr_type_i1_s(s);
+            tmp = lr_emit_add(s, i1, I(1, i1), I(0, i1));
+        } else if (id == 127) { /* StorageSize */
+            lr_type_t *res_ty = get_type(x.m_type);
+            ASR::ttype_t *arg_t = ASRUtils::expr_type(x.m_args[0]);
+            int kind = ASRUtils::extract_kind_from_ttype_t(arg_t);
+            tmp = lr_emit_add(s, res_ty, I(kind * 8, res_ty),
+                I(0, res_ty));
+        } else if (id == 97) { /* SelectedIntKind */
+            visit_expr(*x.m_args[0]);
+            uint32_t r = tmp;
+            lr_type_t *ty = get_type(x.m_type);
+            lr_type_t *i32 = lr_type_i32_s(s);
+            lr_type_t *arg_ty = get_type(ASRUtils::expr_type(x.m_args[0]));
+            if (arg_ty != i32)
+                r = lr_emit_sextortrunc(s, i32, V(r, arg_ty));
+            lr_type_t *params[1] = {i32};
+            uint32_t fn_id = ensure_runtime_func(
+                "_lfortran_selected_int_kind", i32, params, 1);
+            lr_operand_desc_t args[1] = {V(r, i32)};
+            uint32_t result = lr_emit_call(s, i32,
+                LR_GLOBAL(fn_id, ptr), args, 1);
+            if (ty != i32)
+                tmp = lr_emit_sextortrunc(s, ty, V(result, i32));
+            else
+                tmp = result;
+        } else if (id == 98) { /* SelectedRealKind */
+            visit_expr(*x.m_args[0]);
+            uint32_t p = tmp;
+            lr_type_t *ty = get_type(x.m_type);
+            lr_type_t *i32 = lr_type_i32_s(s);
+            lr_type_t *arg_ty = get_type(ASRUtils::expr_type(x.m_args[0]));
+            if (arg_ty != i32)
+                p = lr_emit_sextortrunc(s, i32, V(p, arg_ty));
+            lr_type_t *params[1] = {i32};
+            uint32_t fn_id = ensure_runtime_func(
+                "_lfortran_selected_real_kind", i32, params, 1);
+            lr_operand_desc_t args[1] = {V(p, i32)};
+            uint32_t result = lr_emit_call(s, i32,
+                LR_GLOBAL(fn_id, ptr), args, 1);
+            if (ty != i32)
+                tmp = lr_emit_sextortrunc(s, ty, V(result, i32));
+            else
+                tmp = result;
         } else {
             throw CodeGenError("liric: IntrinsicElementalFunction id="
                 + std::to_string(id) + " not yet implemented");
