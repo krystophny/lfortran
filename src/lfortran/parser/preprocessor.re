@@ -9,6 +9,36 @@
 
 namespace LCompilers::LFortran {
 
+namespace {
+
+std::tm get_local_tm(std::time_t when) {
+    std::tm tm;
+#if defined(_WIN32)
+    localtime_s(&tm, &when);
+#else
+    localtime_r(&when, &tm);
+#endif
+    return tm;
+}
+
+std::string format_date(const std::tm &tm) {
+    static const char *months[] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+    char buffer[16];
+    std::snprintf(buffer, sizeof(buffer), "%s %2d %04d",
+        months[tm.tm_mon], tm.tm_mday, tm.tm_year + 1900);
+    return std::string(buffer);
+}
+
+std::string format_time(const std::tm &tm) {
+    char buffer[16];
+    std::snprintf(buffer, sizeof(buffer), "%02d:%02d:%02d",
+        tm.tm_hour, tm.tm_min, tm.tm_sec);
+    return std::string(buffer);
+}
+
+} // namespace
+
 // This exception is only used internally for the preprocessor, nowhere else.
 
 class PreprocessorError
@@ -104,6 +134,12 @@ CPreprocessor::CPreprocessor(CompilerOptions &compiler_options)
     macro_definitions["__FILE__"] = md;
     md.expansion = "0";
     macro_definitions["__LINE__"] = md;
+    std::time_t now = std::time(nullptr);
+    std::tm tm = get_local_tm(now);
+    md.expansion = "\"" + format_date(tm) + "\"";
+    macro_definitions["__DATE__"] = md;
+    md.expansion = "\"" + format_time(tm) + "\"";
+    macro_definitions["__TIME__"] = md;
 }
 std::string CPreprocessor::token(unsigned char *tok, unsigned char* cur) const
 {
@@ -155,6 +191,26 @@ std::string parse_argument(unsigned char *string_start, unsigned char *old_cur, 
     return arg;
 }
 
+void consume_string_literal(std::string &arg, unsigned char *&cur) {
+    unsigned char quote = *cur;
+    arg += *cur;
+    cur++;
+    while (*cur != '\0') {
+        arg += *cur;
+        if (*cur == quote) {
+            if (*(cur + 1) == quote) {
+                // escaped quote (doubled): consume the second one too
+                cur++;
+                arg += *cur;
+            } else {
+                // closing quote
+                return;
+            }
+        }
+        cur++;
+    }
+}
+
 std::string match_parentheses(unsigned char *string_start, unsigned char *&cur) {
     LCOMPILERS_ASSERT(*cur == '(')
     unsigned char *old_cur = cur;
@@ -171,6 +227,8 @@ std::string match_parentheses(unsigned char *string_start, unsigned char *&cur) 
         if (*cur == '(') {
             arg += match_parentheses(string_start, cur);
             LCOMPILERS_ASSERT(*cur == ')')
+        } else if (*cur == '"' || *cur == '\'') {
+            consume_string_literal(arg, cur);
         } else {
             arg += *cur;
         }
@@ -194,6 +252,8 @@ std::string parse_argument2(unsigned char *string_start, unsigned char *old_cur,
         if (*cur == '(') {
             arg += match_parentheses(string_start, cur);
             LCOMPILERS_ASSERT(*cur == ')')
+        } else if (*cur == '"' || *cur == '\'') {
+            consume_string_literal(arg, cur);
         } else {
             arg += *cur;
         }
@@ -606,6 +666,7 @@ Result<std::string> CPreprocessor::run(const std::string &input, LocationManager
                     // Expand the macro once
                     std::string expansion;
                     if (macro_definitions[t].function_like) {
+                        while (*cur == ' ' || *cur == '\t') cur++;
                         if (*cur != '(') {
                             Location loc;
                             loc.first = cur - string_start;
@@ -1129,6 +1190,7 @@ int parse_factor(unsigned char *string_start, unsigned char *&cur, const cpp_sym
         if (macro_definitions.find(str) != macro_definitions.end()) {
             std::string v;
             if (macro_definitions.at(str).function_like) {
+                while (*cur == ' ' || *cur == '\t') cur++;
                 if (*cur != '(') {
                     Location loc;
                     loc.first = cur - string_start;
