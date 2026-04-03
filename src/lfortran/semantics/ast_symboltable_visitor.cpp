@@ -1,5 +1,6 @@
 #include "libasr/assert.h"
 #include <iostream>
+#include <algorithm>
 #include <map>
 #include <string>
 #include <cmath>
@@ -31,6 +32,7 @@ public:
     std::map<std::string, std::vector<std::string>> defined_op_procs;
     std::map<std::string, std::map<std::string, std::map<std::string, ClassProcInfo>>> class_procedures;
     std::map<std::string, std::map<std::string, std::map<std::string, Location>>> class_deferred_procedures;
+    std::map<std::string, std::vector<ClassProcInfo>> initial_constructors;
     std::vector<std::string> assgn_proc_names;
     std::vector<std::pair<std::string,Location>> simd_variables;
     std::map<std::string, std::vector<AST::arg_t>> entry_function_args;
@@ -145,6 +147,15 @@ public:
 
     void visit_FinalName(const AST::FinalName_t& x) {
         final_proc_names.push_back(al, s2c(al, to_lower(x.m_name)));
+    }
+
+    void visit_InitialName(const AST::InitialName_t &x) {
+        for (size_t i = 0; i < x.n_names; i++) {
+            ClassProcInfo initial_binding;
+            initial_binding.name = to_lower(std::string(x.m_names[i]));
+            initial_binding.loc = x.base.base.loc;
+            initial_constructors[dt_name].push_back(initial_binding);
+        }
     }
 
     void initialize_has_submodules(ASR::Module_t* m) {
@@ -309,6 +320,7 @@ public:
     void visit_ModuleSubmoduleCommon(const T &x, std::string parent_name="") {
         assgn_proc_names.clear();
         class_procedures.clear();
+        initial_constructors.clear();
         SymbolTable *parent_scope = current_scope;
         current_scope = al.make_new<SymbolTable>(parent_scope);
         current_module_dependencies.reserve(al, 4);
@@ -440,6 +452,7 @@ public:
             default_storage_save = current_storage_save;
         }
         current_module_sym = nullptr;
+        register_initial_constructors();
         add_generic_procedures();
         add_overloaded_procedures();
         add_class_procedures();
@@ -3316,6 +3329,89 @@ public:
         }
     }
 
+    bool is_initial_constructor_for_type(ASR::Function_t *func, ASR::symbol_t *clss_sym) {
+        if (func->m_return_var == nullptr) {
+            return false;
+        }
+        ASR::symbol_t *return_type_sym = ASRUtils::symbol_get_past_external(
+            ASRUtils::get_struct_sym_from_struct_expr(func->m_return_var));
+        return return_type_sym != nullptr &&
+               return_type_sym == ASRUtils::symbol_get_past_external(clss_sym);
+    }
+
+    void register_initial_constructors() {
+        for (auto &type_initial : initial_constructors) {
+            const std::string &derived_type_name = type_initial.first;
+            ASR::symbol_t *derived_type_sym = ASRUtils::symbol_get_past_external(
+                current_scope->resolve_symbol(derived_type_name));
+            if (derived_type_sym == nullptr ||
+                    !ASR::is_a<ASR::Struct_t>(*derived_type_sym)) {
+                diag.add(diag::Diagnostic(
+                    "`initial` can only be used with a valid derived type",
+                    diag::Level::Error, diag::Stage::Semantic, {
+                        diag::Label("", {type_initial.second[0].loc})}));
+                throw SemanticAbort();
+            }
+
+            for (const ClassProcInfo &binding : type_initial.second) {
+                const std::string &binding_name = binding.name;
+                ASR::symbol_t *binding_sym = current_scope->resolve_symbol(binding_name);
+                if (binding_sym == nullptr) {
+                    diag.add(diag::Diagnostic(
+                        "'" + binding_name + "' must be a module procedure"
+                        " or an external procedure with an explicit interface",
+                        diag::Level::Error, diag::Stage::Semantic, {
+                            diag::Label("", {binding.loc})}));
+                    throw SemanticAbort();
+                }
+
+                binding_sym = ASRUtils::symbol_get_past_external(binding_sym);
+                if (!ASR::is_a<ASR::Function_t>(*binding_sym)) {
+                    diag.add(diag::Diagnostic(
+                        "`initial` target '" + binding_name + "' must be a function",
+                        diag::Level::Error, diag::Stage::Semantic, {
+                            diag::Label("", {binding.loc})}));
+                    throw SemanticAbort();
+                }
+
+                ASR::Function_t *func = ASR::down_cast<ASR::Function_t>(binding_sym);
+                if (!is_initial_constructor_for_type(func, derived_type_sym)) {
+                    diag.add(diag::Diagnostic(
+                        "`initial` target '" + binding_name +
+                            "' must return type(" + derived_type_name + ")",
+                        diag::Level::Error, diag::Stage::Semantic, {
+                            diag::Label("", {binding.loc})}));
+                    throw SemanticAbort();
+                }
+
+                if (class_procedures[derived_type_name].find(binding_name) !=
+                        class_procedures[derived_type_name].end()) {
+                    diag.add(diag::Diagnostic(
+                        "Type-bound binding '" + binding_name +
+                            "' is already declared for type '" + derived_type_name + "'",
+                        diag::Level::Error, diag::Stage::Semantic, {
+                            diag::Label("", {binding.loc})}));
+                    throw SemanticAbort();
+                }
+
+                class_procedures[derived_type_name][binding_name]["procedure"] = binding;
+                class_deferred_procedures[derived_type_name][binding_name]["nopass"]
+                    = binding.loc;
+
+                auto &constructor_overloads
+                    = generic_procedures[derived_type_name];
+                bool found = false;
+                for (auto &p : constructor_overloads) {
+                    if (p.first == binding_name) { found = true; break; }
+                }
+                if (!found) {
+                    constructor_overloads.push_back({binding_name, binding.loc});
+                }
+            }
+        }
+        initial_constructors.clear();
+    }
+
     void add_generic_procedures() {
         for (auto &proc : generic_procedures) {
             Location loc;
@@ -4206,6 +4302,7 @@ public:
 
     void visit_Template(const AST::Template_t &x){
         is_template = true;
+        initial_constructors.clear();
         ASR::accessType dflt_access_copy = dflt_access;
         SymbolTable *parent_scope = current_scope;
         current_scope = al.make_new<SymbolTable>(parent_scope);
@@ -4256,6 +4353,7 @@ public:
             }
         }
 
+        register_initial_constructors();
         add_overloaded_procedures();
         add_class_procedures();
 
@@ -4271,6 +4369,7 @@ public:
 
         // needs to rebuild the context prior to visiting template
         class_procedures.clear();
+        initial_constructors.clear();
         dflt_access = dflt_access_copy;
         is_template = false;
     }

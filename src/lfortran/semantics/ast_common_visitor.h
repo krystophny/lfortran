@@ -15530,7 +15530,13 @@ public:
                     ASR::symbol_t *f2 = ASRUtils::symbol_get_past_external(v1);
                     tmp = create_ArrayRef(x.base.base.loc, x.m_member[0].m_args, x.m_member[0].n_args, nullptr, 0, nullptr, v1, f2);
                 } else {
-                    tmp = resolve_variable(x.base.base.loc, to_lower(x.m_member[0].m_name));
+                    std::string parent_name = to_lower(x.m_member[0].m_name);
+                    ASR::symbol_t *parent_sym = current_scope->resolve_symbol(parent_name);
+                    if (parent_sym && ASR::is_a<ASR::Struct_t>(*ASRUtils::symbol_get_past_external(parent_sym))) {
+                        tmp = ASR::make_Var_t(al, x.base.base.loc, parent_sym);
+                    } else {
+                        tmp = resolve_variable(x.base.base.loc, parent_name);
+                    }
                 }
                 tmp = (ASR::asr_t*) replace_with_common_block_variables(ASRUtils::EXPR(tmp));
             } else {
@@ -18264,10 +18270,58 @@ public:
                 member_args = x_m_member[1].m_args;
                 member_n_args = x_m_member[1].n_args;
             }
-            tmp = (ASR::asr_t*) replace_with_common_block_variables(
-                ASRUtils::EXPR(this->resolve_variable2(loc, to_lower(x_m_id),
-                to_lower(x_m_member[0].m_name), scope, x_m_member[0].m_args,
-                x_m_member[0].n_args, member_args, member_n_args)));
+            bool static_type_bound_proc = false;
+            std::string parent_name = to_lower(x_m_member[0].m_name);
+            ASR::symbol_t *parent_sym = current_scope->resolve_symbol(parent_name);
+            if (parent_sym != nullptr && x_m_member[0].n_args == 0 &&
+                    member_n_args == 0) {
+                ASR::symbol_t *parent_sym_past_ext
+                    = ASRUtils::symbol_get_past_external(parent_sym);
+                if (ASR::is_a<ASR::Struct_t>(*parent_sym_past_ext)) {
+                    ASR::Struct_t *type_sym
+                        = ASR::down_cast<ASR::Struct_t>(parent_sym_past_ext);
+                    ASR::symbol_t *member_sym = nullptr;
+                    std::string member_name = to_lower(x_m_id);
+                    while (type_sym != nullptr && member_sym == nullptr) {
+                        member_sym = type_sym->m_symtab->get_symbol(member_name);
+                        if (member_sym == nullptr && type_sym->m_parent != nullptr) {
+                            ASR::symbol_t *parent_type_sym
+                                = ASRUtils::symbol_get_past_external(type_sym->m_parent);
+                            type_sym = ASR::down_cast<ASR::Struct_t>(parent_type_sym);
+                        } else if (member_sym == nullptr) {
+                            type_sym = nullptr;
+                        }
+                    }
+                    if (member_sym != nullptr) {
+                        ASR::symbol_t *member_sym_past_ext
+                            = ASRUtils::symbol_get_past_external(member_sym);
+                        if (ASR::is_a<ASR::StructMethodDeclaration_t>(*member_sym_past_ext)) {
+                            ASR::StructMethodDeclaration_t *member_method
+                                = ASR::down_cast<ASR::StructMethodDeclaration_t>(
+                                    member_sym_past_ext);
+                            if (!member_method->m_is_nopass) {
+                                diag.add(Diagnostic(
+                                    "Type-bound procedure '" + member_name +
+                                        "' requires an object instance",
+                                    Level::Error, Stage::Semantic, {
+                                        Label("", {loc})}));
+                                throw SemanticAbort();
+                            }
+                            ASR::symbol_t *member_sym_local
+                                = ASRUtils::import_class_procedure(
+                                    al, loc, member_sym, current_scope);
+                            tmp = ASR::make_Var_t(al, loc, member_sym_local);
+                            static_type_bound_proc = true;
+                        }
+                    }
+                }
+            }
+            if (!static_type_bound_proc) {
+                tmp = (ASR::asr_t*) replace_with_common_block_variables(
+                    ASRUtils::EXPR(this->resolve_variable2(loc, to_lower(x_m_id),
+                    parent_name, scope, x_m_member[0].m_args,
+                    x_m_member[0].n_args, member_args, member_n_args)));
+            }
         } else {
             SymbolTable* scope = current_scope;
             tmp = (ASR::asr_t*) replace_with_common_block_variables(

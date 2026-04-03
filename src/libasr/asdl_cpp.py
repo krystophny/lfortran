@@ -2842,6 +2842,16 @@ static inline ASR::ttype_t* expr_type0(const ASR::expr_t *f)
                 return ASR::down_cast<ASR::Variable_t>(s)->m_type;
             } else if( s->type == ASR::symbolType::Struct ) {
                 return ASR::down_cast<ASR::Struct_t>(s)->m_struct_signature;
+            } else if( s->type == ASR::symbolType::StructMethodDeclaration ) {
+                ASR::StructMethodDeclaration_t *method = ASR::down_cast<ASR::StructMethodDeclaration_t>(s);
+                ASR::symbol_t *proc = method->m_proc;
+                if (proc->type == ASR::symbolType::ExternalSymbol) {
+                    ASR::ExternalSymbol_t *e = ASR::down_cast<ASR::ExternalSymbol_t>(proc);
+                    LCOMPILERS_ASSERT(e->m_external);
+                    proc = e->m_external;
+                }
+                LCOMPILERS_ASSERT(proc->type == ASR::symbolType::Function);
+                return ASR::down_cast<ASR::Function_t>(proc)->m_function_signature;
             } else {
                 // ICE: only Function and Variable have types, this symbol
                 // does not have a type

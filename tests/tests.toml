@@ -4777,6 +4777,18 @@ filename = "../integration_tests/multiple_objects_args.f90"
 pass = "class_constructor"
 
 [[test]]
+filename = "../integration_tests/initial_01.f90"
+run = true
+
+[[test]]
+filename = "../integration_tests/initial_02.f90"
+run = true
+
+[[test]]
+filename = "../integration_tests/initial_03.f90"
+run = true
+
+[[test]]
 filename = "errors/incompatible_rank_assign.f90"
 asr = true
 

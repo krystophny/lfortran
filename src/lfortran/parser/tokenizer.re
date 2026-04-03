@@ -444,6 +444,7 @@ int Tokenizer::lex(Allocator &al, YYSTYPE &yylval, Location &loc, diag::Diagnost
             'import' { KW(IMPORT) }
             'impure' { KW(IMPURE) }
             'in' { KW(IN) }
+            'initial' { KW(INITIAL) }
             'include' { KW(INCLUDE) }
             'inout' { KW(INOUT) }
             'in' whitespace 'out' { KW(IN_OUT) }

@@ -2576,6 +2576,9 @@ public:
             if (ASRUtils::is_derived_type_similar(target_struct, value_struct)) {
                 tmp = ASRUtils::make_Associate_t_util(al, x.base.base.loc, target, value);
             }
+        } else if (ASR::is_a<ASR::FunctionType_t>(*ASRUtils::type_get_past_pointer(target_type)) &&
+                   ASR::is_a<ASR::StructStaticMember_t>(*value)) {
+            tmp = ASRUtils::make_Associate_t_util(al, x.base.base.loc, target, value);
         } else if (ASR::is_a<ASR::FunctionType_t>(*target_type_underlying) && ASR::is_a<ASR::FunctionType_t>(*value_type_underlying)) {
             ASR::FunctionType_t* target_func_type = ASR::down_cast<ASR::FunctionType_t>(target_type_underlying);
             ASR::FunctionType_t* value_func_type = ASR::down_cast<ASR::FunctionType_t>(value_type_underlying);
@@ -2700,6 +2703,14 @@ public:
             }
         } else if (ASRUtils::types_equal(target_type, value_type, target, value)) {
             tmp = ASRUtils::make_Associate_t_util(al, x.base.base.loc, target, value);
+        }
+        if (tmp == nullptr) {
+            diag.add(Diagnostic(
+                "Incompatible pointer association",
+                Level::Error, Stage::Semantic, {
+                    Label("", {x.base.base.loc})
+                }));
+            throw SemanticAbort();
         }
     }
 
