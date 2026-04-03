@@ -475,6 +475,75 @@ public:
         loop_end_stack.pop_back();
     }
 
+    void visit_DoLoop(const ASR::DoLoop_t &x) {
+        lr_error_t err;
+        lr_type_t *i1 = lr_type_i1_s(s);
+
+        /* Evaluate loop bounds */
+        visit_expr(*x.m_head.m_start);
+        uint32_t start_val = tmp;
+        visit_expr(*x.m_head.m_end);
+        uint32_t end_val = tmp;
+        lr_type_t *loop_ty = get_type(ASRUtils::expr_type(x.m_head.m_v));
+
+        uint32_t step_val;
+        if (x.m_head.m_increment) {
+            visit_expr(*x.m_head.m_increment);
+            step_val = tmp;
+        } else {
+            step_val = lr_emit_add(s, loop_ty, I(1, loop_ty), I(0, loop_ty));
+        }
+
+        /* Store start value to loop variable */
+        is_target = true;
+        visit_expr(*x.m_head.m_v);
+        is_target = false;
+        uint32_t loop_var_ptr = tmp;
+        lr_emit_store(s, V(start_val, loop_ty), V(loop_var_ptr, lr_type_ptr_s(s)));
+
+        uint32_t cond_block = lr_session_block(s);
+        uint32_t body_block = lr_session_block(s);
+        uint32_t incr_block = lr_session_block(s);
+        uint32_t end_block = lr_session_block(s);
+
+        loop_head_stack.push_back(incr_block);
+        loop_end_stack.push_back(end_block);
+
+        /* Branch to condition check */
+        lr_emit_br(s, cond_block);
+
+        /* Condition: loop_var <= end (or >= end if step < 0) */
+        lr_session_set_block(s, cond_block, &err);
+        uint32_t cur_val = lr_emit_load(s, loop_ty,
+                                        V(loop_var_ptr, lr_type_ptr_s(s)));
+        uint32_t cond = lr_emit_icmp(s, LR_CMP_SLE,
+                                     V(cur_val, loop_ty),
+                                     V(end_val, loop_ty));
+        lr_emit_condbr(s, V(cond, i1), body_block, end_block);
+
+        /* Body */
+        lr_session_set_block(s, body_block, &err);
+        for (size_t i = 0; i < x.n_body; i++) {
+            visit_stmt(*x.m_body[i]);
+        }
+        lr_emit_br(s, incr_block);
+
+        /* Increment */
+        lr_session_set_block(s, incr_block, &err);
+        uint32_t next_val = lr_emit_load(s, loop_ty,
+                                         V(loop_var_ptr, lr_type_ptr_s(s)));
+        next_val = lr_emit_add(s, loop_ty, V(next_val, loop_ty),
+                               V(step_val, loop_ty));
+        lr_emit_store(s, V(next_val, loop_ty),
+                      V(loop_var_ptr, lr_type_ptr_s(s)));
+        lr_emit_br(s, cond_block);
+
+        /* End */
+        lr_session_set_block(s, end_block, &err);
+        loop_head_stack.pop_back();
+        loop_end_stack.pop_back();
+    }
+
     void visit_Exit(const ASR::Exit_t & /* x */) {
         if (loop_end_stack.empty()) {
             throw CodeGenError("liric: exit outside loop");
