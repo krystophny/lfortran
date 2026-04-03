@@ -1260,33 +1260,80 @@ public:
         lr_session_set_block(s, blk, NULL);
     }
 
-    /* ---- Print (via printf) -------------------------------------------- */
+    /* ---- Runtime function helpers --------------------------------------- */
 
-    /* Declare printf as a varargs function */
-    uint32_t get_printf_id() {
-        lr_error_t err;
+    /* Declare a runtime function by name and return its symbol ID.
+       If already declared, returns the existing ID. */
+    uint32_t ensure_runtime_func(const char *name, lr_type_t *ret_ty,
+                                 lr_type_t **params = NULL,
+                                 uint32_t n_params = 0,
+                                 bool vararg = false) {
         lr_module_t *mod = lr_session_module(s);
-        if (mod && lr_module_lookup_function(mod, "printf")) {
-            return lr_session_intern(s, "printf");
+        if (mod && lr_module_lookup_function(mod, name)) {
+            return lr_session_intern(s, name);
         }
-        lr_type_t *i32 = lr_type_i32_s(s);
-        lr_type_t *params[1] = {lr_type_ptr_s(s)};
-        lr_session_declare(s, "printf", i32, params, 1, true, &err);
-        return lr_session_intern(s, "printf");
+        lr_error_t err;
+        lr_session_declare(s, name, ret_ty, params, n_params, vararg, &err);
+        return lr_session_intern(s, name);
     }
 
-    /* Emit printf(fmt, args...) for an array of ASR expressions.
-       Appends newline unless suppress_newline is true. */
+    /* Convenience: declare a function taking one ptr arg */
+    uint32_t ensure_runtime_func_1ptr(const char *name, lr_type_t *ret_ty) {
+        lr_type_t *params[1] = {lr_type_ptr_s(s)};
+        return ensure_runtime_func(name, ret_ty, params, 1, false);
+    }
+
+    /* ---- Print (via _lfortran_printf runtime function) ----------------- */
+
+    /* _lfortran_printf(format, str, str_len, end, end_len)
+       All 5 args are fixed (not varargs). format is unused by runtime
+       but kept for ABI compatibility. str+str_len is the main output.
+       end+end_len is the line terminator (typically "\n", len=1). */
+    uint32_t get_lfortran_printf_id() {
+        lr_error_t err;
+        lr_module_t *mod = lr_session_module(s);
+        if (mod && lr_module_lookup_function(mod, "_lfortran_printf")) {
+            return lr_session_intern(s, "_lfortran_printf");
+        }
+        lr_type_t *void_ty = lr_type_void_s(s);
+        lr_type_t *params[5] = {
+            lr_type_ptr_s(s),  /* format (unused) */
+            lr_type_ptr_s(s),  /* str */
+            lr_type_i32_s(s),  /* str_len */
+            lr_type_ptr_s(s),  /* end */
+            lr_type_i32_s(s),  /* end_len */
+        };
+        lr_session_declare(s, "_lfortran_printf", void_ty, params, 5, false, &err);
+        return lr_session_intern(s, "_lfortran_printf");
+    }
+
+    /* _lcompilers_snprintf_alloc(al, format, ...) — allocates and formats a string.
+       We pass NULL as allocator to use the default internal allocator. */
+    uint32_t get_snprintf_alloc_id() {
+        lr_error_t err;
+        lr_module_t *mod = lr_session_module(s);
+        if (mod && lr_module_lookup_function(mod, "_lcompilers_snprintf_alloc")) {
+            return lr_session_intern(s, "_lcompilers_snprintf_alloc");
+        }
+        lr_type_t *params[2] = {lr_type_ptr_s(s), lr_type_ptr_s(s)};
+        lr_session_declare(s, "_lcompilers_snprintf_alloc",
+                           lr_type_ptr_s(s), params, 2, true, &err);
+        return lr_session_intern(s, "_lcompilers_snprintf_alloc");
+    }
+
+    /* Emit formatted print via _lcompilers_snprintf_alloc + _lfortran_printf.
+       All I/O goes through lfortran runtime — no libc in emitted code. */
     void emit_printf_values(ASR::expr_t **values, size_t n_values,
                             bool suppress_newline) {
 
-        uint32_t printf_id = get_printf_id();
+        uint32_t snprintf_id = get_snprintf_alloc_id();
+        uint32_t printf_id = get_lfortran_printf_id();
         lr_type_t *ptr = lr_type_ptr_s(s);
+        lr_type_t *i32 = lr_type_i32_s(s);
 
-        /* Build format string and collect args */
+        /* Build format string and collect value args */
         std::string fmt;
-        std::vector<lr_operand_desc_t> call_args;
-        call_args.push_back(LR_NULL(ptr)); /* placeholder for fmt global */
+        std::vector<lr_operand_desc_t> val_args;
 
         for (size_t i = 0; i < n_values; i++) {
             if (i > 0) fmt += " ";
@@ -1305,64 +1352,101 @@ public:
                     case 8: fmt += "%lld"; break;
                     default: fmt += "%d"; break;
                 }
-                call_args.push_back(V(tmp, ty));
+                val_args.push_back(V(tmp, ty));
             } else if (ASRUtils::is_real(*t)) {
-                /* printf needs double for %f/%e */
                 lr_type_t *f64 = lr_type_f64_s(s);
                 uint32_t val = tmp;
                 if (kind == 4) {
                     val = lr_emit_fpext(s, f64, V(val, lr_type_f32_s(s)));
                 }
-                fmt += "%13.4e"; /* Fortran default real format */
-                call_args.push_back(V(val, f64));
+                fmt += "%13.4e";
+                val_args.push_back(V(val, f64));
             } else if (ASRUtils::is_logical(*t)) {
                 fmt += "%s";
-                /* Convert logical to "T"/"F" string pointer */
                 lr_type_t *i1 = lr_type_i1_s(s);
                 uint32_t t_str = lr_emit_globalstringptr(s, "T");
                 uint32_t f_str = lr_emit_globalstringptr(s, "F");
                 uint32_t str = lr_emit_select(s, ptr,
                     V(tmp, i1), V(t_str, ptr), V(f_str, ptr));
-                call_args.push_back(V(str, ptr));
+                val_args.push_back(V(str, ptr));
             } else if (ASRUtils::is_character(*t)) {
                 fmt += "%s";
-                call_args.push_back(V(tmp, ptr));
+                val_args.push_back(V(tmp, ptr));
             } else {
                 throw CodeGenError("liric: Print unsupported type");
             }
         }
         if (!suppress_newline) fmt += "\n";
 
-        /* Create format string as a global constant, reference by symbol name */
-        {
-            size_t flen = fmt.size();
-            lr_type_t *i8 = lr_type_i8_s(s);
-            lr_type_t *arr_ty = lr_type_array_s(s, i8, flen + 1);
-            static unsigned fmt_counter = 0;
-            char name_buf[64];
-            snprintf(name_buf, sizeof(name_buf), ".fmt.%u", fmt_counter++);
-            lr_session_global(s, name_buf, arr_ty, true,
-                              fmt.c_str(), flen + 1);
-            /* Use the interned symbol ID (not the global data ID) */
-            uint32_t sym_id = lr_session_intern(s, name_buf);
-            call_args[0] = LR_GLOBAL(sym_id, ptr);
-        }
+        /* Create format string as a global constant */
+        size_t flen = fmt.size();
+        lr_type_t *i8 = lr_type_i8_s(s);
+        lr_type_t *arr_ty = lr_type_array_s(s, i8, flen + 1);
+        static unsigned fmt_counter = 0;
+        char name_buf[64];
+        snprintf(name_buf, sizeof(name_buf), ".fmt.%u", fmt_counter++);
+        lr_session_global(s, name_buf, arr_ty, true, fmt.c_str(), flen + 1);
+        uint32_t fmt_sym = lr_session_intern(s, name_buf);
 
-        /* Call printf (varargs — need to set call_vararg + call_fixed_args) */
+        /* Step 1: call _lcompilers_snprintf_alloc(NULL, fmt, args...) to
+           format the values into a heap-allocated string. */
+        uint32_t str_ptr;
         {
             lr_inst_desc_t d; memset(&d, 0, sizeof(d));
-            uint32_t nops = 1 + (uint32_t)call_args.size();
+            uint32_t nops = 1 + 2 + (uint32_t)val_args.size();
             lr_operand_desc_t ops[64];
-            ops[0] = LR_GLOBAL(printf_id, ptr);
-            for (size_t j = 0; j < call_args.size(); j++)
-                ops[1 + j] = call_args[j];
+            ops[0] = LR_GLOBAL(snprintf_id, ptr);  /* callee */
+            ops[1] = LR_NULL(ptr);                  /* allocator = NULL (use default) */
+            ops[2] = LR_GLOBAL(fmt_sym, ptr);       /* format string */
+            for (size_t j = 0; j < val_args.size(); j++)
+                ops[3 + j] = val_args[j];
             d.op = LR_OP_CALL;
-            d.type = lr_type_i32_s(s);
+            d.type = ptr;
             d.operands = ops;
             d.num_operands = nops;
             d.call_vararg = true;
-            d.call_fixed_args = 1; /* first arg (format string) is fixed */
-            lr_session_emit(s, &d, NULL);
+            d.call_fixed_args = 2;
+            str_ptr = lr_session_emit(s, &d, NULL);
+        }
+
+        /* Step 2: compute string length via strlen (provided by runtime).
+           strlen returns i64 (size_t), truncate to i32 for _lfortran_printf. */
+        lr_type_t *i64 = lr_type_i64_s(s);
+        uint32_t strlen_id = ensure_runtime_func_1ptr("strlen", i64);
+        lr_operand_desc_t strlen_args[1] = {V(str_ptr, ptr)};
+        uint32_t str_len_64 = lr_emit_call(s, i64,
+            LR_GLOBAL(strlen_id, ptr), strlen_args, 1);
+        uint32_t str_len = lr_emit_trunc(s, i32, V(str_len_64, i64));
+
+        /* Step 3: create end string ("\n" or "") */
+        uint32_t end_sym;
+        uint32_t end_len_val;
+        if (!suppress_newline) {
+            lr_type_t *end_arr = lr_type_array_s(s, i8, 2);
+            char end_name[32];
+            snprintf(end_name, sizeof(end_name), ".end.%u", fmt_counter);
+            lr_session_global(s, end_name, end_arr, true, "\n", 2);
+            end_sym = lr_session_intern(s, end_name);
+            end_len_val = 1;
+        } else {
+            lr_type_t *end_arr = lr_type_array_s(s, i8, 1);
+            char end_name[32];
+            snprintf(end_name, sizeof(end_name), ".end.%u", fmt_counter);
+            lr_session_global(s, end_name, end_arr, true, "", 1);
+            end_sym = lr_session_intern(s, end_name);
+            end_len_val = 0;
+        }
+
+        /* Step 4: call _lfortran_printf(NULL, str, str_len, end, end_len) */
+        {
+            lr_operand_desc_t args[5] = {
+                LR_NULL(ptr),               /* format (unused) */
+                V(str_ptr, ptr),            /* str */
+                V(str_len, i32),            /* str_len */
+                LR_GLOBAL(end_sym, ptr),    /* end */
+                I(end_len_val, i32),        /* end_len */
+            };
+            lr_emit_call_void(s, LR_GLOBAL(printf_id, ptr), args, 5);
         }
     }
 
