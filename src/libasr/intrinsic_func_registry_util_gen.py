@@ -968,7 +968,6 @@ compile_time_only_fn = [
     "SameTypeAs",
     "ExtendsTypeOf",
     "Digits",
-    "TypeOf",
 ]
 
 type_to_asr_type_check = {

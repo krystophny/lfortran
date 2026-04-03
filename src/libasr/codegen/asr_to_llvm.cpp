@@ -3651,6 +3651,95 @@ public:
                         llvm::cast<llvm::PointerType>(ptr_type)));
                 break;
             }
+            case ASRUtils::IntrinsicElementalFunctions::TypeParent: {
+                llvm::Value* ti_ptr = load_type_info_handle_expr(x.m_args[0]);
+                llvm::Value* is_null = builder->CreateICmpEQ(ti_ptr,
+                    llvm::ConstantPointerNull::get(llvm_utils->get_type_info_ptr_type()));
+                llvm::Value* out = llvm_utils->CreateAlloca(*builder,
+                    llvm_utils->get_type_info_ptr_type());
+                llvm_utils->create_if_else(is_null, [&]() {
+                    builder->CreateStore(
+                        llvm::ConstantPointerNull::get(llvm_utils->get_type_info_ptr_type()), out);
+                }, [&]() {
+                    builder->CreateStore(llvm_utils->get_type_info_parent(ti_ptr), out);
+                });
+                tmp = llvm_utils->CreateLoad2(llvm_utils->get_type_info_ptr_type(), out);
+                break;
+            }
+            case ASRUtils::IntrinsicElementalFunctions::TypeExtends: {
+                llvm::Value* child_ptr = load_type_info_handle_expr(x.m_args[0]);
+                llvm::Value* base_ptr = load_type_info_handle_expr(x.m_args[1]);
+                llvm::PointerType* ti_ptr_type = llvm_utils->get_type_info_ptr_type();
+                llvm::Function* fn = builder->GetInsertBlock()->getParent();
+                llvm::BasicBlock* loop_bb = llvm::BasicBlock::Create(context, "extends.loop", fn);
+                llvm::BasicBlock* body_bb = llvm::BasicBlock::Create(context, "extends.body", fn);
+                llvm::BasicBlock* advance_bb = llvm::BasicBlock::Create(context, "extends.advance", fn);
+                llvm::BasicBlock* found_bb = llvm::BasicBlock::Create(context, "extends.found", fn);
+                llvm::BasicBlock* not_found_bb = llvm::BasicBlock::Create(context, "extends.not_found", fn);
+                llvm::BasicBlock* merge_bb = llvm::BasicBlock::Create(context, "extends.merge", fn);
+                builder->CreateBr(loop_bb);
+                builder->SetInsertPoint(loop_bb);
+                llvm::PHINode* cur = builder->CreatePHI(ti_ptr_type, 2, "cur");
+                cur->addIncoming(child_ptr, loop_bb->getSinglePredecessor());
+                llvm::Value* is_null = builder->CreateICmpEQ(cur,
+                    llvm::ConstantPointerNull::get(ti_ptr_type));
+                builder->CreateCondBr(is_null, not_found_bb, body_bb);
+                builder->SetInsertPoint(body_bb);
+                llvm::Value* is_match = builder->CreateICmpEQ(cur, base_ptr);
+                builder->CreateCondBr(is_match, found_bb, advance_bb);
+                builder->SetInsertPoint(advance_bb);
+                llvm::Value* parent = llvm_utils->get_type_info_parent(cur);
+                cur->addIncoming(parent, advance_bb);
+                builder->CreateBr(loop_bb);
+                builder->SetInsertPoint(found_bb);
+                builder->CreateBr(merge_bb);
+                builder->SetInsertPoint(not_found_bb);
+                builder->CreateBr(merge_bb);
+                builder->SetInsertPoint(merge_bb);
+                llvm::PHINode* result = builder->CreatePHI(
+                    llvm::Type::getInt1Ty(context), 2, "extends.result");
+                result->addIncoming(llvm::ConstantInt::getTrue(context), found_bb);
+                result->addIncoming(llvm::ConstantInt::getFalse(context), not_found_bb);
+                tmp = result;
+                break;
+            }
+            case ASRUtils::IntrinsicElementalFunctions::Repr: {
+                // class(*) repr: use type_name of the runtime type
+                llvm::Type* i64_type = llvm::Type::getInt64Ty(context);
+                this->visit_expr(*x.m_args[0]);
+                llvm::Value* poly_val = tmp;
+                ASR::expr_t* arg = x.m_args[0];
+                ASR::symbol_t* struct_sym = ASRUtils::symbol_get_past_external(
+                    ASRUtils::get_struct_sym_from_struct_expr(arg));
+                llvm::Type* class_type = llvm_utils->getClassType(
+                    ASR::down_cast<ASR::Struct_t>(struct_sym), false);
+                ASR::ttype_t* arg_type = ASRUtils::expr_type(arg);
+                int64_t ptr_loads_copy = ptr_loads;
+                ptr_loads = 0;
+                this->visit_expr(*arg);
+                llvm::Value* arg_ptr = tmp;
+                ptr_loads = ptr_loads_copy;
+                if (ASRUtils::is_allocatable(arg_type) || ASR::is_a<ASR::Pointer_t>(*arg_type)) {
+                    arg_ptr = llvm_utils->CreateLoad2(class_type->getPointerTo(), arg_ptr);
+                }
+                llvm::Value* id_ptr = llvm_utils->create_gep2(class_type, arg_ptr, 0);
+                llvm::Type* id_type = llvm::cast<llvm::StructType>(class_type)->getElementType(0);
+                llvm::Value* ti_ptr;
+                if (id_type->isPointerTy()) {
+                    llvm::Value* vptr = llvm_utils->CreateLoad2(id_type, id_ptr);
+                    ti_ptr = load_type_info_from_vptr(vptr);
+                } else {
+                    ti_ptr = cast_to_type_info_ptr(
+                        llvm::ConstantPointerNull::get(llvm_utils->get_type_info_ptr_type()));
+                }
+                llvm::Value* out_desc = llvm_utils->CreateAlloca(*builder,
+                    string_descriptor->getPointerTo());
+                llvm::Value* name_ptr = llvm_utils->get_type_info_name_ptr(ti_ptr);
+                llvm::Value* type_tag = builder->CreatePtrToInt(name_ptr, i64_type);
+                store_type_name_descriptor_from_tag(type_tag, name_ptr, out_desc);
+                tmp = llvm_utils->CreateLoad2(string_descriptor->getPointerTo(), out_desc);
+                break;
+            }
             default: {
                 throw CodeGenError("Either the '" + ASRUtils::IntrinsicElementalFunctionRegistry::
                         get_intrinsic_function_name(x.m_intrinsic_id) +
