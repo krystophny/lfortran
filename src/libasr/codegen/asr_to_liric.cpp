@@ -922,9 +922,38 @@ public:
         lr_session_set_block(s, dead, NULL);
     }
 
-    /* ---- Print (basic: calls _lfortran_printf) ------------------------- */
+    /* ---- GoTo ---------------------------------------------------------- */
 
-    /* ---- Print (via printf from lfortran runtime's libc) --------------- */
+    std::unordered_map<int64_t, uint32_t> goto_targets;
+
+    void visit_GoTo(const ASR::GoTo_t &x) {
+        auto it = goto_targets.find(x.m_target_id);
+        if (it == goto_targets.end()) {
+            /* Forward reference — create block and register */
+            uint32_t blk = lr_session_block(s);
+            goto_targets[x.m_target_id] = blk;
+            lr_emit_br(s, blk);
+        } else {
+            lr_emit_br(s, it->second);
+        }
+        uint32_t dead = lr_session_block(s);
+        lr_session_set_block(s, dead, NULL);
+    }
+
+    void visit_GoToTarget(const ASR::GoToTarget_t &x) {
+        uint32_t blk;
+        auto it = goto_targets.find(x.m_id);
+        if (it == goto_targets.end()) {
+            blk = lr_session_block(s);
+            goto_targets[x.m_id] = blk;
+        } else {
+            blk = it->second;
+        }
+        lr_emit_br(s, blk);
+        lr_session_set_block(s, blk, NULL);
+    }
+
+    /* ---- Print (via printf) -------------------------------------------- */
 
     /* Declare printf as a varargs function */
     uint32_t get_printf_id() {
@@ -939,14 +968,10 @@ public:
         return lr_session_intern(s, "printf");
     }
 
-    void visit_Print(const ASR::Print_t &x) {
-        if (!x.m_text) return;
-
-        /* Extract StringFormat args */
-        if (!ASR::is_a<ASR::StringFormat_t>(*x.m_text)) {
-            throw CodeGenError("liric: Print only supports StringFormat");
-        }
-        ASR::StringFormat_t *sf = ASR::down_cast<ASR::StringFormat_t>(x.m_text);
+    /* Emit printf(fmt, args...) for an array of ASR expressions.
+       Appends newline unless suppress_newline is true. */
+    void emit_printf_values(ASR::expr_t **values, size_t n_values,
+                            bool suppress_newline) {
 
         uint32_t printf_id = get_printf_id();
         lr_type_t *ptr = lr_type_ptr_s(s);
@@ -956,13 +981,13 @@ public:
         std::vector<lr_operand_desc_t> call_args;
         call_args.push_back(LR_NULL(ptr)); /* placeholder for fmt global */
 
-        for (size_t i = 0; i < sf->n_args; i++) {
+        for (size_t i = 0; i < n_values; i++) {
             if (i > 0) fmt += " ";
             ASR::ttype_t *t = ASRUtils::extract_type(
-                ASRUtils::expr_type(sf->m_args[i]));
+                ASRUtils::expr_type(values[i]));
             int kind = ASRUtils::extract_kind_from_ttype_t(t);
 
-            visit_expr(*sf->m_args[i]);
+            visit_expr(*values[i]);
 
             if (ASRUtils::is_integer(*t)) {
                 lr_type_t *ty = get_type(t);
@@ -996,7 +1021,7 @@ public:
                 throw CodeGenError("liric: Print unsupported type");
             }
         }
-        fmt += "\n";
+        if (!suppress_newline) fmt += "\n";
 
         /* Create format string as a global constant, reference by symbol name */
         {
@@ -1028,6 +1053,36 @@ public:
             d.call_vararg = true;
             d.call_fixed_args = 1; /* first arg (format string) is fixed */
             lr_session_emit(s, &d, NULL);
+        }
+    }
+
+    void visit_Print(const ASR::Print_t &x) {
+        if (!x.m_text) return;
+        if (ASR::is_a<ASR::StringFormat_t>(*x.m_text)) {
+            ASR::StringFormat_t *sf =
+                ASR::down_cast<ASR::StringFormat_t>(x.m_text);
+            emit_printf_values(sf->m_args, sf->n_args, false);
+        } else {
+            /* Single expression print (e.g. string) */
+            ASR::expr_t *args[1] = {x.m_text};
+            emit_printf_values(args, 1, false);
+        }
+    }
+
+    void visit_FileWrite(const ASR::FileWrite_t &x) {
+        if (x.m_overloaded) {
+            visit_stmt(*x.m_overloaded);
+            return;
+        }
+        /* For stdout (unit=* or unit=6), use printf.
+           For other units, throw for now. */
+        if (x.n_values == 1 &&
+                ASR::is_a<ASR::StringFormat_t>(*x.m_values[0])) {
+            ASR::StringFormat_t *sf =
+                ASR::down_cast<ASR::StringFormat_t>(x.m_values[0]);
+            emit_printf_values(sf->m_args, sf->n_args, false);
+        } else if (x.n_values > 0) {
+            emit_printf_values(x.m_values, x.n_values, false);
         }
     }
 
