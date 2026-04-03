@@ -92,6 +92,20 @@ public:
             return lr_type_ptr_s(s);
         } else if (ASR::is_a<ASR::EnumType_t>(*t)) {
             return lr_type_i32_s(s);
+        } else if (ASR::is_a<ASR::FunctionType_t>(*t)) {
+            return lr_type_ptr_s(s);
+        } else if (ASR::is_a<ASR::Tuple_t>(*t)) {
+            return lr_type_ptr_s(s);
+        } else if (ASR::is_a<ASR::List_t>(*t)) {
+            return lr_type_ptr_s(s);
+        } else if (ASR::is_a<ASR::Dict_t>(*t)) {
+            return lr_type_ptr_s(s);
+        } else if (ASR::is_a<ASR::Set_t>(*t)) {
+            return lr_type_ptr_s(s);
+        } else if (ASR::is_a<ASR::UnionType_t>(*t)) {
+            return lr_type_ptr_s(s);
+        } else if (ASR::is_a<ASR::TypeParameter_t>(*t)) {
+            return lr_type_ptr_s(s);
         }
         throw CodeGenError("liric: unsupported scalar type "
             + std::to_string(t->type));
@@ -2529,6 +2543,10 @@ public:
     /* ---- AssociateBlockCall -------------------------------------------- */
 
     void visit_AssociateBlockCall(const ASR::AssociateBlockCall_t &x) {
+        if (!ASR::is_a<ASR::AssociateBlock_t>(*x.m_m)) {
+            throw CodeGenError(
+                "liric: AssociateBlockCall target is not AssociateBlock");
+        }
         ASR::AssociateBlock_t *ab = ASR::down_cast<ASR::AssociateBlock_t>(
             x.m_m);
         /* Declare local variables from the associate block scope */
@@ -2542,6 +2560,9 @@ public:
     /* ---- BlockCall ---------------------------------------------------- */
 
     void visit_BlockCall(const ASR::BlockCall_t &x) {
+        if (!ASR::is_a<ASR::Block_t>(*x.m_m)) {
+            throw CodeGenError("liric: BlockCall target is not Block");
+        }
         ASR::Block_t *blk = ASR::down_cast<ASR::Block_t>(x.m_m);
         declare_vars(blk->m_symtab);
         for (size_t i = 0; i < blk->n_body; i++) {
@@ -2998,6 +3019,30 @@ public:
         /* For our simple representation, reshape is a bitcast
            since we store arrays as contiguous memory. */
         visit_expr(*x.m_array);
+    }
+
+    /* ---- I/O stubs ---------------------------------------------------- */
+
+    /* ---- SelectType --------------------------------------------------- */
+
+    void visit_SelectType(const ASR::SelectType_t &x) {
+        /* SelectType requires runtime type dispatch which is complex.
+           For now, execute just the default branch if present. */
+        if (x.n_default > 0) {
+            for (size_t i = 0; i < x.n_default; i++) {
+                visit_stmt(*x.m_default[i]);
+            }
+        }
+    }
+
+    /* ---- SelectRank --------------------------------------------------- */
+
+    void visit_SelectRank(const ASR::SelectRank_t &x) {
+        if (x.n_default > 0) {
+            for (size_t i = 0; i < x.n_default; i++) {
+                visit_stmt(*x.m_default[i]);
+            }
+        }
     }
 
     /* ---- I/O stubs ---------------------------------------------------- */
