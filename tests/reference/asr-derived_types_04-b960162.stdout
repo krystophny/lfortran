@@ -43,6 +43,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             self:
                                                 (Variable
@@ -69,6 +71,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     all_abstract
@@ -97,7 +101,7 @@
                                     (Var 4 all)
                                     Public
                                     .false.
-                                    .false.
+                                    .true.
                                     ()
                                 ),
                             bitset_type:
@@ -136,6 +140,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     bitset_type
@@ -155,6 +161,7 @@
                                     []
                                     ()
                                     ()
+                                    []
                                 )
                         })
                     derived_types_04_bitset

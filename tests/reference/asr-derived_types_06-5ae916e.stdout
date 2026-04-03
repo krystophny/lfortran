@@ -37,6 +37,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             ~unlimited_polymorphic_type:
                                                 (Struct
@@ -62,6 +64,7 @@
                                                     []
                                                     ()
                                                     ()
+                                                    []
                                                 )
                                         })
                                     subrout
@@ -89,8 +92,8 @@
                                     []
                                     ()
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 )
                         })
