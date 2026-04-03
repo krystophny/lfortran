@@ -32,6 +32,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 ),
                             x:
                                 (Struct
@@ -58,6 +60,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     x
@@ -77,6 +81,7 @@
                                     []
                                     ()
                                     ()
+                                    []
                                 ),
                             y:
                                 (Function
@@ -108,6 +113,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 )
                                                         })
                                                     a
@@ -127,6 +134,7 @@
                                                     []
                                                     ()
                                                     ()
+                                                    []
                                                 ),
                                             b:
                                                 (Variable
@@ -153,6 +161,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     y
@@ -175,8 +185,8 @@
                                     []
                                     ()
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             z:
@@ -209,6 +219,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 )
                                                         })
                                                     a
@@ -228,6 +240,7 @@
                                                     []
                                                     ()
                                                     ()
+                                                    []
                                                 ),
                                             b:
                                                 (Variable
@@ -254,6 +267,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             z:
                                                 (Variable
@@ -275,6 +290,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     z
@@ -303,8 +320,8 @@
                                     )]
                                     (Var 6 z)
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 )
                         })

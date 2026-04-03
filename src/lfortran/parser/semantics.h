@@ -298,6 +298,12 @@ static inline ast_t* VAR_DECL_PRAGMA2(Allocator &al, Location &loc,
             nullptr, 0, nullptr, \
             name2char(name), None)
 
+#define ATTR_TYPE_NAME_KIND(x, name, kind, l) make_AttrType_t( \
+            p.m_a, l, \
+            decl_typeType::Type##x, \
+            kind.p, kind.size(), nullptr, \
+            name2char(name), None)
+
 #define ATTR_TYPE_STAR(x, sym, l) make_AttrType_t( \
             p.m_a, l, \
             decl_typeType::Type##x, \
@@ -660,6 +666,20 @@ static inline var_sym_t* VARSYM(Allocator &al, Location &l,
     return r;
 }
 
+static inline ast_t* slash_init_to_expr(Allocator &al, Location &l, const Vec<ast_t*> &values) {
+    if (values.size() == 1) {
+        return values[0];
+    } else {
+        expr_t** exprs = al.allocate<expr_t*>(values.size());
+        for (size_t i = 0; i < values.size(); i++) {
+            exprs[i] = down_cast<expr_t>(values[i]);
+        }
+        return make_ArrayInitializer_t(al, l,
+            nullptr, nullptr, exprs, values.size());
+    }
+}
+#define SLASH_INIT_EXPR(values, l) slash_init_to_expr(p.m_a, l, values)
+
 #define VAR_SYM_NAME(name, sym, loc) VARSYM(p.m_a, loc, \
         name2char(name), nullptr, 0, nullptr, 0, nullptr, nullptr, sym, nullptr)
 #define VAR_SYM_EMPTY(loc) VARSYM(p.m_a, loc, \
@@ -928,8 +948,8 @@ static inline reduce_opType convert_id_to_reduce_type(
 #define POW(x, y, l) make_BinOp_t(p.m_a, l, EXPR(x), operatorType::Pow, EXPR(y))
 #define UNARY_MINUS(x, l) make_UnaryOp_t(p.m_a, l, unaryopType::USub, EXPR(x))
 #define UNARY_PLUS(x, l) make_UnaryOp_t(p.m_a, l, unaryopType::UAdd, EXPR(x))
-#define TRUE(l) make_Logical_t(p.m_a, l, true)
-#define FALSE(l) make_Logical_t(p.m_a, l, false)
+#define TRUE(x, l) make_Logical_t(p.m_a, l, true, str2str_null(p.m_a, x))
+#define FALSE(x, l) make_Logical_t(p.m_a, l, false, str2str_null(p.m_a, x))
 
 ast_t* parenthesis(Allocator &al, Location &loc, expr_t *op) {
     switch (op->type) {
@@ -1332,8 +1352,8 @@ ast_t* builtin3(Allocator &al,
         EXPRS(A2LIST(p.m_a, arg)), 1, nullptr, 0, nullptr)
 #define BACKSPACE2(arg, l) make_Backspace_t(p.m_a, l, 0, \
         EXPRS(A2LIST(p.m_a, arg)), 1, nullptr, 0, nullptr)
-#define FLUSH1(arg, l) make_Flush_t(p.m_a, l, 0, \
-            EXPRS(A2LIST(p.m_a, INTEGER(arg, l))), 1, nullptr, 0, nullptr)
+#define FLUSH2(arg, l) make_Flush_t(p.m_a, l, 0, \
+        EXPRS(A2LIST(p.m_a, arg)), 1, nullptr, 0, nullptr)
 #define ENDFILE2(arg, l) make_Endfile_t(p.m_a, l, 0, \
         EXPRS(A2LIST(p.m_a, arg)), 1, nullptr, 0, nullptr)
 #define BIND2(args0, l) builtin3(p.m_a, args0, l, make_Bind_t)
@@ -2040,11 +2060,11 @@ void add_ws_warning(const Location &loc,
 #define DO2(i, a, b, trivia, body, l) make_DoLoop_t(p.m_a, l, 0, nullptr, 0, \
         name2char(i), EXPR(a), EXPR(b), nullptr, \
         /*body*/ STMTS(body), \
-        /*n_body*/ body.size(), trivia_cast(trivia), nullptr)
+        /*n_body*/ body.size(), trivia_cast(trivia), nullptr, &((i)->loc))
 #define DO2_LABEL(label, i, a, b, trivia, body, l) make_DoLoop_t(p.m_a, l, 0, nullptr, \
         label, name2char(i), EXPR(a), EXPR(b), nullptr, \
         /*body*/ STMTS(body), \
-        /*n_body*/ body.size(), trivia_cast(trivia), nullptr); \
+        /*n_body*/ body.size(), trivia_cast(trivia), nullptr, &((i)->loc)); \
         if (label == 0) { \
             p.diag.add(LCompilers::diag::Diagnostic(  \
                 "Zero is not a valid statement label",   \
@@ -2055,7 +2075,7 @@ void add_ws_warning(const Location &loc,
 #define DO3_LABEL(label, i, a, b, c, trivia, body, l) make_DoLoop_t(p.m_a, l, 0, nullptr, \
         label, name2char(i), EXPR(a), EXPR(b), EXPR(c), \
         /*body*/ STMTS(body), \
-        /*n_body*/ body.size(), trivia_cast(trivia), nullptr); \
+        /*n_body*/ body.size(), trivia_cast(trivia), nullptr, &((i)->loc)); \
         if (label == 0) { \
             p.diag.add(LCompilers::diag::Diagnostic(  \
                 "Zero is not a valid statement label",   \
@@ -2065,7 +2085,7 @@ void add_ws_warning(const Location &loc,
 #define DO3(i, a, b, c, trivia, body, l) make_DoLoop_t(p.m_a, l, 0, nullptr, 0, \
         name2char(i), EXPR(a), EXPR(b), EXPR(c), \
         /*body*/ STMTS(body), \
-        /*n_body*/ body.size(), trivia_cast(trivia), nullptr)
+        /*n_body*/ body.size(), trivia_cast(trivia), nullptr, &((i)->loc))
 
 #define DO_CONCURRENT1(h, loc, trivia, body, l) make_DoConcurrentLoop_t(p.m_a, l, 0, nullptr, \
         CONCURRENT_CONTROLS(h), h.size(), \
