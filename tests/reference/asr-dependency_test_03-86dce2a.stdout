@@ -37,6 +37,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 )
                                                         })
                                                     default_help
@@ -95,8 +97,8 @@
                                     )]
                                     ()
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 )
                         })

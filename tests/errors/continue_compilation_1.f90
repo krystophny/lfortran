@@ -30,7 +30,13 @@ module continue_compilation_1_mod
         module procedure assign_bad_lhs
         module procedure assign_bad_rhs
     end interface
-
+    
+    interface operator(.op.)
+        function op_clash_f(x) result(y)
+            integer, intent(in) :: x
+            integer :: y
+        end function
+    end interface
     type :: Base
         integer :: x
     end type Base
@@ -41,6 +47,29 @@ module continue_compilation_1_mod
 
     type :: type_t
     end type type_t
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 contains
@@ -128,37 +157,37 @@ contains
         integer, intent(out) :: lhs
         integer, intent(out) :: rhs
     end subroutine assign_bad_rhs
+    subroutine slash_init_warning_paths()
+        enum, bind(c)
+            enumerator :: red/1/
+        end enum
+        type(MyClass), save :: slash_x/MyClass(1)/
+        integer, save :: slash_y/2/
+    end subroutine slash_init_warning_paths
 
+    function dummy_func() result(r)
+        integer :: r
+        r = 42
+    end function dummy_func
 
+    subroutine dummy_sub()
+       print *, "dummy subroutine"
+    end subroutine dummy_sub
 
+    subroutine proc_ptr_error_tests()
+        implicit none
+        procedure(), pointer :: pf1
+        pf1 => dummy_sub
 
+        procedure(sub_test), pointer :: pf2
+        pf2 => dummy_func
+    end subroutine proc_ptr_error_tests
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    function op_clash_f(x) result(y)
+        integer, intent(in) :: x
+        integer :: y
+        y = x
+    end function op_clash_f
 
 
 
@@ -265,6 +294,26 @@ program continue_compilation_1
     type(Derived) :: derived_var
     class(type_t) :: inst_tt
     real(8), parameter :: erfc_param = erfc(40.12_8)
+    integer :: arr_idl(4)
+    contiguous :: contig_not_declared
+    contiguous :: MyClass
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -558,7 +607,7 @@ program continue_compilation_1
 
     ! unary defined operator with no matching function
     bad_x = .bad. 10
-
+    bad_x = 5 .op. 3
     ieee_cls = ieee_class(0.0)
     b = (ieee_cls == ieee_quiet_nan)
 
@@ -566,12 +615,77 @@ program continue_compilation_1
     integer, intent(in) :: in_intent
     
     base_var = derived_var
+
+    type :: container(rk, ik)
+        integer, kind :: rk
+        integer, kind :: ik
+        integer(kind=ik)  :: i_val(20)
+        real(kind=rk)     :: r_val(20)
+    end type container
+
+    type(container(4)) :: obj1
+    type(container) :: obj2
+
+    arr_idl = (i, i = 1, 4)
+    integer :: minloc_shape_mismatch = minloc([2, 1, 3], 1, [.true., .false.])
+    integer :: maxloc_shape_mismatch = maxloc([2, 1, 3], 1, [.true., .false.])
+    write (*, "(a)", advance="hello") "Dothraki culture"
+    print *, sum(arr1, dim = mask1)
+    print*, ieee_is_nan(1.0)
+    open(unit=7, decimal=1, decimal="comma")
+    open(unit=7, decimal="POINT", decimal="comma")
+    integer :: char_len_var = 10
+    character(len = char_len_var) :: char_nonconst
+    interface undeclared_iface
+        module procedure undeclared_proc  ! {Error} Symbol 'undeclared_proc' not declared
+    end interface
+
+    integer, parameter :: n2 = "abc"
+    type(MyClass) :: ptr_src_no_target
+    type(MyClass), pointer :: ptr_requires_target => ptr_src_no_target
+    type(Base), target :: ptr_tgt_base
+    type(MyClass), pointer :: ptr_type_mismatch => ptr_tgt_base
+
+
+
+
+
+
+
+
+
     contains
+    subroutine test_uminus_struct()
+        use continue_compilation_1_mod, only: MyClass
+        implicit none
+        type(MyClass) :: tt
+        print *, -tt
+    end subroutine
+
+
+
+
     subroutine sub(f)
         interface
             function f(x)
                 integer :: x, f
             end function
         end interface
+    end subroutine
+    subroutine sub_do_undeclared()
+        implicit none
+        integer :: n(3)
+        do k = 1, 3
+            n(k) = 42
+        end do
+    end subroutine
+    subroutine sub_real_logical_init()
+        implicit none
+        real :: adwf = .true.
+    end subroutine
+    subroutine sub_abs_array_index()
+        implicit none
+        integer(4) :: arr1(3) = [2471095, 820012001, 39024800]
+        if (abs(arr1)(1) /= 2471095) error stop
     end subroutine
 end program

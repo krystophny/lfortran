@@ -39,6 +39,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             ptr:
                                                 (Variable
@@ -69,6 +71,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             ~select_type_block_:
                                                 (Block
@@ -198,8 +202,8 @@
                                     )]
                                     ()
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             child_value:
@@ -227,6 +231,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     child_value
@@ -246,6 +252,7 @@
                                     []
                                     ()
                                     4 toml_value
+                                    []
                                 ),
                             default_class:
                                 (Function
@@ -353,6 +360,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     toml_value
@@ -374,6 +383,7 @@
                                     []
                                     ()
                                     ()
+                                    []
                                 )
                         })
                     derived_types_module_19
@@ -421,8 +431,8 @@
                                     )]
                                     ()
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             check_proc:

@@ -77,6 +77,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 ),
                             r:
                                 (Variable
@@ -98,6 +100,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 )
                         })
                     interface_05
@@ -264,6 +268,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             a1:
                                                 (Variable
@@ -285,6 +291,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     a1
@@ -319,8 +327,8 @@
                                     )]
                                     (Var 3 a1)
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             a2:
@@ -348,6 +356,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             a2:
                                                 (Variable
@@ -369,6 +379,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     a2
@@ -412,8 +424,8 @@
                                     )]
                                     (Var 4 a2)
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 )
                         })

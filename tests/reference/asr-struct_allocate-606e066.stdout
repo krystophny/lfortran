@@ -27,6 +27,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 ),
                             rp1d:
                                 (Struct
@@ -60,6 +62,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     rp1d
@@ -86,6 +90,7 @@
                                     []
                                     ()
                                     ()
+                                    []
                                 ),
                             sds:
                                 (Struct
@@ -129,6 +134,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     sds
@@ -165,6 +172,7 @@
                                     []
                                     ()
                                     ()
+                                    []
                                 )
                         })
                     mod_struct_allocate
@@ -251,6 +259,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 ),
                             sds:
                                 (ExternalSymbol

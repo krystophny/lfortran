@@ -39,6 +39,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     scaled_data_structure
@@ -65,6 +67,7 @@
                                     []
                                     ()
                                     ()
+                                    []
                                 )
                         })
                     module_nullify_04
@@ -121,6 +124,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 ),
                             s2:
                                 (Variable
@@ -154,6 +159,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 ),
                             scaled_data_structure:
                                 (ExternalSymbol
