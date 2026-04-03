@@ -57,6 +57,11 @@ public:
         std::string llvm_ir;
     };
 
+    static bool eval_result_has_value(const EvalResult &r);
+    static std::string eval_result_type_name(const EvalResult &r);
+    static std::string render_eval_result_plain(const EvalResult &r);
+    static std::string render_eval_result_repr(const EvalResult &r, const std::string &name);
+
     // Evaluates `code`.
     // If `verbose=true`, it saves ast, asr and llvm_ir in Result.
     Result<EvalResult> evaluate(const std::string &code, bool verbose,
