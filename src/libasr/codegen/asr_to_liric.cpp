@@ -2922,6 +2922,72 @@ public:
         throw CodeGenError("liric: unsupported array physical type in ArrayItem");
     }
 
+    /* ---- ArraySection --------------------------------------------------- */
+
+    void visit_ArraySection(const ASR::ArraySection_t &x) {
+        if (x.m_value) {
+            visit_expr(*x.m_value);
+            return;
+        }
+        /* ArraySection represents a(lo:hi:step) or a(lo:hi).
+           For fixed-size arrays, we create a new contiguous array with
+           the sliced elements. For descriptor arrays, we just get a
+           pointer to the data start offset. */
+        bool want_address = is_target;
+        ASR::ttype_t *arr_type = ASRUtils::expr_type(x.m_v);
+        ASR::ttype_t *arr_type_inner = ASRUtils::type_get_past_allocatable(
+            ASRUtils::type_get_past_pointer(arr_type));
+        lr_type_t *elem_ty = get_scalar_type(arr_type_inner);
+        lr_type_t *ptr = lr_type_ptr_s(s);
+        lr_type_t *i32 = lr_type_i32_s(s);
+
+        /* Get array base address */
+        is_target = true;
+        visit_expr(*x.m_v);
+        is_target = want_address;
+        uint32_t arr_ptr = tmp;
+
+        /* For simple 1D case, compute the start offset and return pointer */
+        if (x.n_args >= 1 && x.m_args[0].m_left) {
+            bool saved_target = is_target;
+            is_target = false;
+            visit_expr(*x.m_args[0].m_left);
+            is_target = saved_target;
+            uint32_t start = tmp;
+            lr_type_t *start_ty = get_type(
+                ASRUtils::expr_type(x.m_args[0].m_left));
+            if (start_ty != i32) {
+                start = lr_emit_sextortrunc(s, i32, V(start, start_ty));
+            }
+            int64_t lb = get_array_dim_start(arr_type_inner, 0);
+            uint32_t offset = lr_emit_sub(s, i32, V(start, i32),
+                I(lb, i32));
+
+            if (ASR::is_a<ASR::Array_t>(*arr_type_inner)) {
+                ASR::Array_t *at = ASR::down_cast<ASR::Array_t>(
+                    arr_type_inner);
+                if (at->m_physical_type ==
+                        ASR::array_physical_typeType::FixedSizeArray) {
+                    lr_type_t *arr_ty = get_type(arr_type_inner);
+                    lr_operand_desc_t gep_idx[2] = {
+                        I(0, i32), V(offset, i32)
+                    };
+                    tmp = lr_emit_gep(s, arr_ty, V(arr_ptr, ptr),
+                        gep_idx, 2);
+                    return;
+                }
+            }
+            /* For pointer/descriptor arrays */
+            uint32_t data_ptr = lr_emit_load(s, ptr, V(arr_ptr, ptr));
+            lr_operand_desc_t gep_idx[1] = {V(offset, i32)};
+            tmp = lr_emit_gep(s, elem_ty, V(data_ptr, ptr), gep_idx, 1);
+            return;
+        }
+
+        /* Fallback: just return the array pointer */
+        tmp = arr_ptr;
+    }
+
     /* ---- ArrayConstant ------------------------------------------------ */
 
     void visit_ArrayConstant(const ASR::ArrayConstant_t &x) {
