@@ -15,6 +15,19 @@
 
 namespace LCompilers {
 
+class CodeGenError {
+public:
+    diag::Diagnostic d;
+    CodeGenError(const std::string &msg)
+        : d{diag::Diagnostic(msg, diag::Level::Error, diag::Stage::CodeGen)}
+    {}
+    CodeGenError(const std::string &msg, const Location &loc)
+        : d{diag::Diagnostic(msg, diag::Level::Error, diag::Stage::CodeGen, {
+            diag::Label("", {loc})
+        })}
+    {}
+};
+
 static inline uint64_t get_hash(ASR::asr_t *node) {
     return (uint64_t)node;
 }
@@ -30,7 +43,7 @@ public:
     bool is_target;             /* true when visiting assignment target */
     uint32_t proc_return;       /* return block id for current function */
 
-    std::unordered_map<uint64_t, uint32_t> symtab;  /* ASR hash -> vreg */
+    std::unordered_map<uint64_t, uint32_t> lr_symtab;  /* ASR hash -> vreg */
 
     std::vector<uint32_t> loop_head_stack;
     std::vector<uint32_t> loop_end_stack;
@@ -65,6 +78,7 @@ public:
             return lr_type_ptr_s(s);
         }
         throw CodeGenError("liric: unsupported type");
+        return nullptr; /* unreachable, silences warning */
     }
 
     lr_operand_desc_t V(uint32_t vreg, lr_type_t *ty) {
@@ -162,7 +176,7 @@ public:
                 uint64_t h = get_hash((ASR::asr_t *)v);
                 lr_type_t *ty = get_type(v->m_type);
                 uint32_t alloca_vreg = lr_emit_alloca(s, ty);
-                symtab[h] = alloca_vreg;
+                lr_symtab[h] = alloca_vreg;
             }
         }
     }
@@ -174,8 +188,8 @@ public:
         if (ASR::is_a<ASR::Variable_t>(*sym)) {
             ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(sym);
             uint64_t h = get_hash((ASR::asr_t *)v);
-            auto it = symtab.find(h);
-            if (it == symtab.end()) {
+            auto it = lr_symtab.find(h);
+            if (it == lr_symtab.end()) {
                 throw CodeGenError("liric: variable not found: "
                                    + std::string(v->m_name));
             }
