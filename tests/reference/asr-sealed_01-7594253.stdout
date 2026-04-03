@@ -1,0 +1,191 @@
+(TranslationUnit
+    (SymbolTable
+        1
+        {
+            sealed_01:
+                (Program
+                    (SymbolTable
+                        2
+                        {
+                            1_point_t_x:
+                                (ExternalSymbol
+                                    2
+                                    1_point_t_x
+                                    3 x
+                                    point_t
+                                    []
+                                    x
+                                    Public
+                                ),
+                            1_point_t_y:
+                                (ExternalSymbol
+                                    2
+                                    1_point_t_y
+                                    3 y
+                                    point_t
+                                    []
+                                    y
+                                    Public
+                                ),
+                            p:
+                                (Variable
+                                    2
+                                    p
+                                    []
+                                    Local
+                                    ()
+                                    ()
+                                    Default
+                                    (StructType
+                                        [(Integer 4)
+                                        (Integer 4)]
+                                        []
+                                        .true.
+                                        .false.
+                                    )
+                                    2 point_t
+                                    Source
+                                    Public
+                                    Required
+                                    .false.
+                                    .false.
+                                    .false.
+                                    ()
+                                    .false.
+                                    .false.
+                                ),
+                            point_t:
+                                (Struct
+                                    (SymbolTable
+                                        3
+                                        {
+                                            x:
+                                                (Variable
+                                                    3
+                                                    x
+                                                    []
+                                                    Local
+                                                    ()
+                                                    ()
+                                                    Default
+                                                    (Integer 4)
+                                                    ()
+                                                    Source
+                                                    Public
+                                                    Required
+                                                    .false.
+                                                    .false.
+                                                    .false.
+                                                    ()
+                                                    .false.
+                                                    .false.
+                                                ),
+                                            y:
+                                                (Variable
+                                                    3
+                                                    y
+                                                    []
+                                                    Local
+                                                    ()
+                                                    ()
+                                                    Default
+                                                    (Integer 4)
+                                                    ()
+                                                    Source
+                                                    Public
+                                                    Required
+                                                    .false.
+                                                    .false.
+                                                    .false.
+                                                    ()
+                                                    .false.
+                                                    .false.
+                                                )
+                                        })
+                                    point_t
+                                    (StructType
+                                        [(Integer 4)
+                                        (Integer 4)]
+                                        []
+                                        .true.
+                                        .false.
+                                    )
+                                    []
+                                    [x
+                                    y]
+                                    []
+                                    Source
+                                    Public
+                                    .false.
+                                    .false.
+                                    []
+                                    ()
+                                    ()
+                                )
+                        })
+                    sealed_01
+                    []
+                    [(Assignment
+                        (StructInstanceMember
+                            (Var 2 p)
+                            2 1_point_t_x
+                            (Integer 4)
+                            ()
+                        )
+                        (IntegerConstant 10 (Integer 4) Decimal)
+                        ()
+                        .false.
+                        .false.
+                    )
+                    (Assignment
+                        (StructInstanceMember
+                            (Var 2 p)
+                            2 1_point_t_y
+                            (Integer 4)
+                            ()
+                        )
+                        (IntegerConstant 20 (Integer 4) Decimal)
+                        ()
+                        .false.
+                        .false.
+                    )
+                    (If
+                        ()
+                        (LogicalBinOp
+                            (IntegerCompare
+                                (StructInstanceMember
+                                    (Var 2 p)
+                                    2 1_point_t_x
+                                    (Integer 4)
+                                    ()
+                                )
+                                NotEq
+                                (IntegerConstant 10 (Integer 4) Decimal)
+                                (Logical 4)
+                                ()
+                            )
+                            Or
+                            (IntegerCompare
+                                (StructInstanceMember
+                                    (Var 2 p)
+                                    2 1_point_t_y
+                                    (Integer 4)
+                                    ()
+                                )
+                                NotEq
+                                (IntegerConstant 20 (Integer 4) Decimal)
+                                (Logical 4)
+                                ()
+                            )
+                            (Logical 4)
+                            ()
+                        )
+                        [(ErrorStop
+                            (IntegerConstant 1 (Integer 4) Decimal)
+                        )]
+                        []
+                    )]
+                )
+        })
+    []
+)

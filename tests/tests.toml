@@ -1408,6 +1408,10 @@ filename = "derived_types_10.f90"
 asr = true
 
 [[test]]
+filename = "sealed_01.f90"
+asr = true
+
+[[test]]
 filename = "modules1.f90"
 asr = true
 extrafiles = "modules1_module1.f90, modules1_module2.f90"
@@ -3933,6 +3937,14 @@ asr = true
 [[test]]
 filename = "errors/derived_type_06.f90"
 run = true
+
+[[test]]
+filename = "errors/sealed_02.f90"
+asr = true
+
+[[test]]
+filename = "errors/sealed_03.f90"
+asr = true
 
 [[test]]
 filename = "errors/array_01.f90"

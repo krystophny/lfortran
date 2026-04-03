@@ -1,0 +1,5 @@
+semantic error: Attribute `sealed` is only valid for derived type definitions
+ --> tests/errors/sealed_03.f90:3:5
+  |
+3 |     integer, sealed :: x
+  |     ^^^^^^^^^^^^^^^^^^^^ 
