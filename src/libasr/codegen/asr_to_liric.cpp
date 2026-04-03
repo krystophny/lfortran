@@ -59,7 +59,7 @@ public:
     lr_type_t *get_type(ASR::ttype_t *t) {
         t = ASRUtils::type_get_past_pointer(
             ASRUtils::type_get_past_allocatable(t));
-        if (ASRUtils::is_integer(*t)) {
+        if (ASRUtils::is_integer(*t) || ASRUtils::is_unsigned_integer(*t)) {
             int kind = ASRUtils::extract_kind_from_ttype_t(t);
             switch (kind) {
                 case 1: return lr_type_i8_s(s);
@@ -116,6 +116,34 @@ public:
         for (auto &item : x.m_symtab->get_scope()) {
             if (ASR::is_a<ASR::Program_t>(*item.second)) {
                 visit_symbol(*item.second);
+            }
+        }
+    }
+
+    /* ---- Module -------------------------------------------------------- */
+
+    void visit_Module(const ASR::Module_t &x) {
+        /* Visit all functions in the module */
+        for (auto &item : x.m_symtab->get_scope()) {
+            if (ASR::is_a<ASR::Function_t>(*item.second)) {
+                visit_Function(*ASR::down_cast<ASR::Function_t>(
+                    item.second));
+            }
+        }
+        /* Module variables become globals */
+        for (auto &item : x.m_symtab->get_scope()) {
+            if (ASR::is_a<ASR::Variable_t>(*item.second)) {
+                ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(
+                    item.second);
+                uint64_t h = get_hash((ASR::asr_t *)v);
+                if (lr_symtab.find(h) != lr_symtab.end()) continue;
+                lr_type_t *ty = get_type(v->m_type);
+                std::string gname = "__module_" + std::string(x.m_name)
+                    + "_" + std::string(v->m_name);
+                lr_session_global(s, gname.c_str(), ty, false, NULL, 0);
+                uint32_t sym_id = lr_session_intern(s, gname.c_str());
+                /* Store a sentinel — module vars are accessed via global ref */
+                lr_symtab[h] = sym_id | 0x80000000u; /* high bit = global flag */
             }
         }
     }
@@ -381,6 +409,30 @@ public:
                 uint32_t alloca_vreg = lr_emit_alloca(s, ty);
                 lr_symtab[h] = alloca_vreg;
             }
+        }
+    }
+
+    void visit_StringConstant(const ASR::StringConstant_t &x) {
+        tmp = lr_emit_globalstringptr(s, x.m_s);
+    }
+
+    void visit_UnsignedIntegerConstant(const ASR::UnsignedIntegerConstant_t &x) {
+        lr_type_t *ty = get_type(x.m_type);
+        tmp = lr_emit_add(s, ty, I(x.m_n, ty), I(0, ty));
+    }
+
+    void visit_UnsignedIntegerBinOp(const ASR::UnsignedIntegerBinOp_t &x) {
+        if (x.m_value) { visit_expr(*x.m_value); return; }
+        visit_expr(*x.m_left); uint32_t left = tmp;
+        visit_expr(*x.m_right); uint32_t right = tmp;
+        lr_type_t *ty = get_type(x.m_type);
+        lr_operand_desc_t l = V(left, ty), r = V(right, ty);
+        switch (x.m_op) {
+            case ASR::binopType::Add: tmp = lr_emit_add(s, ty, l, r); break;
+            case ASR::binopType::Sub: tmp = lr_emit_sub(s, ty, l, r); break;
+            case ASR::binopType::Mul: tmp = lr_emit_mul(s, ty, l, r); break;
+            case ASR::binopType::Div: tmp = lr_emit_udiv(s, ty, l, r); break;
+            default: throw CodeGenError("liric: unsupported unsigned binop");
         }
     }
 
