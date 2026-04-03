@@ -227,7 +227,12 @@ namespace LCompilers {
             llvm::PointerType *fnPtrTy = llvm::PointerType::get(fnTy, 0);
             llvm::PointerType *fnPtrPtrTy = llvm::PointerType::get(fnPtrTy, 0);
             vptr_type = fnPtrPtrTy;  // i32 (...)**
-            type_info_type = llvm::StructType::get(context, {i8_ptr, i8_ptr, i8_ptr}, false);
+            type_info_type = llvm::StructType::create(context, "lfortran_type_info");
+            type_info_type->setBody({
+                i8_ptr,                                // name ptr or intrinsic tag-encoded pointer
+                llvm::Type::getInt64Ty(context),      // byte size
+                type_info_type->getPointerTo()        // parent type-info
+            }, false);
             fnTy = llvm::FunctionType::get(
                 llvm::Type::getVoidTy(context), {character_type, character_type}, false);
             struct_copy_functype = fnTy;  // void (i8*, i8*)
@@ -255,8 +260,7 @@ namespace LCompilers {
             type_info_ptr = builder->CreateBitCast(type_info_ptr, get_type_info_ptr_type());
         }
         llvm::Value* size_ptr = create_gep2(type_info_type, type_info_ptr, 1);
-        llvm::Value* size_i8 = CreateLoad2(i8_ptr, size_ptr);
-        return builder->CreatePtrToInt(size_i8, llvm::Type::getInt64Ty(context));
+        return CreateLoad2(llvm::Type::getInt64Ty(context), size_ptr);
     }
 
     llvm::Value* LLVMUtils::get_type_info_parent(llvm::Value* type_info_ptr) {
@@ -264,8 +268,7 @@ namespace LCompilers {
             type_info_ptr = builder->CreateBitCast(type_info_ptr, get_type_info_ptr_type());
         }
         llvm::Value* parent_ptr = create_gep2(type_info_type, type_info_ptr, 2);
-        llvm::Value* parent_i8 = CreateLoad2(i8_ptr, parent_ptr);
-        return builder->CreateBitCast(parent_i8, get_type_info_ptr_type());
+        return CreateLoad2(get_type_info_ptr_type(), parent_ptr);
     }
 
     llvm::Value* LLVMUtils::lfortran_free(llvm::Value* ptr) {
@@ -3326,17 +3329,12 @@ llvm::Value* LLVMUtils::handle_global_nonallocatable_stringArray(Allocator& al, 
     llvm::Value* LLVMUtils::get_class_type_size_from_vptr(llvm::Value* vptr) {
         llvm::Type* i8_ptr = llvm::Type::getInt8Ty(context)->getPointerTo();
         llvm::Type* i64_type = llvm::Type::getInt64Ty(context);
-        llvm::StructType* type_info_prefix = llvm::StructType::get(context, {i8_ptr, i8_ptr}, false);
 
         llvm::Value* vptr_i8 = builder->CreateBitCast(vptr, i8_ptr->getPointerTo());
         llvm::Value* typeinfo_ptr_ptr = create_ptr_gep2(
             i8_ptr, vptr_i8, llvm::ConstantInt::get(i64_type, -1, true));
         llvm::Value* typeinfo_ptr = CreateLoad2(i8_ptr, typeinfo_ptr_ptr);
-        llvm::Value* typeinfo_cast = builder->CreateBitCast(
-            typeinfo_ptr, type_info_prefix->getPointerTo());
-        llvm::Value* size_ptr = create_gep2(type_info_prefix, typeinfo_cast, 1);
-        llvm::Value* size_i8 = CreateLoad2(i8_ptr, size_ptr);
-        return builder->CreatePtrToInt(size_i8, i64_type);
+        return get_type_info_size(typeinfo_ptr);
     }
 
     llvm::Value* LLVMUtils::get_class_type_tag_from_vptr(llvm::Value* vptr) {
@@ -9447,11 +9445,6 @@ llvm::Value* LLVMUtils::handle_global_nonallocatable_stringArray(Allocator& al, 
 
         const std::string type_info_name = "_Type_Info_" + ASRUtils::intrinsic_type_to_str_with_kind(ttype, kind);
 
-        std::vector<llvm::Type*> type_info_member_types = {
-            llvm_utils->i8_ptr,
-            llvm_utils->i8_ptr,
-            llvm_utils->i8_ptr
-        };
         std::vector<llvm::Constant*> type_info_member_values;
         type_info_member_values.reserve(3); // A type-info object has 3 members.
 
@@ -9463,19 +9456,16 @@ llvm::Value* LLVMUtils::handle_global_nonallocatable_stringArray(Allocator& al, 
         llvm::Type* llvm_type = llvm_utils->get_type_from_ttype_t_util(nullptr, ttype, module);
         uint64_t type_size = llvm::DataLayout(module->getDataLayout()).getTypeAllocSize(llvm_type);
         type_info_member_values.push_back(
-            llvm::ConstantExpr::getIntToPtr(
-                llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), type_size),
-                llvm_utils->i8_ptr));
+            llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), type_size));
         // No parent for intrinsic types
-        type_info_member_values.push_back(llvm::ConstantPointerNull::get(llvm_utils->i8_ptr));
-
-        llvm::StructType* type_info_struct_type = llvm::StructType::get(context, type_info_member_types, false);
+        type_info_member_values.push_back(
+            llvm::ConstantPointerNull::get(llvm_utils->get_type_info_ptr_type()));
 
         llvm::Constant* type_info_init = llvm::ConstantStruct::get(
-            type_info_struct_type, type_info_member_values);
+            llvm_utils->get_type_info_type(), type_info_member_values);
 
         llvm::GlobalVariable* type_info_var = new llvm::GlobalVariable(*module,
-                                                            type_info_struct_type,
+                                                            llvm_utils->get_type_info_type(),
                                                             true,
                                                             llvm::GlobalValue::LinkOnceODRLinkage,
                                                             type_info_init,
@@ -9584,11 +9574,6 @@ llvm::Value* LLVMUtils::handle_global_nonallocatable_stringArray(Allocator& al, 
         ASR::Struct_t* struct_t = ASR::down_cast<ASR::Struct_t>(ASRUtils::symbol_get_past_external(struct_sym));
         const std::string type_info_name = "_Type_Info_" + std::string(struct_t->m_name);
 
-        std::vector<llvm::Type*> type_info_member_types = {
-            llvm_utils->i8_ptr,
-            llvm_utils->i8_ptr,
-            llvm_utils->i8_ptr
-        };
         std::vector<llvm::Constant*> type_info_member_values;
         type_info_member_values.reserve(3); // A type-info object has 3 members.
 
@@ -9604,25 +9589,26 @@ llvm::Value* LLVMUtils::handle_global_nonallocatable_stringArray(Allocator& al, 
         llvm::Type* struct_type = llvm_utils->getStructType(struct_t, module, false);
         uint64_t struct_size = llvm::DataLayout(module->getDataLayout()).getTypeAllocSize(struct_type);
         type_info_member_values.push_back(
-            llvm::ConstantExpr::getIntToPtr(
-                llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), struct_size),
-                llvm_utils->i8_ptr));
+            llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), struct_size));
         if (struct_t->m_parent) {
             // Pointer to parent struct's type-info
-            type_info_member_values.push_back(llvm::ConstantExpr::getBitCast(
-                newclass2typeinfo.at(ASRUtils::symbol_get_past_external(struct_t->m_parent)), llvm_utils->i8_ptr));
+            llvm::Constant* parent_ti =
+                newclass2typeinfo.at(ASRUtils::symbol_get_past_external(struct_t->m_parent));
+            if (parent_ti->getType() != llvm_utils->get_type_info_ptr_type()) {
+                parent_ti = llvm::ConstantExpr::getBitCast(parent_ti, llvm_utils->get_type_info_ptr_type());
+            }
+            type_info_member_values.push_back(parent_ti);
         } else {
             // No parent — null pointer
-            type_info_member_values.push_back(llvm::ConstantPointerNull::get(llvm_utils->i8_ptr));
+            type_info_member_values.push_back(
+                llvm::ConstantPointerNull::get(llvm_utils->get_type_info_ptr_type()));
         }
 
-        llvm::StructType* type_info_struct_type = llvm::StructType::get(context, type_info_member_types, false);
-
         llvm::Constant* type_info_init = llvm::ConstantStruct::get(
-            type_info_struct_type, type_info_member_values);
+            llvm_utils->get_type_info_type(), type_info_member_values);
 
         llvm::GlobalVariable* type_info_var = new llvm::GlobalVariable(*module,
-                                                            type_info_struct_type,
+                                                            llvm_utils->get_type_info_type(),
                                                             true,
                                                             llvm::GlobalValue::LinkOnceODRLinkage,
                                                             type_info_init,
