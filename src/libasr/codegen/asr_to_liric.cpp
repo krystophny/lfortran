@@ -77,8 +77,24 @@ public:
             return lr_type_i1_s(s);
         } else if (ASRUtils::is_character(*t)) {
             return lr_type_ptr_s(s);
+        } else if (ASR::is_a<ASR::Complex_t>(*t)) {
+            int kind = ASRUtils::extract_kind_from_ttype_t(t);
+            lr_type_t *fty = (kind == 4) ? lr_type_f32_s(s) : lr_type_f64_s(s);
+            lr_type_t *fields[2] = {fty, fty};
+            return lr_type_struct_s(s, fields, 2, false);
+        } else if (ASR::is_a<ASR::Array_t>(*t)) {
+            /* Array types are lowered to descriptor structs by passes.
+               For now, treat as opaque pointer. */
+            return lr_type_ptr_s(s);
+        } else if (ASR::is_a<ASR::StructType_t>(*t)) {
+            return lr_type_ptr_s(s);
+        } else if (ASR::is_a<ASR::CPtr_t>(*t)) {
+            return lr_type_ptr_s(s);
+        } else if (ASR::is_a<ASR::Enum_t>(*t)) {
+            return lr_type_i32_s(s);
         }
-        throw CodeGenError("liric: unsupported type");
+        throw CodeGenError("liric: unsupported type "
+            + std::to_string(t->type));
         return nullptr; /* unreachable, silences warning */
     }
 
@@ -123,7 +139,17 @@ public:
     /* ---- Module -------------------------------------------------------- */
 
     void visit_Module(const ASR::Module_t &x) {
-        /* Visit all functions in the module */
+        /* Skip intrinsic/runtime modules — their functions are provided
+           by the lfortran runtime library, not compiled here. */
+        std::string modname(x.m_name);
+        if (modname.find("lfortran_intrinsic") != std::string::npos ||
+            modname.find("iso_fortran_env") != std::string::npos ||
+            modname.find("iso_c_binding") != std::string::npos ||
+            modname.find("ieee_arithmetic") != std::string::npos) {
+            return;
+        }
+
+        /* Visit all functions in user modules */
         for (auto &item : x.m_symtab->get_scope()) {
             if (ASR::is_a<ASR::Function_t>(*item.second)) {
                 visit_Function(*ASR::down_cast<ASR::Function_t>(
