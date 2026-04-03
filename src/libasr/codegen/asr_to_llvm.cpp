@@ -3740,6 +3740,31 @@ public:
                 tmp = llvm_utils->CreateLoad2(string_descriptor->getPointerTo(), out_desc);
                 break;
             }
+            case ASRUtils::IntrinsicElementalFunctions::TypeId: {
+                ASR::expr_t* arg = x.m_args[0];
+                llvm::Type* type_info_ptr_type = llvm_utils->get_type_info_ptr_type();
+                auto as_type_info_ptr = [&](llvm::Constant* c) -> llvm::Constant* {
+                    if (c->getType() != type_info_ptr_type) {
+                        c = llvm::ConstantExpr::getBitCast(c, type_info_ptr_type);
+                    }
+                    return c;
+                };
+                if (ASR::is_a<ASR::StructConstructor_t>(*arg)) {
+                    ASR::StructConstructor_t* sc = ASR::down_cast<ASR::StructConstructor_t>(arg);
+                    ASR::symbol_t* sym = ASRUtils::symbol_get_past_external(sc->m_dt_sym);
+                    if (ASR::is_a<ASR::Struct_t>(*sym)) {
+                        struct_api->create_type_info_for_struct(sym, module.get());
+                        tmp = as_type_info_ptr(struct_api->newclass2typeinfo.at(sym));
+                    } else {
+                        throw CodeGenError("typeid(): expected a derived type",
+                            x.base.base.loc);
+                    }
+                } else {
+                    throw CodeGenError("typeid(): unsupported argument expression",
+                        x.base.base.loc);
+                }
+                break;
+            }
             default: {
                 throw CodeGenError("Either the '" + ASRUtils::IntrinsicElementalFunctionRegistry::
                         get_intrinsic_function_name(x.m_intrinsic_id) +
