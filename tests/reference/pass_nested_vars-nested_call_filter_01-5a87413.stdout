@@ -27,6 +27,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 )
                         })
                     __lcompilers_created__nested_context__outer_
@@ -76,6 +78,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             a1:
                                                 (ExternalSymbol
@@ -97,10 +101,10 @@
                                                     a
                                                     Public
                                                 ),
-                                            a3:
+                                            a_nested_ctx:
                                                 (ExternalSymbol
                                                     5
-                                                    a3
+                                                    a_nested_ctx
                                                     7 a
                                                     __lcompilers_created__nested_context__outer_
                                                     []
@@ -185,7 +189,7 @@
                                         .false.
                                     )
                                     (Assignment
-                                        (Var 5 a3)
+                                        (Var 5 a_nested_ctx)
                                         (Var 5 a)
                                         ()
                                         .false.
@@ -200,7 +204,7 @@
                                     )
                                     (Assignment
                                         (Var 5 a)
-                                        (Var 5 a3)
+                                        (Var 5 a_nested_ctx)
                                         ()
                                         .false.
                                         .false.
@@ -259,6 +263,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     modproc

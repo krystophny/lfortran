@@ -632,11 +632,19 @@ program continue_compilation_1
     write (*, "(a)", advance="hello") "Dothraki culture"
     print *, sum(arr1, dim = mask1)
     print*, ieee_is_nan(1.0)
+    open(unit=7, decimal=1, decimal="comma")
+    open(unit=7, decimal="POINT", decimal="comma")
+    integer :: char_len_var = 10
+    character(len = char_len_var) :: char_nonconst
+    interface undeclared_iface
+        module procedure undeclared_proc  ! {Error} Symbol 'undeclared_proc' not declared
+    end interface
 
-
-
-
-
+    integer, parameter :: n2 = "abc"
+    type(MyClass) :: ptr_src_no_target
+    type(MyClass), pointer :: ptr_requires_target => ptr_src_no_target
+    type(Base), target :: ptr_tgt_base
+    type(MyClass), pointer :: ptr_type_mismatch => ptr_tgt_base
 
 
 
@@ -647,11 +655,37 @@ program continue_compilation_1
 
 
     contains
+    subroutine test_uminus_struct()
+        use continue_compilation_1_mod, only: MyClass
+        implicit none
+        type(MyClass) :: tt
+        print *, -tt
+    end subroutine
+
+
+
+
     subroutine sub(f)
         interface
             function f(x)
                 integer :: x, f
             end function
         end interface
+    end subroutine
+    subroutine sub_do_undeclared()
+        implicit none
+        integer :: n(3)
+        do k = 1, 3
+            n(k) = 42
+        end do
+    end subroutine
+    subroutine sub_real_logical_init()
+        implicit none
+        real :: adwf = .true.
+    end subroutine
+    subroutine sub_abs_array_index()
+        implicit none
+        integer(4) :: arr1(3) = [2471095, 820012001, 39024800]
+        if (abs(arr1)(1) /= 2471095) error stop
     end subroutine
 end program
