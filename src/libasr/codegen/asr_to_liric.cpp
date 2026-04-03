@@ -1087,14 +1087,80 @@ public:
     }
 
     void visit_StringFormat(const ASR::StringFormat_t &x) {
-        /* StringFormat is handled inline by visit_Print.
-           If we get here from another context, evaluate args and
-           concatenate (not yet implemented for general use). */
         if (x.m_value) {
             visit_expr(*x.m_value);
             return;
         }
         throw CodeGenError("liric: StringFormat outside Print not yet implemented");
+    }
+
+    /* ---- SelectCase ---------------------------------------------------- */
+
+    void visit_Select(const ASR::Select_t &x) {
+        lr_error_t err;
+        lr_type_t *i1 = lr_type_i1_s(s);
+
+        visit_expr(*x.m_test);
+        uint32_t test_val = tmp;
+        lr_type_t *test_ty = get_type(ASRUtils::expr_type(x.m_test));
+
+        uint32_t end_block = lr_session_block(s);
+
+        for (size_t i = 0; i < x.n_body; i++) {
+            ASR::case_stmt_t *cs = x.m_body[i];
+            if (ASR::is_a<ASR::CaseStmt_t>(*cs)) {
+                ASR::CaseStmt_t *c = ASR::down_cast<ASR::CaseStmt_t>(cs);
+                uint32_t case_body = lr_session_block(s);
+                uint32_t next_case = lr_session_block(s);
+
+                /* Check if test matches any of the case values */
+                uint32_t match = 0;
+                for (size_t j = 0; j < c->n_test; j++) {
+                    visit_expr(*c->m_test[j]);
+                    uint32_t cmp = lr_emit_icmp(s, LR_CMP_EQ,
+                        V(test_val, test_ty), V(tmp, test_ty));
+                    if (j == 0) {
+                        match = cmp;
+                    } else {
+                        match = lr_emit_or(s, i1, V(match, i1), V(cmp, i1));
+                    }
+                }
+                lr_emit_condbr(s, V(match, i1), case_body, next_case);
+
+                lr_session_set_block(s, case_body, &err);
+                for (size_t j = 0; j < c->n_body; j++) {
+                    visit_stmt(*c->m_body[j]);
+                }
+                lr_emit_br(s, end_block);
+                lr_session_set_block(s, next_case, &err);
+            }
+        }
+
+        /* Default case */
+        if (x.n_default > 0) {
+            for (size_t i = 0; i < x.n_default; i++) {
+                visit_stmt(*x.m_default[i]);
+            }
+        }
+        lr_emit_br(s, end_block);
+        lr_session_set_block(s, end_block, &err);
+    }
+
+    /* ---- Complex ------------------------------------------------------- */
+
+    void visit_ComplexConstant(const ASR::ComplexConstant_t &x) {
+        int kind = ASRUtils::extract_kind_from_ttype_t(x.m_type);
+        lr_type_t *fty = (kind == 4) ? lr_type_f32_s(s) : lr_type_f64_s(s);
+        lr_type_t *sty = get_type(x.m_type);
+        /* Build struct {re, im} */
+        uint32_t alloca_v = lr_emit_alloca(s, sty);
+        uint32_t re_ptr = lr_emit_structgep(s, sty,
+            V(alloca_v, lr_type_ptr_s(s)), 0);
+        uint32_t im_ptr = lr_emit_structgep(s, sty,
+            V(alloca_v, lr_type_ptr_s(s)), 1);
+        lr_emit_store(s, F(x.m_re, fty), V(re_ptr, lr_type_ptr_s(s)));
+        lr_emit_store(s, F(x.m_im, fty), V(im_ptr, lr_type_ptr_s(s)));
+        tmp = lr_emit_load(s, sty, V(alloca_v, lr_type_ptr_s(s)));
     }
 
     /* ---- Stop / ErrorStop ---------------------------------------------- */
@@ -1159,8 +1225,34 @@ public:
                 break;
             case ASR::cast_kindType::LogicalToInteger:
                 tmp = lr_emit_zext(s, dst_ty, v); break;
+            case ASR::cast_kindType::UnsignedIntegerToInteger:
+            case ASR::cast_kindType::IntegerToUnsignedInteger:
+            case ASR::cast_kindType::UnsignedIntegerToUnsignedInteger:
+                tmp = lr_emit_zextortrunc(s, dst_ty, v); break;
+            case ASR::cast_kindType::UnsignedIntegerToReal:
+                tmp = lr_emit_uitofp(s, dst_ty, v); break;
+            case ASR::cast_kindType::RealToUnsignedInteger:
+                tmp = lr_emit_fptoui(s, dst_ty, v); break;
+            case ASR::cast_kindType::LogicalToReal:
+                tmp = lr_emit_uitofp(s, dst_ty,
+                    V(lr_emit_zext(s, lr_type_i32_s(s), v),
+                      lr_type_i32_s(s)));
+                break;
+            case ASR::cast_kindType::RealToLogical:
+                tmp = lr_emit_fcmp(s, LR_FCMP_ONE, v, F(0.0, src_ty));
+                break;
+            case ASR::cast_kindType::LogicalToLogical:
+                /* no-op */ break;
+            case ASR::cast_kindType::ComplexToReal:
+            case ASR::cast_kindType::ComplexToComplex:
+            case ASR::cast_kindType::RealToComplex:
+            case ASR::cast_kindType::IntegerToComplex:
+                throw CodeGenError("liric: cast kind "
+                    + std::to_string((int)x.m_kind)
+                    + " not yet implemented");
             default:
-                throw CodeGenError("liric: unsupported cast kind");
+                throw CodeGenError("liric: unsupported cast kind "
+                    + std::to_string((int)x.m_kind));
         }
     }
 };
