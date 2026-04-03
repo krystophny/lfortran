@@ -64,6 +64,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 )
                         })
                     modules_44
@@ -124,6 +126,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             settings:
                                                 (Variable
@@ -152,6 +156,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     cmd_new
@@ -231,8 +237,8 @@
                                     )]
                                     ()
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             fpm_cmd_settings:
@@ -262,6 +268,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     fpm_cmd_settings
@@ -283,6 +291,7 @@
                                     []
                                     ()
                                     ()
+                                    []
                                 ),
                             fpm_new_settings:
                                 (Struct
@@ -311,6 +320,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     fpm_new_settings
@@ -332,6 +343,7 @@
                                     []
                                     ()
                                     2 fpm_cmd_settings
+                                    []
                                 ),
                             warnwrite_string____1:
                                 (ExternalSymbol
@@ -381,6 +393,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             data:
                                                 (Variable
@@ -407,6 +421,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             fname:
                                                 (Variable
@@ -428,6 +444,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     warnwrite_string____1

@@ -54,6 +54,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     ls0001
@@ -73,6 +75,7 @@
                                     []
                                     ()
                                     ()
+                                    []
                                 ),
                             struct_instance_ls0001:
                                 (Variable
@@ -99,6 +102,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 )
                         })
                     file_common_block_ls0001
@@ -135,8 +140,8 @@
                     []
                     ()
                     Public
-                    .false.
-                    .false.
+                    .true.
+                    .true.
                     ()
                 )
         })

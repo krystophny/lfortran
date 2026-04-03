@@ -60,6 +60,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             toml_value:
                                                 (ExternalSymbol
@@ -125,6 +127,7 @@
                                     []
                                     ()
                                     10 toml_structure
+                                    []
                                 ),
                             toml_structure:
                                 (Struct
@@ -160,6 +163,7 @@
                                     []
                                     ()
                                     ()
+                                    []
                                 )
                         })
                     tomlf_structure_base
@@ -251,6 +255,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     destroy
@@ -334,7 +340,19 @@
                                         [(SubroutineCall
                                             15 1_toml_structure_destroy
                                             ()
-                                            []
+                                            [((StructInstanceMember
+                                                (Var 15 self)
+                                                15 1_toml_array_list
+                                                (Allocatable
+                                                    (StructType
+                                                        []
+                                                        []
+                                                        .false.
+                                                        .false.
+                                                    )
+                                                )
+                                                ()
+                                            ))]
                                             (StructInstanceMember
                                                 (Var 15 self)
                                                 15 1_toml_array_list
@@ -369,8 +387,8 @@
                                     )]
                                     ()
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             new:
@@ -417,6 +435,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     new_array
@@ -451,8 +471,8 @@
                                     []
                                     ()
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             toml_array:
@@ -498,6 +518,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     toml_array
@@ -524,6 +546,7 @@
                                     []
                                     ()
                                     2 toml_value
+                                    []
                                 ),
                             toml_ordered:
                                 (ExternalSymbol
@@ -592,6 +615,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     destroy
@@ -663,6 +688,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     toml_value
@@ -684,6 +711,7 @@
                                     []
                                     ()
                                     ()
+                                    []
                                 )
                         })
                     tomlf_type_value
