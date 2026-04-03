@@ -803,7 +803,7 @@ public:
         /* Build format string and collect args */
         std::string fmt;
         std::vector<lr_operand_desc_t> call_args;
-        call_args.push_back(LR_NULL(ptr)); /* placeholder for fmt string */
+        call_args.push_back(LR_NULL(ptr)); /* placeholder for fmt global */
 
         for (size_t i = 0; i < sf->n_args; i++) {
             if (i > 0) fmt += " ";
@@ -847,9 +847,20 @@ public:
         }
         fmt += "\n";
 
-        /* Create format string global */
-        uint32_t fmt_gid = lr_emit_globalstringptr(s, fmt.c_str());
-        call_args[0] = V(fmt_gid, ptr);
+        /* Create format string as a global constant, reference by symbol name */
+        {
+            size_t flen = fmt.size();
+            lr_type_t *i8 = lr_type_i8_s(s);
+            lr_type_t *arr_ty = lr_type_array_s(s, i8, flen + 1);
+            static unsigned fmt_counter = 0;
+            char name_buf[64];
+            snprintf(name_buf, sizeof(name_buf), ".fmt.%u", fmt_counter++);
+            lr_session_global(s, name_buf, arr_ty, true,
+                              fmt.c_str(), flen + 1);
+            /* Use the interned symbol ID (not the global data ID) */
+            uint32_t sym_id = lr_session_intern(s, name_buf);
+            call_args[0] = LR_GLOBAL(sym_id, ptr);
+        }
 
         /* Call printf (varargs — need to set call_vararg + call_fixed_args) */
         {
