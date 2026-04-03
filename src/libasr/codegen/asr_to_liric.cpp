@@ -3,6 +3,7 @@
 #ifdef HAVE_LFORTRAN_LIRIC
 
 #include <liric/liric_session.h>
+#include <liric/liric_types.h>
 
 #include <libasr/asr.h>
 #include <libasr/asr_utils.h>
@@ -122,6 +123,13 @@ public:
     /* ---- Program (generates main) -------------------------------------- */
 
     void visit_Program(const ASR::Program_t &x) {
+        /* Generate nested functions first */
+        for (auto &item : x.m_symtab->get_scope()) {
+            if (ASR::is_a<ASR::Function_t>(*item.second)) {
+                visit_Function(*ASR::down_cast<ASR::Function_t>(item.second));
+            }
+        }
+
         lr_type_t *i32 = lr_type_i32_s(s);
         lr_type_t *ptr = lr_type_ptr_s(s);
         lr_type_t *params[2] = {i32, ptr};
@@ -165,15 +173,210 @@ public:
         lr_session_func_end_preserve_ir(s, &err);
     }
 
+    /* ---- Function definition ------------------------------------------- */
+
+    std::string get_mangled_name(const ASR::Function_t &x) {
+        return std::string(x.m_name);
+    }
+
+    void visit_Function(const ASR::Function_t &x) {
+        lr_error_t err;
+
+        /* Skip interfaces (declarations without bodies) */
+        if (ASRUtils::get_FunctionType(x)->m_deftype ==
+                ASR::deftypeType::Interface) {
+            return;
+        }
+
+        /* Build parameter type array */
+        std::vector<lr_type_t *> param_types;
+        for (size_t i = 0; i < x.n_args; i++) {
+            ASR::Variable_t *arg = ASRUtils::EXPR2VAR(x.m_args[i]);
+            lr_type_t *ty = get_type(arg->m_type);
+            /* Pass by pointer for intent(in/out/inout) */
+            if (arg->m_intent == ASR::intentType::In ||
+                arg->m_intent == ASR::intentType::Out ||
+                arg->m_intent == ASR::intentType::InOut ||
+                arg->m_intent == ASR::intentType::Unspecified) {
+                ty = lr_type_ptr_s(s);
+            }
+            param_types.push_back(ty);
+        }
+
+        /* Return type */
+        lr_type_t *ret_ty;
+        ASR::Variable_t *ret_var = nullptr;
+        if (x.m_return_var) {
+            ret_var = ASRUtils::EXPR2VAR(x.m_return_var);
+            ret_ty = get_type(ret_var->m_type);
+        } else {
+            ret_ty = lr_type_void_s(s);
+        }
+
+        std::string fname = get_mangled_name(x);
+        lr_session_func_begin(s, fname.c_str(), ret_ty,
+                              param_types.data(), (uint32_t)param_types.size(),
+                              false, &err);
+
+        uint32_t entry = lr_session_block(s);
+        lr_session_set_block(s, entry, &err);
+
+        /* Save/restore symtab state */
+        auto saved_symtab = lr_symtab;
+
+        /* Map parameters to allocas */
+        for (size_t i = 0; i < x.n_args; i++) {
+            ASR::Variable_t *arg = ASRUtils::EXPR2VAR(x.m_args[i]);
+            uint64_t h = get_hash((ASR::asr_t *)arg);
+            uint32_t param_vreg = lr_session_param(s, (uint32_t)i);
+            /* Parameter is already a pointer, store it for use */
+            lr_symtab[h] = param_vreg;
+        }
+
+        /* Declare local variables (including return variable) */
+        declare_vars(x.m_symtab);
+
+        /* Return block */
+        uint32_t saved_proc_return = proc_return;
+        proc_return = lr_session_block(s);
+
+        /* Visit function body */
+        for (size_t i = 0; i < x.n_body; i++) {
+            visit_stmt(*x.m_body[i]);
+        }
+
+        /* Return */
+        lr_emit_br(s, proc_return);
+        lr_session_set_block(s, proc_return, &err);
+
+        if (ret_var) {
+            uint64_t h = get_hash((ASR::asr_t *)ret_var);
+            auto it = lr_symtab.find(h);
+            if (it != lr_symtab.end()) {
+                uint32_t ret_ptr = it->second;
+                uint32_t ret_val = lr_emit_load(s, ret_ty,
+                    V(ret_ptr, lr_type_ptr_s(s)));
+                lr_emit_ret(s, V(ret_val, ret_ty));
+            } else {
+                lr_emit_ret_void(s);
+            }
+        } else {
+            lr_emit_ret_void(s);
+        }
+
+        lr_session_func_end_preserve_ir(s, &err);
+
+        /* Restore state */
+        lr_symtab = saved_symtab;
+        proc_return = saved_proc_return;
+    }
+
+    /* ---- Function/Subroutine calls ------------------------------------- */
+
+    /* Pass an argument by reference (Fortran convention).
+       If the expression is a Var, return its address.
+       Otherwise, evaluate, store to a temporary alloca, return the alloca. */
+    lr_operand_desc_t emit_arg_by_ref(ASR::expr_t *expr) {
+        if (ASR::is_a<ASR::Var_t>(*expr)) {
+            is_target = true;
+            visit_expr(*expr);
+            is_target = false;
+            return V(tmp, lr_type_ptr_s(s));
+        }
+        /* Non-variable: create temporary */
+        visit_expr(*expr);
+        uint32_t val = tmp;
+        lr_type_t *ty = get_type(ASRUtils::expr_type(expr));
+        uint32_t tmp_alloca = lr_emit_alloca(s, ty);
+        lr_emit_store(s, V(val, ty), V(tmp_alloca, lr_type_ptr_s(s)));
+        return V(tmp_alloca, lr_type_ptr_s(s));
+    }
+
+    /* Ensure a function is declared (for forward references or externals) */
+    uint32_t ensure_function_declared(ASR::Function_t *fn) {
+        std::string fname = get_mangled_name(*fn);
+        /* Check if already defined as a function in the module */
+        lr_module_t *mod = lr_session_module(s);
+        if (mod && lr_module_lookup_function(mod, fname.c_str())) {
+            return lr_session_intern(s, fname.c_str());
+        }
+        /* Not yet defined — create a declaration with correct signature */
+        lr_error_t err;
+        std::vector<lr_type_t *> param_types;
+        for (size_t i = 0; i < fn->n_args; i++) {
+            ASR::Variable_t *arg = ASRUtils::EXPR2VAR(fn->m_args[i]);
+            (void)arg;
+            param_types.push_back(lr_type_ptr_s(s));
+        }
+        lr_type_t *ret_ty;
+        if (fn->m_return_var) {
+            ret_ty = get_type(ASRUtils::EXPR2VAR(fn->m_return_var)->m_type);
+        } else {
+            ret_ty = lr_type_void_s(s);
+        }
+        lr_session_declare(s, fname.c_str(), ret_ty,
+                           param_types.data(), (uint32_t)param_types.size(),
+                           false, &err);
+        return lr_session_intern(s, fname.c_str());
+    }
+
+    void visit_SubroutineCall(const ASR::SubroutineCall_t &x) {
+        ASR::Function_t *fn = ASR::down_cast<ASR::Function_t>(
+            ASRUtils::symbol_get_past_external(x.m_name));
+        uint32_t fn_id = ensure_function_declared(fn);
+
+        /* Evaluate arguments (Fortran pass-by-reference) */
+        std::vector<lr_operand_desc_t> arg_ops;
+        for (size_t i = 0; i < x.n_args; i++) {
+            if (x.m_args[i].m_value) {
+                arg_ops.push_back(emit_arg_by_ref(x.m_args[i].m_value));
+            } else {
+                arg_ops.push_back(LR_NULL(lr_type_ptr_s(s)));
+            }
+        }
+
+        lr_emit_call_void(s, LR_GLOBAL(fn_id, lr_type_ptr_s(s)),
+                          arg_ops.data(), (uint32_t)arg_ops.size());
+    }
+
+    void visit_FunctionCall(const ASR::FunctionCall_t &x) {
+        if (x.m_value) {
+            visit_expr(*x.m_value);
+            return;
+        }
+        ASR::Function_t *fn = ASR::down_cast<ASR::Function_t>(
+            ASRUtils::symbol_get_past_external(x.m_name));
+
+        lr_type_t *ret_ty = get_type(x.m_type);
+        uint32_t fn_id = ensure_function_declared(fn);
+
+        /* Evaluate arguments (Fortran pass-by-reference) */
+        std::vector<lr_operand_desc_t> arg_ops;
+        for (size_t i = 0; i < x.n_args; i++) {
+            if (x.m_args[i].m_value) {
+                arg_ops.push_back(emit_arg_by_ref(x.m_args[i].m_value));
+            } else {
+                arg_ops.push_back(LR_NULL(lr_type_ptr_s(s)));
+            }
+        }
+
+        tmp = lr_emit_call(s, ret_ty, LR_GLOBAL(fn_id, lr_type_ptr_s(s)),
+                           arg_ops.data(), (uint32_t)arg_ops.size());
+    }
+
     /* ---- Variable declarations ----------------------------------------- */
 
     void declare_vars(SymbolTable *symtab) {
         for (auto &item : symtab->get_scope()) {
             if (!ASR::is_a<ASR::Variable_t>(*item.second)) continue;
             ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(item.second);
+            uint64_t h = get_hash((ASR::asr_t *)v);
+            /* Skip if already registered (e.g. function parameters) */
+            if (lr_symtab.find(h) != lr_symtab.end()) continue;
+            /* Allocate stack space for locals, return vars, and unspecified */
             if (v->m_intent == ASR::intentType::Local ||
-                v->m_intent == ASR::intentType::Unspecified) {
-                uint64_t h = get_hash((ASR::asr_t *)v);
+                v->m_intent == ASR::intentType::Unspecified ||
+                v->m_intent == ASR::intentType::ReturnVar) {
                 lr_type_t *ty = get_type(v->m_type);
                 uint32_t alloca_vreg = lr_emit_alloca(s, ty);
                 lr_symtab[h] = alloca_vreg;
