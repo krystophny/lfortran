@@ -25,7 +25,8 @@ int position = 0;
 
 namespace LCompilers::LFortran {
 
-const std::unordered_map<std::string, yytokentype> identifiers_map = {
+static const std::unordered_map<std::string, yytokentype> &identifier_token_map() {
+    static const std::unordered_map<std::string, yytokentype> map = {
     {"EOF", END_OF_FILE},
     {"\n", TK_NEWLINE},
     {"name", TK_NAME},
@@ -268,7 +269,9 @@ const std::unordered_map<std::string, yytokentype> identifiers_map = {
     {"while", KW_WHILE},
     {"write", KW_WRITE},
     {"uminus", UMINUS}
-};
+    };
+    return map;
+}
 
 // star-forms must appear before non-stars
 const std::vector<std::string> declarators{
@@ -465,8 +468,8 @@ struct FixedFormRecursiveDescent {
 
     // token_type automatically determined
     void push_token_no_advance(unsigned char *cur, const std::string &token_str) {
-	auto it = identifiers_map.find(token_str);
-	LCOMPILERS_ASSERT(it != identifiers_map.end());
+	auto it = identifier_token_map().find(token_str);
+	LCOMPILERS_ASSERT(it != identifier_token_map().end());
         push_token_no_advance_token(cur, token_str, it->second);
     }
 
@@ -762,6 +765,10 @@ struct FixedFormRecursiveDescent {
                 char* unescaped = str_unescape_fortran(m_a, s, quote_char);
                 y2.string.p = unescaped;
                 y2.string.n = strlen(unescaped);
+            } else if (token == yytokentype::TK_TRUE
+                    || token == yytokentype::TK_FALSE) {
+                // token_logical_kind() already extracted the kind suffix
+                // into y2.string; preserve it.
             } else {
                 std::string tk{tostr(t.tok, t.tok + len)};
                 y2.string.from_str(m_a, tk);
@@ -1083,6 +1090,11 @@ struct FixedFormRecursiveDescent {
 
         if (next_is(cur, "selectrank(")) {
             lex_selectrank(cur);
+            return true;
+        }
+
+        if (next_is(cur, "selectcase(")) {
+            lex_selectcase(cur);
             return true;
         }
 
@@ -1544,6 +1556,24 @@ struct FixedFormRecursiveDescent {
         tokenize_line(cur); // tokenize rest of line where `select rank` starts
         while (!next_is(cur, "endselect\n")) {
             tokenize_line(cur);
+        }
+        push_token_advance(cur, "endselect");
+        tokenize_line(cur);
+    }
+
+    void lex_selectcase(unsigned char *&cur) {
+        auto end = cur; next_line(end);
+        push_token_advance(cur, "select");
+        push_token_advance(cur, "case");
+        tokenize_line(cur);
+        while (!next_is(cur, "endselect\n")) {
+            if (next_is(cur, "casedefault")) {
+                push_token_advance(cur, "case");
+                push_token_advance(cur, "default");
+                tokenize_line(cur);
+            } else {
+                tokenize_line(cur);
+            }
         }
         push_token_advance(cur, "endselect");
         tokenize_line(cur);
