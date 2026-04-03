@@ -485,16 +485,53 @@ public:
 
     /* ---- Intrinsic functions ------------------------------------------- */
 
+    /* Declare a C math function (double->double or float->float) */
+    uint32_t declare_math_func(const char *name, lr_type_t *ty) {
+        lr_error_t err;
+        lr_module_t *mod = lr_session_module(s);
+        if (mod && lr_module_lookup_function(mod, name)) {
+            return lr_session_intern(s, name);
+        }
+        lr_type_t *params[1] = {ty};
+        lr_session_declare(s, name, ty, params, 1, false, &err);
+        return lr_session_intern(s, name);
+    }
+
+    uint32_t declare_math_func2(const char *name, lr_type_t *ret,
+                                lr_type_t *a1, lr_type_t *a2) {
+        lr_error_t err;
+        lr_module_t *mod = lr_session_module(s);
+        if (mod && lr_module_lookup_function(mod, name)) {
+            return lr_session_intern(s, name);
+        }
+        lr_type_t *params[2] = {a1, a2};
+        lr_session_declare(s, name, ret, params, 2, false, &err);
+        return lr_session_intern(s, name);
+    }
+
+    /* Emit a call to a unary math function (sin, cos, sqrt, etc.) */
+    void emit_unary_math(const char *f64_name, const char *f32_name,
+                         ASR::expr_t *arg, ASR::ttype_t *res_type) {
+        visit_expr(*arg);
+        uint32_t a = tmp;
+        lr_type_t *ty = get_type(res_type);
+        lr_type_t *ptr = lr_type_ptr_s(s);
+        const char *name = (ty == lr_type_f32_s(s)) ? f32_name : f64_name;
+        uint32_t fn_id = declare_math_func(name, ty);
+        lr_operand_desc_t args[1] = {V(a, ty)};
+        tmp = lr_emit_call(s, ty, LR_GLOBAL(fn_id, ptr), args, 1);
+    }
+
     void visit_IntrinsicElementalFunction(
             const ASR::IntrinsicElementalFunction_t &x) {
         if (x.m_value) {
             visit_expr(*x.m_value);
             return;
         }
-        /* Runtime intrinsics without compile-time value.
-           ID 62 = Abs, 2 = Mod, 74 = Modulo (from intrinsic_functions.h) */
         int64_t id = x.m_intrinsic_id;
-        if (id == 62) { /* Abs */
+        lr_type_t *ptr = lr_type_ptr_s(s);
+
+        if (id == 39) { /* Abs */
             visit_expr(*x.m_args[0]);
             uint32_t arg = tmp;
             ASR::ttype_t *t = ASRUtils::expr_type(x.m_args[0]);
@@ -506,11 +543,12 @@ public:
                 tmp = lr_emit_select(s, ty,
                     V(cond, lr_type_i1_s(s)),
                     V(arg, ty), V(neg, ty));
+            } else if (ASRUtils::is_real(*t)) {
+                emit_unary_math("fabs", "fabsf", x.m_args[0], x.m_type);
             } else {
-                throw CodeGenError("liric: abs() for non-integer "
-                                   "not yet implemented");
+                throw CodeGenError("liric: abs() unsupported type");
             }
-        } else if (id == 2 || id == 74) { /* Mod, Modulo */
+        } else if (id == 2 || id == 51) { /* Mod, Modulo */
             visit_expr(*x.m_args[0]);
             uint32_t a = tmp;
             visit_expr(*x.m_args[1]);
@@ -520,6 +558,214 @@ public:
                 tmp = lr_emit_srem(s, ty, V(a, ty), V(b, ty));
             } else {
                 tmp = lr_emit_frem(s, ty, V(a, ty), V(b, ty));
+            }
+        } else if (id == 3) { /* Sin */
+            emit_unary_math("sin", "sinf", x.m_args[0], x.m_type);
+        } else if (id == 4) { /* Cos */
+            emit_unary_math("cos", "cosf", x.m_args[0], x.m_type);
+        } else if (id == 5) { /* Tan */
+            emit_unary_math("tan", "tanf", x.m_args[0], x.m_type);
+        } else if (id == 6) { /* Asin */
+            emit_unary_math("asin", "asinf", x.m_args[0], x.m_type);
+        } else if (id == 7) { /* Acos */
+            emit_unary_math("acos", "acosf", x.m_args[0], x.m_type);
+        } else if (id == 8) { /* Atan */
+            emit_unary_math("atan", "atanf", x.m_args[0], x.m_type);
+        } else if (id == 9) { /* Sinh */
+            emit_unary_math("sinh", "sinhf", x.m_args[0], x.m_type);
+        } else if (id == 10) { /* Cosh */
+            emit_unary_math("cosh", "coshf", x.m_args[0], x.m_type);
+        } else if (id == 11) { /* Tanh */
+            emit_unary_math("tanh", "tanhf", x.m_args[0], x.m_type);
+        } else if (id == 12) { /* Atan2 */
+            visit_expr(*x.m_args[0]);
+            uint32_t a = tmp;
+            visit_expr(*x.m_args[1]);
+            uint32_t b = tmp;
+            lr_type_t *ty = get_type(x.m_type);
+            const char *name = (ty == lr_type_f32_s(s)) ? "atan2f" : "atan2";
+            uint32_t fn_id = declare_math_func2(name, ty, ty, ty);
+            lr_operand_desc_t args[2] = {V(a, ty), V(b, ty)};
+            tmp = lr_emit_call(s, ty, LR_GLOBAL(fn_id, ptr), args, 2);
+        } else if (id == 34) { /* Log */
+            emit_unary_math("log", "logf", x.m_args[0], x.m_type);
+        } else if (id == 35) { /* Log10 */
+            emit_unary_math("log10", "log10f", x.m_args[0], x.m_type);
+        } else if (id == 42) { /* Exp */
+            emit_unary_math("exp", "expf", x.m_args[0], x.m_type);
+        } else if (id == 142) { /* Sqrt */
+            emit_unary_math("sqrt", "sqrtf", x.m_args[0], x.m_type);
+        } else if (id == 146) { /* Floor */
+            visit_expr(*x.m_args[0]);
+            uint32_t a = tmp;
+            ASR::ttype_t *arg_t = ASRUtils::expr_type(x.m_args[0]);
+            lr_type_t *arg_ty = get_type(arg_t);
+            lr_type_t *res_ty = get_type(x.m_type);
+            if (ASRUtils::is_real(*arg_t) && ASRUtils::is_integer(*x.m_type)) {
+                const char *fn = (arg_ty == lr_type_f32_s(s))
+                    ? "floorf" : "floor";
+                uint32_t fn_id = declare_math_func(fn, arg_ty);
+                lr_operand_desc_t args[1] = {V(a, arg_ty)};
+                uint32_t fval = lr_emit_call(s, arg_ty,
+                    LR_GLOBAL(fn_id, ptr), args, 1);
+                tmp = lr_emit_fptosi(s, res_ty, V(fval, arg_ty));
+            } else {
+                emit_unary_math("floor", "floorf", x.m_args[0], x.m_type);
+            }
+        } else if (id == 147) { /* Ceiling */
+            visit_expr(*x.m_args[0]);
+            uint32_t a = tmp;
+            ASR::ttype_t *arg_t = ASRUtils::expr_type(x.m_args[0]);
+            lr_type_t *arg_ty = get_type(arg_t);
+            lr_type_t *res_ty = get_type(x.m_type);
+            if (ASRUtils::is_real(*arg_t) && ASRUtils::is_integer(*x.m_type)) {
+                const char *fn = (arg_ty == lr_type_f32_s(s))
+                    ? "ceilf" : "ceil";
+                uint32_t fn_id = declare_math_func(fn, arg_ty);
+                lr_operand_desc_t args[1] = {V(a, arg_ty)};
+                uint32_t fval = lr_emit_call(s, arg_ty,
+                    LR_GLOBAL(fn_id, ptr), args, 1);
+                tmp = lr_emit_fptosi(s, res_ty, V(fval, arg_ty));
+            } else {
+                emit_unary_math("ceil", "ceilf", x.m_args[0], x.m_type);
+            }
+        } else if (id == 137) { /* Nint */
+            visit_expr(*x.m_args[0]);
+            uint32_t a = tmp;
+            ASR::ttype_t *arg_t = ASRUtils::expr_type(x.m_args[0]);
+            lr_type_t *arg_ty = get_type(arg_t);
+            lr_type_t *res_ty = get_type(x.m_type);
+            const char *fn = (arg_ty == lr_type_f32_s(s))
+                ? "roundf" : "round";
+            uint32_t fn_id = declare_math_func(fn, arg_ty);
+            lr_operand_desc_t args[1] = {V(a, arg_ty)};
+            uint32_t fval = lr_emit_call(s, arg_ty,
+                LR_GLOBAL(fn_id, ptr), args, 1);
+            tmp = lr_emit_fptosi(s, res_ty, V(fval, arg_ty));
+        } else if (id == 122 || id == 123) { /* Max, Min */
+            visit_expr(*x.m_args[0]);
+            uint32_t result = tmp;
+            lr_type_t *ty = get_type(x.m_type);
+            ASR::ttype_t *t = ASRUtils::expr_type(x.m_args[0]);
+            for (size_t i = 1; i < x.n_args; i++) {
+                visit_expr(*x.m_args[i]);
+                uint32_t b = tmp;
+                uint32_t cond;
+                if (ASRUtils::is_integer(*t)) {
+                    cond = lr_emit_icmp(s, (id == 122)
+                        ? LR_CMP_SGT : LR_CMP_SLT,
+                        V(result, ty), V(b, ty));
+                } else {
+                    cond = lr_emit_fcmp(s, (id == 122)
+                        ? LR_FCMP_OGT : LR_FCMP_OLT,
+                        V(result, ty), V(b, ty));
+                }
+                result = lr_emit_select(s, ty,
+                    V(cond, lr_type_i1_s(s)),
+                    V(result, ty), V(b, ty));
+            }
+            tmp = result;
+        } else if (id == 130) { /* Sign */
+            visit_expr(*x.m_args[0]);
+            uint32_t a = tmp;
+            visit_expr(*x.m_args[1]);
+            uint32_t b = tmp;
+            lr_type_t *ty = get_type(x.m_type);
+            if (ASRUtils::is_integer(*x.m_type)) {
+                /* sign(a, b) = abs(a) * sign_of(b) */
+                uint32_t abs_a_neg = lr_emit_neg(s, ty, V(a, ty));
+                uint32_t a_pos = lr_emit_icmp(s, LR_CMP_SGE,
+                    V(a, ty), I(0, ty));
+                uint32_t abs_a = lr_emit_select(s, ty,
+                    V(a_pos, lr_type_i1_s(s)),
+                    V(a, ty), V(abs_a_neg, ty));
+                uint32_t b_neg = lr_emit_icmp(s, LR_CMP_SLT,
+                    V(b, ty), I(0, ty));
+                uint32_t neg_abs = lr_emit_neg(s, ty, V(abs_a, ty));
+                tmp = lr_emit_select(s, ty,
+                    V(b_neg, lr_type_i1_s(s)),
+                    V(neg_abs, ty), V(abs_a, ty));
+            } else {
+                /* sign(a, b) = copysign(a, b) */
+                const char *fn = (ty == lr_type_f32_s(s))
+                    ? "copysignf" : "copysign";
+                uint32_t fn_id = declare_math_func2(fn, ty, ty, ty);
+                lr_operand_desc_t args[2] = {V(a, ty), V(b, ty)};
+                tmp = lr_emit_call(s, ty, LR_GLOBAL(fn_id, ptr), args, 2);
+            }
+        } else if (id == 80) { /* Not (bitwise) */
+            visit_expr(*x.m_args[0]);
+            lr_type_t *ty = get_type(x.m_type);
+            tmp = lr_emit_not(s, ty, V(tmp, ty));
+        } else if (id == 81) { /* Iand */
+            visit_expr(*x.m_args[0]);
+            uint32_t a = tmp;
+            visit_expr(*x.m_args[1]);
+            uint32_t b = tmp;
+            lr_type_t *ty = get_type(x.m_type);
+            tmp = lr_emit_and(s, ty, V(a, ty), V(b, ty));
+        } else if (id == 82) { /* Ior */
+            visit_expr(*x.m_args[0]);
+            uint32_t a = tmp;
+            visit_expr(*x.m_args[1]);
+            uint32_t b = tmp;
+            lr_type_t *ty = get_type(x.m_type);
+            tmp = lr_emit_or(s, ty, V(a, ty), V(b, ty));
+        } else if (id == 83) { /* Ieor */
+            visit_expr(*x.m_args[0]);
+            uint32_t a = tmp;
+            visit_expr(*x.m_args[1]);
+            uint32_t b = tmp;
+            lr_type_t *ty = get_type(x.m_type);
+            tmp = lr_emit_xor(s, ty, V(a, ty), V(b, ty));
+        } else if (id == 62) { /* Shiftr */
+            visit_expr(*x.m_args[0]);
+            uint32_t a = tmp;
+            visit_expr(*x.m_args[1]);
+            uint32_t b = tmp;
+            lr_type_t *ty = get_type(x.m_type);
+            lr_type_t *bty = get_type(ASRUtils::expr_type(x.m_args[1]));
+            if (bty != ty) b = lr_emit_sextortrunc(s, ty, V(b, bty));
+            tmp = lr_emit_lshr(s, ty, V(a, ty), V(b, ty));
+        } else if (id == 64) { /* Shiftl */
+            visit_expr(*x.m_args[0]);
+            uint32_t a = tmp;
+            visit_expr(*x.m_args[1]);
+            uint32_t b = tmp;
+            lr_type_t *ty = get_type(x.m_type);
+            lr_type_t *bty = get_type(ASRUtils::expr_type(x.m_args[1]));
+            if (bty != ty) b = lr_emit_sextortrunc(s, ty, V(b, bty));
+            tmp = lr_emit_shl(s, ty, V(a, ty), V(b, ty));
+        } else if (id == 37) { /* Trunc */
+            visit_expr(*x.m_args[0]);
+            uint32_t a = tmp;
+            lr_type_t *ty = get_type(x.m_type);
+            lr_type_t *arg_ty = get_type(ASRUtils::expr_type(x.m_args[0]));
+            if (ASRUtils::is_real(*x.m_type)) {
+                emit_unary_math("trunc", "truncf", x.m_args[0], x.m_type);
+            } else {
+                tmp = lr_emit_fptosi(s, ty, V(a, arg_ty));
+            }
+        } else if (id == 141) { /* Dim */
+            visit_expr(*x.m_args[0]);
+            uint32_t a = tmp;
+            visit_expr(*x.m_args[1]);
+            uint32_t b = tmp;
+            lr_type_t *ty = get_type(x.m_type);
+            if (ASRUtils::is_integer(*x.m_type)) {
+                uint32_t diff = lr_emit_sub(s, ty, V(a, ty), V(b, ty));
+                uint32_t cond = lr_emit_icmp(s, LR_CMP_SGT,
+                    V(a, ty), V(b, ty));
+                tmp = lr_emit_select(s, ty,
+                    V(cond, lr_type_i1_s(s)),
+                    V(diff, ty), I(0, ty));
+            } else {
+                uint32_t diff = lr_emit_fsub(s, ty, V(a, ty), V(b, ty));
+                uint32_t cond = lr_emit_fcmp(s, LR_FCMP_OGT,
+                    V(a, ty), V(b, ty));
+                tmp = lr_emit_select(s, ty,
+                    V(cond, lr_type_i1_s(s)),
+                    V(diff, ty), F(0.0, ty));
             }
         } else {
             throw CodeGenError("liric: IntrinsicElementalFunction id="
@@ -1202,6 +1448,166 @@ public:
         lr_emit_store(s, F(x.m_re, fty), V(re_ptr, lr_type_ptr_s(s)));
         lr_emit_store(s, F(x.m_im, fty), V(im_ptr, lr_type_ptr_s(s)));
         tmp = lr_emit_load(s, sty, V(alloca_v, lr_type_ptr_s(s)));
+    }
+
+    void visit_ComplexConstructor(const ASR::ComplexConstructor_t &x) {
+        if (x.m_value) {
+            visit_expr(*x.m_value);
+            return;
+        }
+        lr_type_t *sty = get_type(x.m_type);
+        int kind = ASRUtils::extract_kind_from_ttype_t(x.m_type);
+        lr_type_t *fty = (kind == 4) ? lr_type_f32_s(s) : lr_type_f64_s(s);
+        lr_type_t *ptr = lr_type_ptr_s(s);
+
+        visit_expr(*x.m_re);
+        uint32_t re_val = tmp;
+        visit_expr(*x.m_im);
+        uint32_t im_val = tmp;
+
+        uint32_t alloca_v = lr_emit_alloca(s, sty);
+        uint32_t re_ptr = lr_emit_structgep(s, sty, V(alloca_v, ptr), 0);
+        uint32_t im_ptr = lr_emit_structgep(s, sty, V(alloca_v, ptr), 1);
+        lr_emit_store(s, V(re_val, fty), V(re_ptr, ptr));
+        lr_emit_store(s, V(im_val, fty), V(im_ptr, ptr));
+        tmp = lr_emit_load(s, sty, V(alloca_v, ptr));
+    }
+
+    void visit_ComplexBinOp(const ASR::ComplexBinOp_t &x) {
+        if (x.m_value) {
+            visit_expr(*x.m_value);
+            return;
+        }
+        visit_expr(*x.m_left);
+        uint32_t left = tmp;
+        visit_expr(*x.m_right);
+        uint32_t right = tmp;
+
+        lr_type_t *sty = get_type(x.m_type);
+        int kind = ASRUtils::extract_kind_from_ttype_t(x.m_type);
+        lr_type_t *fty = (kind == 4) ? lr_type_f32_s(s) : lr_type_f64_s(s);
+        lr_type_t *ptr = lr_type_ptr_s(s);
+
+        /* Extract re/im from both operands */
+        uint32_t idx0[1] = {0};
+        uint32_t idx1[1] = {1};
+        uint32_t l_re = lr_emit_extractvalue(s, fty, V(left, sty), idx0, 1);
+        uint32_t l_im = lr_emit_extractvalue(s, fty, V(left, sty), idx1, 1);
+        uint32_t r_re = lr_emit_extractvalue(s, fty, V(right, sty), idx0, 1);
+        uint32_t r_im = lr_emit_extractvalue(s, fty, V(right, sty), idx1, 1);
+
+        uint32_t res_re, res_im;
+        switch (x.m_op) {
+            case ASR::binopType::Add:
+                res_re = lr_emit_fadd(s, fty, V(l_re, fty), V(r_re, fty));
+                res_im = lr_emit_fadd(s, fty, V(l_im, fty), V(r_im, fty));
+                break;
+            case ASR::binopType::Sub:
+                res_re = lr_emit_fsub(s, fty, V(l_re, fty), V(r_re, fty));
+                res_im = lr_emit_fsub(s, fty, V(l_im, fty), V(r_im, fty));
+                break;
+            case ASR::binopType::Mul: {
+                /* (a+bi)(c+di) = (ac-bd) + (ad+bc)i */
+                uint32_t ac = lr_emit_fmul(s, fty, V(l_re, fty), V(r_re, fty));
+                uint32_t bd = lr_emit_fmul(s, fty, V(l_im, fty), V(r_im, fty));
+                uint32_t ad = lr_emit_fmul(s, fty, V(l_re, fty), V(r_im, fty));
+                uint32_t bc = lr_emit_fmul(s, fty, V(l_im, fty), V(r_re, fty));
+                res_re = lr_emit_fsub(s, fty, V(ac, fty), V(bd, fty));
+                res_im = lr_emit_fadd(s, fty, V(ad, fty), V(bc, fty));
+                break;
+            }
+            case ASR::binopType::Div: {
+                /* (a+bi)/(c+di) = ((ac+bd) + (bc-ad)i) / (c^2+d^2) */
+                uint32_t ac = lr_emit_fmul(s, fty, V(l_re, fty), V(r_re, fty));
+                uint32_t bd = lr_emit_fmul(s, fty, V(l_im, fty), V(r_im, fty));
+                uint32_t bc = lr_emit_fmul(s, fty, V(l_im, fty), V(r_re, fty));
+                uint32_t ad = lr_emit_fmul(s, fty, V(l_re, fty), V(r_im, fty));
+                uint32_t cc = lr_emit_fmul(s, fty, V(r_re, fty), V(r_re, fty));
+                uint32_t dd = lr_emit_fmul(s, fty, V(r_im, fty), V(r_im, fty));
+                uint32_t denom = lr_emit_fadd(s, fty, V(cc, fty), V(dd, fty));
+                uint32_t num_re = lr_emit_fadd(s, fty, V(ac, fty), V(bd, fty));
+                uint32_t num_im = lr_emit_fsub(s, fty, V(bc, fty), V(ad, fty));
+                res_re = lr_emit_fdiv(s, fty, V(num_re, fty), V(denom, fty));
+                res_im = lr_emit_fdiv(s, fty, V(num_im, fty), V(denom, fty));
+                break;
+            }
+            default:
+                throw CodeGenError("liric: unsupported complex binop");
+        }
+
+        /* Build result struct */
+        uint32_t alloca_v = lr_emit_alloca(s, sty);
+        uint32_t re_ptr = lr_emit_structgep(s, sty, V(alloca_v, ptr), 0);
+        uint32_t im_ptr = lr_emit_structgep(s, sty, V(alloca_v, ptr), 1);
+        lr_emit_store(s, V(res_re, fty), V(re_ptr, ptr));
+        lr_emit_store(s, V(res_im, fty), V(im_ptr, ptr));
+        tmp = lr_emit_load(s, sty, V(alloca_v, ptr));
+    }
+
+    void visit_ComplexUnaryMinus(const ASR::ComplexUnaryMinus_t &x) {
+        if (x.m_value) {
+            visit_expr(*x.m_value);
+            return;
+        }
+        visit_expr(*x.m_arg);
+        uint32_t arg = tmp;
+        lr_type_t *sty = get_type(x.m_type);
+        int kind = ASRUtils::extract_kind_from_ttype_t(x.m_type);
+        lr_type_t *fty = (kind == 4) ? lr_type_f32_s(s) : lr_type_f64_s(s);
+        lr_type_t *ptr = lr_type_ptr_s(s);
+
+        uint32_t idx0[1] = {0};
+        uint32_t idx1[1] = {1};
+        uint32_t re = lr_emit_extractvalue(s, fty, V(arg, sty), idx0, 1);
+        uint32_t im = lr_emit_extractvalue(s, fty, V(arg, sty), idx1, 1);
+        uint32_t neg_re = lr_emit_fneg(s, fty, V(re, fty));
+        uint32_t neg_im = lr_emit_fneg(s, fty, V(im, fty));
+
+        uint32_t alloca_v = lr_emit_alloca(s, sty);
+        uint32_t re_ptr = lr_emit_structgep(s, sty, V(alloca_v, ptr), 0);
+        uint32_t im_ptr = lr_emit_structgep(s, sty, V(alloca_v, ptr), 1);
+        lr_emit_store(s, V(neg_re, fty), V(re_ptr, ptr));
+        lr_emit_store(s, V(neg_im, fty), V(im_ptr, ptr));
+        tmp = lr_emit_load(s, sty, V(alloca_v, ptr));
+    }
+
+    void visit_ComplexCompare(const ASR::ComplexCompare_t &x) {
+        if (x.m_value) {
+            visit_expr(*x.m_value);
+            return;
+        }
+        visit_expr(*x.m_left);
+        uint32_t left = tmp;
+        visit_expr(*x.m_right);
+        uint32_t right = tmp;
+
+        lr_type_t *sty = get_type(ASRUtils::expr_type(x.m_left));
+        int kind = ASRUtils::extract_kind_from_ttype_t(
+            ASRUtils::expr_type(x.m_left));
+        lr_type_t *fty = (kind == 4) ? lr_type_f32_s(s) : lr_type_f64_s(s);
+        lr_type_t *i1 = lr_type_i1_s(s);
+
+        uint32_t idx0[1] = {0};
+        uint32_t idx1[1] = {1};
+        uint32_t l_re = lr_emit_extractvalue(s, fty, V(left, sty), idx0, 1);
+        uint32_t l_im = lr_emit_extractvalue(s, fty, V(left, sty), idx1, 1);
+        uint32_t r_re = lr_emit_extractvalue(s, fty, V(right, sty), idx0, 1);
+        uint32_t r_im = lr_emit_extractvalue(s, fty, V(right, sty), idx1, 1);
+
+        uint32_t re_cmp = lr_emit_fcmp(s, LR_FCMP_OEQ,
+            V(l_re, fty), V(r_re, fty));
+        uint32_t im_cmp = lr_emit_fcmp(s, LR_FCMP_OEQ,
+            V(l_im, fty), V(r_im, fty));
+
+        if (x.m_op == ASR::cmpopType::Eq) {
+            tmp = lr_emit_and(s, i1, V(re_cmp, i1), V(im_cmp, i1));
+        } else if (x.m_op == ASR::cmpopType::NotEq) {
+            uint32_t eq = lr_emit_and(s, i1, V(re_cmp, i1),
+                                      V(im_cmp, i1));
+            tmp = lr_emit_xor(s, i1, V(eq, i1), I(1, i1));
+        } else {
+            throw CodeGenError("liric: unsupported complex compare op");
+        }
     }
 
     /* ---- Stop / ErrorStop ---------------------------------------------- */
