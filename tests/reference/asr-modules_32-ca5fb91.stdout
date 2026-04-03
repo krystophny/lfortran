@@ -74,6 +74,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     build_target_ptr
@@ -100,6 +102,7 @@
                                     []
                                     ()
                                     ()
+                                    []
                                 ),
                             build_target_t:
                                 (Struct
@@ -128,6 +131,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             version:
                                                 (Variable
@@ -151,6 +156,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     build_target_t
@@ -176,6 +183,7 @@
                                     []
                                     ()
                                     ()
+                                    []
                                 ),
                             func:
                                 (Function
@@ -214,6 +222,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     func
@@ -266,8 +276,8 @@
                                     )]
                                     (Var 5 target_ptr)
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 )
                         })

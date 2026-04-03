@@ -32,6 +32,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     dqk15w
@@ -59,75 +61,14 @@
                                     ()
                                 ),
                             f:
-                                (Function
-                                    (SymbolTable
-                                        6
-                                        {
-                                            f_arg_0:
-                                                (Variable
-                                                    6
-                                                    f_arg_0
-                                                    []
-                                                    Unspecified
-                                                    ()
-                                                    ()
-                                                    Default
-                                                    (Real 4)
-                                                    ()
-                                                    BindC
-                                                    Public
-                                                    Required
-                                                    .false.
-                                                    .false.
-                                                    .false.
-                                                    ()
-                                                    .false.
-                                                    .false.
-                                                ),
-                                            f_return_var_name:
-                                                (Variable
-                                                    6
-                                                    f_return_var_name
-                                                    []
-                                                    ReturnVar
-                                                    ()
-                                                    ()
-                                                    Default
-                                                    (Real 8)
-                                                    ()
-                                                    BindC
-                                                    Public
-                                                    Required
-                                                    .false.
-                                                    .false.
-                                                    .false.
-                                                    ()
-                                                    .false.
-                                                    .false.
-                                                ),
-                                            hlgth:
-                                                (Variable
-                                                    6
-                                                    hlgth
-                                                    []
-                                                    Local
-                                                    ()
-                                                    ()
-                                                    Default
-                                                    (Real 4)
-                                                    ()
-                                                    Source
-                                                    Public
-                                                    Required
-                                                    .false.
-                                                    .false.
-                                                    .false.
-                                                    ()
-                                                    .false.
-                                                    .false.
-                                                )
-                                        })
+                                (Variable
+                                    2
                                     f
+                                    []
+                                    Unspecified
+                                    ()
+                                    ()
+                                    Default
                                     (FunctionType
                                         [(Real 4)]
                                         (Real 8)
@@ -142,13 +83,17 @@
                                         []
                                         .false.
                                     )
-                                    []
-                                    [(Var 6 f_arg_0)]
-                                    []
-                                    (Var 6 f_return_var_name)
+                                    2 ~implicit_interface_f_6
+                                    Source
                                     Public
+                                    Required
                                     .false.
                                     .false.
+                                    .false.
+                                    ()
+                                    .false.
+                                    .false.
+                                    NotMethod
                                     ()
                                 ),
                             hlgth:
@@ -171,11 +116,102 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
+                                ),
+                            ~implicit_interface_f_6:
+                                (Function
+                                    (SymbolTable
+                                        6
+                                        {
+                                            ~implicit_interface_f_6_arg_0:
+                                                (Variable
+                                                    6
+                                                    ~implicit_interface_f_6_arg_0
+                                                    []
+                                                    Unspecified
+                                                    ()
+                                                    ()
+                                                    Default
+                                                    (Real 4)
+                                                    ()
+                                                    BindC
+                                                    Public
+                                                    Required
+                                                    .false.
+                                                    .false.
+                                                    .false.
+                                                    ()
+                                                    .false.
+                                                    .false.
+                                                    NotMethod
+                                                    ()
+                                                ),
+                                            ~implicit_interface_f_6_return_var:
+                                                (Variable
+                                                    6
+                                                    ~implicit_interface_f_6_return_var
+                                                    []
+                                                    ReturnVar
+                                                    ()
+                                                    ()
+                                                    Default
+                                                    (Real 8)
+                                                    ()
+                                                    BindC
+                                                    Public
+                                                    Required
+                                                    .false.
+                                                    .false.
+                                                    .false.
+                                                    ()
+                                                    .false.
+                                                    .false.
+                                                    NotMethod
+                                                    ()
+                                                )
+                                        })
+                                    ~implicit_interface_f_6
+                                    (FunctionType
+                                        [(Real 4)]
+                                        (Real 8)
+                                        BindC
+                                        Interface
+                                        ()
+                                        .false.
+                                        .false.
+                                        .false.
+                                        .false.
+                                        .false.
+                                        []
+                                        .false.
+                                    )
+                                    []
+                                    [(Var 6 ~implicit_interface_f_6_arg_0)]
+                                    []
+                                    (Var 6 ~implicit_interface_f_6_return_var)
+                                    Public
+                                    .false.
+                                    .false.
+                                    ()
                                 )
                         })
                     dqc25c
                     (FunctionType
-                        [(Real 8)]
+                        [(FunctionType
+                            [(Real 4)]
+                            (Real 8)
+                            BindC
+                            Interface
+                            ()
+                            .false.
+                            .false.
+                            .false.
+                            .false.
+                            .false.
+                            []
+                            .false.
+                        )]
                         ()
                         Source
                         Implementation
@@ -251,6 +287,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             c_return_var_name:
                                                 (Variable
@@ -272,6 +310,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             d:
                                                 (Variable
@@ -293,6 +333,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     c
@@ -339,6 +381,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 ),
                             f:
                                 (Variable
@@ -360,6 +404,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 ),
                             func:
                                 (Variable
@@ -381,6 +427,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 ),
                             sub2:
                                 (Function
@@ -407,6 +455,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     sub2
@@ -512,6 +562,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             a_return_var_name:
                                                 (Variable
@@ -533,6 +585,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             b:
                                                 (Variable
@@ -554,6 +608,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     a
@@ -600,6 +656,8 @@
                                     ()
                                     .false.
                                     .false.
+                                    NotMethod
+                                    ()
                                 ),
                             sub:
                                 (Function
@@ -626,6 +684,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     sub

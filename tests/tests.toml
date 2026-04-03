@@ -767,6 +767,10 @@ filename = "../integration_tests/write_12.f90"
 run = true
 
 [[test]]
+filename = "../integration_tests/write_22.f90"
+run = true
+
+[[test]]
 filename = "../integration_tests/submodule_01.f90"
 ast = true
 
@@ -2032,7 +2036,15 @@ filename = "../integration_tests/format_58.f90"
 run = true
 
 [[test]]
+filename = "../integration_tests/format_66.f90"
+run = true
+
+[[test]]
 filename = "../integration_tests/print_09.f90"
+run = true
+
+[[test]]
+filename = "../integration_tests/print_12.f90"
 run = true
 
 [[test]]
@@ -2059,10 +2071,6 @@ filename = "associate1.f90"
 interactive = true
 ast = true
 ast_f90 = true
-
-[[test]]
-filename = "associate2.f90"
-asr = true
 
 [[test]]
 filename = "fn_call1.f90"
@@ -4264,6 +4272,7 @@ asr_implicit_typing = true
 filename = "../integration_tests/implicit_argument_casting_01.f90"
 asr_implicit_argument_casting = true
 enable_disable_implicit_argument_casting = true
+options = "--legacy-array-sections"
 
 [[test]]
 filename = "../integration_tests/valid_array_assignment_same_length_different_start.f90"
@@ -4284,6 +4293,7 @@ run_with_dbg = true
 [[test]]
 filename = "../integration_tests/legacy_array_sections_01.f90"
 llvm = true
+options = "--legacy-array-sections"
 
 [[test]]
 filename = "format2.f90"
@@ -4554,6 +4564,14 @@ asr = true
 
 [[test]]
 filename = "warnings/doloop_01.f90"
+asr = true
+
+[[test]]
+filename = "warnings/rand_01.f90"
+asr = true
+
+[[test]]
+filename = "warnings/sizeof_01.f90"
 asr = true
 
 [[test]]
@@ -5099,3 +5117,11 @@ run = true
 filename = "errors/continue_compilation_walrus.f90"
 semantics_only_cc = true
 options = "--infer"
+
+[[test]]
+filename = "../integration_tests/subroutines_21.f90"
+asr = true
+
+[[test]]
+filename = "../integration_tests/arrays_107.f90"
+asr = true

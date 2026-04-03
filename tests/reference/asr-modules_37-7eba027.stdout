@@ -92,6 +92,8 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    NotMethod
+                                                                    ()
                                                                 )
                                                         })
                                                     associate_block
@@ -217,6 +219,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             i:
                                                 (Variable
@@ -238,6 +242,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             j:
                                                 (Variable
@@ -259,6 +265,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             model:
                                                 (Variable
@@ -285,6 +293,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             targets:
                                                 (Variable
@@ -323,6 +333,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             temp:
                                                 (Variable
@@ -351,6 +363,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             verbose:
                                                 (Variable
@@ -372,6 +386,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     build_package
@@ -446,8 +462,8 @@
                                     )]
                                     ()
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             build_target_ptr:
@@ -508,6 +524,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     build_target_ptr
@@ -534,6 +552,7 @@
                                     []
                                     ()
                                     ()
+                                    []
                                 ),
                             build_target_t:
                                 (Struct
@@ -562,6 +581,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     build_target_t
@@ -583,6 +604,7 @@
                                     []
                                     ()
                                     ()
+                                    []
                                 ),
                             cmd_build:
                                 (Function
@@ -624,6 +646,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             settings:
                                                 (Variable
@@ -650,6 +674,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 ),
                                             targets:
                                                 (Variable
@@ -690,6 +716,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     cmd_build
@@ -730,8 +758,8 @@
                                     )]
                                     ()
                                     Public
-                                    .false.
-                                    .false.
+                                    .true.
+                                    .true.
                                     ()
                                 ),
                             fpm_build_settings:
@@ -758,6 +786,7 @@
                                     []
                                     ()
                                     2 fpm_cmd_settings
+                                    []
                                 ),
                             fpm_cmd_settings:
                                 (Struct
@@ -790,6 +819,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     fpm_cmd_settings
@@ -809,6 +840,7 @@
                                     []
                                     ()
                                     ()
+                                    []
                                 ),
                             fpm_model_t:
                                 (Struct
@@ -834,6 +866,7 @@
                                     []
                                     ()
                                     ()
+                                    []
                                 ),
                             string_t:
                                 (Struct
@@ -862,6 +895,8 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    NotMethod
+                                                    ()
                                                 )
                                         })
                                     string_t
@@ -883,6 +918,7 @@
                                     []
                                     ()
                                     ()
+                                    []
                                 )
                         })
                     modules_37_fpm_backend
