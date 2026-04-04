@@ -227,18 +227,45 @@ public:
         lr_session_declare(s, name, ret, params, n, vararg, &err);
     }
 
-    // --- Emit a call to a named function ---
+    // --- Emit a call to a named external function ---
+    //
+    // All runtime functions use the platform ABI, so we set
+    // call_external_abi to ensure correct register/stack layout.
 
     uint32_t emit_call(const char *name, lr_type_t *ret,
                        lr_operand_desc_t *args, uint32_t nargs) {
         uint32_t sym = lr_session_intern(s, name);
-        return lr_emit_call(s, ret, LR_GLOBAL(sym, ty_ptr), args, nargs);
+        lr_inst_desc_t d;
+        memset(&d, 0, sizeof(d));
+        uint32_t nops = 1 + nargs;
+        lr_operand_desc_t ops[32];
+        if (nops > 32) throw CodeGenError("liric: too many call args");
+        ops[0] = LR_GLOBAL(sym, ty_ptr);
+        for (uint32_t i = 0; i < nargs; i++) ops[1 + i] = args[i];
+        d.op = LR_OP_CALL;
+        d.type = ret;
+        d.operands = ops;
+        d.num_operands = nops;
+        d.call_external_abi = true;
+        return lr_session_emit(s, &d, nullptr);
     }
 
     void emit_call_void(const char *name,
                         lr_operand_desc_t *args, uint32_t nargs) {
         uint32_t sym = lr_session_intern(s, name);
-        lr_emit_call_void(s, LR_GLOBAL(sym, ty_ptr), args, nargs);
+        lr_inst_desc_t d;
+        memset(&d, 0, sizeof(d));
+        uint32_t nops = 1 + nargs;
+        lr_operand_desc_t ops[32];
+        if (nops > 32) throw CodeGenError("liric: too many call args");
+        ops[0] = LR_GLOBAL(sym, ty_ptr);
+        for (uint32_t i = 0; i < nargs; i++) ops[1 + i] = args[i];
+        d.op = LR_OP_CALL;
+        d.type = ty_void;
+        d.operands = ops;
+        d.num_operands = nops;
+        d.call_external_abi = true;
+        lr_session_emit(s, &d, nullptr);
     }
 
     // --- One-liner visitors via macros ---
@@ -874,14 +901,14 @@ public:
         }
 
         // Set up the call as vararg with fixed_args=9
-        uint32_t fmt_sym = lr_session_intern(s,
+        uint32_t strfmt_sym = lr_session_intern(s,
             "_lcompilers_string_format_fortran");
         {
             lr_inst_desc_t d;
             memset(&d, 0, sizeof(d));
             uint32_t nops = 1 + call_args.size();
             std::vector<lr_operand_desc_t> ops(nops);
-            ops[0] = LR_GLOBAL(fmt_sym, ty_ptr);
+            ops[0] = LR_GLOBAL(strfmt_sym, ty_ptr);
             for (size_t i = 0; i < call_args.size(); i++) {
                 ops[1 + i] = call_args[i];
             }
@@ -889,6 +916,7 @@ public:
             d.type = ty_ptr;
             d.operands = ops.data();
             d.num_operands = nops;
+            d.call_external_abi = true;
             d.call_vararg = true;
             d.call_fixed_args = 9;
             tmp = lr_session_emit(s, &d, nullptr);
@@ -901,10 +929,10 @@ public:
 
         // Call _lfortran_printf(fmt, str_data, str_len, "\n", 1)
         lr_operand_desc_t printf_args[] = {
-            LR_GLOBAL(fmt_gid, ty_ptr),
+            LR_GLOBAL(fmt_sym, ty_ptr),
             V(str_data, ty_ptr),
             V(str_len, ty_i32),
-            LR_GLOBAL(nl_gid, ty_ptr),
+            LR_GLOBAL(nl_sym, ty_ptr),
             I(1, ty_i32)
         };
         emit_call_void("_lfortran_printf", printf_args, 5);
