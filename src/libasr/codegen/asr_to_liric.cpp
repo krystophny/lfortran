@@ -2266,19 +2266,14 @@ public:
         lr_type_t *ptr = lr_type_ptr_s(s);
         lr_type_t *i32 = lr_type_i32_s(s);
 
-        /* Declare printf as a varargs function returning i32 */
-        uint32_t printf_c_id;
-        {
-            lr_module_t *mod = lr_session_module(s);
-            if (mod && lr_module_lookup_function(mod, "printf")) {
-                printf_c_id = lr_session_intern(s, "printf");
-            } else {
-                lr_error_t err;
-                lr_type_t *params[1] = {ptr};
-                lr_session_declare(s, "printf", i32, params, 1, true, &err);
-                printf_c_id = lr_session_intern(s, "printf");
-            }
-        }
+        uint32_t snprintf_id = get_snprintf_alloc_id();
+        uint32_t lf_printf_id = get_lfortran_printf_id();
+
+        /* Get allocator via _lfortran_get_default_allocator() */
+        uint32_t alloc_fn = ensure_runtime_func(
+            "_lfortran_get_default_allocator", ptr, NULL, 0, false);
+        uint32_t allocator = lr_emit_call(s, ptr,
+            LR_GLOBAL(alloc_fn, ptr), NULL, 0);
 
         /* Build format string and collect value args */
         std::string fmt;
@@ -2372,41 +2367,76 @@ public:
         if (!suppress_newline) fmt += "\n";
 
         /* Create format string as a global constant */
-        uint32_t fmt_ptr = emit_global_string( fmt.c_str());
+        uint32_t fmt_ptr = emit_global_string(fmt.c_str());
 
-        /* Call printf(fmt, args...) */
+        /* Step 1: format values via _lcompilers_snprintf_alloc(allocator, fmt, args...)
+           This runtime function formats values into a heap-allocated string.
+           No direct libc call in emitted code — runtime handles it. */
+        uint32_t str_ptr;
         {
             lr_inst_desc_t d; memset(&d, 0, sizeof(d));
-            uint32_t nops = 1 + 1 + (uint32_t)val_args.size();
+            uint32_t nops = 1 + 2 + (uint32_t)val_args.size();
             lr_operand_desc_t ops[64];
-            ops[0] = LR_GLOBAL(printf_c_id, ptr);  /* callee */
-            ops[1] = V(fmt_ptr, ptr);               /* format string */
+            ops[0] = LR_GLOBAL(snprintf_id, ptr);   /* callee */
+            ops[1] = V(allocator, ptr);              /* allocator (from runtime) */
+            ops[2] = V(fmt_ptr, ptr);                /* format string */
             for (size_t j = 0; j < val_args.size(); j++)
-                ops[2 + j] = val_args[j];
+                ops[3 + j] = val_args[j];
             d.op = LR_OP_CALL;
-            d.type = i32;
+            d.type = ptr;
             d.operands = ops;
             d.num_operands = nops;
             d.call_vararg = true;
-            d.call_fixed_args = 1;
-            lr_session_emit(s, &d, NULL);
+            d.call_fixed_args = 2;
+            str_ptr = lr_session_emit(s, &d, NULL);
         }
 
-        if (!suppress_newline) {
-            /* Flush stdout */
-            uint32_t fflush_id;
-            lr_module_t *mod = lr_session_module(s);
-            if (mod && lr_module_lookup_function(mod, "fflush")) {
-                fflush_id = lr_session_intern(s, "fflush");
-            } else {
-                lr_error_t err;
-                lr_type_t *params[1] = {ptr};
-                lr_session_declare(s, "fflush", i32, params, 1,
-                    false, &err);
-                fflush_id = lr_session_intern(s, "fflush");
-            }
-            lr_operand_desc_t fargs[1] = {LR_NULL(ptr)};
-            lr_emit_call(s, i32, LR_GLOBAL(fflush_id, ptr), fargs, 1);
+        /* Step 2: compute string length inline (no libc strlen).
+           Walk the string byte-by-byte until null terminator. */
+        uint32_t str_len;
+        {
+            lr_type_t *i8 = lr_type_i8_s(s);
+            lr_type_t *i1 = lr_type_i1_s(s);
+            lr_type_t *i64 = lr_type_i64_s(s);
+            lr_error_t err;
+            uint32_t cnt = lr_emit_alloca(s, i32);
+            lr_emit_store(s, I(0, i32), V(cnt, ptr));
+
+            uint32_t cond_blk = lr_session_block(s);
+            uint32_t body_blk = lr_session_block(s);
+            uint32_t done_blk = lr_session_block(s);
+
+            lr_emit_br(s, cond_blk);
+            lr_session_set_block(s, cond_blk, &err);
+            uint32_t cur = lr_emit_load(s, i32, V(cnt, ptr));
+            uint32_t idx = lr_emit_sext(s, i64, V(cur, i32));
+            lr_operand_desc_t gi[1] = {V(idx, i64)};
+            uint32_t cp = lr_emit_gep(s, i8, V(str_ptr, ptr), gi, 1);
+            uint32_t ch = lr_emit_load(s, i8, V(cp, ptr));
+            uint32_t is_null = lr_emit_icmp(s, LR_CMP_EQ, V(ch, i8), I(0, i8));
+            lr_emit_condbr(s, V(is_null, i1), done_blk, body_blk);
+
+            lr_session_set_block(s, body_blk, &err);
+            uint32_t next = lr_emit_add(s, i32, V(cur, i32), I(1, i32));
+            lr_emit_store(s, V(next, i32), V(cnt, ptr));
+            lr_emit_br(s, cond_blk);
+
+            lr_session_set_block(s, done_blk, &err);
+            str_len = lr_emit_load(s, i32, V(cnt, ptr));
+        }
+
+        /* Step 3: call _lfortran_printf(NULL, str, str_len, end, end_len)
+           Writes str to stdout. No libc printf in emitted code. */
+        {
+            uint32_t end_str = emit_global_string(suppress_newline ? "" : "\n");
+            lr_operand_desc_t pargs[5] = {
+                LR_NULL(ptr),                   /* format (unused by runtime) */
+                V(str_ptr, ptr),                /* str data */
+                V(str_len, i32),                /* str length */
+                V(end_str, ptr),                /* end string */
+                I(suppress_newline ? 0 : 1, i32), /* end length */
+            };
+            lr_emit_call_void(s, LR_GLOBAL(lf_printf_id, ptr), pargs, 5);
         }
     }
 
