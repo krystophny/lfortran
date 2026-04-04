@@ -1142,10 +1142,7 @@ public:
             uint32_t total = lr_emit_mul(s, i64, V(str_len, i64),
                 V(cnt64, i64));
             uint32_t buf_size = lr_emit_add(s, i64, V(total, i64), I(1, i64));
-            uint32_t malloc_id = get_malloc_id();
-            lr_operand_desc_t ma_args[1] = {V(buf_size, i64)};
-            uint32_t buf = lr_emit_call(s, ptr,
-                LR_GLOBAL(malloc_id, ptr), ma_args, 1);
+            uint32_t buf = emit_malloc(buf_size);
             /* Copy in a loop */
             uint32_t memcpy_id = get_memcpy_id();
             uint32_t off_alloca = lr_emit_alloca(s, i64);
@@ -1198,10 +1195,8 @@ public:
             lr_type_t *arg_ty = get_type(ASRUtils::expr_type(x.m_args[0]));
             uint32_t ch = lr_emit_trunc(s, i8, V(code, arg_ty));
             /* Allocate 2-byte buffer */
-            uint32_t malloc_id = get_malloc_id();
-            lr_operand_desc_t ma_args[1] = {I(2, i64)};
-            uint32_t buf = lr_emit_call(s, ptr,
-                LR_GLOBAL(malloc_id, ptr), ma_args, 1);
+            uint32_t two = lr_emit_add(s, i64, I(2, i64), I(0, i64));
+            uint32_t buf = emit_malloc(two);
             lr_emit_store(s, V(ch, i8), V(buf, ptr));
             lr_operand_desc_t gep_null[1] = {I(1, lr_type_i32_s(s))};
             uint32_t null_ptr = lr_emit_gep(s, i8, V(buf, ptr),
@@ -1269,7 +1264,6 @@ public:
             lr_type_t *i64 = lr_type_i64_s(s);
             lr_type_t *i8 = lr_type_i8_s(s);
             uint32_t strlen_id = get_strlen_id();
-            uint32_t malloc_id = get_malloc_id();
             uint32_t memcpy_id = get_memcpy_id();
             lr_operand_desc_t sl[1] = {V(left, ptr)};
             uint32_t ll = lr_emit_call(s, i64,
@@ -1279,9 +1273,7 @@ public:
                 LR_GLOBAL(strlen_id, ptr), sr, 1);
             uint32_t tl = lr_emit_add(s, i64, V(ll, i64), V(rl, i64));
             uint32_t bs = lr_emit_add(s, i64, V(tl, i64), I(1, i64));
-            lr_operand_desc_t ma[1] = {V(bs, i64)};
-            uint32_t buf = lr_emit_call(s, ptr,
-                LR_GLOBAL(malloc_id, ptr), ma, 1);
+            uint32_t buf = emit_malloc(bs);
             lr_operand_desc_t mc1[3] = {V(buf, ptr), V(left, ptr), V(ll, i64)};
             lr_emit_call_void(s, LR_GLOBAL(memcpy_id, ptr), mc1, 3);
             lr_operand_desc_t gi[1] = {V(ll, i64)};
@@ -1301,7 +1293,6 @@ public:
             lr_type_t *i32 = lr_type_i32_s(s);
             lr_type_t *i1 = lr_type_i1_s(s);
             uint32_t strlen_id = get_strlen_id();
-            uint32_t malloc_id = get_malloc_id();
             uint32_t memcpy_id = get_memcpy_id();
             lr_operand_desc_t sl[1] = {V(str, ptr)};
             uint32_t len = lr_emit_call(s, i64,
@@ -1333,9 +1324,7 @@ public:
             lr_session_set_block(s, scan_end, &err);
             uint32_t trim_len = lr_emit_load(s, i64, V(end_alloca, ptr));
             uint32_t bs = lr_emit_add(s, i64, V(trim_len, i64), I(1, i64));
-            lr_operand_desc_t ma[1] = {V(bs, i64)};
-            uint32_t buf = lr_emit_call(s, ptr,
-                LR_GLOBAL(malloc_id, ptr), ma, 1);
+            uint32_t buf = emit_malloc(bs);
             lr_operand_desc_t mc[3] = {V(buf, ptr), V(str, ptr),
                 V(trim_len, i64)};
             lr_emit_call_void(s, LR_GLOBAL(memcpy_id, ptr), mc, 3);
@@ -1466,7 +1455,6 @@ public:
             lr_type_t *i8 = lr_type_i8_s(s);
             lr_type_t *i1 = lr_type_i1_s(s);
             uint32_t strlen_id = get_strlen_id();
-            uint32_t malloc_id = get_malloc_id();
             uint32_t memcpy_id = get_memcpy_id();
             lr_operand_desc_t sl[1] = {V(str, ptr)};
             uint32_t len = lr_emit_call(s, i64,
@@ -1500,9 +1488,7 @@ public:
             uint32_t trim_start = lr_emit_load(s, i64,
                 V(start_alloca, ptr));
             uint32_t bs = lr_emit_add(s, i64, V(len, i64), I(1, i64));
-            lr_operand_desc_t ma[1] = {V(bs, i64)};
-            uint32_t buf = lr_emit_call(s, ptr,
-                LR_GLOBAL(malloc_id, ptr), ma, 1);
+            uint32_t buf = emit_malloc(bs);
             uint32_t rem_len = lr_emit_sub(s, i64, V(len, i64),
                 V(trim_start, i64));
             lr_operand_desc_t src_idx[1] = {V(trim_start, i64)};
@@ -1520,7 +1506,6 @@ public:
             lr_type_t *i8 = lr_type_i8_s(s);
             lr_type_t *i1 = lr_type_i1_s(s);
             uint32_t strlen_id = get_strlen_id();
-            uint32_t malloc_id = get_malloc_id();
             uint32_t memcpy_id = get_memcpy_id();
             lr_operand_desc_t sl[1] = {V(str, ptr)};
             uint32_t len = lr_emit_call(s, i64,
@@ -1552,9 +1537,7 @@ public:
             lr_session_set_block(s, scan_end, &err);
             uint32_t trim_len = lr_emit_load(s, i64, V(end_alloca, ptr));
             uint32_t bs = lr_emit_add(s, i64, V(len, i64), I(1, i64));
-            lr_operand_desc_t ma[1] = {V(bs, i64)};
-            uint32_t buf = lr_emit_call(s, ptr,
-                LR_GLOBAL(malloc_id, ptr), ma, 1);
+            uint32_t buf = emit_malloc(bs);
             lr_operand_desc_t mc[3] = {V(buf, ptr), V(str, ptr),
                 V(trim_len, i64)};
             lr_emit_call_void(s, LR_GLOBAL(memcpy_id, ptr), mc, 3);
@@ -3422,36 +3405,59 @@ public:
 
     /* ---- Allocate / Deallocate ---------------------------------------- */
 
-    uint32_t get_malloc_id() {
-        lr_error_t err;
+    uint32_t get_malloc_alloc_id() {
         lr_module_t *mod = lr_session_module(s);
-        if (mod && lr_module_lookup_function(mod, "malloc")) {
-            return lr_session_intern(s, "malloc");
+        if (mod && lr_module_lookup_function(mod, "_lfortran_malloc_alloc")) {
+            return lr_session_intern(s, "_lfortran_malloc_alloc");
         }
+        lr_error_t err;
         lr_type_t *ptr = lr_type_ptr_s(s);
         lr_type_t *i64 = lr_type_i64_s(s);
-        lr_type_t *params[1] = {i64};
-        lr_session_declare(s, "malloc", ptr, params, 1, false, &err);
-        return lr_session_intern(s, "malloc");
+        lr_type_t *params[2] = {ptr, i64};
+        lr_session_declare(s, "_lfortran_malloc_alloc", ptr, params, 2,
+                           false, &err);
+        return lr_session_intern(s, "_lfortran_malloc_alloc");
     }
 
-    uint32_t get_free_id() {
-        lr_error_t err;
+    uint32_t get_free_alloc_id() {
         lr_module_t *mod = lr_session_module(s);
-        if (mod && lr_module_lookup_function(mod, "free")) {
-            return lr_session_intern(s, "free");
+        if (mod && lr_module_lookup_function(mod, "_lfortran_free_alloc")) {
+            return lr_session_intern(s, "_lfortran_free_alloc");
         }
+        lr_error_t err;
         lr_type_t *ptr = lr_type_ptr_s(s);
-        lr_type_t *params[1] = {ptr};
-        lr_session_declare(s, "free", lr_type_void_s(s), params, 1,
-                           false, &err);
-        return lr_session_intern(s, "free");
+        lr_type_t *params[2] = {ptr, ptr};
+        lr_session_declare(s, "_lfortran_free_alloc", lr_type_void_s(s),
+                           params, 2, false, &err);
+        return lr_session_intern(s, "_lfortran_free_alloc");
+    }
+
+    /* Emit _lfortran_malloc_alloc(allocator, size) and return the pointer. */
+    uint32_t emit_malloc(uint32_t byte_size) {
+        lr_type_t *ptr = lr_type_ptr_s(s);
+        lr_type_t *i64 = lr_type_i64_s(s);
+        uint32_t malloc_id = get_malloc_alloc_id();
+        uint32_t alloc_fn = get_default_allocator_id();
+        uint32_t allocator = lr_emit_call(s, ptr,
+            LR_GLOBAL(alloc_fn, ptr), NULL, 0);
+        lr_operand_desc_t args[2] = {V(allocator, ptr), V(byte_size, i64)};
+        return lr_emit_call(s, ptr, LR_GLOBAL(malloc_id, ptr), args, 2);
+    }
+
+    /* Emit _lfortran_free_alloc(allocator, ptr). */
+    void emit_free(uint32_t data_ptr) {
+        lr_type_t *ptr = lr_type_ptr_s(s);
+        uint32_t free_id = get_free_alloc_id();
+        uint32_t alloc_fn = get_default_allocator_id();
+        uint32_t allocator = lr_emit_call(s, ptr,
+            LR_GLOBAL(alloc_fn, ptr), NULL, 0);
+        lr_operand_desc_t args[2] = {V(allocator, ptr), V(data_ptr, ptr)};
+        lr_emit_call_void(s, LR_GLOBAL(free_id, ptr), args, 2);
     }
 
     void visit_Allocate(const ASR::Allocate_t &x) {
         lr_type_t *ptr = lr_type_ptr_s(s);
         lr_type_t *i64 = lr_type_i64_s(s);
-        uint32_t malloc_id = get_malloc_id();
 
         for (size_t i = 0; i < x.n_args; i++) {
             ASR::alloc_arg_t &aa = x.m_args[i];
@@ -3485,9 +3491,7 @@ public:
             uint32_t byte_size = lr_emit_mul(s, i64, V(total_size, i64),
                 I(elem_bytes, i64));
 
-            lr_operand_desc_t args[1] = {V(byte_size, i64)};
-            uint32_t mem = lr_emit_call(s, ptr,
-                LR_GLOBAL(malloc_id, ptr), args, 1);
+            uint32_t mem = emit_malloc(byte_size);
 
             is_target = true;
             visit_expr(*aa.m_a);
@@ -3508,7 +3512,6 @@ public:
 
     void visit_ExplicitDeallocate(const ASR::ExplicitDeallocate_t &x) {
         lr_type_t *ptr = lr_type_ptr_s(s);
-        uint32_t free_id = get_free_id();
 
         for (size_t i = 0; i < x.n_vars; i++) {
             is_target = true;
@@ -3516,8 +3519,7 @@ public:
             is_target = false;
             uint32_t var_ptr = tmp;
             uint32_t data = lr_emit_load(s, ptr, V(var_ptr, ptr));
-            lr_operand_desc_t args[1] = {V(data, ptr)};
-            lr_emit_call_void(s, LR_GLOBAL(free_id, ptr), args, 1);
+            emit_free(data);
         }
     }
 
@@ -3611,16 +3613,17 @@ public:
     /* ---- String operations -------------------------------------------- */
 
     uint32_t get_strlen_id() {
-        lr_error_t err;
         lr_module_t *mod = lr_session_module(s);
-        if (mod && lr_module_lookup_function(mod, "strlen")) {
-            return lr_session_intern(s, "strlen");
+        if (mod && lr_module_lookup_function(mod, "_lfortran_str_len")) {
+            return lr_session_intern(s, "_lfortran_str_len");
         }
+        lr_error_t err;
         lr_type_t *i64 = lr_type_i64_s(s);
         lr_type_t *ptr = lr_type_ptr_s(s);
         lr_type_t *params[1] = {ptr};
-        lr_session_declare(s, "strlen", i64, params, 1, false, &err);
-        return lr_session_intern(s, "strlen");
+        lr_session_declare(s, "_lfortran_str_len", i64, params, 1,
+                           false, &err);
+        return lr_session_intern(s, "_lfortran_str_len");
     }
 
     uint32_t get_strcmp_id() {
@@ -3733,7 +3736,7 @@ public:
             return;
         }
         /* Allocate buffer for result = left + right.
-           Compute lengths, malloc, memcpy both halves,
+           Compute lengths, allocate, memcpy both halves,
            null-terminate. */
         visit_expr(*x.m_left);
         uint32_t left_str = tmp;
@@ -3743,7 +3746,6 @@ public:
         lr_type_t *ptr = lr_type_ptr_s(s);
         lr_type_t *i64 = lr_type_i64_s(s);
         uint32_t strlen_id = get_strlen_id();
-        uint32_t malloc_id = get_malloc_id();
         uint32_t memcpy_id = get_memcpy_id();
 
         lr_operand_desc_t sl_args[1] = {V(left_str, ptr)};
@@ -3758,9 +3760,7 @@ public:
         uint32_t buf_size = lr_emit_add(s, i64, V(total_len, i64),
                                         I(1, i64));
 
-        lr_operand_desc_t ma_args[1] = {V(buf_size, i64)};
-        uint32_t buf = lr_emit_call(s, ptr,
-            LR_GLOBAL(malloc_id, ptr), ma_args, 1);
+        uint32_t buf = emit_malloc(buf_size);
 
         lr_operand_desc_t mc1_args[3] = {
             V(buf, ptr), V(left_str, ptr), V(left_len, i64)
@@ -4134,10 +4134,8 @@ public:
         uint32_t idx0 = lr_emit_sub(s, i32, V(idx, i32), I(1, i32));
 
         /* Allocate 2-byte buffer for single character + null */
-        uint32_t malloc_id = get_malloc_id();
-        lr_operand_desc_t ma_args[1] = {I(2, i64)};
-        uint32_t buf = lr_emit_call(s, ptr,
-            LR_GLOBAL(malloc_id, ptr), ma_args, 1);
+        uint32_t two = lr_emit_add(s, i64, I(2, i64), I(0, i64));
+        uint32_t buf = emit_malloc(two);
 
         /* Copy the character */
         lr_operand_desc_t gep_idx[1] = {V(idx0, i32)};
@@ -4201,12 +4199,9 @@ public:
         slice_len = lr_emit_add(s, i64, V(slice_len, i64), I(1, i64));
 
         /* Allocate and copy */
-        uint32_t malloc_id = get_malloc_id();
         uint32_t memcpy_id = get_memcpy_id();
         uint32_t buf_size = lr_emit_add(s, i64, V(slice_len, i64), I(1, i64));
-        lr_operand_desc_t ma_args[1] = {V(buf_size, i64)};
-        uint32_t buf = lr_emit_call(s, ptr,
-            LR_GLOBAL(malloc_id, ptr), ma_args, 1);
+        uint32_t buf = emit_malloc(buf_size);
 
         lr_operand_desc_t src_idx[1] = {V(start0, i64)};
         uint32_t src_ptr = lr_emit_gep(s, i8, V(str, ptr), src_idx, 1);
