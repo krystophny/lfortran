@@ -1466,6 +1466,7 @@ int compile_to_object_file_liric(const std::string &infile,
         const std::string &outfile,
         bool time_report,
         CompilerOptions &compiler_options,
+        LCompilers::PassManager &pass_manager,
         int liric_backend)
 {
     std::string input = read_file_ok(infile);
@@ -1496,6 +1497,13 @@ int compile_to_object_file_liric(const std::string &infile,
     {
         int err = save_mod_files(*asr, compiler_options, lm);
         if (err) return err;
+    }
+
+    // ASR passes (lower intrinsics, arrays, etc.)
+    {
+        compiler_options.po.always_run = false;
+        pass_manager.rtlib = compiler_options.rtlib;
+        pass_manager.apply_passes(al, asr, compiler_options.po, diagnostics);
     }
 
     // ASR -> liric -> object file
@@ -2782,7 +2790,8 @@ int main_app(int argc, char *argv[]) {
 #endif
         } else if (backend == Backend::liric) {
             result = compile_to_object_file_liric(opts.arg_file, outfile,
-                compiler_options.time_report, compiler_options, 0);
+                compiler_options.time_report, compiler_options,
+                lfortran_pass_manager, 0);
         } else {
             throw LCompilers::LCompilersException("Unsupported backend.");
         }
@@ -2842,7 +2851,8 @@ int main_app(int argc, char *argv[]) {
 #endif
             } else if (backend == Backend::liric) {
                 err = compile_to_object_file_liric(arg_file, tmp_o,
-                    compiler_options.time_report, compiler_options, 0);
+                    compiler_options.time_report, compiler_options,
+                    lfortran_pass_manager, 0);
             } else {
                 throw LCompilers::LCompilersException("Backend not supported");
             }
