@@ -557,6 +557,20 @@ public:
                 lr_type_t *ty = get_type(v->m_type);
                 uint32_t alloca_vreg = lr_emit_alloca(s, ty);
                 lr_symtab[h] = alloca_vreg;
+
+                /* Initialize from m_value or m_symbolic_value */
+                ASR::expr_t *init = v->m_value ? v->m_value
+                                               : v->m_symbolic_value;
+                if (init) {
+                    try {
+                        visit_expr(*init);
+                        lr_emit_store(s, V(tmp, ty),
+                            V(alloca_vreg, lr_type_ptr_s(s)));
+                    } catch (...) {
+                        /* Initialization expression not supported:
+                           leave uninitialized (zero from alloca). */
+                    }
+                }
             }
         }
     }
@@ -2150,20 +2164,27 @@ public:
     void visit_DoLoop(const ASR::DoLoop_t &x) {
         lr_error_t err;
         lr_type_t *i1 = lr_type_i1_s(s);
+        lr_type_t *ptr = lr_type_ptr_s(s);
 
-        /* Evaluate loop bounds */
-        visit_expr(*x.m_head.m_start);
-        uint32_t start_val = tmp;
-        visit_expr(*x.m_head.m_end);
-        uint32_t end_val = tmp;
         lr_type_t *loop_ty = get_type(ASRUtils::expr_type(x.m_head.m_v));
 
-        uint32_t step_val;
+        /* Allocate storage for end and step values so they persist
+           across basic blocks (liric SSA requires this). */
+        uint32_t end_alloca = lr_emit_alloca(s, loop_ty);
+        uint32_t step_alloca = lr_emit_alloca(s, loop_ty);
+
+        /* Evaluate and store loop bounds */
+        visit_expr(*x.m_head.m_start);
+        uint32_t start_val = tmp;
+
+        visit_expr(*x.m_head.m_end);
+        lr_emit_store(s, V(tmp, loop_ty), V(end_alloca, ptr));
+
         if (x.m_head.m_increment) {
             visit_expr(*x.m_head.m_increment);
-            step_val = tmp;
+            lr_emit_store(s, V(tmp, loop_ty), V(step_alloca, ptr));
         } else {
-            step_val = lr_emit_add(s, loop_ty, I(1, loop_ty), I(0, loop_ty));
+            lr_emit_store(s, I(1, loop_ty), V(step_alloca, ptr));
         }
 
         /* Store start value to loop variable */
@@ -2171,7 +2192,7 @@ public:
         visit_expr(*x.m_head.m_v);
         is_target = false;
         uint32_t loop_var_ptr = tmp;
-        lr_emit_store(s, V(start_val, loop_ty), V(loop_var_ptr, lr_type_ptr_s(s)));
+        lr_emit_store(s, V(start_val, loop_ty), V(loop_var_ptr, ptr));
 
         uint32_t cond_block = lr_session_block(s);
         uint32_t body_block = lr_session_block(s);
@@ -2186,11 +2207,19 @@ public:
 
         /* Condition: loop_var <= end (or >= end if step < 0) */
         lr_session_set_block(s, cond_block, &err);
-        uint32_t cur_val = lr_emit_load(s, loop_ty,
-                                        V(loop_var_ptr, lr_type_ptr_s(s)));
-        uint32_t cond = lr_emit_icmp(s, LR_CMP_SLE,
-                                     V(cur_val, loop_ty),
-                                     V(end_val, loop_ty));
+        uint32_t cur_val = lr_emit_load(s, loop_ty, V(loop_var_ptr, ptr));
+        uint32_t end_val = lr_emit_load(s, loop_ty, V(end_alloca, ptr));
+        uint32_t step_val = lr_emit_load(s, loop_ty, V(step_alloca, ptr));
+
+        /* Determine comparison: if step > 0 use SLE, if step < 0 use SGE */
+        uint32_t step_neg = lr_emit_icmp(s, LR_CMP_SLT,
+            V(step_val, loop_ty), I(0, loop_ty));
+        uint32_t cond_le = lr_emit_icmp(s, LR_CMP_SLE,
+            V(cur_val, loop_ty), V(end_val, loop_ty));
+        uint32_t cond_ge = lr_emit_icmp(s, LR_CMP_SGE,
+            V(cur_val, loop_ty), V(end_val, loop_ty));
+        uint32_t cond = lr_emit_select(s, i1, V(step_neg, i1),
+            V(cond_ge, i1), V(cond_le, i1));
         lr_emit_condbr(s, V(cond, i1), body_block, end_block);
 
         /* Body */
@@ -2202,12 +2231,11 @@ public:
 
         /* Increment */
         lr_session_set_block(s, incr_block, &err);
-        uint32_t next_val = lr_emit_load(s, loop_ty,
-                                         V(loop_var_ptr, lr_type_ptr_s(s)));
-        next_val = lr_emit_add(s, loop_ty, V(next_val, loop_ty),
-                               V(step_val, loop_ty));
-        lr_emit_store(s, V(next_val, loop_ty),
-                      V(loop_var_ptr, lr_type_ptr_s(s)));
+        uint32_t inc_cur = lr_emit_load(s, loop_ty, V(loop_var_ptr, ptr));
+        uint32_t inc_step = lr_emit_load(s, loop_ty, V(step_alloca, ptr));
+        uint32_t next_val = lr_emit_add(s, loop_ty,
+            V(inc_cur, loop_ty), V(inc_step, loop_ty));
+        lr_emit_store(s, V(next_val, loop_ty), V(loop_var_ptr, ptr));
         lr_emit_br(s, cond_block);
 
         /* End */
