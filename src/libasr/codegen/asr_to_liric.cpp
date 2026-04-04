@@ -2162,18 +2162,24 @@ public:
     }
 
     void visit_DoLoop(const ASR::DoLoop_t &x) {
+        /* Implement DoLoop using the WhileLoop infrastructure:
+           i = start
+           do while (cond)
+             body
+             i = i + step
+           end do
+           This reuses the same block/branch pattern that works
+           correctly in visit_WhileLoop. */
         lr_error_t err;
         lr_type_t *i1 = lr_type_i1_s(s);
         lr_type_t *ptr = lr_type_ptr_s(s);
-
         lr_type_t *loop_ty = get_type(ASRUtils::expr_type(x.m_head.m_v));
 
-        /* Allocate storage for end and step values so they persist
-           across basic blocks (liric SSA requires this). */
+        /* Store end and step in allocas for cross-block persistence */
         uint32_t end_alloca = lr_emit_alloca(s, loop_ty);
         uint32_t step_alloca = lr_emit_alloca(s, loop_ty);
 
-        /* Evaluate and store loop bounds */
+        /* Evaluate and store start, end, step */
         visit_expr(*x.m_head.m_start);
         uint32_t start_val = tmp;
 
@@ -2182,63 +2188,66 @@ public:
 
         if (x.m_head.m_increment) {
             visit_expr(*x.m_head.m_increment);
-            lr_emit_store(s, V(tmp, loop_ty), V(step_alloca, ptr));
         } else {
-            lr_emit_store(s, I(1, loop_ty), V(step_alloca, ptr));
+            tmp = lr_emit_add(s, loop_ty, I(1, loop_ty), I(0, loop_ty));
         }
+        lr_emit_store(s, V(tmp, loop_ty), V(step_alloca, ptr));
 
-        /* Store start value to loop variable */
+        /* Assign start to loop variable (same as visit_Assignment) */
         is_target = true;
         visit_expr(*x.m_head.m_v);
         is_target = false;
-        uint32_t loop_var_ptr = tmp;
-        lr_emit_store(s, V(start_val, loop_ty), V(loop_var_ptr, ptr));
+        lr_emit_store(s, V(start_val, loop_ty), V(tmp, ptr));
 
+        /* Use WhileLoop pattern: cond -> body -> cond */
         uint32_t cond_block = lr_session_block(s);
         uint32_t body_block = lr_session_block(s);
-        uint32_t incr_block = lr_session_block(s);
         uint32_t end_block = lr_session_block(s);
 
-        loop_head_stack.push_back(incr_block);
+        loop_head_stack.push_back(cond_block);
         loop_end_stack.push_back(end_block);
 
-        /* Branch to condition check */
         lr_emit_br(s, cond_block);
 
-        /* Condition: loop_var <= end (or >= end if step < 0) */
+        /* ---- Condition ---- */
         lr_session_set_block(s, cond_block, &err);
-        uint32_t cur_val = lr_emit_load(s, loop_ty, V(loop_var_ptr, ptr));
-        uint32_t end_val = lr_emit_load(s, loop_ty, V(end_alloca, ptr));
-        uint32_t step_val = lr_emit_load(s, loop_ty, V(step_alloca, ptr));
 
-        /* Determine comparison: if step > 0 use SLE, if step < 0 use SGE */
+        /* Load loop variable value using visit_Var (not is_target) */
+        visit_expr(*x.m_head.m_v);
+        uint32_t cur = tmp;
+        uint32_t end = lr_emit_load(s, loop_ty, V(end_alloca, ptr));
+        uint32_t step = lr_emit_load(s, loop_ty, V(step_alloca, ptr));
+
         uint32_t step_neg = lr_emit_icmp(s, LR_CMP_SLT,
-            V(step_val, loop_ty), I(0, loop_ty));
+            V(step, loop_ty), I(0, loop_ty));
         uint32_t cond_le = lr_emit_icmp(s, LR_CMP_SLE,
-            V(cur_val, loop_ty), V(end_val, loop_ty));
+            V(cur, loop_ty), V(end, loop_ty));
         uint32_t cond_ge = lr_emit_icmp(s, LR_CMP_SGE,
-            V(cur_val, loop_ty), V(end_val, loop_ty));
+            V(cur, loop_ty), V(end, loop_ty));
         uint32_t cond = lr_emit_select(s, i1, V(step_neg, i1),
             V(cond_ge, i1), V(cond_le, i1));
         lr_emit_condbr(s, V(cond, i1), body_block, end_block);
 
-        /* Body */
+        /* ---- Body + Increment ---- */
         lr_session_set_block(s, body_block, &err);
         for (size_t i = 0; i < x.n_body; i++) {
             visit_stmt(*x.m_body[i]);
         }
-        lr_emit_br(s, incr_block);
 
-        /* Increment */
-        lr_session_set_block(s, incr_block, &err);
-        uint32_t inc_cur = lr_emit_load(s, loop_ty, V(loop_var_ptr, ptr));
-        uint32_t inc_step = lr_emit_load(s, loop_ty, V(step_alloca, ptr));
-        uint32_t next_val = lr_emit_add(s, loop_ty,
-            V(inc_cur, loop_ty), V(inc_step, loop_ty));
-        lr_emit_store(s, V(next_val, loop_ty), V(loop_var_ptr, ptr));
+        /* Increment: i = i + step (using visit_Assignment pattern) */
+        is_target = true;
+        visit_expr(*x.m_head.m_v);
+        is_target = false;
+        uint32_t lv_ptr = tmp;
+        uint32_t cur2 = lr_emit_load(s, loop_ty, V(lv_ptr, ptr));
+        uint32_t step2 = lr_emit_load(s, loop_ty, V(step_alloca, ptr));
+        uint32_t next = lr_emit_add(s, loop_ty,
+            V(cur2, loop_ty), V(step2, loop_ty));
+        lr_emit_store(s, V(next, loop_ty), V(lv_ptr, ptr));
+
         lr_emit_br(s, cond_block);
 
-        /* End */
+        /* ---- End ---- */
         lr_session_set_block(s, end_block, &err);
         loop_head_stack.pop_back();
         loop_end_stack.pop_back();
