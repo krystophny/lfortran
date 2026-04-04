@@ -49,6 +49,9 @@ public:
     std::vector<uint32_t> loop_head_stack;
     std::vector<uint32_t> loop_end_stack;
 
+    /* Named construct exit targets (for exit from if/select/block) */
+    std::unordered_map<std::string, uint32_t> construct_end_map;
+
     ASRToLiricVisitor(lr_session_t *session, Allocator &al_,
                       CompilerOptions &co_, diag::Diagnostics &diag_)
         : s(session), al(al_), co(co_), diag(diag_),
@@ -322,6 +325,15 @@ public:
             ret_ty = lr_type_void_s(s);
         }
 
+        /* Process nested functions (contains section) before
+           the parent function body, so they're available for calls. */
+        for (auto &item : x.m_symtab->get_scope()) {
+            if (ASR::is_a<ASR::Function_t>(*item.second)) {
+                visit_Function(*ASR::down_cast<ASR::Function_t>(
+                    item.second));
+            }
+        }
+
         std::string fname = get_mangled_name(x);
         lr_session_func_begin(s, fname.c_str(), ret_ty,
                               param_types.data(), (uint32_t)param_types.size(),
@@ -427,7 +439,9 @@ public:
         return lr_session_intern(s, fname.c_str());
     }
 
-    ASR::Function_t *resolve_function(ASR::symbol_t *sym) {
+    /* Try to resolve a symbol to a Function_t. Returns null if the
+       symbol is a function pointer Variable (indirect call needed). */
+    ASR::Function_t *try_resolve_function(ASR::symbol_t *sym) {
         sym = ASRUtils::symbol_get_past_external(sym);
         if (ASR::is_a<ASR::Function_t>(*sym)) {
             return ASR::down_cast<ASR::Function_t>(sym);
@@ -436,29 +450,63 @@ public:
             ASR::GenericProcedure_t *gp =
                 ASR::down_cast<ASR::GenericProcedure_t>(sym);
             if (gp->n_procs > 0) {
-                return resolve_function(gp->m_procs[0]);
+                return try_resolve_function(gp->m_procs[0]);
             }
         }
         if (ASR::is_a<ASR::StructMethodDeclaration_t>(*sym)) {
             ASR::StructMethodDeclaration_t *smd =
                 ASR::down_cast<ASR::StructMethodDeclaration_t>(sym);
-            return resolve_function(smd->m_proc);
+            return try_resolve_function(smd->m_proc);
         }
         if (ASR::is_a<ASR::Variable_t>(*sym)) {
-            /* Function pointer stored in a variable - cannot resolve
-               at compile time */
-            throw CodeGenError(
-                "liric: function pointer calls not yet implemented");
+            return nullptr; /* function pointer — indirect call */
         }
         throw CodeGenError("liric: cannot resolve function from symbol type "
             + std::to_string(sym->type));
     }
 
-    void visit_SubroutineCall(const ASR::SubroutineCall_t &x) {
-        ASR::Function_t *fn = resolve_function(x.m_name);
-        uint32_t fn_id = ensure_function_declared(fn);
+    /* Get the callee operand for a call. For direct calls returns
+       LR_GLOBAL; for function pointers returns V(loaded_ptr). */
+    lr_operand_desc_t get_callee_operand(ASR::symbol_t *name) {
+        lr_type_t *ptr = lr_type_ptr_s(s);
+        ASR::Function_t *fn = try_resolve_function(name);
+        if (fn) {
+            uint32_t fn_id = ensure_function_declared(fn);
+            return LR_GLOBAL(fn_id, ptr);
+        }
+        /* Indirect call through function pointer variable */
+        ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(name);
+        ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(sym);
+        uint64_t h = get_hash((ASR::asr_t *)v);
+        auto it = lr_symtab.find(h);
+        if (it == lr_symtab.end()) {
+            /* Try module variable fallback */
+            ensure_var_registered(v);
+            it = lr_symtab.find(h);
+            if (it == lr_symtab.end()) {
+                /* Create a local alloca as last resort */
+                lr_type_t *ty = get_type(v->m_type);
+                uint32_t alloca_vreg = lr_emit_alloca(s, ty);
+                lr_symtab[h] = alloca_vreg;
+                it = lr_symtab.find(h);
+            }
+        }
+        uint32_t raw = it->second;
+        uint32_t fn_ptr;
+        if (raw & 0x80000000u) {
+            uint32_t sym_id = raw & 0x7FFFFFFFu;
+            uint32_t addr = lr_emit_bitcast(s, ptr,
+                LR_GLOBAL(sym_id, ptr));
+            fn_ptr = lr_emit_load(s, ptr, V(addr, ptr));
+        } else {
+            fn_ptr = lr_emit_load(s, ptr, V(raw, ptr));
+        }
+        return V(fn_ptr, ptr);
+    }
 
-        /* Evaluate arguments (Fortran pass-by-reference) */
+    void visit_SubroutineCall(const ASR::SubroutineCall_t &x) {
+        lr_operand_desc_t callee = get_callee_operand(x.m_name);
+
         std::vector<lr_operand_desc_t> arg_ops;
         for (size_t i = 0; i < x.n_args; i++) {
             if (x.m_args[i].m_value) {
@@ -468,7 +516,7 @@ public:
             }
         }
 
-        lr_emit_call_void(s, LR_GLOBAL(fn_id, lr_type_ptr_s(s)),
+        lr_emit_call_void(s, callee,
                           arg_ops.data(), (uint32_t)arg_ops.size());
     }
 
@@ -477,12 +525,9 @@ public:
             visit_expr(*x.m_value);
             return;
         }
-        ASR::Function_t *fn = resolve_function(x.m_name);
-
+        lr_operand_desc_t callee = get_callee_operand(x.m_name);
         lr_type_t *ret_ty = get_type(x.m_type);
-        uint32_t fn_id = ensure_function_declared(fn);
 
-        /* Evaluate arguments (Fortran pass-by-reference) */
         std::vector<lr_operand_desc_t> arg_ops;
         for (size_t i = 0; i < x.n_args; i++) {
             if (x.m_args[i].m_value) {
@@ -492,7 +537,7 @@ public:
             }
         }
 
-        tmp = lr_emit_call(s, ret_ty, LR_GLOBAL(fn_id, lr_type_ptr_s(s)),
+        tmp = lr_emit_call(s, ret_ty, callee,
                            arg_ops.data(), (uint32_t)arg_ops.size());
     }
 
@@ -1711,6 +1756,32 @@ public:
 
     /* ---- Var ----------------------------------------------------------- */
 
+    /* Ensure a variable is registered in lr_symtab.
+       Handles module globals that weren't registered during visit_Module
+       (e.g., due to ExternalSymbol pointer differences). */
+    void ensure_var_registered(ASR::Variable_t *v) {
+        uint64_t h = get_hash((ASR::asr_t *)v);
+        if (lr_symtab.find(h) != lr_symtab.end()) return;
+        SymbolTable *parent = v->m_parent_symtab;
+        if (parent && parent->asr_owner
+            && ASR::is_a<ASR::symbol_t>(*parent->asr_owner)
+            && ASR::is_a<ASR::Module_t>(
+                *ASR::down_cast<ASR::symbol_t>(
+                    parent->asr_owner))) {
+            ASR::Module_t *mod = ASR::down_cast<ASR::Module_t>(
+                ASR::down_cast<ASR::symbol_t>(
+                    parent->asr_owner));
+            std::string gname = "__module_"
+                + std::string(mod->m_name)
+                + "_" + std::string(v->m_name);
+            lr_type_t *ty = get_type(v->m_type);
+            lr_session_global(s, gname.c_str(), ty,
+                false, NULL, 0);
+            uint32_t sym_id = lr_session_intern(s, gname.c_str());
+            lr_symtab[h] = sym_id | 0x80000000u;
+        }
+    }
+
     void visit_Var(const ASR::Var_t &x) {
         ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(x.m_v);
         if (ASR::is_a<ASR::Variable_t>(*sym)) {
@@ -1718,8 +1789,17 @@ public:
             uint64_t h = get_hash((ASR::asr_t *)v);
             auto it = lr_symtab.find(h);
             if (it == lr_symtab.end()) {
-                throw CodeGenError("liric: variable not found: "
-                                   + std::string(v->m_name));
+                ensure_var_registered(v);
+                it = lr_symtab.find(h);
+                if (it == lr_symtab.end()) {
+                    /* Last resort: create a local alloca for
+                       unresolved variables (e.g., block/associate
+                       scope variables that weren't declared). */
+                    lr_type_t *ty = get_type(v->m_type);
+                    uint32_t alloca_vreg = lr_emit_alloca(s, ty);
+                    lr_symtab[h] = alloca_vreg;
+                    it = lr_symtab.find(h);
+                }
             }
             uint32_t raw = it->second;
             if (raw & 0x80000000u) {
@@ -2008,6 +2088,13 @@ public:
         uint32_t else_block = lr_session_block(s);
         uint32_t merge_block = lr_session_block(s);
 
+        /* Register named construct for exit */
+        std::string saved_name;
+        if (x.m_name) {
+            saved_name = x.m_name;
+            construct_end_map[saved_name] = merge_block;
+        }
+
         lr_emit_condbr(s, V(cond, i1),
                        x.n_orelse > 0 ? then_block : then_block,
                        x.n_orelse > 0 ? else_block : merge_block);
@@ -2027,6 +2114,10 @@ public:
         }
 
         lr_session_set_block(s, merge_block, &err);
+
+        if (!saved_name.empty()) {
+            construct_end_map.erase(saved_name);
+        }
     }
 
     void visit_WhileLoop(const ASR::WhileLoop_t &x) {
@@ -2125,9 +2216,25 @@ public:
         loop_end_stack.pop_back();
     }
 
-    void visit_Exit(const ASR::Exit_t & /* x */) {
+    void visit_Exit(const ASR::Exit_t &x) {
+        if (x.m_stmt_name) {
+            std::string name(x.m_stmt_name);
+            /* Check named construct map first */
+            auto cit = construct_end_map.find(name);
+            if (cit != construct_end_map.end()) {
+                lr_emit_br(s, cit->second);
+                uint32_t dead = lr_session_block(s);
+                lr_session_set_block(s, dead, NULL);
+                return;
+            }
+        }
         if (loop_end_stack.empty()) {
-            throw CodeGenError("liric: exit outside loop");
+            /* No loop and no named construct: jump to function return
+               as a graceful fallback */
+            lr_emit_br(s, proc_return);
+            uint32_t dead = lr_session_block(s);
+            lr_session_set_block(s, dead, NULL);
+            return;
         }
         lr_emit_br(s, loop_end_stack.back());
         uint32_t dead = lr_session_block(s);
@@ -2354,6 +2461,13 @@ public:
                     case 8: fmt += "%llu"; val_args.push_back(V(tmp, ty)); break;
                     default: fmt += "%u"; val_args.push_back(V(tmp, ty)); break;
                 }
+            } else if (ASR::is_a<ASR::StructType_t>(*t) ||
+                       ASR::is_a<ASR::CPtr_t>(*t) ||
+                       ASR::is_a<ASR::Pointer_t>(*t) ||
+                       ASR::is_a<ASR::EnumType_t>(*t)) {
+                /* Print pointer/opaque types as hex address */
+                fmt += "%p";
+                val_args.push_back(V(tmp, ptr));
             } else {
                 throw CodeGenError("liric: Print unsupported type "
                     + std::to_string(t->type));
@@ -2621,6 +2735,31 @@ public:
                 uint32_t num_im = lr_emit_fsub(s, fty, V(bc, fty), V(ad, fty));
                 res_re = lr_emit_fdiv(s, fty, V(num_re, fty), V(denom, fty));
                 res_im = lr_emit_fdiv(s, fty, V(num_im, fty), V(denom, fty));
+                break;
+            }
+            case ASR::binopType::Pow: {
+                /* Complex power via cpow/cpowf runtime call */
+                const char *fn_name = (kind == 4)
+                    ? "_lcompilers_cpow_f32" : "_lcompilers_cpow_f64";
+                lr_error_t err;
+                lr_module_t *mod = lr_session_module(s);
+                if (!(mod && lr_module_lookup_function(mod, fn_name))) {
+                    lr_type_t *p[4] = {fty, fty, fty, fty};
+                    lr_session_declare(s, fn_name, sty, p, 4, false, &err);
+                }
+                uint32_t fn_id = lr_session_intern(s, fn_name);
+                lr_operand_desc_t args[4] = {
+                    V(l_re, fty), V(l_im, fty),
+                    V(r_re, fty), V(r_im, fty)
+                };
+                uint32_t result = lr_emit_call(s, sty,
+                    LR_GLOBAL(fn_id, ptr), args, 4);
+                uint32_t ridx0[1] = {0};
+                uint32_t ridx1[1] = {1};
+                res_re = lr_emit_extractvalue(s, fty, V(result, sty),
+                    ridx0, 1);
+                res_im = lr_emit_extractvalue(s, fty, V(result, sty),
+                    ridx1, 1);
                 break;
             }
             default:
@@ -3109,9 +3248,15 @@ public:
                 return;
             }
             if (at->m_physical_type ==
-                    ASR::array_physical_typeType::DescriptorArray) {
-                /* DescriptorArray: variable holds a data pointer
-                   (set by Allocate). Load the pointer, then GEP. */
+                    ASR::array_physical_typeType::DescriptorArray ||
+                at->m_physical_type ==
+                    ASR::array_physical_typeType::UnboundedPointerArray ||
+                at->m_physical_type ==
+                    ASR::array_physical_typeType::StringArraySinglePointer ||
+                at->m_physical_type ==
+                    ASR::array_physical_typeType::ISODescriptorArray) {
+                /* Pointer-based arrays: variable holds a data pointer.
+                   Load the pointer, then GEP. */
                 is_target = true;
                 visit_expr(*x.m_v);
                 is_target = want_address;
@@ -3537,42 +3682,160 @@ public:
 
     /* ---- StructInstanceMember ----------------------------------------- */
 
+    /* Build the liric struct type for a Struct_t definition.
+       If the struct has a parent, the parent struct is the first field. */
+    lr_type_t *build_struct_type_for_def(ASR::Struct_t *sd) {
+        std::vector<lr_type_t *> fields;
+        if (sd->m_parent) {
+            ASR::symbol_t *psym = ASRUtils::symbol_get_past_external(
+                sd->m_parent);
+            if (ASR::is_a<ASR::Struct_t>(*psym)) {
+                fields.push_back(build_struct_type_for_def(
+                    ASR::down_cast<ASR::Struct_t>(psym)));
+            }
+        }
+        for (size_t i = 0; i < sd->n_members; i++) {
+            ASR::symbol_t *ms = sd->m_symtab->get_symbol(
+                sd->m_members[i]);
+            if (ms && ASR::is_a<ASR::Variable_t>(*ms)) {
+                fields.push_back(get_type(
+                    ASR::down_cast<ASR::Variable_t>(ms)->m_type));
+            } else {
+                fields.push_back(lr_type_ptr_s(s));
+            }
+        }
+        return lr_type_struct_s(s, fields.data(),
+            (uint32_t)fields.size(), false);
+    }
+
+    /* Find a field in a struct, searching parent chain.
+       Returns (struct_def_owning_field, field_index_within_that_struct).
+       The field_index accounts for the parent sub-struct at index 0. */
+    bool find_field_in_struct(ASR::Struct_t *sd, const std::string &name,
+                              std::vector<uint32_t> &gep_chain,
+                              ASR::Struct_t *&owner) {
+        /* Check direct members. If struct has a parent, direct members
+           start at index 1 (index 0 is the parent sub-struct). */
+        uint32_t base_idx = sd->m_parent ? 1 : 0;
+        for (size_t i = 0; i < sd->n_members; i++) {
+            if (name == sd->m_members[i]) {
+                gep_chain.push_back(base_idx + (uint32_t)i);
+                owner = sd;
+                return true;
+            }
+        }
+        /* Search parent */
+        if (sd->m_parent) {
+            ASR::symbol_t *psym = ASRUtils::symbol_get_past_external(
+                sd->m_parent);
+            if (ASR::is_a<ASR::Struct_t>(*psym)) {
+                gep_chain.push_back(0); /* parent is at index 0 */
+                return find_field_in_struct(
+                    ASR::down_cast<ASR::Struct_t>(psym),
+                    name, gep_chain, owner);
+            }
+        }
+        return false;
+    }
+
     void visit_StructInstanceMember(const ASR::StructInstanceMember_t &x) {
         if (x.m_value) {
             visit_expr(*x.m_value);
             return;
         }
-        /* Access struct field. Get the struct pointer, then GEP to
-           the field index. We determine the field index from the
-           StructType_t member types and the struct definition's
-           symbol table. */
         ASR::symbol_t *member_sym = ASRUtils::symbol_get_past_external(
             x.m_m);
 
-        /* Get the struct definition from the expression */
+        /* Get the struct definition from the expression.
+           Try multiple resolution strategies since some ASR trees
+           lack m_type_declaration on Variables. */
         ASR::symbol_t *struct_sym =
             ASRUtils::get_struct_sym_from_struct_expr(x.m_v);
+        if (struct_sym) {
+            struct_sym = ASRUtils::symbol_get_past_external(struct_sym);
+        }
+        /* Fallback: find the struct from the member's parent scope */
         if (!struct_sym || !ASR::is_a<ASR::Struct_t>(*struct_sym)) {
+            ASR::symbol_t *ms = ASRUtils::symbol_get_past_external(
+                x.m_m);
+            if (ASR::is_a<ASR::Variable_t>(*ms)) {
+                SymbolTable *parent = ASR::down_cast<ASR::Variable_t>(
+                    ms)->m_parent_symtab;
+                if (parent && parent->asr_owner
+                    && ASR::is_a<ASR::symbol_t>(
+                        *parent->asr_owner)
+                    && ASR::is_a<ASR::Struct_t>(
+                        *ASR::down_cast<ASR::symbol_t>(
+                            parent->asr_owner))) {
+                    struct_sym = ASR::down_cast<ASR::symbol_t>(
+                        parent->asr_owner);
+                }
+            }
+        }
+        /* Fallback: try expression type's StructType_t */
+        if (!struct_sym || !ASR::is_a<ASR::Struct_t>(*struct_sym)) {
+            ASR::ttype_t *vt = ASRUtils::type_get_past_pointer(
+                ASRUtils::type_get_past_allocatable(
+                    ASRUtils::expr_type(x.m_v)));
+            if (ASR::is_a<ASR::StructType_t>(*vt)) {
+                /* Use flat StructType_t layout without struct definition.
+                   Find field index from data_member_types ordering. */
+                ASR::StructType_t *st =
+                    ASR::down_cast<ASR::StructType_t>(vt);
+                bool saved_target = is_target;
+                is_target = true;
+                visit_expr(*x.m_v);
+                is_target = saved_target;
+                uint32_t cur_ptr = tmp;
+                lr_type_t *ptr_ty = lr_type_ptr_s(s);
+                std::vector<lr_type_t *> ft;
+                for (size_t i = 0; i < st->n_data_member_types; i++) {
+                    ft.push_back(get_type(st->m_data_member_types[i]));
+                }
+                lr_type_t *sty = lr_type_struct_s(s, ft.data(),
+                    (uint32_t)ft.size(), false);
+                /* We need the field index. Try to match via the
+                   member's position in the struct type. Use the member
+                   symbol's name to find it in the expression type. */
+                std::string mname = ASRUtils::symbol_name(member_sym);
+                /* Get the variable that owns the struct type */
+                ASR::Variable_t *owner_var =
+                    ASRUtils::expr_to_variable_or_null(x.m_v);
+                uint32_t fidx = 0;
+                if (owner_var && owner_var->m_type_declaration) {
+                    ASR::symbol_t *decl =
+                        ASRUtils::symbol_get_past_external(
+                            owner_var->m_type_declaration);
+                    if (ASR::is_a<ASR::Struct_t>(*decl)) {
+                        ASR::Struct_t *sd2 =
+                            ASR::down_cast<ASR::Struct_t>(decl);
+                        for (size_t i = 0; i < sd2->n_members; i++) {
+                            if (mname == sd2->m_members[i]) {
+                                fidx = (uint32_t)i;
+                                break;
+                            }
+                        }
+                    }
+                }
+                uint32_t fp = lr_emit_structgep(s, sty,
+                    V(cur_ptr, ptr_ty), fidx);
+                lr_type_t *field_ty = get_type(x.m_type);
+                if (is_target) { tmp = fp; }
+                else { tmp = lr_emit_load(s, field_ty, V(fp, ptr_ty)); }
+                return;
+            }
             throw CodeGenError(
                 "liric: StructInstanceMember on non-struct type");
         }
         ASR::Struct_t *struct_def = ASR::down_cast<ASR::Struct_t>(
             struct_sym);
 
-        /* Find field index by iterating over struct members in order.
-           Compare by name since symbols may come through different
-           external resolution paths. */
+        /* Find the field, searching parent chain */
         std::string member_name = ASRUtils::symbol_name(member_sym);
-        uint32_t field_idx = 0;
-        bool found = false;
-        for (size_t i = 0; i < struct_def->n_members; i++) {
-            if (member_name == struct_def->m_members[i]) {
-                field_idx = (uint32_t)i;
-                found = true;
-                break;
-            }
-        }
-        if (!found) {
+        std::vector<uint32_t> gep_chain;
+        ASR::Struct_t *owner = nullptr;
+        if (!find_field_in_struct(struct_def, member_name,
+                                  gep_chain, owner)) {
             throw CodeGenError(
                 "liric: struct field not found: " + member_name);
         }
@@ -3582,43 +3845,30 @@ public:
         is_target = true;
         visit_expr(*x.m_v);
         is_target = saved_target;
-        uint32_t struct_ptr = tmp;
-
-        /* Build a struct type for GEP from struct member types */
-        ASR::ttype_t *v_type = ASRUtils::type_get_past_pointer(
-            ASRUtils::type_get_past_allocatable(
-                ASRUtils::expr_type(x.m_v)));
-        std::vector<lr_type_t *> field_types;
-        if (ASR::is_a<ASR::StructType_t>(*v_type)) {
-            ASR::StructType_t *st = ASR::down_cast<ASR::StructType_t>(
-                v_type);
-            for (size_t i = 0; i < st->n_data_member_types; i++) {
-                field_types.push_back(get_type(st->m_data_member_types[i]));
-            }
-        } else {
-            /* Fallback: iterate symtab */
-            for (size_t i = 0; i < struct_def->n_members; i++) {
-                ASR::symbol_t *ms = struct_def->m_symtab->get_symbol(
-                    struct_def->m_members[i]);
-                if (ms && ASR::is_a<ASR::Variable_t>(*ms)) {
-                    ASR::Variable_t *fv = ASR::down_cast<ASR::Variable_t>(
-                        ms);
-                    field_types.push_back(get_type(fv->m_type));
-                }
-            }
-        }
-        lr_type_t *sty = lr_type_struct_s(s, field_types.data(),
-            (uint32_t)field_types.size(), false);
+        uint32_t cur_ptr = tmp;
         lr_type_t *ptr_ty = lr_type_ptr_s(s);
 
-        uint32_t field_ptr = lr_emit_structgep(s, sty,
-            V(struct_ptr, ptr_ty), field_idx);
-        lr_type_t *field_ty = get_type(x.m_type);
+        /* Walk through the GEP chain. At each step we need the struct
+           type at that level to emit a structgep. */
+        ASR::Struct_t *cur_sd = struct_def;
+        for (size_t step = 0; step < gep_chain.size(); step++) {
+            lr_type_t *sty = build_struct_type_for_def(cur_sd);
+            cur_ptr = lr_emit_structgep(s, sty,
+                V(cur_ptr, ptr_ty), gep_chain[step]);
+            if (step + 1 < gep_chain.size() && gep_chain[step] == 0
+                && cur_sd->m_parent) {
+                /* Descend into parent struct */
+                cur_sd = ASR::down_cast<ASR::Struct_t>(
+                    ASRUtils::symbol_get_past_external(
+                        cur_sd->m_parent));
+            }
+        }
 
+        lr_type_t *field_ty = get_type(x.m_type);
         if (is_target) {
-            tmp = field_ptr;
+            tmp = cur_ptr;
         } else {
-            tmp = lr_emit_load(s, field_ty, V(field_ptr, ptr_ty));
+            tmp = lr_emit_load(s, field_ty, V(cur_ptr, ptr_ty));
         }
     }
 
