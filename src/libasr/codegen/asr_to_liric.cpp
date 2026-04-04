@@ -3559,14 +3559,14 @@ public:
         ASR::Struct_t *struct_def = ASR::down_cast<ASR::Struct_t>(
             struct_sym);
 
-        /* Find field index by iterating over struct members in order */
+        /* Find field index by iterating over struct members in order.
+           Compare by name since symbols may come through different
+           external resolution paths. */
+        std::string member_name = ASRUtils::symbol_name(member_sym);
         uint32_t field_idx = 0;
         bool found = false;
         for (size_t i = 0; i < struct_def->n_members; i++) {
-            ASR::symbol_t *ms = struct_def->m_symtab->get_symbol(
-                struct_def->m_members[i]);
-            if (ms && ASRUtils::symbol_get_past_external(ms) ==
-                    member_sym) {
+            if (member_name == struct_def->m_members[i]) {
                 field_idx = (uint32_t)i;
                 found = true;
                 break;
@@ -3574,7 +3574,7 @@ public:
         }
         if (!found) {
             throw CodeGenError(
-                "liric: struct field not found");
+                "liric: struct field not found: " + member_name);
         }
 
         /* Visit the struct expression to get its pointer */
