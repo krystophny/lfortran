@@ -293,6 +293,7 @@ class ASRToLLVMVisitor;
             llvm::StructType *complex_type_4_ptr, *complex_type_8_ptr;
             llvm::PointerType *character_type;
             llvm::Type* string_descriptor; /* <{ i8* --DATA-- , i64 --LENGTH-- }> */
+            llvm::StructType* type_info_type; /* { i8*, i8*, i8* } -- old layout */
             llvm::Type* vptr_type;
             llvm::Type* dim_descr_type_; // dimension_descriptor type (used with descriptorArrays)
             llvm::FunctionType* struct_copy_functype;
@@ -793,6 +794,11 @@ class ASRToLLVMVisitor;
             llvm::Type* getComplexType(int a_kind, bool get_pointer=false);
             // Returns LLVM Type Based On String's PhysicalType
             llvm::Type* get_StringType(ASR::ttype_t* type);
+            llvm::StructType* get_type_info_type();
+            llvm::PointerType* get_type_info_ptr_type();
+            llvm::Value* get_type_info_name_ptr(llvm::Value* type_info_ptr);
+            llvm::Value* get_type_info_size(llvm::Value* type_info_ptr);
+            llvm::Value* get_type_info_parent(llvm::Value* type_info_ptr);
 
             llvm::Type* get_el_type(ASR::expr_t* expr, ASR::ttype_t* m_type_, llvm::Module* module);
 
@@ -1240,6 +1246,7 @@ class ASRToLLVMVisitor;
                 break;
                 case(ASR::FunctionType):
                 case(ASR::CPtr):
+                case(ASR::TypeInfo):
                 case(ASR::String):
                 // Do nothing
                 break;
@@ -1284,6 +1291,7 @@ class ASRToLLVMVisitor;
                 case(ASR::Logical):
                 case(ASR::FunctionType):
                 case(ASR::CPtr):
+                case(ASR::TypeInfo):
                 // Pointers -- Do nothing
                 break;
                 default: 
@@ -1655,6 +1663,7 @@ class ASRToLLVMVisitor;
                 case ASR::UnsignedInteger:
                 case ASR::Logical :
                 case ASR::CPtr:
+                case ASR::TypeInfo:
                 // Do Nothing.
                 break;
                 default:
@@ -2066,6 +2075,7 @@ class ASRToLLVMVisitor;
                 return true;
                 case ASR::FunctionType:
                 case ASR::CPtr:
+                case ASR::TypeInfo:
                     return false;
                 default:
                     throw LCompilersException("Handle this case");

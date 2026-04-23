@@ -4185,6 +4185,8 @@ RUN(NAME infer_walrus_struct_03 LABELS llvm_infer NO_STD_F23)
 RUN(NAME infer_walrus_shadow_01 LABELS llvm_infer NO_STD_F23)
 RUN(NAME infer_walrus_shadow_02 LABELS llvm_infer NO_STD_F23)
 RUN(NAME infer_walrus_shadow_03 LABELS llvm_infer NO_STD_F23)
+RUN(NAME typeof_01 LABELS llvm llvm_infer NO_STD_F23)
+RUN(NAME typeof_02 LABELS llvm llvm_infer NO_STD_F23)
 
 RUN(NAME verify_intent_external_01 LABELS gfortran llvm EXTRAFILES
         verify_intent_external_01_mod1.f90 verify_intent_external_01_mod2.f90)
