@@ -2037,22 +2037,21 @@ int link_executable(const std::vector<std::string> &infiles,
     }
     if (backend == Backend::liric) {
 #ifdef HAVE_LFORTRAN_LIRIC
-        // Direct executable emission - no system linker needed
-        std::vector<const char *> obj_ptrs;
-        for (const auto &f : infiles) obj_ptrs.push_back(f.c_str());
-        int err = liric_link_executable(obj_ptrs.data(), obj_ptrs.size(),
-            outfile.c_str());
-        if (err) {
-            std::cerr << "Liric direct executable emission failed." << std::endl;
-            return 10;
-        }
-        return 0;
+        // liric's AOT no-link emitExecutableFromObjects only accepts .o files
+        // with .liric_blob/.liric_ll sidecars.  fpm and other build systems
+        // pass static archives (libfpm.a) at the link step, which the
+        // AOT path rejects.  Fall through to the LLVM clang-based linker
+        // below for all liric link invocations -- the .o files we produced
+        // are standard object files and link cleanly with the system linker
+        // and lfortran_runtime.  liric_link_executable remains exported for
+        // callers that explicitly want AOT no-link emission.
 #else
         std::cerr << "The liric backend requires -DWITH_LIRIC=ON." << std::endl;
         return 1;
 #endif
     }
-    if (backend == Backend::llvm || backend == Backend::mlir) {
+    if (backend == Backend::llvm || backend == Backend::mlir ||
+        backend == Backend::liric) {
         std::string run_cmd = "", compile_cmd = "";
         if (t == "x86_64-pc-windows-msvc") {
             compile_cmd = "link /NOLOGO /OUT:" + outfile + " ";
@@ -2162,6 +2161,13 @@ int link_executable(const std::vector<std::string> &infiles,
                 compile_cmd += extra_linker_flags;
             }
             compile_cmd += " -l" + runtime_lib + " -lm";
+            if (backend == Backend::liric) {
+                // pass_manager emits per-TU `_lcompilers_*` instantiations
+                // of trim/index/scan/... into every consumer .o; these are
+                // byte-identical so we accept multiple definitions and let
+                // the linker keep one.
+                compile_cmd += " -Wl,--allow-multiple-definition";
+            }
             if (compiler_options.openmp && CC.find("clang" ) != std::string::npos) {
                 std::string openmp_shared_library = compiler_options.openmp_lib_dir;
                 std::string omp_cmd =  " -L" + openmp_shared_library + " -Wl,-rpath," + openmp_shared_library + " -lomp";
@@ -2728,6 +2734,16 @@ int main_app(int argc, char *argv[]) {
         backend = Backend::liric;
         lfortran_pass_manager.passes_to_skip_with_llvm.push_back("print_arr");
         lfortran_pass_manager.passes_to_skip_with_llvm.push_back("print_struct_type");
+        // pass_array_by_data renames functions that take array args to
+        // per-element-type variants (e.g. new_diagnostic ->
+        // new_diagnostic_toml_label____5).  The rename is applied at
+        // definition sites but the cross-translation-unit call sites
+        // sometimes reference the unmangled name, producing undefined
+        // references at link time when fpm-style separate compilation
+        // links many .o files together.  Skip the pass for liric; the
+        // compat shim handles the unmangled names fine.
+        lfortran_pass_manager.passes_to_skip_with_llvm.push_back(
+            "pass_array_by_data");
 #else
         std::cerr << "The liric backend requires building with -DWITH_LIRIC=ON." << std::endl;
         return 1;
@@ -2918,15 +2934,6 @@ int main_app(int argc, char *argv[]) {
 #endif
         } else if (backend == Backend::liric) {
 #ifdef HAVE_LFORTRAN_LIRIC
-            // The liric LLVM-compat shim has per-IR-call overhead that makes
-            // emitting full bodies for every imported module impractical for
-            // fpm-sized projects (main.f90 alone takes many minutes).  Force
-            // separate-compilation semantics so we emit external linkage for
-            // module symbols and only the local definitions get full IR.
-            // This matches the way build systems (fpm, the lfortran-dev
-            // build_*.sh scripts) call lfortran -c per file.
-            compiler_options.separate_compilation = true;
-            lcompilers_unique_ID_separate_compilation = LCOMPILERS_UNIQUE_ID;
             result = compile_src_to_object_file_liric(opts.arg_file, outfile,
                 compiler_options, lfortran_pass_manager);
 #else
@@ -2988,11 +2995,6 @@ int main_app(int argc, char *argv[]) {
             }
             if (backend == Backend::liric) {
 #ifdef HAVE_LFORTRAN_LIRIC
-                // See comment above: liric compat shim requires
-                // separate-compilation semantics to compile fpm-sized
-                // projects within reasonable time.
-                compiler_options.separate_compilation = true;
-                lcompilers_unique_ID_separate_compilation = LCOMPILERS_UNIQUE_ID;
                 err = compile_src_to_object_file_liric(arg_file, tmp_o,
                     compiler_options, lfortran_pass_manager);
 #else

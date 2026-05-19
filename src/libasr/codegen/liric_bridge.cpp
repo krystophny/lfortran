@@ -46,8 +46,11 @@ LIRIC_EXPORT int liric_compile_to_object(
     if (!res.ok) return 1;
 
     try {
+        // save_object_file runs through liric_llvm::legacy::PassManager::run,
+        // which already emits the .liric_blob and .liric_ll sidecars alongside
+        // the .o.  A second emitObjectCompanionFiles call would redo the same
+        // text-IR dump, which dominated compile time on fpm-sized modules.
         e.save_object_file(*(res.result->m_m), outfile);
-        res.result->m_m->emitObjectCompanionFiles(outfile);
     } catch (const std::exception &ex) {
         std::cerr << "liric object emission failed: " << ex.what() << std::endl;
         return 1;
