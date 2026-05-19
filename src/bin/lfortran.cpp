@@ -2918,6 +2918,15 @@ int main_app(int argc, char *argv[]) {
 #endif
         } else if (backend == Backend::liric) {
 #ifdef HAVE_LFORTRAN_LIRIC
+            // The liric LLVM-compat shim has per-IR-call overhead that makes
+            // emitting full bodies for every imported module impractical for
+            // fpm-sized projects (main.f90 alone takes many minutes).  Force
+            // separate-compilation semantics so we emit external linkage for
+            // module symbols and only the local definitions get full IR.
+            // This matches the way build systems (fpm, the lfortran-dev
+            // build_*.sh scripts) call lfortran -c per file.
+            compiler_options.separate_compilation = true;
+            lcompilers_unique_ID_separate_compilation = LCOMPILERS_UNIQUE_ID;
             result = compile_src_to_object_file_liric(opts.arg_file, outfile,
                 compiler_options, lfortran_pass_manager);
 #else
@@ -2979,6 +2988,11 @@ int main_app(int argc, char *argv[]) {
             }
             if (backend == Backend::liric) {
 #ifdef HAVE_LFORTRAN_LIRIC
+                // See comment above: liric compat shim requires
+                // separate-compilation semantics to compile fpm-sized
+                // projects within reasonable time.
+                compiler_options.separate_compilation = true;
+                lcompilers_unique_ID_separate_compilation = LCOMPILERS_UNIQUE_ID;
                 err = compile_src_to_object_file_liric(arg_file, tmp_o,
                     compiler_options, lfortran_pass_manager);
 #else
