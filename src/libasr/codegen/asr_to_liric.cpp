@@ -168,6 +168,7 @@ public:
     std::unordered_map<uint64_t, uint32_t> lr_symtab;
     std::unordered_map<uint64_t, uint32_t> lr_globals;   // variable hash -> intern symbol id
     std::unordered_map<uint64_t, uint32_t> class_tag_slots;
+    std::unordered_set<uint64_t> class_desc_aliases;
     std::unordered_set<uint64_t> runtime_pointer_arrays;
     std::unordered_set<uint64_t> known_struct_hashes;
     std::vector<ASR::Struct_t *> known_structs;
@@ -3967,6 +3968,26 @@ public:
         return formal && ASRUtils::is_unlimited_polymorphic_type(formal->m_type);
     }
 
+    bool type_is_unlimited_polymorphic_assumed_rank(ASR::ttype_t *type) {
+        if (!ASRUtils::is_unlimited_polymorphic_type(type)) {
+            return false;
+        }
+        type = ASRUtils::type_get_past_allocatable_pointer(type);
+        if (!ASR::is_a<ASR::Array_t>(*type)) {
+            return false;
+        }
+        ASR::Array_t *array = ASR::down_cast<ASR::Array_t>(type);
+        return array->m_physical_type ==
+            ASR::array_physical_typeType::AssumedRankArray;
+    }
+
+    bool formal_is_unlimited_polymorphic_assumed_rank(
+            ASR::Function_t *fn, size_t i) {
+        ASR::Variable_t *formal = formal_arg_var(fn, i);
+        return formal &&
+            type_is_unlimited_polymorphic_assumed_rank(formal->m_type);
+    }
+
     bool formal_is_optional(ASR::Function_t *fn, size_t i) {
         ASR::Variable_t *formal = formal_arg_var(fn, i);
         return formal && formal->m_presence == ASR::presenceType::Optional;
@@ -4061,6 +4082,80 @@ public:
             V(storage, ty_ptr), LR_NULL(ty_ptr));
     }
 
+    int64_t polymorphic_actual_tag(ASR::expr_t *actual) {
+        if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*actual)) {
+            ASR::ArrayPhysicalCast_t *cast =
+                ASR::down_cast<ASR::ArrayPhysicalCast_t>(actual);
+            int64_t tag = polymorphic_actual_tag(cast->m_arg);
+            if (tag != 0) return tag;
+        } else if (ASR::is_a<ASR::Cast_t>(*actual)) {
+            ASR::Cast_t *cast = ASR::down_cast<ASR::Cast_t>(actual);
+            int64_t tag = polymorphic_actual_tag(cast->m_arg);
+            if (tag != 0) return tag;
+        } else if (ASR::is_a<ASR::Var_t>(*actual)) {
+            ASR::Var_t *var = ASR::down_cast<ASR::Var_t>(actual);
+            ASR::symbol_t *sym =
+                ASRUtils::symbol_get_past_external(var->m_v);
+            if (ASR::is_a<ASR::Variable_t>(*sym)) {
+                ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(sym);
+                ASR::Struct_t *st = struct_symbol_from_type_decl(
+                    v->m_type_declaration);
+                if (st) {
+                    return struct_symbol_tag((ASR::symbol_t *)st);
+                }
+            }
+        }
+        return polymorphic_type_tag(ASRUtils::expr_type(actual));
+    }
+
+    uint32_t emit_polymorphic_assumed_rank_actual(ASR::expr_t *actual) {
+        int64_t tag = polymorphic_actual_tag(actual);
+        if (tag == 0) {
+            throw CodeGenError(
+                "liric: unsupported class(*) actual type");
+        }
+
+        ASR::ttype_t *actual_type = ASRUtils::type_get_past_allocatable_pointer(
+            ASRUtils::expr_type(actual));
+        if (ASR::is_a<ASR::Array_t>(*actual_type)) {
+            uint32_t desc = desc_ptr_of(actual);
+            desc_store_i64(desc, 24, emit_i64_const(tag));
+            return desc;
+        }
+
+        uint32_t data_ptr = 0;
+        if (expr_is_storage_reference(actual)) {
+            bool was_target = is_target;
+            is_target = true;
+            visit_expr(*actual);
+            is_target = was_target;
+            data_ptr = tmp;
+            if (expr_is_allocatable_struct(actual)) {
+                uint32_t raw = lr_emit_load(s, ty_ptr, V(data_ptr, ty_ptr));
+                data_ptr = class_data_ptr(raw);
+            }
+        } else {
+            visit_expr(*actual);
+            lr_type_t *at = value_type_for_expr(actual);
+            uint32_t slot = emit_temp_slot(at);
+            lr_emit_store(s, V(tmp, at), V(slot, ty_ptr));
+            data_ptr = slot;
+        }
+
+        ASR::ttype_t *core = ASRUtils::type_get_past_array(actual_type);
+        int64_t elem_bytes = (int64_t)element_byte_size(core);
+        uint32_t desc = emit_desc_alloca(0);
+        desc_store_base(desc, data_ptr);
+        desc_store_i64(desc, 8, emit_i64_const(elem_bytes));
+        desc_store_rank(desc, 0);
+        desc_store_i64(desc, 24, emit_i64_const(tag));
+        desc_store_i64(desc, DESC_HEADER_BYTES + 0, emit_i64_const(1));
+        desc_store_i64(desc, DESC_HEADER_BYTES + 8, emit_i64_const(1));
+        desc_store_i64(desc, DESC_HEADER_BYTES + 16,
+            emit_i64_const(elem_bytes));
+        return desc;
+    }
+
     uint32_t emit_polymorphic_actual(ASR::expr_t *actual) {
         if (ASRUtils::is_unlimited_polymorphic_type(
                 ASRUtils::expr_type(actual))) {
@@ -4090,7 +4185,7 @@ public:
             data_ptr = slot;
         }
 
-        int64_t tag = polymorphic_type_tag(ASRUtils::expr_type(actual));
+        int64_t tag = polymorphic_actual_tag(actual);
         if (tag == 0) {
             throw CodeGenError(
                 "liric: unsupported class(*) actual type");
@@ -4169,21 +4264,28 @@ public:
             ASR::ttype_t *type =
                 ASRUtils::type_get_past_allocatable_pointer(x.m_type);
             ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(type);
+            ASR::Array_t *shape_array_t = array_t;
+            ASR::ttype_t *arg_type =
+                ASRUtils::type_get_past_allocatable_pointer(
+                    ASRUtils::expr_type(x.m_arg));
+            if (ASR::is_a<ASR::Array_t>(*arg_type)) {
+                shape_array_t = ASR::down_cast<ASR::Array_t>(arg_type);
+            }
             bool was_target = is_target;
             is_target = true;
             visit_expr(*x.m_arg);
             is_target = was_target;
             uint32_t base = tmp;
-            uint32_t desc = emit_desc_alloca((int)array_t->n_dims);
+            uint32_t desc = emit_desc_alloca((int)shape_array_t->n_dims);
             int64_t elem_bytes = element_byte_size(array_t->m_type);
             desc_store_base(desc, base);
             desc_store_i64(desc, 8, emit_i64_const(elem_bytes));
-            desc_store_rank(desc, (int)array_t->n_dims);
+            desc_store_rank(desc, (int)shape_array_t->n_dims);
             desc_store_i64(desc, 24, emit_i64_const(0));
             uint32_t stride = emit_i64_const(elem_bytes);
-            for (size_t d = 0; d < array_t->n_dims; d++) {
-                uint32_t lbound = emit_array_dim_lbound(array_t, d);
-                uint32_t extent = emit_array_dim_extent(array_t, d);
+            for (size_t d = 0; d < shape_array_t->n_dims; d++) {
+                uint32_t lbound = emit_array_dim_lbound(shape_array_t, d);
+                uint32_t extent = emit_array_dim_extent(shape_array_t, d);
                 int64_t base_off = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
                 desc_store_i64(desc, base_off + 0, lbound);
                 desc_store_i64(desc, base_off + 8, extent);
@@ -4205,13 +4307,55 @@ public:
     // store the rvalue.
 
     void visit_Associate(const ASR::Associate_t &x) {
+        bool value_is_descriptor_array = false;
+        if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*x.m_value)) {
+            ASR::ArrayPhysicalCast_t *cast =
+                ASR::down_cast<ASR::ArrayPhysicalCast_t>(x.m_value);
+            value_is_descriptor_array = cast->m_new ==
+                ASR::array_physical_typeType::DescriptorArray;
+        }
+        bool value_is_descriptor_pointer = value_is_descriptor_array ||
+            type_is_unlimited_polymorphic_assumed_rank(
+                ASRUtils::expr_type(x.m_value));
+        bool mark_runtime_pointer_array = false;
+        uint64_t runtime_pointer_array_hash = 0;
+        if (ASR::is_a<ASR::Var_t>(*x.m_target)) {
+            ASR::Var_t *target = ASR::down_cast<ASR::Var_t>(x.m_target);
+            ASR::symbol_t *sym =
+                ASRUtils::symbol_get_past_external(target->m_v);
+            if (ASR::is_a<ASR::Variable_t>(*sym)) {
+                ASR::Variable_t *target_var =
+                    ASR::down_cast<ASR::Variable_t>(sym);
+                uint64_t h = get_hash((ASR::asr_t *)target_var);
+                if (type_is_unlimited_polymorphic_assumed_rank(
+                        ASRUtils::expr_type(x.m_value))) {
+                    class_desc_aliases.insert(h);
+                } else {
+                    class_desc_aliases.erase(h);
+                }
+                ASR::ttype_t *target_type =
+                    ASRUtils::type_get_past_allocatable_pointer(
+                        target_var->m_type);
+                if (value_is_descriptor_pointer &&
+                        ASR::is_a<ASR::Array_t>(*target_type)) {
+                    mark_runtime_pointer_array = true;
+                    runtime_pointer_array_hash = h;
+                }
+            }
+        }
         visit_expr(*x.m_value);
         uint32_t rhs = tmp;
         lr_type_t *t = value_type_for_expr(x.m_value);
+        if (value_is_descriptor_pointer) {
+            t = ty_ptr;
+        }
         is_target = true;
         visit_expr(*x.m_target);
         is_target = false;
         lr_emit_store(s, V(rhs, t), V(tmp, ty_ptr));
+        if (mark_runtime_pointer_array) {
+            runtime_pointer_arrays.insert(runtime_pointer_array_hash);
+        }
     }
 
     // --- ArrayItem (FixedSizeArray, single-dim only for now) ---
@@ -6021,7 +6165,10 @@ public:
         for (size_t i = 0; i < x.n_args; i++) {
             if (x.m_args[i].m_value) {
                 ASR::expr_t *arg = x.m_args[i].m_value;
-                if (formal_is_unlimited_polymorphic(fn, i)) {
+                if (formal_is_unlimited_polymorphic_assumed_rank(fn, i)) {
+                    args.push_back(V(emit_polymorphic_assumed_rank_actual(arg),
+                        ty_ptr));
+                } else if (formal_is_unlimited_polymorphic(fn, i)) {
                     args.push_back(V(emit_polymorphic_actual(arg), ty_ptr));
                 } else if (formal_is_optional(fn, i) &&
                         ASRUtils::is_allocatable(ASRUtils::expr_type(arg))) {
@@ -6216,7 +6363,10 @@ public:
         for (size_t i = 0; i < x.n_args; i++) {
             if (x.m_args[i].m_value) {
                 ASR::expr_t *arg = x.m_args[i].m_value;
-                if (formal_is_unlimited_polymorphic(fn, i)) {
+                if (formal_is_unlimited_polymorphic_assumed_rank(fn, i)) {
+                    args.push_back(V(emit_polymorphic_assumed_rank_actual(arg),
+                        ty_ptr));
+                } else if (formal_is_unlimited_polymorphic(fn, i)) {
                     args.push_back(V(emit_polymorphic_actual(arg), ty_ptr));
                 } else if (formal_is_optional(fn, i) &&
                         ASRUtils::is_allocatable(ASRUtils::expr_type(arg))) {
@@ -6299,6 +6449,27 @@ public:
             is_target = true;
             visit_expr(*x.m_arg);
             is_target = was_target;
+            if (ASR::is_a<ASR::Var_t>(*x.m_arg)) {
+                ASR::Var_t *var = ASR::down_cast<ASR::Var_t>(x.m_arg);
+                ASR::symbol_t *sym =
+                    ASRUtils::symbol_get_past_external(var->m_v);
+                if (ASR::is_a<ASR::Variable_t>(*sym)) {
+                    uint64_t h = get_hash((ASR::asr_t *)
+                        ASR::down_cast<ASR::Variable_t>(sym));
+                    if (class_desc_aliases.count(h)) {
+                        uint32_t desc = lr_emit_load(s, ty_ptr,
+                            V(tmp, ty_ptr));
+                        uint32_t data = desc_base_addr(desc);
+                        if (is_target) {
+                            tmp = data;
+                            return;
+                        }
+                        lr_type_t *dst_t = get_type(x.m_type);
+                        tmp = lr_emit_load(s, dst_t, V(data, ty_ptr));
+                        return;
+                    }
+                }
+            }
             uint32_t desc = lr_emit_load(s, ty_poly_desc, V(tmp, ty_ptr));
             uint32_t fld0 = 0;
             uint32_t data = lr_emit_extractvalue(s, ty_ptr,
@@ -8586,20 +8757,21 @@ public:
         is_target = true;
         visit_expr(*x.m_selector);
         is_target = was_target;
-        uint32_t desc = lr_emit_load(s, ty_poly_desc, V(tmp, ty_ptr));
-        uint32_t fld1 = 1;
-        uint32_t selector_tag = lr_emit_extractvalue(s, ty_i64,
-            V(desc, ty_poly_desc), &fld1, 1);
+        uint32_t selector_tag = 0;
+        if (type_is_unlimited_polymorphic_assumed_rank(
+                ASRUtils::expr_type(x.m_selector))) {
+            selector_tag = desc_load_i64(tmp, 24);
+        } else {
+            uint32_t desc = lr_emit_load(s, ty_poly_desc, V(tmp, ty_ptr));
+            uint32_t fld1 = 1;
+            selector_tag = lr_emit_extractvalue(s, ty_i64,
+                V(desc, ty_poly_desc), &fld1, 1);
+        }
 
         lr_error_t err;
         uint32_t merge_bb = lr_session_block(s);
         for (size_t i = 0; i < x.n_body; i++) {
-            if (x.m_body[i]->type != ASR::type_stmtType::TypeStmtType) {
-                continue;
-            }
-            ASR::TypeStmtType_t *stmt =
-                ASR::down_cast<ASR::TypeStmtType_t>(x.m_body[i]);
-            int64_t branch_tag = polymorphic_type_tag(stmt->m_type);
+            int64_t branch_tag = type_stmt_tag(x.m_body[i]);
             if (branch_tag == 0) {
                 continue;
             }
