@@ -6650,6 +6650,13 @@ public:
                     V(c0, dst_t), V(im, dst_ft), &fld1, 1);
                 break;
             }
+            case ASR::cast_kindType::PointerToInteger:
+            case ASR::cast_kindType::CPtrToUnsignedInteger:
+                tmp = lr_emit_ptrtoint(s, dst_t, V(val, src_t));
+                break;
+            case ASR::cast_kindType::UnsignedIntegerToCPtr:
+                tmp = lr_emit_inttoptr(s, dst_t, V(val, src_t));
+                break;
             default:
                 throw CodeGenError(
                     std::string("liric: unsupported cast kind ")
