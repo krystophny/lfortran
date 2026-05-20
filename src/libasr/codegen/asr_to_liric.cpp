@@ -562,7 +562,119 @@ public:
         lr_type_t *t = get_type(x.m_type);
         tmp = lr_emit_xor(s, t, V(v, t), I(-1, t));
     }
+    // Element-wise integer compare with array result (e.g. `a > 0`
+    // where `a` is an array).  The array_op pass lowers most such
+    // exprs at the statement layer (whole-array Assignment), but
+    // contexts like `print *, a > 0` keep the IntegerCompare as a
+    // print argument with array type.  Lower by allocating a flat
+    // result buffer and emitting an element-wise loop over the
+    // array side.
+    void emit_array_compare_int(const ASR::IntegerCompare_t &x) {
+        if (x.m_value) { visit_expr(*x.m_value); return; }
+        ASR::ttype_t *res_t = ASRUtils::type_get_past_allocatable_pointer(x.m_type);
+        ASR::Array_t *res_arr = ASR::down_cast<ASR::Array_t>(res_t);
+        int64_t n_eles = ASRUtils::get_fixed_size_of_array(
+            res_arr->m_dims, res_arr->n_dims);
+        if (n_eles <= 0) {
+            throw CodeGenError("liric: array compare with non-fixed n_eles");
+        }
+        ASR::ttype_t *elem_res_t = ASRUtils::type_get_past_array(res_t);
+        int64_t res_elem_bytes = element_byte_size(elem_res_t);
+
+        // Determine which side is the array; build a per-element load.
+        ASR::ttype_t *lt = ASRUtils::type_get_past_allocatable_pointer(
+            ASRUtils::expr_type(x.m_left));
+        ASR::ttype_t *rt = ASRUtils::type_get_past_allocatable_pointer(
+            ASRUtils::expr_type(x.m_right));
+        bool left_arr = ASR::is_a<ASR::Array_t>(*lt);
+        bool right_arr = ASR::is_a<ASR::Array_t>(*rt);
+
+        // Materialise the operand side(s) as pointers.
+        bool was_target = is_target;
+        is_target = true;
+        visit_expr(*x.m_left);
+        uint32_t left_ptr = tmp;
+        visit_expr(*x.m_right);
+        uint32_t right_ptr = tmp;
+        is_target = was_target;
+        ASR::ttype_t *scalar_lt = left_arr
+            ? ASRUtils::type_get_past_array(lt) : lt;
+        ASR::ttype_t *scalar_rt = right_arr
+            ? ASRUtils::type_get_past_array(rt) : rt;
+        lr_type_t *scalar_lr_t = get_type(scalar_lt);
+        lr_type_t *scalar_rr_t = get_type(scalar_rt);
+        int64_t left_elem_bytes = left_arr
+            ? element_byte_size(scalar_lt) : 0;
+        int64_t right_elem_bytes = right_arr
+            ? element_byte_size(scalar_rt) : 0;
+
+        uint32_t dst_ptr = emit_storage_alloca_nbytes(
+            (uint64_t)(n_eles * res_elem_bytes));
+
+        // For non-array sides, load the scalar value once.
+        uint32_t left_scalar = 0;
+        if (!left_arr) {
+            // visit_expr already produced a vreg (with is_target=true
+            // for storage-ref).  Materialise scalar by load.
+            // For constants and pure values, left_ptr already holds the value
+            // as a vreg; we conservatively go through a load via slot.
+            uint32_t slot = emit_temp_slot(scalar_lr_t);
+            lr_emit_store(s, V(left_ptr, scalar_lr_t), V(slot, ty_ptr));
+            left_scalar = lr_emit_load(s, scalar_lr_t, V(slot, ty_ptr));
+        }
+        uint32_t right_scalar = 0;
+        if (!right_arr) {
+            uint32_t slot = emit_temp_slot(scalar_rr_t);
+            lr_emit_store(s, V(right_ptr, scalar_rr_t), V(slot, ty_ptr));
+            right_scalar = lr_emit_load(s, scalar_rr_t, V(slot, ty_ptr));
+        }
+
+        int liric_cmp = LR_CMP_EQ;
+        switch (x.m_op) {
+            case ASR::cmpopType::Eq:    liric_cmp = LR_CMP_EQ; break;
+            case ASR::cmpopType::NotEq: liric_cmp = LR_CMP_NE; break;
+            case ASR::cmpopType::Lt:    liric_cmp = LR_CMP_SLT; break;
+            case ASR::cmpopType::LtE:   liric_cmp = LR_CMP_SLE; break;
+            case ASR::cmpopType::Gt:    liric_cmp = LR_CMP_SGT; break;
+            case ASR::cmpopType::GtE:   liric_cmp = LR_CMP_SGE; break;
+        }
+
+        for (int64_t i = 0; i < n_eles; i++) {
+            uint32_t lv, rv;
+            if (left_arr) {
+                lr_operand_desc_t off[1] = {I(i * left_elem_bytes, ty_i64)};
+                uint32_t p = lr_emit_gep(s, ty_i8,
+                    V(left_ptr, ty_ptr), off, 1);
+                lv = lr_emit_load(s, scalar_lr_t, V(p, ty_ptr));
+            } else {
+                lv = left_scalar;
+            }
+            if (right_arr) {
+                lr_operand_desc_t off[1] = {I(i * right_elem_bytes, ty_i64)};
+                uint32_t p = lr_emit_gep(s, ty_i8,
+                    V(right_ptr, ty_ptr), off, 1);
+                rv = lr_emit_load(s, scalar_rr_t, V(p, ty_ptr));
+            } else {
+                rv = right_scalar;
+            }
+            uint32_t c = lr_emit_icmp(s, liric_cmp,
+                V(lv, scalar_lr_t), V(rv, scalar_rr_t));
+            // zext i1 -> Logical kind (i32) and store.
+            lr_type_t *res_lr_t = get_type(elem_res_t);
+            uint32_t z = lr_emit_zext(s, res_lr_t, V(c, ty_i1));
+            lr_operand_desc_t doff[1] = {I(i * res_elem_bytes, ty_i64)};
+            uint32_t dp = lr_emit_gep(s, ty_i8,
+                V(dst_ptr, ty_ptr), doff, 1);
+            lr_emit_store(s, V(z, res_lr_t), V(dp, ty_ptr));
+        }
+        tmp = dst_ptr;
+    }
+
     void visit_IntegerCompare(const ASR::IntegerCompare_t &x) {
+        if (ASR::is_a<ASR::Array_t>(*ASRUtils::type_get_past_allocatable_pointer(x.m_type))) {
+            emit_array_compare_int(x);
+            return;
+        }
         LIRIC_CMP_INT(x);
     }
     void visit_UnsignedIntegerCompare(const ASR::UnsignedIntegerCompare_t &x) {
