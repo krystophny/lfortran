@@ -6597,6 +6597,16 @@ public:
                 }
                 break;
             }
+            case ASR::cast_kindType::ComplexToInteger: {
+                int64_t src_kind = ASRUtils::extract_kind_from_ttype_t(
+                    ASRUtils::expr_type(x.m_arg));
+                lr_type_t *src_ft = (src_kind == 4) ? ty_f32 : ty_f64;
+                uint32_t fld0 = 0;
+                uint32_t re = lr_emit_extractvalue(s, src_ft,
+                    V(val, src_t), &fld0, 1);
+                tmp = lr_emit_fptosi(s, dst_t, V(re, src_ft));
+                break;
+            }
             case ASR::cast_kindType::ComplexToComplex: {
                 if (src_t == dst_t) { tmp = val; break; }
                 int64_t src_kind = ASRUtils::extract_kind_from_ttype_t(
