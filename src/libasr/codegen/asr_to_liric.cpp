@@ -2028,6 +2028,62 @@ public:
 
     // --- If ---
 
+    // Fortran 2018 `select rank (sel)` on an assumed-rank descriptor.
+    // The descriptor stores the current rank as an i8 at offset 20.
+    // For each `rank(N)` arm, branch on (desc.rank == N) and execute
+    // the arm body inside a fresh basic block.  Any default arm runs
+    // when no preceding rank case matched.  This mirrors the LLVM
+    // backend's chain of conditional branches.
+    void visit_SelectRank(const ASR::SelectRank_t &x) {
+        if (!ASR::is_a<ASR::Var_t>(*x.m_selector)) {
+            throw CodeGenError(
+                "liric: select-rank selector must be a Var");
+        }
+        // Descriptor pointer for the assumed-rank dummy.
+        uint32_t desc = desc_ptr_of(x.m_selector);
+        // Load i8 rank field at offset 20.
+        lr_operand_desc_t off[1] = {I(20, ty_i64)};
+        uint32_t rank_p = lr_emit_gep(s, ty_i8,
+            V(desc, ty_ptr), off, 1);
+        uint32_t rank_i8 = lr_emit_load(s, ty_i8, V(rank_p, ty_ptr));
+        uint32_t rank_i32 = lr_emit_zext(s, ty_i32, V(rank_i8, ty_i8));
+
+        lr_error_t err;
+        uint32_t merge_bb = lr_session_block(s);
+
+        for (size_t i = 0; i < x.n_body; i++) {
+            ASR::rank_stmt_t *rs = x.m_body[i];
+            if (rs->type != ASR::rank_stmtType::RankExpr) {
+                throw CodeGenError(
+                    "liric: only RankExpr arms supported in select-rank");
+            }
+            ASR::RankExpr_t *re = ASR::down_cast<ASR::RankExpr_t>(rs);
+            visit_expr(*re->m_rank);
+            lr_type_t *rt = get_type(ASRUtils::expr_type(re->m_rank));
+            uint32_t want = (rt == ty_i32)
+                ? tmp
+                : ((lr_type_width(s, rt) > 32)
+                    ? lr_emit_trunc(s, ty_i32, V(tmp, rt))
+                    : lr_emit_sext(s, ty_i32, V(tmp, rt)));
+            uint32_t cmp = lr_emit_icmp(s, LR_CMP_EQ,
+                V(rank_i32, ty_i32), V(want, ty_i32));
+            uint32_t then_bb = lr_session_block(s);
+            uint32_t next_bb = lr_session_block(s);
+            lr_emit_condbr(s, V(cmp, ty_i1), then_bb, next_bb);
+            lr_session_set_block(s, then_bb, &err);
+            for (size_t j = 0; j < re->n_body; j++) {
+                visit_stmt(*re->m_body[j]);
+            }
+            lr_emit_br(s, merge_bb);
+            lr_session_set_block(s, next_bb, &err);
+        }
+        for (size_t i = 0; i < x.n_default; i++) {
+            visit_stmt(*x.m_default[i]);
+        }
+        lr_emit_br(s, merge_bb);
+        lr_session_set_block(s, merge_bb, &err);
+    }
+
     void visit_If(const ASR::If_t &x) {
         visit_expr(*x.m_test);
         uint32_t cond = tmp;
