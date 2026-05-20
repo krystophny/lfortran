@@ -7200,11 +7200,68 @@ public:
             case ASRUtils::IntrinsicElementalFunctions::Exp2:
                 emit_real_libm_unary(x, "exp2f", "exp2");
                 return;
+            case ASRUtils::IntrinsicElementalFunctions::SameTypeAs:
+            case ASRUtils::IntrinsicElementalFunctions::ExtendsTypeOf: {
+                if (x.n_args != 2) {
+                    throw CodeGenError(
+                        "liric: same_type_as/extends_type_of expects two args");
+                }
+                // ExtendsTypeOf is approximated as same-tag compare: we
+                // lack a runtime parent-chain registry, so subtyping
+                // cases will fail at runtime rather than at link time.
+                uint32_t tag_a = load_polymorphic_tag_from_expr(x.m_args[0]);
+                uint32_t tag_b = load_polymorphic_tag_from_expr(x.m_args[1]);
+                tmp = lr_emit_icmp(s, LR_CMP_EQ,
+                    V(tag_a, ty_i64), V(tag_b, ty_i64));
+                return;
+            }
             default: break;
         }
         throw CodeGenError(std::string("liric: runtime intrinsic ")
             + ASRUtils::get_intrinsic_name(x.m_intrinsic_id)
             + " not yet supported");
+    }
+
+    // Load the dynamic type tag of a polymorphic actual.  For class(*)
+    // arguments the tag lives in field 1 of the {data, tag} descriptor.
+    // For class(T) arguments the tag is the i64 at the start of the
+    // class header (offset -class_header_bytes from the data ptr).
+    uint32_t load_polymorphic_tag_from_expr(ASR::expr_t *arg) {
+        ASR::ttype_t *at = ASRUtils::type_get_past_allocatable_pointer(
+            ASRUtils::expr_type(arg));
+        if (ASRUtils::is_unlimited_polymorphic_type(at)) {
+            bool was_target = is_target;
+            is_target = true;
+            visit_expr(*arg);
+            is_target = was_target;
+            uint32_t addr = tmp;
+            uint32_t desc = lr_emit_load(s, ty_poly_desc,
+                V(addr, ty_ptr));
+            uint32_t fld1 = 1;
+            return lr_emit_extractvalue(s, ty_i64,
+                V(desc, ty_poly_desc), &fld1, 1);
+        }
+        // class(T) or concrete: look up tag in the class header.
+        bool was_target = is_target;
+        is_target = true;
+        visit_expr(*arg);
+        is_target = was_target;
+        uint32_t addr = tmp;
+        if (expr_is_allocatable_struct(arg)) {
+            uint32_t raw = lr_emit_load(s, ty_ptr, V(addr, ty_ptr));
+            return load_raw_object_type_tag(raw);
+        }
+        if (ASRUtils::is_class_type(at)) {
+            return load_object_type_tag(addr);
+        }
+        // Concrete type(U): no class header — use the static struct tag.
+        ASR::Struct_t *st = struct_symbol_for_concrete_expr(arg);
+        if (st) {
+            return emit_i64_const(struct_symbol_tag(
+                (ASR::symbol_t *)st));
+        }
+        throw CodeGenError(
+            "liric: cannot extract dynamic type tag for argument");
     }
 
     // Emit a single-arg real-typed libm call: pick float vs double variant
