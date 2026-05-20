@@ -3997,6 +3997,10 @@ public:
             ASR::down_cast<ASR::Array_t>(formal_type);
         ASR::Array_t *actual_array =
             ASR::down_cast<ASR::Array_t>(actual_type);
+        if (formal_array->m_physical_type ==
+                ASR::array_physical_typeType::AssumedRankArray) {
+            return false;
+        }
         return actual_array->m_physical_type ==
             ASR::array_physical_typeType::DescriptorArray &&
             formal_array->m_physical_type !=
@@ -5029,6 +5033,9 @@ public:
         }
         ASR::Array_t *array_t = down_cast<ASR::Array_t>(naked);
         int n_dims = (int)array_t->n_dims;
+        if (n_dims == 0 && arg.n_dims > 0) {
+            n_dims = (int)arg.n_dims;
+        }
         int64_t elem_bytes = element_byte_size(array_t->m_type);
 
         bool was_target = is_target;
@@ -9802,9 +9809,13 @@ found_offset:
         }
         ASR::Array_t *array_t = down_cast<ASR::Array_t>(vt);
         int64_t n_dims = (int64_t)array_t->n_dims;
+        bool is_assumed_rank =
+            array_t->m_physical_type ==
+                ASR::array_physical_typeType::AssumedRankArray;
         bool use_type_dims =
-            array_t->m_physical_type !=
-                ASR::array_physical_typeType::DescriptorArray ||
+            (array_t->m_physical_type !=
+                ASR::array_physical_typeType::DescriptorArray &&
+                !is_assumed_rank) ||
             ASR::is_a<ASR::IntrinsicArrayFunction_t>(*x.m_v);
 
         if (use_type_dims) {
@@ -9920,6 +9931,55 @@ found_offset:
             } else {
                 tmp = lr_emit_trunc(s, rt2, V(ext, ty_i64));
             }
+            return;
+        }
+
+        if (!x.m_dim && is_assumed_rank) {
+            lr_operand_desc_t rank_off[1] = {I(20, ty_i64)};
+            uint32_t rank_p = lr_emit_gep(s, ty_i8,
+                V(desc, ty_ptr), rank_off, 1);
+            uint32_t rank_i8 = lr_emit_load(s, ty_i8, V(rank_p, ty_ptr));
+            uint32_t rank = lr_emit_zext(s, ty_i64, V(rank_i8, ty_i8));
+            uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+            uint32_t prod_ptr = lr_emit_alloca(s, ty_i64);
+            lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+            lr_emit_store(s, I(1, ty_i64), V(prod_ptr, ty_ptr));
+
+            lr_error_t err;
+            uint32_t head_bb = lr_session_block(s);
+            uint32_t body_bb = lr_session_block(s);
+            uint32_t done_bb = lr_session_block(s);
+            lr_emit_br(s, head_bb);
+
+            lr_session_set_block(s, head_bb, &err);
+            uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+            uint32_t more = lr_emit_icmp(s, LR_CMP_SLT,
+                V(idx, ty_i64), V(rank, ty_i64));
+            lr_emit_condbr(s, V(more, ty_i1), body_bb, done_bb);
+
+            lr_session_set_block(s, body_bb, &err);
+            uint32_t dim_off = lr_emit_mul(s, ty_i64,
+                V(idx, ty_i64), I(DESC_DIM_BYTES, ty_i64));
+            uint32_t ext_off = lr_emit_add(s, ty_i64,
+                V(dim_off, ty_i64),
+                I(DESC_HEADER_BYTES + DESC_DIM_EXTENT, ty_i64));
+            lr_operand_desc_t ext_gep[1] = {V(ext_off, ty_i64)};
+            uint32_t ext_p = lr_emit_gep(s, ty_i8,
+                V(desc, ty_ptr), ext_gep, 1);
+            uint32_t ext = lr_emit_load(s, ty_i64, V(ext_p, ty_ptr));
+            uint32_t prod = lr_emit_load(s, ty_i64, V(prod_ptr, ty_ptr));
+            prod = lr_emit_mul(s, ty_i64, V(prod, ty_i64), V(ext, ty_i64));
+            lr_emit_store(s, V(prod, ty_i64), V(prod_ptr, ty_ptr));
+            uint32_t next = lr_emit_add(s, ty_i64,
+                V(idx, ty_i64), I(1, ty_i64));
+            lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+            lr_emit_br(s, head_bb);
+
+            lr_session_set_block(s, done_bb, &err);
+            uint32_t prod64 = lr_emit_load(s, ty_i64, V(prod_ptr, ty_ptr));
+            lr_type_t *rt = get_type(x.m_type);
+            tmp = (rt == ty_i64) ? prod64 : lr_emit_trunc(s, rt,
+                V(prod64, ty_i64));
             return;
         }
 
