@@ -905,7 +905,7 @@ public:
     bool is_allocatable_struct_type(ASR::ttype_t *type) {
         if (!ASRUtils::is_allocatable(type)) return false;
         ASR::ttype_t *core = ASRUtils::type_get_past_allocatable_pointer(type);
-        core = ASRUtils::type_get_past_array(core);
+        if (ASR::is_a<ASR::Array_t>(*core)) return false;
         return ASR::is_a<ASR::StructType_t>(*core);
     }
 
@@ -973,7 +973,9 @@ public:
             }
         }
         seen.erase(st_hash);
-        return nbytes > 0 ? nbytes : 1;
+        uint64_t abi_nbytes = lr_type_size_or_default(
+            get_type(st->m_struct_signature));
+        return std::max(nbytes > 0 ? nbytes : 1, abi_nbytes);
     }
 
     uint64_t struct_storage_size(ASR::Struct_t *st) {
@@ -1893,20 +1895,130 @@ public:
         reset_descriptor_array(src_desc, array_t);
     }
 
+    void store_descriptor_shape_with_base(uint32_t dst_desc,
+                                          uint32_t new_base,
+                                          uint32_t elem_len,
+                                          uint32_t src_desc,
+                                          ASR::Array_t *array_t) {
+        int n_dims = (int)array_t->n_dims;
+        desc_store_base(dst_desc, new_base);
+        desc_store_i64(dst_desc, 8, elem_len);
+        desc_store_rank(dst_desc, n_dims);
+        desc_store_i64(dst_desc, 24, emit_i64_const(0));
+
+        uint32_t stride = elem_len;
+        for (int d = 0; d < n_dims; d++) {
+            uint32_t extent = desc_dim_extent(src_desc, d);
+            int64_t base_off = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
+            desc_store_i64(dst_desc, base_off + 0, emit_i64_const(1));
+            desc_store_i64(dst_desc, base_off + 8, extent);
+            desc_store_i64(dst_desc, base_off + 16, stride);
+            stride = lr_emit_mul(s, ty_i64,
+                V(stride, ty_i64), V(extent, ty_i64));
+        }
+    }
+
+    void emit_allocatable_descriptor_array_assignment(ASR::expr_t *target,
+                                                     ASR::expr_t *value,
+                                                     ASR::Array_t *array_t) {
+        uint32_t src_desc = desc_ptr_of(value);
+        uint32_t dst_desc = desc_ptr_of(target);
+        uint32_t src_base = desc_base_addr(src_desc);
+        uint32_t old_base = desc_base_addr(dst_desc);
+        uint32_t total = descriptor_array_element_count(
+            src_desc, (int)array_t->n_dims);
+        uint32_t elem_len = desc_load_i64(src_desc, 8);
+        uint32_t has_elements = lr_emit_icmp(s, LR_CMP_SGT,
+            V(total, ty_i64), I(0, ty_i64));
+        uint32_t alloc_elems = lr_emit_select(s, ty_i64,
+            V(has_elements, ty_i1), V(total, ty_i64), I(1, ty_i64));
+        uint32_t bytes = lr_emit_mul(s, ty_i64,
+            V(alloc_elems, ty_i64), V(elem_len, ty_i64));
+        uint32_t copy_bytes = lr_emit_mul(s, ty_i64,
+            V(total, ty_i64), V(elem_len, ty_i64));
+
+        uint32_t allocator = emit_call(
+            "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+        lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
+        declare_func("_lfortran_malloc_alloc", ty_ptr,
+            malloc_params, 2, false);
+        lr_operand_desc_t malloc_args[] = {
+            V(allocator, ty_ptr), V(bytes, ty_i64)
+        };
+        uint32_t new_base = emit_call("_lfortran_malloc_alloc",
+            ty_ptr, malloc_args, 2);
+
+        lr_type_t *memcpy_params[] = {ty_ptr, ty_ptr, ty_i64};
+        declare_func("memcpy", ty_ptr, memcpy_params, 3, false);
+        lr_operand_desc_t memcpy_args[] = {
+            V(new_base, ty_ptr), V(src_base, ty_ptr), V(copy_bytes, ty_i64)
+        };
+        emit_call("memcpy", ty_ptr, memcpy_args, 3);
+
+        store_descriptor_shape_with_base(dst_desc, new_base, elem_len,
+            src_desc, array_t);
+        emit_free_if_nonnull(allocator, old_base);
+    }
+
+    void resize_descriptor_array_like(ASR::expr_t *target,
+                                      ASR::expr_t *source,
+                                      ASR::Array_t *array_t) {
+        uint32_t src_desc = desc_ptr_of(source);
+        uint32_t dst_desc = desc_ptr_of(target);
+        uint32_t old_base = desc_base_addr(dst_desc);
+        uint32_t total = descriptor_array_element_count(
+            src_desc, (int)array_t->n_dims);
+        uint32_t elem_len = desc_load_i64(src_desc, 8);
+        uint32_t has_elements = lr_emit_icmp(s, LR_CMP_SGT,
+            V(total, ty_i64), I(0, ty_i64));
+        uint32_t alloc_elems = lr_emit_select(s, ty_i64,
+            V(has_elements, ty_i1), V(total, ty_i64), I(1, ty_i64));
+        uint32_t bytes = lr_emit_mul(s, ty_i64,
+            V(alloc_elems, ty_i64), V(elem_len, ty_i64));
+
+        uint32_t allocator = emit_call(
+            "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+        lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
+        declare_func("_lfortran_malloc_alloc", ty_ptr,
+            malloc_params, 2, false);
+        lr_operand_desc_t malloc_args[] = {
+            V(allocator, ty_ptr), V(bytes, ty_i64)
+        };
+        uint32_t new_base = emit_call("_lfortran_malloc_alloc",
+            ty_ptr, malloc_args, 2);
+
+        lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
+        declare_func("memset", ty_ptr, memset_params, 3, false);
+        lr_operand_desc_t memset_args[] = {
+            V(new_base, ty_ptr), I(0, ty_i32), V(bytes, ty_i64)
+        };
+        emit_call("memset", ty_ptr, memset_args, 3);
+
+        store_descriptor_shape_with_base(dst_desc, new_base, elem_len,
+            src_desc, array_t);
+        emit_free_if_nonnull(allocator, old_base);
+    }
+
     void emit_descriptor_array_assignment(ASR::expr_t *target,
                                           ASR::expr_t *value,
-                                          ASR::Array_t *array_t) {
+                                          ASR::Array_t *array_t,
+                                          bool target_allocatable) {
         uint32_t src_desc = desc_ptr_of(value);
         uint32_t dst_desc = desc_ptr_of(target);
         uint32_t src_base = desc_base_addr(src_desc);
         uint32_t dst_base = desc_base_addr(dst_desc);
         uint32_t total = descriptor_array_element_count(
-            dst_desc, (int)array_t->n_dims);
+            src_desc, (int)array_t->n_dims);
         uint32_t elem_len = desc_load_i64(dst_desc, 8);
 
         ASR::ttype_t *elem_type =
             ASRUtils::type_get_past_allocatable_pointer(array_t->m_type);
         elem_type = ASRUtils::type_get_past_array(elem_type);
+        if (target_allocatable && !ASR::is_a<ASR::String_t>(*elem_type)) {
+            emit_allocatable_descriptor_array_assignment(
+                target, value, array_t);
+            return;
+        }
         if (!ASR::is_a<ASR::String_t>(*elem_type)) {
             uint32_t bytes = lr_emit_mul(s, ty_i64,
                 V(total, ty_i64), V(elem_len, ty_i64));
@@ -2061,7 +2173,8 @@ public:
                         x.m_target, x.m_value, array_t);
                 } else {
                     emit_descriptor_array_assignment(
-                        x.m_target, x.m_value, array_t);
+                        x.m_target, x.m_value, array_t,
+                        ASRUtils::is_allocatable(target_expr_type));
                 }
                 return;
             }
@@ -2633,14 +2746,54 @@ public:
         tmp = new_desc;
     }
 
-    // --- DebugCheckArrayBounds: no-op (bounds_checking is off by default) ---
+    // --- DebugCheckArrayBounds ---
+    //
+    // array_op lowers allocatable array-section assignment into temporary
+    // arrays plus scalar copy loops.  The shape relation survives here, so
+    // resize descriptor-array lhs storage before the generated loop reads
+    // ubound(lhs).
 
     void visit_DebugCheckArrayBounds(
-            const ASR::DebugCheckArrayBounds_t & /*x*/) {
-        // The frontend always emits this node before an array-shape
-        // assignment.  When bounds_checking is enabled the LLVM backend
-        // wires runtime asserts; we just drop the check for now so the
-        // assignment itself still runs.
+            const ASR::DebugCheckArrayBounds_t &x) {
+        if (x.n_components != 1 || x.m_move_allocation) {
+            return;
+        }
+        ASR::ttype_t *target_type = expr_storage_type(x.m_target);
+        if (!ASRUtils::is_allocatable(target_type)) {
+            return;
+        }
+        target_type = ASRUtils::type_get_past_allocatable_pointer(
+            target_type);
+        if (!ASR::is_a<ASR::Array_t>(*target_type)) {
+            return;
+        }
+        ASR::Array_t *target_array = ASR::down_cast<ASR::Array_t>(
+            target_type);
+        if (target_array->m_physical_type !=
+                ASR::array_physical_typeType::DescriptorArray) {
+            return;
+        }
+        ASR::ttype_t *source_type =
+            ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(x.m_components[0]));
+        if (!ASR::is_a<ASR::Array_t>(*source_type)) {
+            return;
+        }
+        ASR::Array_t *source_array = ASR::down_cast<ASR::Array_t>(
+            source_type);
+        if (source_array->m_physical_type !=
+                ASR::array_physical_typeType::DescriptorArray) {
+            return;
+        }
+        ASR::ttype_t *elem_type =
+            ASRUtils::type_get_past_allocatable_pointer(
+                target_array->m_type);
+        elem_type = ASRUtils::type_get_past_array(elem_type);
+        if (ASR::is_a<ASR::String_t>(*elem_type)) {
+            return;
+        }
+        resize_descriptor_array_like(
+            x.m_target, x.m_components[0], target_array);
     }
 
     // --- BitCast ---
@@ -3638,6 +3791,9 @@ public:
             }
             case ASR::ttypeType::String:
                 return 16;            // descriptor
+            case ASR::ttypeType::StructType: {
+                return (int64_t)lr_type_size_or_default(get_type(t));
+            }
             case ASR::ttypeType::Pointer:
             case ASR::ttypeType::CPtr:
                 return 8;
