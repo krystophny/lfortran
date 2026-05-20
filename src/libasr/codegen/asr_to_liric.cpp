@@ -177,6 +177,7 @@ public:
     // Cached types
     lr_type_t *ty_void, *ty_i1, *ty_i8, *ty_i16, *ty_i32, *ty_i64;
     lr_type_t *ty_f32, *ty_f64, *ty_ptr;
+    lr_type_t *ty_c32, *ty_c64;
     lr_type_t *ty_str_desc;     // Fortran string descriptor: {i8*, i64}
     lr_type_t *ty_poly_desc;    // class(*) descriptor: {data*, type_tag}
 
@@ -194,6 +195,14 @@ public:
         ty_f32  = lr_type_f32_s(s);
         ty_f64  = lr_type_f64_s(s);
         ty_ptr  = lr_type_ptr_s(s);
+        {
+            lr_type_t *fields[2] = {ty_f32, ty_f32};
+            ty_c32 = lr_type_struct_s(s, fields, 2, false);
+        }
+        {
+            lr_type_t *fields[2] = {ty_f64, ty_f64};
+            ty_c64 = lr_type_struct_s(s, fields, 2, false);
+        }
         // String descriptor mirrors the LLVM backend's character_type:
         // a 16-byte struct {data_ptr, length} passed by pointer at the
         // Fortran ABI boundary.
@@ -261,9 +270,7 @@ public:
                 return ty_i1;
             case ASR::ttypeType::Complex: {
                 int kind = ASRUtils::extract_kind_from_ttype_t(t);
-                lr_type_t *re = (kind == 4) ? ty_f32 : ty_f64;
-                lr_type_t *fields[2] = {re, re};
-                return lr_type_struct_s(s, fields, 2, false);
+                return (kind == 4) ? ty_c32 : ty_c64;
             }
             case ASR::ttypeType::String:
                 return ty_str_desc;
@@ -854,6 +861,10 @@ public:
         return 32;
     }
 
+    bool return_type_uses_sret(lr_type_t *t) {
+        return t != ty_void && lr_type_width(s, t) == 0;
+    }
+
     uint64_t storage_size_or_default(ASR::ttype_t *asr_type,
             lr_type_t *liric_type) {
         ASR::ttype_t *type =
@@ -1260,8 +1271,18 @@ public:
             return;
         }
 
+        lr_type_t *ret_type = ty_void;
+        bool uses_sret = false;
+        if (x.m_return_var) {
+            ret_type = get_type(ASRUtils::expr_type(x.m_return_var));
+            uses_sret = return_type_uses_sret(ret_type);
+        }
+
         // Build parameter types
         std::vector<lr_type_t *> param_types;
+        if (uses_sret) {
+            param_types.push_back(ty_ptr);
+        }
         for (size_t i = 0; i < x.n_args; i++) {
             ASR::Var_t *arg_var = down_cast<ASR::Var_t>(x.m_args[i]);
             ASR::Variable_t *v = down_cast<ASR::Variable_t>(arg_var->m_v);
@@ -1270,15 +1291,11 @@ public:
             (void)v;
         }
 
-        lr_type_t *ret_type = ty_void;
-        if (x.m_return_var) {
-            ret_type = get_type(ASRUtils::expr_type(x.m_return_var));
-        }
-
         lr_error_t err;
         std::string fn_name = callable_name(
             const_cast<ASR::Function_t *>(&x));
-        lr_session_func_begin(s, fn_name.c_str(), ret_type,
+        lr_session_func_begin(s, fn_name.c_str(),
+            uses_sret ? ty_void : ret_type,
             param_types.data(), param_types.size(), false, &err);
 
         uint32_t entry_block = lr_session_block(s);
@@ -1291,7 +1308,7 @@ public:
         for (size_t i = 0; i < x.n_args; i++) {
             ASR::Var_t *arg_var = down_cast<ASR::Var_t>(x.m_args[i]);
             ASR::Variable_t *v = down_cast<ASR::Variable_t>(arg_var->m_v);
-            uint32_t p = lr_session_param(s, i);
+            uint32_t p = lr_session_param(s, i + (uses_sret ? 1 : 0));
             uint64_t h = get_hash((ASR::asr_t *)v);
             lr_symtab[h] = p;
         }
@@ -1343,7 +1360,13 @@ public:
             uint32_t slot = lr_symtab[get_hash((ASR::asr_t *)v)];
             lr_type_t *rt = get_type(v->m_type);
             uint32_t val = lr_emit_load(s, rt, V(slot, ty_ptr));
-            lr_emit_ret(s, V(val, rt));
+            if (uses_sret) {
+                uint32_t out = lr_session_param(s, 0);
+                lr_emit_store(s, V(val, rt), V(out, ty_ptr));
+                lr_emit_ret_void(s);
+            } else {
+                lr_emit_ret(s, V(val, rt));
+            }
         } else {
             lr_emit_ret_void(s);
         }
@@ -3122,6 +3145,76 @@ public:
             V(c0, ct), F(x.m_im, ft), &fld1, 1);
     }
 
+    uint32_t emit_real_libm_call(const char *fname_f32,
+                                 const char *fname_f64,
+                                 uint32_t arg, lr_type_t *ft) {
+        const char *fn = (ft == ty_f32) ? fname_f32 : fname_f64;
+        lr_type_t *params[] = {ft};
+        declare_func(fn, ft, params, 1, false);
+        lr_operand_desc_t args[] = {V(arg, ft)};
+        return emit_call(fn, ft, args, 1);
+    }
+
+    uint32_t emit_real_libm_call2(const char *fname_f32,
+                                  const char *fname_f64,
+                                  uint32_t arg1, uint32_t arg2,
+                                  lr_type_t *ft) {
+        const char *fn = (ft == ty_f32) ? fname_f32 : fname_f64;
+        lr_type_t *params[] = {ft, ft};
+        declare_func(fn, ft, params, 2, false);
+        lr_operand_desc_t args[] = {V(arg1, ft), V(arg2, ft)};
+        return emit_call(fn, ft, args, 2);
+    }
+
+    uint32_t emit_complex_value(lr_type_t *ct, lr_type_t *ft,
+                                uint32_t re, uint32_t im) {
+        uint32_t fld0 = 0, fld1 = 1;
+        uint32_t c0 = lr_emit_insertvalue(s, ct,
+            LR_UNDEF(ct), V(re, ft), &fld0, 1);
+        return lr_emit_insertvalue(s, ct,
+            V(c0, ct), V(im, ft), &fld1, 1);
+    }
+
+    void emit_complex_exp_from_parts(lr_type_t *ct, lr_type_t *ft,
+                                     uint32_t re, uint32_t im) {
+        uint32_t exp_re = emit_real_libm_call("expf", "exp", re, ft);
+        uint32_t cos_im = emit_real_libm_call("cosf", "cos", im, ft);
+        uint32_t sin_im = emit_real_libm_call("sinf", "sin", im, ft);
+        uint32_t out_re = lr_emit_fmul(s, ft, V(exp_re, ft), V(cos_im, ft));
+        uint32_t out_im = lr_emit_fmul(s, ft, V(exp_re, ft), V(sin_im, ft));
+        tmp = emit_complex_value(ct, ft, out_re, out_im);
+    }
+
+    void emit_complex_exp_value(uint32_t v, ASR::ttype_t *type) {
+        lr_type_t *ct = get_type(type);
+        int kind = ASRUtils::extract_kind_from_ttype_t(type);
+        lr_type_t *ft = (kind == 4) ? ty_f32 : ty_f64;
+        uint32_t fld0 = 0, fld1 = 1;
+        uint32_t re = lr_emit_extractvalue(s, ft, V(v, ct), &fld0, 1);
+        uint32_t im = lr_emit_extractvalue(s, ft, V(v, ct), &fld1, 1);
+        emit_complex_exp_from_parts(ct, ft, re, im);
+    }
+
+    uint32_t coerce_real_like_to_kind(uint32_t value, ASR::ttype_t *src_type,
+                                      lr_type_t *dst_ft) {
+        src_type = ASRUtils::type_get_past_allocatable_pointer(src_type);
+        src_type = ASRUtils::type_get_past_array(src_type);
+        if (ASR::is_a<ASR::Integer_t>(*src_type)) {
+            int64_t kind = ASRUtils::extract_kind_from_ttype_t(src_type);
+            lr_type_t *it = (kind == 8) ? ty_i64 : ty_i32;
+            return lr_emit_sitofp(s, dst_ft, V(value, it));
+        }
+        if (ASR::is_a<ASR::Real_t>(*src_type)) {
+            int64_t kind = ASRUtils::extract_kind_from_ttype_t(src_type);
+            lr_type_t *src_ft = (kind == 4) ? ty_f32 : ty_f64;
+            if (src_ft == dst_ft) return value;
+            return (dst_ft == ty_f64)
+                ? lr_emit_fpext(s, dst_ft, V(value, src_ft))
+                : lr_emit_fptrunc(s, dst_ft, V(value, src_ft));
+        }
+        throw CodeGenError("liric: cmplx() argument type not supported");
+    }
+
     // real(z) / aimag(z): extract field 0/1 from the {f32,f32}/{f64,f64}
     // complex value built by ComplexConstant/ComplexConstructor.
     void visit_ComplexRe(const ASR::ComplexRe_t &x) {
@@ -3303,13 +3396,32 @@ public:
                 im = lr_emit_fdiv(s, ft, V(num_im, ft), V(denom, ft));
                 break;
             }
+            case ASR::binopType::Pow: {
+                uint32_t mag = emit_real_libm_call2("hypotf", "hypot",
+                    lre, lim, ft);
+                uint32_t log_mag = emit_real_libm_call("logf", "log",
+                    mag, ft);
+                uint32_t theta = emit_real_libm_call2("atan2f", "atan2",
+                    lim, lre, ft);
+                uint32_t c_log_mag = lr_emit_fmul(s, ft,
+                    V(rre, ft), V(log_mag, ft));
+                uint32_t d_theta = lr_emit_fmul(s, ft,
+                    V(rim, ft), V(theta, ft));
+                uint32_t c_theta = lr_emit_fmul(s, ft,
+                    V(rre, ft), V(theta, ft));
+                uint32_t d_log_mag = lr_emit_fmul(s, ft,
+                    V(rim, ft), V(log_mag, ft));
+                uint32_t exp_re = lr_emit_fsub(s, ft,
+                    V(c_log_mag, ft), V(d_theta, ft));
+                uint32_t exp_im = lr_emit_fadd(s, ft,
+                    V(c_theta, ft), V(d_log_mag, ft));
+                emit_complex_exp_from_parts(ct, ft, exp_re, exp_im);
+                return;
+            }
             default:
                 throw CodeGenError("liric: unsupported complex binop");
         }
-        uint32_t c0 = lr_emit_insertvalue(s, ct,
-            LR_UNDEF(ct), V(re, ft), &fld0, 1);
-        tmp = lr_emit_insertvalue(s, ct,
-            V(c0, ct), V(im, ft), &fld1, 1);
+        tmp = emit_complex_value(ct, ft, re, im);
     }
 
     // s ** n -> StringRepeat: call the runtime allocator to build the
@@ -5772,6 +5884,16 @@ public:
             return;
         }
         uint32_t sym = lr_session_intern(s, callable_name(fn).c_str());
+        if (return_type_uses_sret(ret)) {
+            uint32_t ret_slot = emit_temp_slot(ret);
+            std::vector<lr_operand_desc_t> sret_args;
+            sret_args.push_back(V(ret_slot, ty_ptr));
+            sret_args.insert(sret_args.end(), args.begin(), args.end());
+            lr_emit_call_void(s, LR_GLOBAL(sym, ty_ptr),
+                sret_args.data(), sret_args.size());
+            tmp = lr_emit_load(s, ret, V(ret_slot, ty_ptr));
+            return;
+        }
         tmp = lr_emit_call(s, ret, LR_GLOBAL(sym, ty_ptr),
                            args.data(), args.size());
     }
@@ -6105,6 +6227,83 @@ public:
             case ASRUtils::IntrinsicElementalFunctions::Min:
                 emit_min_max(x, /*is_max=*/false);
                 return;
+            case ASRUtils::IntrinsicElementalFunctions::Real:
+            case ASRUtils::IntrinsicElementalFunctions::Aimag: {
+                if (x.n_args < 1) {
+                    throw CodeGenError("liric: complex part expects one arg");
+                }
+                ASR::ttype_t *arg_type =
+                    ASRUtils::expr_type(x.m_args[0]);
+                arg_type = ASRUtils::type_get_past_allocatable_pointer(
+                    arg_type);
+                arg_type = ASRUtils::type_get_past_array(arg_type);
+                if (!ASR::is_a<ASR::Complex_t>(*arg_type)) {
+                    if (static_cast<ASRUtils::IntrinsicElementalFunctions>(
+                            x.m_intrinsic_id) ==
+                            ASRUtils::IntrinsicElementalFunctions::Real) {
+                        visit_expr(*x.m_args[0]);
+                        return;
+                    }
+                    throw CodeGenError(
+                        "liric: aimag() argument must be complex");
+                }
+                visit_expr(*x.m_args[0]);
+                uint32_t v = tmp;
+                lr_type_t *ct = get_type(arg_type);
+                lr_type_t *ft = get_type(x.m_type);
+                uint32_t fld = static_cast<ASRUtils::IntrinsicElementalFunctions>(
+                    x.m_intrinsic_id) == ASRUtils::IntrinsicElementalFunctions::Real
+                    ? 0 : 1;
+                tmp = lr_emit_extractvalue(s, ft, V(v, ct), &fld, 1);
+                return;
+            }
+            case ASRUtils::IntrinsicElementalFunctions::Cmplx: {
+                if (x.n_args < 1) {
+                    throw CodeGenError("liric: cmplx() expects an arg");
+                }
+                lr_type_t *ct = get_type(x.m_type);
+                int kind = ASRUtils::extract_kind_from_ttype_t(x.m_type);
+                lr_type_t *ft = (kind == 4) ? ty_f32 : ty_f64;
+                ASR::ttype_t *first_type =
+                    ASRUtils::expr_type(x.m_args[0]);
+                first_type = ASRUtils::type_get_past_allocatable_pointer(
+                    first_type);
+                first_type = ASRUtils::type_get_past_array(first_type);
+                if (ASR::is_a<ASR::Complex_t>(*first_type)) {
+                    visit_expr(*x.m_args[0]);
+                    int first_kind =
+                        ASRUtils::extract_kind_from_ttype_t(first_type);
+                    if (first_kind == kind) {
+                        return;
+                    }
+                    lr_type_t *src_ct = get_type(first_type);
+                    lr_type_t *src_ft = (first_kind == 4) ? ty_f32 : ty_f64;
+                    uint32_t fld0 = 0, fld1 = 1;
+                    uint32_t re0 = lr_emit_extractvalue(s, src_ft,
+                        V(tmp, src_ct), &fld0, 1);
+                    uint32_t im0 = lr_emit_extractvalue(s, src_ft,
+                        V(tmp, src_ct), &fld1, 1);
+                    uint32_t re = (ft == ty_f64)
+                        ? lr_emit_fpext(s, ft, V(re0, src_ft))
+                        : lr_emit_fptrunc(s, ft, V(re0, src_ft));
+                    uint32_t im = (ft == ty_f64)
+                        ? lr_emit_fpext(s, ft, V(im0, src_ft))
+                        : lr_emit_fptrunc(s, ft, V(im0, src_ft));
+                    tmp = emit_complex_value(ct, ft, re, im);
+                    return;
+                }
+                visit_expr(*x.m_args[0]);
+                uint32_t re = coerce_real_like_to_kind(tmp,
+                    ASRUtils::expr_type(x.m_args[0]), ft);
+                uint32_t im = lr_emit_fadd(s, ft, F(0.0, ft), F(0.0, ft));
+                if (x.n_args >= 2) {
+                    visit_expr(*x.m_args[1]);
+                    im = coerce_real_like_to_kind(tmp,
+                        ASRUtils::expr_type(x.m_args[1]), ft);
+                }
+                tmp = emit_complex_value(ct, ft, re, im);
+                return;
+            }
             case ASRUtils::IntrinsicElementalFunctions::Abs: {
                 if (x.n_args != 1) {
                     throw CodeGenError("liric: abs() expects one arg");
@@ -6132,9 +6331,23 @@ public:
                 }
                 return;
             }
-            case ASRUtils::IntrinsicElementalFunctions::Exp:
-                emit_real_libm_unary(x, "expf", "exp");
+            case ASRUtils::IntrinsicElementalFunctions::Exp: {
+                if (x.n_args != 1) {
+                    throw CodeGenError("liric: exp() expects one arg");
+                }
+                ASR::ttype_t *arg_type =
+                    ASRUtils::expr_type(x.m_args[0]);
+                arg_type = ASRUtils::type_get_past_allocatable_pointer(
+                    arg_type);
+                arg_type = ASRUtils::type_get_past_array(arg_type);
+                if (ASR::is_a<ASR::Complex_t>(*arg_type)) {
+                    visit_expr(*x.m_args[0]);
+                    emit_complex_exp_value(tmp, arg_type);
+                } else {
+                    emit_real_libm_unary(x, "expf", "exp");
+                }
                 return;
+            }
             case ASRUtils::IntrinsicElementalFunctions::Exp2:
                 emit_real_libm_unary(x, "exp2f", "exp2");
                 return;
