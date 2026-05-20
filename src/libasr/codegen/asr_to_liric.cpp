@@ -171,6 +171,7 @@ public:
     std::vector<ASR::Struct_t *> known_structs;
     std::unordered_map<uint64_t, lr_type_t *> struct_types;
     std::unordered_map<int, uint32_t> goto_blocks;
+    std::unordered_map<std::string, std::vector<uint32_t>> named_exit_blocks;
     std::vector<uint32_t> loop_head_stack;
     std::vector<uint32_t> loop_end_stack;
 
@@ -863,6 +864,34 @@ public:
 
     bool return_type_uses_sret(lr_type_t *t) {
         return t != ty_void && lr_type_width(s, t) == 0;
+    }
+
+    void push_named_exit(char *name, uint32_t target) {
+        if (!name || name[0] == '\0') return;
+        named_exit_blocks[std::string(name)].push_back(target);
+    }
+
+    void pop_named_exit(char *name) {
+        if (!name || name[0] == '\0') return;
+        auto it = named_exit_blocks.find(std::string(name));
+        if (it == named_exit_blocks.end() || it->second.empty()) return;
+        it->second.pop_back();
+        if (it->second.empty()) named_exit_blocks.erase(it);
+    }
+
+    uint32_t named_exit_target(char *name) {
+        if (!name || name[0] == '\0') {
+            if (loop_end_stack.empty()) {
+                throw CodeGenError("liric: EXIT outside a loop or named block");
+            }
+            return loop_end_stack.back();
+        }
+        auto it = named_exit_blocks.find(std::string(name));
+        if (it == named_exit_blocks.end() || it->second.empty()) {
+            throw CodeGenError(std::string("liric: unknown EXIT target ") +
+                name);
+        }
+        return it->second.back();
     }
 
     uint64_t storage_size_or_default(ASR::ttype_t *asr_type,
@@ -2570,6 +2599,7 @@ public:
         uint32_t then_bb = lr_session_block(s);
         uint32_t else_bb = lr_session_block(s);
         uint32_t merge_bb = lr_session_block(s);
+        push_named_exit(x.m_name, merge_bb);
 
         lr_emit_condbr(s, V(cond, ty_i1), then_bb,
                        else_bb);
@@ -2584,6 +2614,111 @@ public:
         lr_emit_br(s, merge_bb);
 
         lr_session_set_block(s, merge_bb, &err);
+        pop_named_exit(x.m_name);
+    }
+
+    void visit_Select(const ASR::Select_t &x) {
+        ASR::ttype_t *test_type =
+            ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(x.m_test));
+        test_type = ASRUtils::type_get_past_array(test_type);
+        if (!ASR::is_a<ASR::Integer_t>(*test_type)) {
+            for (size_t i = 0; i < x.n_body; i++) {
+                ASR::case_stmt_t *cs = x.m_body[i];
+                if (cs->type == ASR::case_stmtType::CaseStmt) {
+                    ASR::CaseStmt_t *c = ASR::down_cast<ASR::CaseStmt_t>(cs);
+                    for (size_t j = 0; j < c->n_body; j++) {
+                        visit_stmt(*c->m_body[j]);
+                    }
+                } else if (cs->type == ASR::case_stmtType::CaseStmt_Range) {
+                    ASR::CaseStmt_Range_t *c =
+                        ASR::down_cast<ASR::CaseStmt_Range_t>(cs);
+                    for (size_t j = 0; j < c->n_body; j++) {
+                        visit_stmt(*c->m_body[j]);
+                    }
+                }
+            }
+            for (size_t i = 0; i < x.n_default; i++) {
+                visit_stmt(*x.m_default[i]);
+            }
+            return;
+        }
+
+        visit_expr(*x.m_test);
+        uint32_t selector = tmp;
+        lr_type_t *sel_t = get_type(test_type);
+        uint32_t merge_bb = lr_session_block(s);
+        push_named_exit(x.m_name, merge_bb);
+
+        lr_error_t err;
+        for (size_t i = 0; i < x.n_body; i++) {
+            ASR::case_stmt_t *cs = x.m_body[i];
+            uint32_t body_bb = lr_session_block(s);
+            uint32_t next_bb = lr_session_block(s);
+            uint32_t cond = 0;
+            bool have_cond = false;
+            if (cs->type == ASR::case_stmtType::CaseStmt) {
+                ASR::CaseStmt_t *c = ASR::down_cast<ASR::CaseStmt_t>(cs);
+                for (size_t j = 0; j < c->n_test; j++) {
+                    visit_expr(*c->m_test[j]);
+                    uint32_t eq = lr_emit_icmp(s, LR_CMP_EQ,
+                        V(selector, sel_t), V(tmp, sel_t));
+                    cond = have_cond ? lr_emit_or(s, ty_i1,
+                        V(cond, ty_i1), V(eq, ty_i1)) : eq;
+                    have_cond = true;
+                }
+            } else if (cs->type == ASR::case_stmtType::CaseStmt_Range) {
+                ASR::CaseStmt_Range_t *c =
+                    ASR::down_cast<ASR::CaseStmt_Range_t>(cs);
+                uint32_t range_cond = 0;
+                bool have_range = false;
+                if (c->m_start) {
+                    visit_expr(*c->m_start);
+                    range_cond = lr_emit_icmp(s, LR_CMP_SGE,
+                        V(selector, sel_t), V(tmp, sel_t));
+                    have_range = true;
+                }
+                if (c->m_end) {
+                    visit_expr(*c->m_end);
+                    uint32_t le = lr_emit_icmp(s, LR_CMP_SLE,
+                        V(selector, sel_t), V(tmp, sel_t));
+                    range_cond = have_range ? lr_emit_and(s, ty_i1,
+                        V(range_cond, ty_i1), V(le, ty_i1)) : le;
+                    have_range = true;
+                }
+                cond = have_range ? range_cond :
+                    lr_emit_add(s, ty_i1, I(1, ty_i1), I(0, ty_i1));
+                have_cond = true;
+            } else {
+                throw CodeGenError("liric: unsupported select case arm");
+            }
+            if (!have_cond) {
+                cond = lr_emit_add(s, ty_i1, I(0, ty_i1), I(0, ty_i1));
+            }
+            lr_emit_condbr(s, V(cond, ty_i1), body_bb, next_bb);
+            lr_session_set_block(s, body_bb, &err);
+            if (cs->type == ASR::case_stmtType::CaseStmt) {
+                ASR::CaseStmt_t *c = ASR::down_cast<ASR::CaseStmt_t>(cs);
+                for (size_t j = 0; j < c->n_body; j++) {
+                    visit_stmt(*c->m_body[j]);
+                }
+            } else {
+                ASR::CaseStmt_Range_t *c =
+                    ASR::down_cast<ASR::CaseStmt_Range_t>(cs);
+                for (size_t j = 0; j < c->n_body; j++) {
+                    visit_stmt(*c->m_body[j]);
+                }
+            }
+            lr_emit_br(s, merge_bb);
+            lr_session_set_block(s, next_bb, &err);
+        }
+
+        for (size_t i = 0; i < x.n_default; i++) {
+            visit_stmt(*x.m_default[i]);
+        }
+        lr_emit_br(s, merge_bb);
+        lr_session_set_block(s, merge_bb, &err);
+        pop_named_exit(x.m_name);
     }
 
     // --- DoLoop ---
@@ -3073,6 +3208,9 @@ public:
     void visit_BlockCall(const ASR::BlockCall_t &x) {
         ASR::Block_t *blk = down_cast<ASR::Block_t>(
             ASRUtils::symbol_get_past_external(x.m_m));
+        lr_error_t err;
+        uint32_t end_bb = lr_session_block(s);
+        push_named_exit(blk->m_name, end_bb);
         for (auto &item : blk->m_symtab->get_scope()) {
             if (!ASR::is_a<ASR::Variable_t>(*item.second)) continue;
             ASR::Variable_t *v = down_cast<ASR::Variable_t>(item.second);
@@ -3085,6 +3223,9 @@ public:
         for (size_t i = 0; i < blk->n_body; i++) {
             visit_stmt(*blk->m_body[i]);
         }
+        lr_emit_br(s, end_bb);
+        lr_session_set_block(s, end_bb, &err);
+        pop_named_exit(blk->m_name);
     }
 
     void visit_AssociateBlockCall(const ASR::AssociateBlockCall_t &x) {
@@ -5000,8 +5141,11 @@ public:
         lr_session_set_block(s, cont_bb, &err);
     }
 
-    void visit_Exit(const ASR::Exit_t &) {
-        lr_emit_br(s, loop_end_stack.back());
+    void visit_Exit(const ASR::Exit_t &x) {
+        lr_emit_br(s, named_exit_target(x.m_stmt_name));
+        lr_error_t err;
+        uint32_t sink = lr_session_block(s);
+        lr_session_set_block(s, sink, &err);
     }
 
     void visit_Cycle(const ASR::Cycle_t &) {
