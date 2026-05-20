@@ -6599,6 +6599,21 @@ public:
         if (x.m_value) { visit_expr(*x.m_value); return; }
         switch (static_cast<ASRUtils::IntrinsicElementalFunctions>(
                 x.m_intrinsic_id)) {
+            case ASRUtils::IntrinsicElementalFunctions::Merge: {
+                if (x.n_args != 3) {
+                    throw CodeGenError("liric: merge() expects three args");
+                }
+                visit_expr(*x.m_args[0]);
+                uint32_t true_value = tmp;
+                visit_expr(*x.m_args[1]);
+                uint32_t false_value = tmp;
+                visit_expr(*x.m_args[2]);
+                uint32_t mask = tmp;
+                lr_type_t *rt = get_type(x.m_type);
+                tmp = lr_emit_select(s, rt, V(mask, ty_i1),
+                    V(true_value, rt), V(false_value, rt));
+                return;
+            }
             case ASRUtils::IntrinsicElementalFunctions::Max:
                 emit_min_max(x, /*is_max=*/true);
                 return;
@@ -7728,6 +7743,42 @@ public:
             *array_t = ASR::down_cast<ASR::Array_t>(type);
         }
         return true;
+    }
+
+    bool extract_int_const(ASR::expr_t *expr, int64_t &value) {
+        if (!expr) {
+            return false;
+        }
+        if (ASR::is_a<ASR::IntegerConstant_t>(*expr)) {
+            value = ASR::down_cast<ASR::IntegerConstant_t>(expr)->m_n;
+            return true;
+        }
+        if (ASR::is_a<ASR::UnsignedIntegerConstant_t>(*expr)) {
+            value = (int64_t)
+                ASR::down_cast<ASR::UnsignedIntegerConstant_t>(expr)->m_n;
+            return true;
+        }
+        if (ASR::is_a<ASR::IntegerUnaryMinus_t>(*expr)) {
+            int64_t arg_value = 0;
+            ASR::IntegerUnaryMinus_t *minus =
+                ASR::down_cast<ASR::IntegerUnaryMinus_t>(expr);
+            if (extract_int_const(minus->m_arg, arg_value)) {
+                value = -arg_value;
+                return true;
+            }
+        }
+        if (ASR::is_a<ASR::Cast_t>(*expr)) {
+            return extract_int_const(
+                ASR::down_cast<ASR::Cast_t>(expr)->m_arg, value);
+        }
+        if (ASR::is_a<ASR::IntrinsicElementalFunction_t>(*expr)) {
+            ASR::IntrinsicElementalFunction_t *fn =
+                ASR::down_cast<ASR::IntrinsicElementalFunction_t>(expr);
+            if (fn->m_value) {
+                return extract_int_const(fn->m_value, value);
+            }
+        }
+        return false;
     }
 
     ASR::ArrayConstructor_t *array_constructor_value(ASR::expr_t *expr) {
@@ -9751,14 +9802,17 @@ found_offset:
         }
         ASR::Array_t *array_t = down_cast<ASR::Array_t>(vt);
         int64_t n_dims = (int64_t)array_t->n_dims;
+        bool use_type_dims =
+            array_t->m_physical_type !=
+                ASR::array_physical_typeType::DescriptorArray ||
+            ASR::is_a<ASR::IntrinsicArrayFunction_t>(*x.m_v);
 
-        if (array_t->m_physical_type !=
-                ASR::array_physical_typeType::DescriptorArray) {
+        if (use_type_dims) {
             bool has_runtime_extent = false;
             for (int64_t d = 0; d < n_dims; d++) {
                 int64_t extent = 0;
                 if (array_t->m_dims[d].m_length &&
-                        !ASRUtils::extract_value(
+                        !extract_int_const(
                             array_t->m_dims[d].m_length, extent)) {
                     has_runtime_extent = true;
                     break;
@@ -9771,18 +9825,25 @@ found_offset:
                 if (!length) {
                     return lr_emit_add(s, rt, I(extent, rt), I(0, rt));
                 }
-                if (ASRUtils::extract_value(length, extent)) {
+                if (extract_int_const(length, extent)) {
                     return lr_emit_add(s, rt, I(extent, rt), I(0, rt));
                 }
                 visit_expr(*length);
                 lr_type_t *lt = get_type(ASRUtils::expr_type(length));
                 return cast_int_value(tmp, lt, rt);
             };
+            int64_t req_dim_value = 0;
+            bool const_dim = x.m_dim &&
+                extract_int_const(x.m_dim, req_dim_value);
+            if (const_dim && (req_dim_value < 1 || req_dim_value > n_dims)) {
+                tmp = lr_emit_add(s, rt, I(0, rt), I(0, rt));
+                return;
+            }
 
             // Runtime dim on a FixedSize/Pointer array: dims are
             // compile-time but the selector isn't.  Emit a chain of
             // selects: (dim==1 ? ext_0 : (dim==2 ? ext_1 : ...)).
-            if (x.m_dim && !ASRUtils::is_value_constant(x.m_dim)) {
+            if (x.m_dim && !const_dim) {
                 visit_expr(*x.m_dim);
                 lr_type_t *dt = get_type(ASRUtils::expr_type(x.m_dim));
                 uint32_t dim_v = (dt == rt) ? tmp
@@ -9803,10 +9864,8 @@ found_offset:
             int64_t start_dim = 0;
             int64_t end_dim = n_dims;
             if (x.m_dim) {
-                int req_dim;
-                ASRUtils::extract_value(x.m_dim, req_dim);
-                start_dim = req_dim - 1;
-                end_dim = req_dim;
+                start_dim = req_dim_value - 1;
+                end_dim = req_dim_value;
             }
             if (has_runtime_extent) {
                 uint32_t prod = lr_emit_add(s, rt, I(1, rt), I(0, rt));
@@ -9822,7 +9881,7 @@ found_offset:
             for (int64_t d = start_dim; d < end_dim; d++) {
                 int64_t extent = 1;
                 if (array_t->m_dims[d].m_length) {
-                    ASRUtils::extract_value(array_t->m_dims[d].m_length,
+                    extract_int_const(array_t->m_dims[d].m_length,
                         extent);
                 }
                 prod *= extent;
@@ -9832,10 +9891,13 @@ found_offset:
         }
 
         uint32_t desc = desc_ptr_of(x.m_v);
+        int64_t req_dim_value = 0;
+        bool const_dim = x.m_dim &&
+            extract_int_const(x.m_dim, req_dim_value);
 
         // Runtime-dim path: compute (dim - 1) * DIM_BYTES + DIM_EXTENT
         // + HEADER and load extent[dim - 1] from the descriptor.
-        if (x.m_dim && !ASRUtils::is_value_constant(x.m_dim)) {
+        if (x.m_dim && !const_dim) {
             visit_expr(*x.m_dim);
             lr_type_t *dt = get_type(ASRUtils::expr_type(x.m_dim));
             uint32_t dim_v = (dt == ty_i64)
@@ -9864,10 +9926,8 @@ found_offset:
         int64_t start_dim = 0;
         int64_t end_dim = n_dims;
         if (x.m_dim) {
-            int req_dim;
-            ASRUtils::extract_value(x.m_dim, req_dim);
-            start_dim = req_dim - 1;
-            end_dim = req_dim;
+            start_dim = req_dim_value - 1;
+            end_dim = req_dim_value;
         }
 
         uint32_t prod = 0;
