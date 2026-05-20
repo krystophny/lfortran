@@ -4214,6 +4214,72 @@ public:
         return desc;
     }
 
+    // True when the call site needs us to wrap a concrete `type(U)` actual
+    // into a `class(T)` formal: formal is a class type (not unlimited
+    // polymorphic), and actual is a concrete derived-type (not a class).
+    bool needs_concrete_to_class_wrap(ASR::Function_t *fn, size_t i,
+                                      ASR::expr_t *actual) {
+        ASR::Variable_t *formal = formal_arg_var(fn, i);
+        if (!formal) return false;
+        ASR::ttype_t *ft = ASRUtils::type_get_past_allocatable_pointer(
+            formal->m_type);
+        if (ASRUtils::is_unlimited_polymorphic_type(ft)) return false;
+        if (!ASRUtils::is_class_type(ft)) return false;
+        ASR::ttype_t *at = ASRUtils::type_get_past_allocatable_pointer(
+            ASRUtils::expr_type(actual));
+        if (!ASR::is_a<ASR::StructType_t>(*at)) return false;
+        if (ASRUtils::is_class_type(at)) return false;
+        return true;
+    }
+
+    // Wrap a non-polymorphic `type(U)` actual into a stack-allocated class
+    // descriptor `{tag, vtable[128], data}` so the polymorphic callee can
+    // dispatch through the vtable.  Returns the data pointer (past the
+    // header), which is what `class(T)` formals expect.  intent(in) is the
+    // common case (DTIO and most user code); intent(inout)/out callers
+    // that hand us a concrete actual would need a write-back path, which
+    // we do not implement yet.
+    ASR::Struct_t *struct_symbol_for_concrete_expr(ASR::expr_t *expr) {
+        if (ASR::is_a<ASR::Var_t>(*expr)) {
+            ASR::Var_t *var = ASR::down_cast<ASR::Var_t>(expr);
+            ASR::symbol_t *sym =
+                ASRUtils::symbol_get_past_external(var->m_v);
+            if (sym && ASR::is_a<ASR::Variable_t>(*sym)) {
+                ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(sym);
+                return struct_symbol_from_type_decl(v->m_type_declaration);
+            }
+        }
+        return nullptr;
+    }
+
+    uint32_t emit_class_wrapper_for_concrete(ASR::expr_t *actual) {
+        ASR::Struct_t *st = struct_symbol_for_concrete_expr(actual);
+        if (!st) {
+            throw CodeGenError(
+                "liric: class wrapper cannot resolve concrete struct symbol");
+        }
+        uint64_t data_bytes = struct_storage_size(st);
+        uint64_t raw_bytes = (uint64_t)class_header_bytes() + data_bytes;
+        uint32_t raw = emit_storage_alloca_nbytes(raw_bytes);
+        lr_emit_store(s, I(struct_symbol_tag(
+            (ASR::symbol_t *)st), ty_i64), V(raw, ty_ptr));
+        emit_struct_vtable(raw, st);
+        uint32_t data_ptr = class_data_ptr(raw);
+        bool was_target = is_target;
+        is_target = true;
+        visit_expr(*actual);
+        is_target = was_target;
+        uint32_t actual_ptr = tmp;
+        lr_type_t *memcpy_params[] = {ty_ptr, ty_ptr, ty_i64};
+        declare_func("memcpy", ty_ptr, memcpy_params, 3, false);
+        lr_operand_desc_t memcpy_args[] = {
+            V(data_ptr, ty_ptr), V(actual_ptr, ty_ptr),
+            I((int64_t)data_bytes, ty_i64)
+        };
+        emit_call("memcpy", ty_ptr, memcpy_args, 3);
+        return data_ptr;
+    }
+
     uint32_t emit_polymorphic_actual(ASR::expr_t *actual) {
         if (ASRUtils::is_unlimited_polymorphic_type(
                 ASRUtils::expr_type(actual))) {
@@ -6267,6 +6333,9 @@ public:
                         ty_ptr));
                 } else if (formal_is_unlimited_polymorphic(fn, i)) {
                     args.push_back(V(emit_polymorphic_actual(arg), ty_ptr));
+                } else if (needs_concrete_to_class_wrap(fn, i, arg)) {
+                    args.push_back(V(
+                        emit_class_wrapper_for_concrete(arg), ty_ptr));
                 } else if (formal_is_optional(fn, i) &&
                         ASRUtils::is_allocatable(ASRUtils::expr_type(arg))) {
                     args.push_back(V(emit_optional_actual_pointer(arg),
@@ -6471,6 +6540,9 @@ public:
                         ty_ptr));
                 } else if (formal_is_unlimited_polymorphic(fn, i)) {
                     args.push_back(V(emit_polymorphic_actual(arg), ty_ptr));
+                } else if (needs_concrete_to_class_wrap(fn, i, arg)) {
+                    args.push_back(V(
+                        emit_class_wrapper_for_concrete(arg), ty_ptr));
                 } else if (formal_is_optional(fn, i) &&
                         ASRUtils::is_allocatable(ASRUtils::expr_type(arg))) {
                     args.push_back(V(emit_optional_actual_pointer(arg),
@@ -8575,7 +8647,35 @@ public:
 
     void visit_FileWrite(const ASR::FileWrite_t &x) {
         if (x.m_overloaded) {
-            throw CodeGenError("liric: derived-type I/O FileWrite not yet supported");
+            // Derived-type formatted I/O: the frontend has already lowered
+            // `write(unit,'(DT)') obj` into a SubroutineCall to the user's
+            // `write(formatted)` proc, stored in m_overloaded.  Direct mode
+            // always writes to stdout via printf, so we don't need the
+            // _lfortran_set_child_io / _lfortran_file_write_newline runtime
+            // dance the LLVM backend performs.  Emit the user proc call,
+            // then append the record terminator ("\n") for the parent write
+            // — child writes inside the proc already terminate themselves
+            // through the normal FileWrite trailer path.
+            this->visit_stmt(*x.m_overloaded);
+            uint32_t nl_sym = declare_global_cstring("\n", "_lr_fwnl");
+            lr_type_t *printf_params[] = {ty_ptr};
+            declare_func("printf", ty_i32, printf_params, 1, true);
+            uint32_t printf_sym = lr_session_intern(s, "printf");
+            lr_inst_desc_t d;
+            memset(&d, 0, sizeof(d));
+            lr_operand_desc_t ops[2] = {
+                LR_GLOBAL(printf_sym, ty_ptr),
+                LR_GLOBAL(nl_sym, ty_ptr)
+            };
+            d.op = LR_OP_CALL;
+            d.type = ty_i32;
+            d.operands = ops;
+            d.num_operands = 2;
+            d.call_external_abi = true;
+            d.call_vararg = true;
+            d.call_fixed_args = 1;
+            lr_session_emit(s, &d, nullptr);
+            return;
         }
         if (x.m_id || x.m_rec || x.m_pos) {
             throw CodeGenError(
