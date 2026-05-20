@@ -1436,8 +1436,9 @@ public:
             return;
         }
         // bind(c, name=...) declarations resolve to externally provided
-        // C symbols at link time - we shouldn't emit a Fortran body.
-        if (ftype->m_abi == ASR::abiType::BindC && ftype->m_bindc_name) {
+        // C symbols, but module procedure implementations still emit.
+        if (ftype->m_abi == ASR::abiType::BindC && ftype->m_bindc_name &&
+                x.n_body == 0) {
             return;
         }
 
