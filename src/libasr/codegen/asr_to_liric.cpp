@@ -5823,7 +5823,9 @@ public:
                     // stable cross-compile property so different .o
                     // files might disagree on whether to prefix the
                     // same module's functions.
-                    base = std::string(mod->m_name) + "__" + base;
+                    const char *module_name = mod->m_parent_module ?
+                        mod->m_parent_module : mod->m_name;
+                    base = std::string(module_name) + "__" + base;
                     break;
                 }
             }
