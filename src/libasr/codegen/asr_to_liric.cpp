@@ -1479,7 +1479,13 @@ public:
         }
         for (size_t i = 0; i < x.n_args; i++) {
             ASR::Var_t *arg_var = down_cast<ASR::Var_t>(x.m_args[i]);
-            ASR::Variable_t *v = down_cast<ASR::Variable_t>(arg_var->m_v);
+            ASR::symbol_t *arg_sym =
+                ASRUtils::symbol_get_past_external(arg_var->m_v);
+            if (ASR::is_a<ASR::Function_t>(*arg_sym)) {
+                param_types.push_back(ty_ptr);
+                continue;
+            }
+            ASR::Variable_t *v = down_cast<ASR::Variable_t>(arg_sym);
             if (ftype->m_abi == ASR::abiType::BindC && v->m_value_attr) {
                 param_types.push_back(get_type(v->m_type));
             } else {
@@ -1506,8 +1512,16 @@ public:
         // dereference it, writes go through the pointer.
         for (size_t i = 0; i < x.n_args; i++) {
             ASR::Var_t *arg_var = down_cast<ASR::Var_t>(x.m_args[i]);
-            ASR::Variable_t *v = down_cast<ASR::Variable_t>(arg_var->m_v);
+            ASR::symbol_t *arg_sym =
+                ASRUtils::symbol_get_past_external(arg_var->m_v);
             uint32_t p = lr_session_param(s, i + (uses_sret ? 1 : 0));
+            if (ASR::is_a<ASR::Function_t>(*arg_sym)) {
+                ASR::Function_t *formal_fn =
+                    down_cast<ASR::Function_t>(arg_sym);
+                lr_symtab[get_hash((ASR::asr_t *)formal_fn)] = p;
+                continue;
+            }
+            ASR::Variable_t *v = down_cast<ASR::Variable_t>(arg_sym);
             uint64_t h = get_hash((ASR::asr_t *)v);
             if (ftype->m_abi == ASR::abiType::BindC && v->m_value_attr) {
                 lr_type_t *pt = get_type(v->m_type);
@@ -1635,6 +1649,11 @@ public:
         // Function symbol.  Emit the function's address.
         if (ASR::is_a<ASR::Function_t>(*raw_sym)) {
             ASR::Function_t *fn = down_cast<ASR::Function_t>(raw_sym);
+            auto param_it = lr_symtab.find(get_hash((ASR::asr_t *)fn));
+            if (param_it != lr_symtab.end()) {
+                tmp = param_it->second;
+                return;
+            }
             uint32_t fsym = lr_session_intern(s, callable_name(fn).c_str());
             lr_operand_desc_t no_off[1] = {I(0, ty_i64)};
             tmp = lr_emit_gep(s, ty_i8,
@@ -5691,6 +5710,12 @@ public:
         return ftype->m_deftype == ASR::deftypeType::Interface;
     }
 
+    uint32_t interface_function_param(ASR::Function_t *fn) {
+        if (!function_is_interface(fn)) return UINT32_MAX;
+        auto it = lr_symtab.find(get_hash((ASR::asr_t *)fn));
+        return it == lr_symtab.end() ? UINT32_MAX : it->second;
+    }
+
     void pad_proc_pointer_args(ASR::Variable_t *v,
             std::vector<lr_operand_desc_t> &args) {
         ASR::ttype_t *type = ASRUtils::type_get_past_allocatable_pointer(
@@ -6175,7 +6200,8 @@ public:
             return;
         }
 
-        if (fn) {
+        uint32_t interface_fptr = interface_function_param(fn);
+        if (fn && interface_fptr == UINT32_MAX) {
             ASR::FunctionType_t *ftype =
                 down_cast<ASR::FunctionType_t>(fn->m_function_signature);
             if (ftype->m_abi == ASR::abiType::BindC) {
@@ -6290,6 +6316,12 @@ public:
             return;
         }
 
+        if (interface_fptr != UINT32_MAX) {
+            lr_emit_call_void(s, V(interface_fptr, ty_ptr),
+                              args.data(), args.size());
+            return;
+        }
+
         if (fn && emit_dynamic_subroutine_dispatch(fn,
                 dynamic_method_name(x.m_name, fn), args)) {
             return;
@@ -6324,7 +6356,8 @@ public:
                 + " kind=" + std::to_string(raw ? (int)raw->type : -1));
         }
 
-        if (fn) {
+        uint32_t interface_fptr = interface_function_param(fn);
+        if (fn && interface_fptr == UINT32_MAX) {
             std::string cname = callable_name(fn);
             ASR::FunctionType_t *ftype = down_cast<ASR::FunctionType_t>(
                 fn->m_function_signature);
@@ -6473,6 +6506,21 @@ public:
         }
 
         lr_type_t *ret = get_type(x.m_type);
+        if (interface_fptr != UINT32_MAX) {
+            if (return_type_uses_sret(ret)) {
+                uint32_t ret_slot = emit_temp_slot(ret);
+                std::vector<lr_operand_desc_t> sret_args;
+                sret_args.push_back(V(ret_slot, ty_ptr));
+                sret_args.insert(sret_args.end(), args.begin(), args.end());
+                lr_emit_call_void(s, V(interface_fptr, ty_ptr),
+                    sret_args.data(), sret_args.size());
+                tmp = lr_emit_load(s, ret, V(ret_slot, ty_ptr));
+                return;
+            }
+            tmp = lr_emit_call(s, ret, V(interface_fptr, ty_ptr),
+                               args.data(), args.size());
+            return;
+        }
         if (is_proc_ptr) {
             ASR::Variable_t *v = down_cast<ASR::Variable_t>(raw);
             pad_proc_pointer_args(v, args);
