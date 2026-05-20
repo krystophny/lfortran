@@ -2037,14 +2037,46 @@ int link_executable(const std::vector<std::string> &infiles,
     }
     if (backend == Backend::liric) {
 #ifdef HAVE_LFORTRAN_LIRIC
-        // liric's AOT no-link emitExecutableFromObjects only accepts .o files
-        // with .liric_blob/.liric_ll sidecars.  fpm and other build systems
-        // pass static archives (libfpm.a) at the link step, which the
-        // AOT path rejects.  Fall through to the LLVM clang-based linker
-        // below for all liric link invocations -- the .o files we produced
-        // are standard object files and link cleanly with the system linker
-        // and lfortran_runtime.  liric_link_executable remains exported for
-        // callers that explicitly want AOT no-link emission.
+        std::vector<std::string> link_inputs(infiles);
+        // The AOT no-link path resolves all symbols from sidecars
+        // (.liric_blob / .liric_ll) on the object inputs.  The user-facing
+        // program needs _lfortran_* symbols from liblfortran_runtime_static.a
+        // and Fortran intrinsic-module symbols from
+        // liblfortran_runtime_fortran.a; pass both as archive inputs so
+        // liric's archive resolver pulls in only the needed members.
+        auto try_add_archive = [&](const std::string &name) {
+            std::vector<std::string> candidates = {
+                runtime_library_dir + "/" + name,
+                runtime_library_dir + "/legacy/" + name,
+            };
+            for (const std::string &p : candidates) {
+                std::ifstream f(p);
+                if (f.good()) {
+                    link_inputs.push_back(p);
+                    return true;
+                }
+            }
+            return false;
+        };
+        try_add_archive("liblfortran_runtime_fortran.a");
+        try_add_archive("liblfortran_runtime_static.a");
+        // liric needs its own runtime archive at emit time to provide
+        // libm intrinsics and target stubs.  Point at the one shipped
+        // alongside lfortran's runtime library if the user hasn't set
+        // LIRIC_RUNTIME_ARCHIVE themselves.
+        if (!std::getenv("LIRIC_RUNTIME_ARCHIVE")) {
+            std::string rt_lrarch = runtime_library_dir + "/liric_runtime.lrarch";
+            std::ifstream rt_f(rt_lrarch);
+            if (rt_f.good())
+                setenv("LIRIC_RUNTIME_ARCHIVE", rt_lrarch.c_str(), 1);
+        }
+        std::vector<const char *> objects;
+        objects.reserve(link_inputs.size());
+        for (const std::string &input : link_inputs) {
+            objects.push_back(input.c_str());
+        }
+        return liric_link_executable(objects.data(), (int)objects.size(),
+            outfile.c_str());
 #else
         std::cerr << "The liric backend requires -DWITH_LIRIC=ON." << std::endl;
         return 1;
