@@ -1331,8 +1331,11 @@ public:
         // Skip interface-only functions (no body), but emit bodies for
         // Intrinsic-abi functions so callers can link against them
         // (e.g. newunit_int_4 from lfortran_intrinsic_custom).
-        if (x.n_body == 0 && !x.m_return_var) return;
         if (ftype->m_deftype == ASR::deftypeType::Interface) return;
+        if (x.n_body == 0 && !x.m_return_var &&
+                ftype->m_deftype != ASR::deftypeType::Implementation) {
+            return;
+        }
         // bind(c, name=...) declarations resolve to externally provided
         // C symbols at link time - we shouldn't emit a Fortran body.
         if (ftype->m_abi == ASR::abiType::BindC && ftype->m_bindc_name) {
@@ -1488,7 +1491,7 @@ public:
         // Function symbol.  Emit the function's address.
         if (ASR::is_a<ASR::Function_t>(*raw_sym)) {
             ASR::Function_t *fn = down_cast<ASR::Function_t>(raw_sym);
-            uint32_t fsym = lr_session_intern(s, fn->m_name);
+            uint32_t fsym = lr_session_intern(s, callable_name(fn).c_str());
             lr_operand_desc_t no_off[1] = {I(0, ty_i64)};
             tmp = lr_emit_gep(s, ty_i8,
                 LR_GLOBAL(fsym, ty_ptr), no_off, 1);
@@ -5310,6 +5313,25 @@ public:
         return ftype->m_deftype == ASR::deftypeType::Interface;
     }
 
+    void pad_proc_pointer_args(ASR::Variable_t *v,
+            std::vector<lr_operand_desc_t> &args) {
+        ASR::ttype_t *type = ASRUtils::type_get_past_allocatable_pointer(
+            v->m_type);
+        if (!ASR::is_a<ASR::FunctionType_t>(*type)) return;
+        ASR::FunctionType_t *ftype = ASR::down_cast<ASR::FunctionType_t>(type);
+        while (args.size() < ftype->n_arg_types) {
+            args.push_back(LR_NULL(ty_ptr));
+        }
+    }
+
+    bool is_procedure_dummy_arg(ASR::Variable_t *v) {
+        ASR::ttype_t *type = ASRUtils::type_get_past_allocatable_pointer(
+            v->m_type);
+        return ASR::is_a<ASR::FunctionType_t>(*type) &&
+            v->m_intent != ASR::intentType::Local &&
+            v->m_intent != ASR::intentType::ReturnVar;
+    }
+
     int64_t class_vtable_slots() const {
         return 128;
     }
@@ -5871,11 +5893,12 @@ public:
         }
 
         if (is_proc_ptr) {
-            // Indirect call through the procedure-pointer variable's
-            // value.  Load the address and pass it as the callee.
+            // Procedure dummy args already hold the callee address.
             ASR::Variable_t *v = down_cast<ASR::Variable_t>(raw);
+            pad_proc_pointer_args(v, args);
             uint32_t slot = lr_symtab[get_hash((ASR::asr_t *)v)];
-            uint32_t fptr = lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
+            uint32_t fptr = is_procedure_dummy_arg(v) ? slot :
+                lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
             lr_emit_call_void(s, V(fptr, ty_ptr),
                               args.data(), args.size());
             return;
@@ -6061,8 +6084,10 @@ public:
         lr_type_t *ret = get_type(x.m_type);
         if (is_proc_ptr) {
             ASR::Variable_t *v = down_cast<ASR::Variable_t>(raw);
+            pad_proc_pointer_args(v, args);
             uint32_t slot = lr_symtab[get_hash((ASR::asr_t *)v)];
-            uint32_t fptr = lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
+            uint32_t fptr = is_procedure_dummy_arg(v) ? slot :
+                lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
             tmp = lr_emit_call(s, ret, V(fptr, ty_ptr),
                                args.data(), args.size());
             return;
