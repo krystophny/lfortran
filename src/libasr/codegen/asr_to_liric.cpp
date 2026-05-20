@@ -1181,7 +1181,10 @@ public:
     }
 
     uint32_t emit_storage_alloca_nbytes(uint64_t nbytes) {
-        uint32_t slot = lr_emit_alloca(s, storage_type_for_bytes(nbytes));
+        const uint64_t max_stack_storage = 1024 * 1024;
+        uint32_t slot = nbytes > max_stack_storage
+            ? emit_malloc_bytes(emit_i64_const((int64_t)nbytes))
+            : lr_emit_alloca(s, storage_type_for_bytes(nbytes));
         lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
         declare_func("memset", ty_ptr, memset_params, 3, false);
         lr_operand_desc_t args[] = {
@@ -4868,6 +4871,35 @@ public:
         }
     }
 
+    bool struct_storage_needs_initialization(ASR::Struct_t *st) {
+        if (!st) {
+            return false;
+        }
+        std::vector<ASR::Variable_t *> members;
+        collect_struct_members_parent_first(st, members);
+        for (ASR::Variable_t *member : members) {
+            ASR::ttype_t *member_type = member->m_type;
+            if (ASRUtils::is_allocatable(member_type) ||
+                    ASRUtils::is_pointer(member_type)) {
+                continue;
+            }
+            ASR::ttype_t *core =
+                ASRUtils::type_get_past_allocatable_pointer(member_type);
+            core = ASRUtils::type_get_past_array(core);
+            if (ASR::is_a<ASR::String_t>(*core)) {
+                return true;
+            }
+            if (ASR::is_a<ASR::StructType_t>(*core)) {
+                ASR::Struct_t *member_st = struct_symbol_from_type_decl(
+                    member->m_type_declaration);
+                if (struct_storage_needs_initialization(member_st)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     void initialize_struct_variable_storage(uint32_t slot,
                                             ASR::Variable_t *var) {
         ASR::ttype_t *type =
@@ -4883,6 +4915,9 @@ public:
             ASR::Struct_t *st = struct_symbol_from_type_decl(
                 var->m_type_declaration);
             if (!st) {
+                return;
+            }
+            if (!struct_storage_needs_initialization(st)) {
                 return;
             }
             int64_t total = 1;
