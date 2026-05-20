@@ -172,6 +172,7 @@ public:
     std::unordered_map<uint64_t, lr_type_t *> struct_types;
     std::unordered_map<int, uint32_t> goto_blocks;
     std::unordered_map<std::string, std::vector<uint32_t>> named_exit_blocks;
+    std::unordered_map<std::string, std::vector<uint32_t>> named_cycle_blocks;
     std::vector<uint32_t> loop_head_stack;
     std::vector<uint32_t> loop_end_stack;
 
@@ -889,6 +890,34 @@ public:
         auto it = named_exit_blocks.find(std::string(name));
         if (it == named_exit_blocks.end() || it->second.empty()) {
             throw CodeGenError(std::string("liric: unknown EXIT target ") +
+                name);
+        }
+        return it->second.back();
+    }
+
+    void push_named_cycle(char *name, uint32_t target) {
+        if (!name || name[0] == '\0') return;
+        named_cycle_blocks[std::string(name)].push_back(target);
+    }
+
+    void pop_named_cycle(char *name) {
+        if (!name || name[0] == '\0') return;
+        auto it = named_cycle_blocks.find(std::string(name));
+        if (it == named_cycle_blocks.end() || it->second.empty()) return;
+        it->second.pop_back();
+        if (it->second.empty()) named_cycle_blocks.erase(it);
+    }
+
+    uint32_t named_cycle_target(char *name) {
+        if (!name || name[0] == '\0') {
+            if (loop_head_stack.empty()) {
+                throw CodeGenError("liric: CYCLE outside a loop");
+            }
+            return loop_head_stack.back();
+        }
+        auto it = named_cycle_blocks.find(std::string(name));
+        if (it == named_cycle_blocks.end() || it->second.empty()) {
+            throw CodeGenError(std::string("liric: unknown CYCLE target ") +
                 name);
         }
         return it->second.back();
@@ -2753,6 +2782,8 @@ public:
 
         loop_head_stack.push_back(head_bb);
         loop_end_stack.push_back(end_bb);
+        push_named_cycle(x.m_name, head_bb);
+        push_named_exit(x.m_name, end_bb);
 
         lr_emit_br(s, head_bb);
 
@@ -2790,6 +2821,8 @@ public:
         lr_emit_br(s, head_bb);
 
         lr_session_set_block(s, end_bb, &err);
+        pop_named_exit(x.m_name);
+        pop_named_cycle(x.m_name);
         loop_head_stack.pop_back();
         loop_end_stack.pop_back();
     }
@@ -2804,6 +2837,8 @@ public:
 
         loop_head_stack.push_back(head_bb);
         loop_end_stack.push_back(end_bb);
+        push_named_cycle(x.m_name, head_bb);
+        push_named_exit(x.m_name, end_bb);
 
         lr_emit_br(s, head_bb);
 
@@ -2816,6 +2851,8 @@ public:
         lr_emit_br(s, head_bb);
 
         lr_session_set_block(s, end_bb, &err);
+        pop_named_exit(x.m_name);
+        pop_named_cycle(x.m_name);
         loop_head_stack.pop_back();
         loop_end_stack.pop_back();
     }
@@ -5148,8 +5185,8 @@ public:
         lr_session_set_block(s, sink, &err);
     }
 
-    void visit_Cycle(const ASR::Cycle_t &) {
-        lr_emit_br(s, loop_head_stack.back());
+    void visit_Cycle(const ASR::Cycle_t &x) {
+        lr_emit_br(s, named_cycle_target(x.m_stmt_name));
     }
 
     void visit_IntrinsicImpureSubroutine(
