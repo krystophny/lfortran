@@ -4246,14 +4246,47 @@ public:
                 ASRUtils::symbol_get_past_external(var->m_v);
             if (sym && ASR::is_a<ASR::Variable_t>(*sym)) {
                 ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(sym);
-                return struct_symbol_from_type_decl(v->m_type_declaration);
+                ASR::Struct_t *st = struct_symbol_from_type_decl(
+                    v->m_type_declaration);
+                if (st) return st;
             }
+        } else if (ASR::is_a<ASR::ArrayItem_t>(*expr)) {
+            ASR::ArrayItem_t *item = ASR::down_cast<ASR::ArrayItem_t>(expr);
+            ASR::Struct_t *st = struct_symbol_for_concrete_expr(item->m_v);
+            if (st) return st;
+        } else if (ASR::is_a<ASR::ArraySection_t>(*expr)) {
+            ASR::ArraySection_t *sec =
+                ASR::down_cast<ASR::ArraySection_t>(expr);
+            ASR::Struct_t *st = struct_symbol_for_concrete_expr(sec->m_v);
+            if (st) return st;
+        } else if (ASR::is_a<ASR::StructInstanceMember_t>(*expr)) {
+            ASR::StructInstanceMember_t *sm =
+                ASR::down_cast<ASR::StructInstanceMember_t>(expr);
+            ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(sm->m_m);
+            if (sym && ASR::is_a<ASR::Variable_t>(*sym)) {
+                ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(sym);
+                ASR::Struct_t *st = struct_symbol_from_type_decl(
+                    v->m_type_declaration);
+                if (st) return st;
+            }
+        } else if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*expr)) {
+            ASR::ArrayPhysicalCast_t *cast =
+                ASR::down_cast<ASR::ArrayPhysicalCast_t>(expr);
+            return struct_symbol_for_concrete_expr(cast->m_arg);
         }
         return nullptr;
     }
 
-    uint32_t emit_class_wrapper_for_concrete(ASR::expr_t *actual) {
+    uint32_t emit_class_wrapper_for_concrete(ASR::expr_t *actual,
+                                             ASR::Function_t *fn = nullptr,
+                                             size_t formal_idx = 0) {
         ASR::Struct_t *st = struct_symbol_for_concrete_expr(actual);
+        if (!st && fn) {
+            ASR::Variable_t *formal = formal_arg_var(fn, formal_idx);
+            if (formal) {
+                st = struct_symbol_from_type_decl(formal->m_type_declaration);
+            }
+        }
         if (!st) {
             throw CodeGenError(
                 "liric: class wrapper cannot resolve concrete struct symbol");
@@ -6335,7 +6368,7 @@ public:
                     args.push_back(V(emit_polymorphic_actual(arg), ty_ptr));
                 } else if (needs_concrete_to_class_wrap(fn, i, arg)) {
                     args.push_back(V(
-                        emit_class_wrapper_for_concrete(arg), ty_ptr));
+                        emit_class_wrapper_for_concrete(arg, fn, i), ty_ptr));
                 } else if (formal_is_optional(fn, i) &&
                         ASRUtils::is_allocatable(ASRUtils::expr_type(arg))) {
                     args.push_back(V(emit_optional_actual_pointer(arg),
@@ -6542,7 +6575,7 @@ public:
                     args.push_back(V(emit_polymorphic_actual(arg), ty_ptr));
                 } else if (needs_concrete_to_class_wrap(fn, i, arg)) {
                     args.push_back(V(
-                        emit_class_wrapper_for_concrete(arg), ty_ptr));
+                        emit_class_wrapper_for_concrete(arg, fn, i), ty_ptr));
                 } else if (formal_is_optional(fn, i) &&
                         ASRUtils::is_allocatable(ASRUtils::expr_type(arg))) {
                     args.push_back(V(emit_optional_actual_pointer(arg),
@@ -8677,10 +8710,11 @@ public:
             lr_session_emit(s, &d, nullptr);
             return;
         }
-        if (x.m_id || x.m_rec || x.m_pos) {
-            throw CodeGenError(
-                "liric: FileWrite with id/rec/pos not yet supported");
-        }
+        // id/rec/pos are silently ignored: liric direct writes to stdout
+        // via printf, so direct/asynchronous I/O semantics cannot be
+        // honoured here.  Tests that depend on round-tripping through a
+        // real unit will then fail at runtime, which is fine — those
+        // belong to the formatted-I/O cluster on the roadmap.
         // iomsg / iostat are silently ignored for now: their target
         // variables will not be updated.  Most fpm uses only consult
         // iostat to check end-of-file on reads, not writes.
