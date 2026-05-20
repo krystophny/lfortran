@@ -2028,6 +2028,10 @@ public:
 
     // --- If ---
 
+    // Coarray sync barriers are no-ops in single-image execution.
+    void visit_SyncAll(const ASR::SyncAll_t & /*x*/) {}
+    void visit_SyncMemory(const ASR::SyncMemory_t & /*x*/) {}
+
     // Fortran 2018 `select rank (sel)` on an assumed-rank descriptor.
     // The descriptor stores the current rank as an i8 at offset 20.
     // For each `rank(N)` arm, branch on (desc.rank == N) and execute
@@ -2813,6 +2817,75 @@ public:
             LR_UNDEF(ct), V(re, ft), &fld0, 1);
         tmp = lr_emit_insertvalue(s, ct,
             V(c0, ct), V(im, ft), &fld1, 1);
+    }
+
+    // s ** n -> StringRepeat: call the runtime allocator to build the
+    // repeated buffer, then pack into a {ptr, length} descriptor.  The
+    // runtime helper takes a char* and an i32 count.
+    void visit_StringRepeat(const ASR::StringRepeat_t &x) {
+        if (x.m_value) { visit_expr(*x.m_value); return; }
+        visit_expr(*x.m_left);
+        uint32_t left_desc = tmp;
+        uint32_t fld0 = 0, fld1 = 1;
+        uint32_t left_data = lr_emit_extractvalue(s, ty_ptr,
+            V(left_desc, ty_str_desc), &fld0, 1);
+        uint32_t left_len = lr_emit_extractvalue(s, ty_i64,
+            V(left_desc, ty_str_desc), &fld1, 1);
+        visit_expr(*x.m_right);
+        uint32_t count_v = tmp;
+        lr_type_t *ct = get_type(ASRUtils::expr_type(x.m_right));
+        uint32_t count_i32 = (ct == ty_i32) ? count_v
+            : ((lr_type_width(s, ct) > 32)
+                ? lr_emit_trunc(s, ty_i32, V(count_v, ct))
+                : lr_emit_sext(s, ty_i32, V(count_v, ct)));
+
+        declare_func("_lfortran_get_default_allocator",
+            ty_ptr, nullptr, 0, false);
+        uint32_t alloc_ptr = emit_call(
+            "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+        lr_type_t *params[] = {ty_ptr, ty_ptr, ty_i32};
+        declare_func("_lfortran_strrepeat_c_alloc", ty_ptr,
+            params, 3, false);
+        lr_operand_desc_t args[] = {
+            V(alloc_ptr, ty_ptr), V(left_data, ty_ptr),
+            V(count_i32, ty_i32)
+        };
+        uint32_t new_data = emit_call(
+            "_lfortran_strrepeat_c_alloc", ty_ptr, args, 3);
+        uint32_t count_i64 = lr_emit_sext(s, ty_i64, V(count_i32, ty_i32));
+        uint32_t new_len = lr_emit_mul(s, ty_i64,
+            V(left_len, ty_i64), V(count_i64, ty_i64));
+        uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
+            LR_UNDEF(ty_str_desc), V(new_data, ty_ptr), &fld0, 1);
+        tmp = lr_emit_insertvalue(s, ty_str_desc,
+            V(d0, ty_str_desc), V(new_len, ty_i64), &fld1, 1);
+    }
+
+    // achar(i) / char(i) -> StringChr: runtime allocates a 1-char buffer
+    // with byte `i`, wrap in a {ptr, 1} string descriptor.
+    void visit_StringChr(const ASR::StringChr_t &x) {
+        if (x.m_value) { visit_expr(*x.m_value); return; }
+        visit_expr(*x.m_arg);
+        uint32_t v = tmp;
+        lr_type_t *vt = get_type(ASRUtils::expr_type(x.m_arg));
+        uint32_t v_i8 = (vt == ty_i8) ? v
+            : lr_emit_trunc(s, ty_i8, V(v, vt));
+        declare_func("_lfortran_get_default_allocator",
+            ty_ptr, nullptr, 0, false);
+        uint32_t alloc_ptr = emit_call(
+            "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+        lr_type_t *params[] = {ty_ptr, ty_i8};
+        declare_func("_lfortran_str_chr_alloc", ty_ptr, params, 2, false);
+        lr_operand_desc_t args[] = {
+            V(alloc_ptr, ty_ptr), V(v_i8, ty_i8)
+        };
+        uint32_t data = emit_call(
+            "_lfortran_str_chr_alloc", ty_ptr, args, 2);
+        uint32_t fld0 = 0, fld1 = 1;
+        uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
+            LR_UNDEF(ty_str_desc), V(data, ty_ptr), &fld0, 1);
+        tmp = lr_emit_insertvalue(s, ty_str_desc,
+            V(d0, ty_str_desc), I(1, ty_i64), &fld1, 1);
     }
 
     // ichar(s) / iachar(s) -> StringOrd: load first byte of the string
