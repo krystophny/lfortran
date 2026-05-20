@@ -906,6 +906,7 @@ public:
 
     bool is_allocatable_struct_type(ASR::ttype_t *type) {
         if (!ASRUtils::is_allocatable(type)) return false;
+        if (ASRUtils::is_unlimited_polymorphic_type(type)) return false;
         ASR::ttype_t *core = ASRUtils::type_get_past_allocatable_pointer(type);
         if (ASR::is_a<ASR::Array_t>(*core)) return false;
         return ASR::is_a<ASR::StructType_t>(*core);
@@ -998,6 +999,9 @@ public:
     }
 
     uint64_t storage_size_for_variable(ASR::Variable_t *v) {
+        if (ASRUtils::is_unlimited_polymorphic_type(v->m_type)) {
+            return 16;
+        }
         if (is_allocatable_struct_type(v->m_type)) {
             return 8;
         }
@@ -4247,10 +4251,64 @@ public:
         return true;
     }
 
+    bool emit_unlimited_polymorphic_allocation(uint32_t slot,
+                                               ASR::expr_t *source) {
+        if (!source) {
+            return false;
+        }
+        ASR::ttype_t *src_type = ASRUtils::expr_type(source);
+        int64_t tag = polymorphic_type_tag(src_type);
+        if (tag == 0) {
+            return false;
+        }
+        uint64_t nbytes = storage_size_or_default(src_type,
+            get_type(src_type));
+
+        uint32_t allocator = emit_call(
+            "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+        lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
+        declare_func("_lfortran_malloc_alloc", ty_ptr,
+            malloc_params, 2, false);
+        lr_operand_desc_t malloc_args[] = {
+            V(allocator, ty_ptr), I((int64_t)nbytes, ty_i64)
+        };
+        uint32_t data = emit_call("_lfortran_malloc_alloc",
+            ty_ptr, malloc_args, 2);
+
+        lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
+        declare_func("memset", ty_ptr, memset_params, 3, false);
+        lr_operand_desc_t memset_args[] = {
+            V(data, ty_ptr), I(0, ty_i32), I((int64_t)nbytes, ty_i64)
+        };
+        emit_call("memset", ty_ptr, memset_args, 3);
+
+        visit_expr(*source);
+        lr_type_t *src_lr_type = value_type_for_expr(source);
+        lr_emit_store(s, V(tmp, src_lr_type), V(data, ty_ptr));
+
+        uint32_t fld0 = 0, fld1 = 1;
+        uint32_t d0 = lr_emit_insertvalue(s, ty_poly_desc,
+            LR_UNDEF(ty_poly_desc), V(data, ty_ptr), &fld0, 1);
+        uint32_t d1 = lr_emit_insertvalue(s, ty_poly_desc,
+            V(d0, ty_poly_desc), I(tag, ty_i64), &fld1, 1);
+        lr_emit_store(s, V(d1, ty_poly_desc), V(slot, ty_ptr));
+        return true;
+    }
+
     void visit_Allocate(const ASR::Allocate_t &x) {
         for (size_t i = 0; i < x.n_args; i++) {
             const ASR::alloc_arg_t &arg = x.m_args[i];
             ASR::ttype_t *at = ASRUtils::expr_type(arg.m_a);
+            if (ASRUtils::is_unlimited_polymorphic_type(at)) {
+                bool was_target = is_target;
+                is_target = true;
+                visit_expr(*arg.m_a);
+                is_target = was_target;
+                if (emit_unlimited_polymorphic_allocation(tmp,
+                        x.m_source)) {
+                    continue;
+                }
+            }
             ASR::ttype_t *core_naked =
                 ASRUtils::type_get_past_allocatable_pointer(at);
             if (arg.n_dims > 0 ||
@@ -5610,6 +5668,10 @@ public:
             uint32_t fld0 = 0;
             uint32_t data = lr_emit_extractvalue(s, ty_ptr,
                 V(desc, ty_poly_desc), &fld0, 1);
+            if (is_target) {
+                tmp = data;
+                return;
+            }
             lr_type_t *dst_t = get_type(x.m_type);
             tmp = lr_emit_load(s, dst_t, V(data, ty_ptr));
             return;
