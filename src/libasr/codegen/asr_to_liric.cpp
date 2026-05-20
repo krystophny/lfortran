@@ -7661,52 +7661,17 @@ found_offset:
                 start_dim = req_dim - 1;
                 end_dim = req_dim;
             }
-            lr_type_t *rt = get_type(x.m_type);
-            // Constant-folding pass first.  If every selected dim has
-            // a compile-time-known length, emit a single add of the
-            // product.  Otherwise, accumulate at runtime by visiting
-            // each m_length expression (PointerArray automatic locals
-            // declare e.g. `keep(n)` with `n` runtime).
-            int64_t const_prod = 1;
-            bool all_const = true;
+            int64_t prod = 1;
             for (int64_t d = start_dim; d < end_dim; d++) {
                 int64_t extent = 1;
-                if (array_t->m_dims[d].m_length &&
-                        ASRUtils::extract_value(
-                            array_t->m_dims[d].m_length, extent)) {
-                    const_prod *= extent;
-                } else {
-                    all_const = false;
-                    break;
+                if (array_t->m_dims[d].m_length) {
+                    ASRUtils::extract_value(array_t->m_dims[d].m_length,
+                        extent);
                 }
+                prod *= extent;
             }
-            if (all_const) {
-                tmp = lr_emit_add(s, rt,
-                    I(const_prod, rt), I(0, rt));
-                return;
-            }
-            // Runtime path: walk each dim, visit its length expr.
-            uint32_t prod_v = lr_emit_add(s, rt, I(1, rt), I(0, rt));
-            for (int64_t d = start_dim; d < end_dim; d++) {
-                if (!array_t->m_dims[d].m_length) continue;
-                int64_t cextent = 1;
-                if (ASRUtils::extract_value(
-                        array_t->m_dims[d].m_length, cextent)) {
-                    prod_v = lr_emit_mul(s, rt,
-                        V(prod_v, rt), I(cextent, rt));
-                } else {
-                    visit_expr(*array_t->m_dims[d].m_length);
-                    lr_type_t *dt = get_type(ASRUtils::expr_type(
-                        array_t->m_dims[d].m_length));
-                    uint32_t ev = (dt == rt) ? tmp
-                        : ((lr_type_width(s, dt) > lr_type_width(s, rt))
-                            ? lr_emit_trunc(s, rt, V(tmp, dt))
-                            : lr_emit_sext(s, rt, V(tmp, dt)));
-                    prod_v = lr_emit_mul(s, rt,
-                        V(prod_v, rt), V(ev, rt));
-                }
-            }
-            tmp = prod_v;
+            lr_type_t *rt = get_type(x.m_type);
+            tmp = lr_emit_add(s, rt, I(prod, rt), I(0, rt));
             return;
         }
 
