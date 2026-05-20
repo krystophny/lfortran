@@ -2741,6 +2741,7 @@ public:
 
         lr_error_t err;
         uint32_t merge_bb = lr_session_block(s);
+        push_named_exit(x.m_name, merge_bb);
 
         for (size_t i = 0; i < x.n_body; i++) {
             ASR::rank_stmt_t *rs = x.m_body[i];
@@ -2772,6 +2773,7 @@ public:
             visit_stmt(*x.m_default[i]);
         }
         lr_emit_br(s, merge_bb);
+        pop_named_exit(x.m_name);
         lr_session_set_block(s, merge_bb, &err);
     }
 
