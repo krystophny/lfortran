@@ -7675,23 +7675,16 @@ public:
                 uint32_t total = 0;
                 if (array_t->m_physical_type !=
                         ASR::array_physical_typeType::DescriptorArray) {
-                    int64_t static_total = 1;
+                    total = emit_i64_const(1);
                     for (size_t d = 0; d < array_t->n_dims; d++) {
-                        int64_t extent = 0;
-                        if (!array_t->m_dims[d].m_length ||
-                                !ASRUtils::extract_value(
-                                    array_t->m_dims[d].m_length, extent) ||
-                                extent <= 0) {
-                            static_total = -1;
-                            break;
+                        if (!array_t->m_dims[d].m_length) {
+                            throw CodeGenError(
+                                "liric: formatted array needs a known size");
                         }
-                        static_total *= extent;
+                        uint32_t extent = emit_array_dim_extent(array_t, d);
+                        total = lr_emit_mul(s, ty_i64,
+                            V(total, ty_i64), V(extent, ty_i64));
                     }
-                    if (static_total <= 0) {
-                        throw CodeGenError(
-                            "liric: formatted array needs a fixed size");
-                    }
-                    total = emit_i64_const(static_total);
                 } else {
                     total = descriptor_array_element_count(
                         desc_ptr_of(sf.m_args[i]), (int)array_t->n_dims);
