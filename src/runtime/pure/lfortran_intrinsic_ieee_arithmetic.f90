@@ -753,6 +753,7 @@ module lfortran_intrinsic_ieee_arithmetic
         type(ieee_round_type), intent(in) :: round_value
         ! TODO: Implement using C binding to set actual rounding mode
         ! This requires calling fesetround() from C
+        continue
     end subroutine
 
     ! ========================================================================
@@ -774,6 +775,7 @@ module lfortran_intrinsic_ieee_arithmetic
         logical, intent(in) :: flag_value
         ! TODO: Implement using C binding to set exception flags
         ! This requires calling feclearexcept() or feraiseexcept() from C
+        continue
     end subroutine
 
     ! IEEE_GET_HALTING_MODE
@@ -790,6 +792,7 @@ module lfortran_intrinsic_ieee_arithmetic
         type(ieee_flag_type), intent(in) :: flag
         logical, intent(in) :: halting
         ! TODO: Implement halting mode setting
+        continue
     end subroutine
 
     ! IEEE_GET_UNDERFLOW_MODE
@@ -803,6 +806,7 @@ module lfortran_intrinsic_ieee_arithmetic
     subroutine ieee_set_underflow_mode(gradual)
         logical, intent(in) :: gradual
         ! TODO: Implement using C binding to set FTZ/DAZ mode
+        continue
     end subroutine
 
     ! IEEE_GET_STATUS
@@ -817,6 +821,7 @@ module lfortran_intrinsic_ieee_arithmetic
     subroutine ieee_set_status(status_value)
         type(ieee_status_type), intent(in) :: status_value
         ! TODO: Implement using C binding to restore FPU status
+        continue
     end subroutine
 
     ! IEEE_SUPPORT_FLAG
