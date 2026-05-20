@@ -7793,6 +7793,216 @@ public:
         emit_call("memcpy", ty_ptr, memcpy_args, 3);
     }
 
+    uint32_t emit_i64_vector_ptr(uint32_t base, uint32_t idx) {
+        uint32_t off = lr_emit_mul(s, ty_i64, V(idx, ty_i64), I(8, ty_i64));
+        lr_operand_desc_t gep_off[1] = {V(off, ty_i64)};
+        return lr_emit_gep(s, ty_i8, V(base, ty_ptr), gep_off, 1);
+    }
+
+    uint32_t emit_i64_vector_ptr(uint32_t base, int64_t idx) {
+        lr_operand_desc_t gep_off[1] = {I(idx * 8, ty_i64)};
+        return lr_emit_gep(s, ty_i8, V(base, ty_ptr), gep_off, 1);
+    }
+
+    uint32_t emit_linear_elem_ptr(uint32_t base, uint32_t elem_idx,
+            uint32_t elem_len) {
+        uint32_t byte_off = lr_emit_mul(s, ty_i64,
+            V(elem_idx, ty_i64), V(elem_len, ty_i64));
+        lr_operand_desc_t off[1] = {V(byte_off, ty_i64)};
+        return lr_emit_gep(s, ty_i8, V(base, ty_ptr), off, 1);
+    }
+
+    uint32_t emit_ordered_dest_linear(uint32_t coords_mem,
+            const std::vector<uint32_t> &extents) {
+        uint32_t linear = emit_i64_const(0);
+        uint32_t stride = emit_i64_const(1);
+        for (size_t d = 0; d < extents.size(); d++) {
+            uint32_t coord_ptr = emit_i64_vector_ptr(coords_mem, (int64_t)d);
+            uint32_t coord = lr_emit_load(s, ty_i64, V(coord_ptr, ty_ptr));
+            uint32_t term = lr_emit_mul(s, ty_i64,
+                V(coord, ty_i64), V(stride, ty_i64));
+            linear = lr_emit_add(s, ty_i64, V(linear, ty_i64), V(term, ty_i64));
+            stride = lr_emit_mul(s, ty_i64,
+                V(stride, ty_i64), V(extents[d], ty_i64));
+        }
+        return linear;
+    }
+
+    void emit_advance_ordered_coords(uint32_t coords_mem,
+            uint32_t extents_mem, uint32_t order_mem, size_t n_dims) {
+        lr_error_t err;
+        uint32_t done_bb = lr_session_block(s);
+        for (size_t p = 0; p < n_dims; p++) {
+            uint32_t order_ptr = emit_i64_vector_ptr(order_mem, (int64_t)p);
+            uint32_t dim_idx = lr_emit_load(s, ty_i64, V(order_ptr, ty_ptr));
+            uint32_t coord_ptr = emit_i64_vector_ptr(coords_mem, dim_idx);
+            uint32_t extent_ptr = emit_i64_vector_ptr(extents_mem, dim_idx);
+            uint32_t coord = lr_emit_load(s, ty_i64, V(coord_ptr, ty_ptr));
+            uint32_t extent = lr_emit_load(s, ty_i64, V(extent_ptr, ty_ptr));
+            uint32_t next = lr_emit_add(s, ty_i64,
+                V(coord, ty_i64), I(1, ty_i64));
+            uint32_t wraps = lr_emit_icmp(s, LR_CMP_SGE,
+                V(next, ty_i64), V(extent, ty_i64));
+            uint32_t wrap_bb = lr_session_block(s);
+            uint32_t store_bb = lr_session_block(s);
+            uint32_t next_dim_bb = p + 1 < n_dims
+                ? lr_session_block(s) : done_bb;
+            lr_emit_condbr(s, V(wraps, ty_i1), wrap_bb, store_bb);
+
+            lr_session_set_block(s, store_bb, &err);
+            lr_emit_store(s, V(next, ty_i64), V(coord_ptr, ty_ptr));
+            lr_emit_br(s, done_bb);
+
+            lr_session_set_block(s, wrap_bb, &err);
+            lr_emit_store(s, I(0, ty_i64), V(coord_ptr, ty_ptr));
+            lr_emit_br(s, next_dim_bb);
+            if (p + 1 < n_dims) {
+                lr_session_set_block(s, next_dim_bb, &err);
+            }
+        }
+        lr_session_set_block(s, done_bb, &err);
+    }
+
+    uint32_t emit_reshape_order_mem(ASR::expr_t *order_expr,
+            size_t n_dims) {
+        uint32_t order_mem = emit_storage_alloca_nbytes(n_dims * 8);
+        if (!order_expr) {
+            for (size_t d = 0; d < n_dims; d++) {
+                uint32_t p = emit_i64_vector_ptr(order_mem, (int64_t)d);
+                lr_emit_store(s, I((int64_t)d, ty_i64), V(p, ty_ptr));
+            }
+            return order_mem;
+        }
+        ASR::Array_t *order_array = nullptr;
+        if (!expr_is_array(order_expr, &order_array)) {
+            throw CodeGenError("liric: reshape order is not an array");
+        }
+        ArrayLinearView order_view = emit_array_linear_view(
+            order_expr, order_array);
+        ASR::ttype_t *order_elem_t =
+            ASRUtils::type_get_past_array(
+                ASRUtils::type_get_past_allocatable_pointer(
+                    order_array->m_type));
+        lr_type_t *order_elem_lr = get_type(order_elem_t);
+        int64_t order_elem_bytes = element_byte_size(order_elem_t);
+        for (size_t d = 0; d < n_dims; d++) {
+            lr_operand_desc_t off[1] = {
+                I((int64_t)(d * order_elem_bytes), ty_i64)
+            };
+            uint32_t src = lr_emit_gep(s, ty_i8,
+                V(order_view.base, ty_ptr), off, 1);
+            uint32_t raw = lr_emit_load(s, order_elem_lr, V(src, ty_ptr));
+            uint32_t raw64 = cast_int_value(raw, order_elem_lr, ty_i64);
+            uint32_t zero_based = lr_emit_sub(s, ty_i64,
+                V(raw64, ty_i64), I(1, ty_i64));
+            uint32_t dst = emit_i64_vector_ptr(order_mem, (int64_t)d);
+            lr_emit_store(s, V(zero_based, ty_i64), V(dst, ty_ptr));
+        }
+        return order_mem;
+    }
+
+    uint32_t emit_reshape_fill_buffer(const ASR::ArrayReshape_t &x,
+            ASR::Array_t *src_arr,
+            const std::vector<uint32_t> &extents, int64_t elem_sz) {
+        ArrayLinearView src_view = emit_array_linear_view(x.m_array, src_arr);
+        uint32_t res_total = emit_extent_total(extents);
+        uint32_t elem_len = emit_i64_const(elem_sz);
+        uint32_t bytes = lr_emit_mul(s, ty_i64,
+            V(res_total, ty_i64), V(elem_len, ty_i64));
+        uint32_t dst = emit_malloc_bytes(bytes);
+
+        ArrayLinearView pad_view = {0, 0, 0};
+        bool has_pad = x.m_pad != nullptr;
+        if (has_pad) {
+            ASR::Array_t *pad_array = nullptr;
+            if (!expr_is_array(x.m_pad, &pad_array)) {
+                throw CodeGenError("liric: reshape pad is not an array");
+            }
+            pad_view = emit_array_linear_view(x.m_pad, pad_array);
+        }
+
+        bool has_order = x.m_order != nullptr;
+        uint32_t coords_mem = 0;
+        uint32_t extents_mem = 0;
+        uint32_t order_mem = 0;
+        if (has_order) {
+            coords_mem = emit_storage_alloca_nbytes(extents.size() * 8);
+            extents_mem = emit_storage_alloca_nbytes(extents.size() * 8);
+            for (size_t d = 0; d < extents.size(); d++) {
+                uint32_t c = emit_i64_vector_ptr(coords_mem, (int64_t)d);
+                lr_emit_store(s, I(0, ty_i64), V(c, ty_ptr));
+                uint32_t p = emit_i64_vector_ptr(extents_mem, (int64_t)d);
+                lr_emit_store(s, V(extents[d], ty_i64), V(p, ty_ptr));
+            }
+            order_mem = emit_reshape_order_mem(x.m_order, extents.size());
+        }
+
+        uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+        uint32_t src_elem_slot = lr_emit_alloca(s, ty_ptr);
+        lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+
+        lr_error_t err;
+        uint32_t head_bb = lr_session_block(s);
+        uint32_t body_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_br(s, head_bb);
+
+        lr_session_set_block(s, head_bb, &err);
+        uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+        uint32_t more = lr_emit_icmp(s, LR_CMP_SLT,
+            V(idx, ty_i64), V(res_total, ty_i64));
+        lr_emit_condbr(s, V(more, ty_i1), body_bb, done_bb);
+
+        lr_session_set_block(s, body_bb, &err);
+        uint32_t src_has_elem = lr_emit_icmp(s, LR_CMP_SLT,
+            V(idx, ty_i64), V(src_view.total, ty_i64));
+        if (has_pad) {
+            uint32_t from_src_bb = lr_session_block(s);
+            uint32_t from_pad_bb = lr_session_block(s);
+            uint32_t copy_bb = lr_session_block(s);
+            lr_emit_condbr(s, V(src_has_elem, ty_i1), from_src_bb, from_pad_bb);
+
+            lr_session_set_block(s, from_src_bb, &err);
+            uint32_t src_elem = emit_linear_elem_ptr(
+                src_view.base, idx, src_view.elem_len);
+            lr_emit_store(s, V(src_elem, ty_ptr), V(src_elem_slot, ty_ptr));
+            lr_emit_br(s, copy_bb);
+
+            lr_session_set_block(s, from_pad_bb, &err);
+            uint32_t pad_base_idx = lr_emit_sub(s, ty_i64,
+                V(idx, ty_i64), V(src_view.total, ty_i64));
+            uint32_t pad_idx = lr_emit_srem(s, ty_i64,
+                V(pad_base_idx, ty_i64), V(pad_view.total, ty_i64));
+            uint32_t pad_elem = emit_linear_elem_ptr(
+                pad_view.base, pad_idx, pad_view.elem_len);
+            lr_emit_store(s, V(pad_elem, ty_ptr), V(src_elem_slot, ty_ptr));
+            lr_emit_br(s, copy_bb);
+
+            lr_session_set_block(s, copy_bb, &err);
+        } else {
+            uint32_t src_elem = emit_linear_elem_ptr(
+                src_view.base, idx, src_view.elem_len);
+            lr_emit_store(s, V(src_elem, ty_ptr), V(src_elem_slot, ty_ptr));
+        }
+
+        uint32_t src_elem = lr_emit_load(s, ty_ptr, V(src_elem_slot, ty_ptr));
+        uint32_t dst_idx = has_order
+            ? emit_ordered_dest_linear(coords_mem, extents)
+            : idx;
+        uint32_t dst_elem = emit_linear_elem_ptr(dst, dst_idx, elem_len);
+        emit_memcpy_dynamic(dst_elem, src_elem, elem_len);
+        if (has_order) {
+            emit_advance_ordered_coords(
+                coords_mem, extents_mem, order_mem, extents.size());
+        }
+        uint32_t next = lr_emit_add(s, ty_i64, V(idx, ty_i64), I(1, ty_i64));
+        lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+        lr_emit_br(s, head_bb);
+
+        lr_session_set_block(s, done_bb, &err);
+        return dst;
+    }
+
     void emit_copy_descriptor_to_linear(uint32_t dst_base,
             uint32_t dst_start, uint32_t desc, ASR::Array_t *array_t) {
         int n_dims = (int)array_t->n_dims;
@@ -9143,13 +9353,6 @@ found_offset:
     // the result has no fixed size yet (deferred-shape allocatable).
     void visit_ArrayReshape(const ASR::ArrayReshape_t &x) {
         if (x.m_value) { visit_expr(*x.m_value); return; }
-        if (x.m_order) {
-            throw CodeGenError("liric: reshape order not supported");
-        }
-        if (x.m_pad) {
-            throw CodeGenError("liric: reshape pad not supported");
-        }
-
         ASR::ttype_t *src_t = ASRUtils::expr_type(x.m_array);
         src_t = ASRUtils::type_get_past_allocatable_pointer(src_t);
         ASR::ttype_t *res_t = ASRUtils::type_get_past_allocatable_pointer(
@@ -9164,6 +9367,34 @@ found_offset:
         ASR::ttype_t *elem_t = ASRUtils::type_get_past_array(res_t);
         elem_t = ASRUtils::type_get_past_allocatable_pointer(elem_t);
         int64_t elem_sz = element_byte_size(elem_t);
+
+        if (x.m_order || x.m_pad) {
+            std::vector<uint32_t> extents =
+                emit_reshape_extents(x.m_shape, res_arr);
+            uint32_t dst = emit_reshape_fill_buffer(
+                x, src_arr, extents, elem_sz);
+            if (res_arr->m_physical_type ==
+                    ASR::array_physical_typeType::DescriptorArray) {
+                uint32_t desc = emit_desc_alloca((int)res_arr->n_dims);
+                desc_store_base(desc, dst);
+                desc_store_i64(desc, 8, emit_i64_const(elem_sz));
+                desc_store_rank(desc, (int)res_arr->n_dims);
+                desc_store_i64(desc, 24, emit_i64_const(0));
+                uint32_t stride = emit_i64_const(elem_sz);
+                for (size_t d = 0; d < res_arr->n_dims; d++) {
+                    int64_t base_off = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
+                    desc_store_i64(desc, base_off + 0, emit_i64_const(1));
+                    desc_store_i64(desc, base_off + 8, extents[d]);
+                    desc_store_i64(desc, base_off + 16, stride);
+                    stride = lr_emit_mul(s, ty_i64,
+                        V(stride, ty_i64), V(extents[d], ty_i64));
+                }
+                tmp = desc;
+                return;
+            }
+            tmp = dst;
+            return;
+        }
 
         if (res_arr->m_physical_type ==
                 ASR::array_physical_typeType::DescriptorArray) {
