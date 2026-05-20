@@ -1023,6 +1023,29 @@ public:
             }
             return 8;
         }
+        ASR::ttype_t *core =
+            ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+        if (ASR::is_a<ASR::Array_t>(*core)) {
+            ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(core);
+            ASR::Struct_t *st = struct_symbol_from_type_decl(
+                v->m_type_declaration);
+            int64_t total = 1;
+            for (size_t d = 0; d < array_t->n_dims; d++) {
+                int64_t extent = 0;
+                if (!array_t->m_dims[d].m_length ||
+                        !ASRUtils::extract_value(
+                            array_t->m_dims[d].m_length, extent) ||
+                        extent <= 0) {
+                    total = -1;
+                    break;
+                }
+                total *= extent;
+            }
+            if (st && total > 0) {
+                return (uint64_t)total * struct_storage_size(st);
+            }
+            return storage_size_or_default(v->m_type, get_type(v->m_type));
+        }
         ASR::Struct_t *st = struct_symbol_from_type_decl(
             v->m_type_declaration);
         if (st) {
@@ -1193,6 +1216,7 @@ public:
                 LR_GLOBAL(sym, ty_ptr), no_off, 1);
             initialize_local_array_descriptor(slot, v->m_type);
             initialize_local_string_descriptor(slot, v->m_type);
+            initialize_struct_variable_storage(slot, v);
             initialize_local_value(v, slot);
             if (is_allocatable_struct_type(v->m_type)) {
                 uint32_t tag_slot = lr_emit_alloca(s, ty_i64);
@@ -1282,6 +1306,7 @@ public:
                     lr_symtab[get_hash((ASR::asr_t *)v)] = slot;
                     initialize_local_array_descriptor(slot, v->m_type);
                     initialize_local_string_descriptor(slot, v->m_type);
+                    initialize_struct_variable_storage(slot, v);
                     initialize_local_value(v, slot);
                     if (is_allocatable_struct_type(v->m_type)) {
                         uint32_t tag_slot = lr_emit_alloca(s, ty_i64);
@@ -3864,6 +3889,53 @@ public:
     // back to the variable's slot.  Anything else (arrays, source=,
     // stat=, mold=) is rejected with a clear diagnostic.
 
+    uint64_t struct_type_storage_size_from_signature(ASR::ttype_t *t) {
+        t = ASRUtils::type_get_past_allocatable_pointer(t);
+        t = ASRUtils::type_get_past_array(t);
+        if (!ASR::is_a<ASR::StructType_t>(*t)) {
+            return (uint64_t)element_byte_size(t);
+        }
+        ASR::StructType_t *st = ASR::down_cast<ASR::StructType_t>(t);
+        uint64_t nbytes = 0;
+        for (size_t i = 0; i < st->n_data_member_types; i++) {
+            ASR::ttype_t *member_type = st->m_data_member_types[i];
+            ASR::ttype_t *core =
+                ASRUtils::type_get_past_allocatable_pointer(member_type);
+            if (ASR::is_a<ASR::Array_t>(*core)) {
+                ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(core);
+                int64_t total = 1;
+                for (size_t d = 0; d < array_t->n_dims; d++) {
+                    int64_t extent = 0;
+                    if (!array_t->m_dims[d].m_length ||
+                            !ASRUtils::extract_value(
+                                array_t->m_dims[d].m_length, extent) ||
+                            extent <= 0) {
+                        total = -1;
+                        break;
+                    }
+                    total *= extent;
+                }
+                if (total > 0) {
+                    nbytes += (uint64_t)total *
+                        (uint64_t)element_byte_size(array_t->m_type);
+                } else {
+                    nbytes += storage_size_or_default(member_type,
+                        get_type(member_type));
+                }
+                continue;
+            }
+            core = ASRUtils::type_get_past_array(core);
+            if (ASR::is_a<ASR::StructType_t>(*core)) {
+                nbytes += struct_type_storage_size_from_signature(core);
+            } else {
+                nbytes += storage_size_or_default(member_type,
+                    get_type(member_type));
+            }
+        }
+        uint64_t abi_nbytes = lr_type_size_or_default(get_type(t));
+        return std::max(nbytes > 0 ? nbytes : 1, abi_nbytes);
+    }
+
     // Byte size of a scalar element for descriptor.elem_len.
     int64_t element_byte_size(ASR::ttype_t *t) {
         t = ASRUtils::type_get_past_allocatable_pointer(t);
@@ -3884,7 +3956,7 @@ public:
             case ASR::ttypeType::String:
                 return 16;            // descriptor
             case ASR::ttypeType::StructType: {
-                return (int64_t)lr_type_size_or_default(get_type(t));
+                return (int64_t)struct_type_storage_size_from_signature(t);
             }
             case ASR::ttypeType::Pointer:
             case ASR::ttypeType::CPtr:
@@ -4166,6 +4238,60 @@ public:
             }
             byte_offset += storage_size_for_variable(member);
         }
+    }
+
+    void initialize_struct_variable_storage(uint32_t slot,
+                                            ASR::Variable_t *var) {
+        ASR::ttype_t *type =
+            ASRUtils::type_get_past_allocatable_pointer(var->m_type);
+        if (ASR::is_a<ASR::Array_t>(*type)) {
+            ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(type);
+            ASR::ttype_t *elem_type =
+                ASRUtils::type_get_past_allocatable_pointer(array_t->m_type);
+            elem_type = ASRUtils::type_get_past_array(elem_type);
+            if (!ASR::is_a<ASR::StructType_t>(*elem_type)) {
+                return;
+            }
+            ASR::Struct_t *st = struct_symbol_from_type_decl(
+                var->m_type_declaration);
+            if (!st) {
+                return;
+            }
+            int64_t total = 1;
+            for (size_t d = 0; d < array_t->n_dims; d++) {
+                int64_t extent = 0;
+                if (!array_t->m_dims[d].m_length ||
+                        !ASRUtils::extract_value(
+                            array_t->m_dims[d].m_length, extent) ||
+                        extent <= 0) {
+                    total = -1;
+                    break;
+                }
+                total *= extent;
+            }
+            if (total <= 0) {
+                return;
+            }
+            uint64_t stride = element_byte_size(array_t->m_type);
+            for (int64_t i = 0; i < total; i++) {
+                lr_operand_desc_t off[1] = {
+                    I((int64_t)(i * stride), ty_i64)
+                };
+                uint32_t elem_ptr = lr_emit_gep(s, ty_i8,
+                    V(slot, ty_ptr), off, 1);
+                initialize_struct_storage(st, elem_ptr);
+            }
+            return;
+        }
+        type = ASRUtils::type_get_past_array(type);
+        if (!ASR::is_a<ASR::StructType_t>(*type) ||
+                ASRUtils::is_allocatable(var->m_type) ||
+                ASRUtils::is_pointer(var->m_type)) {
+            return;
+        }
+        ASR::Struct_t *st = struct_symbol_from_type_decl(
+            var->m_type_declaration);
+        initialize_struct_storage(st, slot);
     }
 
     void emit_allocatable_struct_allocation(uint32_t slot,
@@ -5879,7 +6005,7 @@ public:
                 break;
             }
         }
-        if (has_array_arg) {
+        if (has_array_arg && !sf.m_fmt) {
             for (size_t i = 0; i < sf.n_args; i++) {
                 ASR::Array_t *array_t = nullptr;
                 if (expr_is_array(sf.m_args[i], &array_t)) {
@@ -5909,72 +6035,10 @@ public:
             return;
         }
 
-        uint32_t allocator = emit_call(
-            "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
-
-        // Build serialization info string.  Format matches asr_to_llvm's
-        // SerializeType (comma-separated, I<kind>, R<kind>, L<kind*8>,
-        // S-DESC[-N] for strings).
-        std::string serial;
-        for (size_t i = 0; i < sf.n_args; i++) {
-            if (i > 0) serial += ",";
-            ASR::ttype_t *at = ASRUtils::expr_type(sf.m_args[i]);
-            at = ASRUtils::type_get_past_array(
-                    ASRUtils::type_get_past_allocatable(at));
-            switch (at->type) {
-                case ASR::ttypeType::Integer:
-                    serial += "I" + std::to_string(
-                        ASRUtils::extract_kind_from_ttype_t(at));
-                    break;
-                case ASR::ttypeType::Real:
-                    serial += "R" + std::to_string(
-                        ASRUtils::extract_kind_from_ttype_t(at));
-                    break;
-                case ASR::ttypeType::Logical:
-                    serial += "L" + std::to_string(
-                        ASRUtils::extract_kind_from_ttype_t(at) * 8);
-                    break;
-                case ASR::ttypeType::Complex: {
-                    std::string r = "R" + std::to_string(
-                        ASRUtils::extract_kind_from_ttype_t(at));
-                    serial += "{" + r + "," + r + "}";
-                    break;
-                }
-                case ASR::ttypeType::String: {
-                    ASR::String_t *st = down_cast<ASR::String_t>(at);
-                    serial += "S-";
-                    if (st->m_physical_type == ASR::DescriptorString) {
-                        serial += "DESC";
-                    } else if (st->m_physical_type == ASR::CChar) {
-                        serial += "CCHAR";
-                    } else {
-                        throw CodeGenError(
-                            "liric: unsupported string physical type for print");
-                    }
-                    int64_t len = -1;
-                    if (st->m_len && ASRUtils::extract_value(st->m_len, len)) {
-                        serial += "-" + std::to_string(len);
-                    }
-                    break;
-                }
-                default:
-                    throw CodeGenError("liric: unsupported print arg type");
-            }
-        }
-
-        // Create global constants for print data.
-        // lr_session_global creates data; lr_session_intern maps the name
-        // to a symbol ID usable in LR_GLOBAL operands.
-        std::string hash = std::to_string(get_hash((ASR::asr_t *)&x));
-
-        std::string serial_z = serial + '\0';
-        std::string serial_name = "_lr_serial_" + hash;
-        lr_session_global(s, serial_name.c_str(),
-            lr_type_array_s(s, ty_i8, serial_z.size()),
-            true, serial_z.data(), serial_z.size());
-        uint32_t serial_sym = lr_session_intern(s, serial_name.c_str());
+        auto formatted = emit_string_format(sf);
 
         const char nl_data[] = "\n";
+        std::string hash = std::to_string(get_hash((ASR::asr_t *)&x));
         std::string nl_name = "_lr_nl_" + hash;
         lr_session_global(s, nl_name.c_str(),
             lr_type_array_s(s, ty_i8, 2),
@@ -5988,79 +6052,17 @@ public:
             true, fmt_data, 5);
         uint32_t fmt_sym = lr_session_intern(s, fmt_name.c_str());
 
-        // Evaluate all args and store to alloca slots (pass by pointer)
-        std::vector<uint32_t> arg_slots;
-        for (size_t i = 0; i < sf.n_args; i++) {
-            visit_expr(*sf.m_args[i]);
-            lr_type_t *at = value_type_for_expr(sf.m_args[i]);
-            uint32_t slot = emit_temp_slot(at);
-            lr_emit_store(s, V(tmp, at), V(slot, ty_ptr));
-            arg_slots.push_back(slot);
-        }
-
-        // Alloca for output length
-        uint32_t out_len_ptr = lr_emit_alloca(s, ty_i64);
-
-        // Build call args for _lcompilers_string_format_fortran
-        // Fixed args: alloc, sep(null), sep_len(0), serial_info, out_len,
-        //             array_count(0), string_count(0), decimal_mode(0),
-        //             sign_mode(0), round_mode(0)
-        // Variadic: pointers to each formatted arg
-        std::vector<lr_operand_desc_t> call_args;
-        call_args.push_back(V(allocator, ty_ptr));                     // alloc
-        call_args.push_back(LR_NULL(ty_ptr));                          // sep
-        call_args.push_back(I(0, ty_i64));                             // sep_len
-        call_args.push_back(LR_GLOBAL(serial_sym, ty_ptr));           // serial_info
-        call_args.push_back(V(out_len_ptr, ty_ptr));                   // out_len
-        call_args.push_back(I(0, ty_i32));                             // arrays
-        call_args.push_back(I(0, ty_i32));                             // strings
-        call_args.push_back(I(0, ty_i32));                             // decimal
-        call_args.push_back(I(0, ty_i32));                             // sign
-        call_args.push_back(I(0, ty_i32));                             // round
-        for (size_t i = 0; i < arg_slots.size(); i++) {
-            call_args.push_back(V(arg_slots[i], ty_ptr));
-        }
-
-        // Set up the call as vararg with fixed_args=10
-        uint32_t strfmt_sym = lr_session_intern(s,
-            "_lcompilers_string_format_fortran");
-        {
-            lr_inst_desc_t d;
-            memset(&d, 0, sizeof(d));
-            uint32_t nops = 1 + call_args.size();
-            std::vector<lr_operand_desc_t> ops(nops);
-            ops[0] = LR_GLOBAL(strfmt_sym, ty_ptr);
-            for (size_t i = 0; i < call_args.size(); i++) {
-                ops[1 + i] = call_args[i];
-            }
-            d.op = LR_OP_CALL;
-            d.type = ty_ptr;
-            d.operands = ops.data();
-            d.num_operands = nops;
-            d.call_external_abi = true;
-            d.call_vararg = true;
-            d.call_fixed_args = 10;
-            tmp = lr_session_emit(s, &d, nullptr);
-        }
-        uint32_t str_data = tmp;
-
-        // Load output length and truncate to i32
-        uint32_t str_len64 = lr_emit_load(s, ty_i64, V(out_len_ptr, ty_ptr));
-        uint32_t str_len = lr_emit_trunc(s, ty_i32, V(str_len64, ty_i64));
-
-        // Call _lfortran_printf(fmt, str_data, str_len, "\n", 1)
         lr_operand_desc_t printf_args[] = {
             LR_GLOBAL(fmt_sym, ty_ptr),
-            V(str_data, ty_ptr),
-            V(str_len, ty_i32),
+            V(formatted.data, ty_ptr),
+            V(lr_emit_trunc(s, ty_i32, V(formatted.len, ty_i64)), ty_i32),
             LR_GLOBAL(nl_sym, ty_ptr),
             I(1, ty_i32)
         };
         emit_call_void("_lfortran_printf", printf_args, 5);
 
-        // Free the formatted string if non-null
         uint32_t is_null = lr_emit_icmp(s, LR_CMP_EQ,
-            V(str_data, ty_ptr), LR_NULL(ty_ptr));
+            V(formatted.data, ty_ptr), LR_NULL(ty_ptr));
 
         uint32_t free_bb = lr_session_block(s);
         uint32_t done_bb = lr_session_block(s);
@@ -6069,7 +6071,7 @@ public:
         lr_error_t err;
         lr_session_set_block(s, free_bb, &err);
         lr_operand_desc_t free_args[] = {
-            V(allocator, ty_ptr), V(str_data, ty_ptr)};
+            V(formatted.allocator, ty_ptr), V(formatted.data, ty_ptr)};
         emit_call_void("_lfortran_free_alloc", free_args, 2);
         lr_emit_br(s, done_bb);
 
@@ -6638,9 +6640,31 @@ public:
         return lr_session_intern(s, name.c_str());
     }
 
-    std::string serialization_for_type(ASR::ttype_t *at) {
-        at = ASRUtils::type_get_past_array(
-                ASRUtils::type_get_past_allocatable_pointer(at));
+    std::string serialization_for_type(ASR::ttype_t *at,
+            ASR::expr_t *expr = nullptr,
+            ASR::symbol_t *decl_sym = nullptr,
+            bool in_struct = false) {
+        at = ASRUtils::type_get_past_allocatable_pointer(at);
+        if (ASR::is_a<ASR::Array_t>(*at)) {
+            ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(at);
+            std::string serial;
+            if (in_struct) {
+                int64_t total = ASRUtils::get_fixed_size_of_array(
+                    array_t->m_dims, array_t->n_dims);
+                if (total <= 0) {
+                    throw CodeGenError(
+                        "liric: formatted struct member cannot be a "
+                        "dynamic array");
+                }
+                serial += std::to_string(total);
+            }
+            serial += "[";
+            serial += serialization_for_type(array_t->m_type, expr,
+                decl_sym, in_struct);
+            serial += "]";
+            return serial;
+        }
+        at = ASRUtils::type_get_past_array(at);
         switch (at->type) {
             case ASR::ttypeType::Integer:
                 return "I" + std::to_string(
@@ -6673,6 +6697,27 @@ public:
                 }
                 return serial;
             }
+            case ASR::ttypeType::StructType: {
+                ASR::symbol_t *sym = decl_sym;
+                if (!sym && expr) {
+                    sym = ASRUtils::get_struct_sym_from_struct_expr(expr);
+                }
+                ASR::Struct_t *st = struct_symbol_from_type_decl(sym);
+                if (!st) {
+                    throw CodeGenError(
+                        "liric: cannot resolve formatted struct type");
+                }
+                std::vector<ASR::Variable_t *> members;
+                collect_struct_members_parent_first(st, members);
+                std::string serial = "(";
+                for (size_t i = 0; i < members.size(); i++) {
+                    if (i > 0) serial += ",";
+                    serial += serialization_for_type(members[i]->m_type,
+                        nullptr, members[i]->m_type_declaration, true);
+                }
+                serial += ")";
+                return serial;
+            }
             default:
                 throw CodeGenError(std::string(
                     "liric: unsupported formatted value type ")
@@ -6681,18 +6726,127 @@ public:
     }
 
     std::string serialization_for_value(ASR::expr_t *value) {
-        return serialization_for_type(ASRUtils::expr_type(value));
+        return serialization_for_type(ASRUtils::expr_type(value), value);
     }
 
-    bool string_format_args_are_scalar(const ASR::StringFormat_t &sf) {
-        for (size_t i = 0; i < sf.n_args; i++) {
-            ASR::ttype_t *at = ASRUtils::expr_type(sf.m_args[i]);
-            at = ASRUtils::type_get_past_allocatable_pointer(at);
-            if (ASR::is_a<ASR::Array_t>(*at)) {
-                return false;
+    uint64_t formatted_type_size(ASR::ttype_t *type,
+            ASR::symbol_t *decl_sym = nullptr) {
+        type = ASRUtils::type_get_past_allocatable_pointer(type);
+        if (ASR::is_a<ASR::Array_t>(*type)) {
+            ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(type);
+            int64_t total = ASRUtils::get_fixed_size_of_array(
+                array_t->m_dims, array_t->n_dims);
+            if (total <= 0) {
+                throw CodeGenError(
+                    "liric: formatted struct member cannot be a "
+                    "dynamic array");
             }
+            return (uint64_t)total *
+                formatted_type_size(array_t->m_type, decl_sym);
         }
-        return true;
+        type = ASRUtils::type_get_past_array(type);
+        if (ASR::is_a<ASR::StructType_t>(*type)) {
+            ASR::Struct_t *st = struct_symbol_from_type_decl(decl_sym);
+            if (!st) {
+                throw CodeGenError(
+                    "liric: cannot size formatted struct type");
+            }
+            uint64_t total = 0;
+            std::vector<ASR::Variable_t *> members;
+            collect_struct_members_parent_first(st, members);
+            for (ASR::Variable_t *member : members) {
+                total += formatted_type_size(member->m_type,
+                    member->m_type_declaration);
+            }
+            return total;
+        }
+        if (ASR::is_a<ASR::String_t>(*type)) {
+            return 16;
+        }
+        return storage_size_or_default(type, get_type(type));
+    }
+
+    void emit_pack_formatted_value(uint32_t dst, uint32_t src,
+            ASR::ttype_t *type, ASR::symbol_t *decl_sym = nullptr) {
+        type = ASRUtils::type_get_past_allocatable_pointer(type);
+        if (ASR::is_a<ASR::Array_t>(*type)) {
+            ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(type);
+            int64_t total = ASRUtils::get_fixed_size_of_array(
+                array_t->m_dims, array_t->n_dims);
+            if (total <= 0) {
+                throw CodeGenError(
+                    "liric: formatted struct member cannot be a "
+                    "dynamic array");
+            }
+            ASR::ttype_t *elem_type = array_t->m_type;
+            uint64_t src_stride = element_byte_size(elem_type);
+            uint64_t dst_stride = formatted_type_size(elem_type, decl_sym);
+            for (int64_t i = 0; i < total; i++) {
+                lr_operand_desc_t src_off[1] = {
+                    I((int64_t)(i * src_stride), ty_i64)
+                };
+                lr_operand_desc_t dst_off[1] = {
+                    I((int64_t)(i * dst_stride), ty_i64)
+                };
+                uint32_t src_elem = lr_emit_gep(s, ty_i8,
+                    V(src, ty_ptr), src_off, 1);
+                uint32_t dst_elem = lr_emit_gep(s, ty_i8,
+                    V(dst, ty_ptr), dst_off, 1);
+                emit_pack_formatted_value(dst_elem, src_elem, elem_type,
+                    decl_sym);
+            }
+            return;
+        }
+        type = ASRUtils::type_get_past_array(type);
+        if (ASR::is_a<ASR::StructType_t>(*type)) {
+            ASR::Struct_t *st = struct_symbol_from_type_decl(decl_sym);
+            if (!st) {
+                throw CodeGenError(
+                    "liric: cannot pack formatted struct type");
+            }
+            std::vector<ASR::Variable_t *> members;
+            collect_struct_members_parent_first(st, members);
+            uint64_t src_offset = 0;
+            uint64_t dst_offset = 0;
+            for (ASR::Variable_t *member : members) {
+                lr_operand_desc_t src_off[1] = {
+                    I((int64_t)src_offset, ty_i64)
+                };
+                lr_operand_desc_t dst_off[1] = {
+                    I((int64_t)dst_offset, ty_i64)
+                };
+                uint32_t src_field = lr_emit_gep(s, ty_i8,
+                    V(src, ty_ptr), src_off, 1);
+                uint32_t dst_field = lr_emit_gep(s, ty_i8,
+                    V(dst, ty_ptr), dst_off, 1);
+                emit_pack_formatted_value(dst_field, src_field,
+                    member->m_type, member->m_type_declaration);
+                src_offset += storage_size_for_variable(member);
+                dst_offset += formatted_type_size(member->m_type,
+                    member->m_type_declaration);
+            }
+            return;
+        }
+        emit_memcpy_bytes(dst, src, formatted_type_size(type, decl_sym));
+    }
+
+    uint32_t emit_formatted_struct_arg_ptr(ASR::expr_t *expr,
+            ASR::ttype_t *type) {
+        ASR::Struct_t *st = struct_symbol_from_type_decl(
+            ASRUtils::get_struct_sym_from_struct_expr(expr));
+        if (!st) {
+            throw CodeGenError(
+                "liric: cannot resolve formatted struct argument");
+        }
+        bool was_target = is_target;
+        is_target = true;
+        visit_expr(*expr);
+        is_target = was_target;
+        uint32_t src = tmp;
+        uint32_t packed = emit_storage_alloca_nbytes(
+            formatted_type_size(type, (ASR::symbol_t *)st));
+        emit_pack_formatted_value(packed, src, type, (ASR::symbol_t *)st);
+        return packed;
     }
 
     struct FormattedString {
@@ -6728,12 +6882,69 @@ public:
         }
 
         std::vector<uint32_t> arg_slots;
+        std::vector<uint32_t> array_sizes;
         for (size_t i = 0; i < sf.n_args; i++) {
-            visit_expr(*sf.m_args[i]);
-            lr_type_t *at = value_type_for_expr(sf.m_args[i]);
-            uint32_t slot = emit_temp_slot(at);
-            lr_emit_store(s, V(tmp, at), V(slot, ty_ptr));
-            arg_slots.push_back(slot);
+            ASR::ttype_t *at = ASRUtils::expr_type(sf.m_args[i]);
+            at = ASRUtils::type_get_past_allocatable_pointer(at);
+            if (ASR::is_a<ASR::Array_t>(*at)) {
+                ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(at);
+                uint32_t total = 0;
+                if (array_t->m_physical_type !=
+                        ASR::array_physical_typeType::DescriptorArray) {
+                    int64_t static_total = 1;
+                    for (size_t d = 0; d < array_t->n_dims; d++) {
+                        int64_t extent = 0;
+                        if (!array_t->m_dims[d].m_length ||
+                                !ASRUtils::extract_value(
+                                    array_t->m_dims[d].m_length, extent) ||
+                                extent <= 0) {
+                            static_total = -1;
+                            break;
+                        }
+                        static_total *= extent;
+                    }
+                    if (static_total <= 0) {
+                        throw CodeGenError(
+                            "liric: formatted array needs a fixed size");
+                    }
+                    total = emit_i64_const(static_total);
+                } else {
+                    total = descriptor_array_element_count(
+                        desc_ptr_of(sf.m_args[i]), (int)array_t->n_dims);
+                }
+                array_sizes.push_back(total);
+                bool was_target = is_target;
+                is_target = true;
+                visit_expr(*sf.m_args[i]);
+                is_target = was_target;
+                uint32_t arg_ptr = tmp;
+                ASR::ttype_t *elem_type =
+                    ASRUtils::type_get_past_allocatable_pointer(
+                        array_t->m_type);
+                elem_type = ASRUtils::type_get_past_array(elem_type);
+                if (ASR::is_a<ASR::StructType_t>(*elem_type)) {
+                    ASR::symbol_t *elem_decl =
+                        ASRUtils::get_struct_sym_from_struct_expr(
+                            sf.m_args[i]);
+                    uint32_t packed = emit_storage_alloca_nbytes(
+                        formatted_type_size(at, elem_decl));
+                    emit_pack_formatted_value(packed, arg_ptr, at, elem_decl);
+                    arg_ptr = packed;
+                }
+                arg_slots.push_back(arg_ptr);
+                continue;
+            }
+            at = ASRUtils::type_get_past_array(at);
+            if (ASR::is_a<ASR::StructType_t>(*at)) {
+                arg_slots.push_back(emit_formatted_struct_arg_ptr(
+                    sf.m_args[i], ASRUtils::expr_type(sf.m_args[i])));
+            } else {
+                visit_expr(*sf.m_args[i]);
+                lr_type_t *lr_t = value_type_for_expr(sf.m_args[i]);
+                uint32_t slot = emit_temp_slot(lr_t);
+                lr_emit_store(s, V(tmp, lr_t), V(slot, ty_ptr));
+                arg_slots.push_back(slot);
+            }
         }
 
         uint32_t allocator = emit_call(
@@ -6745,11 +6956,14 @@ public:
         call_args.push_back(sf.m_fmt ? V(fmt_len, ty_i64) : I(0, ty_i64));
         call_args.push_back(LR_GLOBAL(serial_sym, ty_ptr));
         call_args.push_back(V(out_len_ptr, ty_ptr));
+        call_args.push_back(I((int64_t)array_sizes.size(), ty_i32));
         call_args.push_back(I(0, ty_i32));
         call_args.push_back(I(0, ty_i32));
         call_args.push_back(I(0, ty_i32));
         call_args.push_back(I(0, ty_i32));
-        call_args.push_back(I(0, ty_i32));
+        for (uint32_t array_size : array_sizes) {
+            call_args.push_back(V(array_size, ty_i64));
+        }
         for (uint32_t slot : arg_slots) {
             call_args.push_back(V(slot, ty_ptr));
         }
@@ -6812,6 +7026,53 @@ public:
         ops[9]  = I(0, ty_i32);
         ops[10] = I(0, ty_i32);
         ops[11] = V(slot, ty_ptr);
+        d.op = LR_OP_CALL;
+        d.type = ty_ptr;
+        d.operands = ops;
+        d.num_operands = 12;
+        d.call_external_abi = true;
+        d.call_vararg = true;
+        d.call_fixed_args = 10;
+        uint32_t fdata = lr_session_emit(s, &d, nullptr);
+        uint32_t flen = lr_emit_load(s, ty_i64, V(out_len_ptr, ty_ptr));
+        return {fdata, flen};
+    }
+
+    std::pair<uint32_t, uint32_t> format_pointer_value_to_string(
+            uint32_t value_ptr, ASR::ttype_t *vt,
+            const std::string &suffix,
+            ASR::expr_t *expr = nullptr,
+            ASR::symbol_t *decl_sym = nullptr) {
+        std::string serial = serialization_for_type(vt, expr, decl_sym);
+        std::string serial_z = serial + '\0';
+        std::string serial_name = "_lr_fwserial_ptr_" + suffix;
+        lr_session_global(s, serial_name.c_str(),
+            lr_type_array_s(s, ty_i8, serial_z.size()),
+            true, serial_z.data(), serial_z.size());
+        uint32_t serial_sym =
+            lr_session_intern(s, serial_name.c_str());
+
+        uint32_t allocator = emit_call(
+            "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+        uint32_t out_len_ptr = lr_emit_alloca(s, ty_i64);
+
+        uint32_t strfmt_sym = lr_session_intern(s,
+            "_lcompilers_string_format_fortran");
+        lr_inst_desc_t d;
+        memset(&d, 0, sizeof(d));
+        lr_operand_desc_t ops[12];
+        ops[0]  = LR_GLOBAL(strfmt_sym, ty_ptr);
+        ops[1]  = V(allocator, ty_ptr);
+        ops[2]  = LR_NULL(ty_ptr);
+        ops[3]  = I(0, ty_i64);
+        ops[4]  = LR_GLOBAL(serial_sym, ty_ptr);
+        ops[5]  = V(out_len_ptr, ty_ptr);
+        ops[6]  = I(0, ty_i32);
+        ops[7]  = I(0, ty_i32);
+        ops[8]  = I(0, ty_i32);
+        ops[9]  = I(0, ty_i32);
+        ops[10] = I(0, ty_i32);
+        ops[11] = V(value_ptr, ty_ptr);
         d.op = LR_OP_CALL;
         d.type = ty_ptr;
         d.operands = ops;
@@ -6962,6 +7223,21 @@ public:
                 V(desc, ty_str_desc), &fld0, 1);
             len = lr_emit_extractvalue(s, ty_i64,
                 V(desc, ty_str_desc), &fld1, 1);
+        } else if (ASR::is_a<ASR::StructType_t>(*elem_t)) {
+            ASR::Struct_t *st = struct_symbol_from_type_decl(
+                ASRUtils::get_struct_sym_from_struct_expr(expr));
+            if (!st) {
+                throw CodeGenError(
+                    "liric: cannot resolve formatted array struct type");
+            }
+            uint32_t packed = emit_storage_alloca_nbytes(
+                formatted_type_size(elem_t, (ASR::symbol_t *)st));
+            emit_pack_formatted_value(packed, elem_ptr, elem_t,
+                (ASR::symbol_t *)st);
+            std::tie(data, len) = format_pointer_value_to_string(packed,
+                elem_t, "array_struct_" + std::to_string(
+                    (uint64_t)reinterpret_cast<uintptr_t>(expr)), expr,
+                (ASR::symbol_t *)st);
         } else {
             uint32_t value = lr_emit_load(s, elem_lr, V(elem_ptr, ty_ptr));
             std::tie(data, len) = format_scalar_value_to_string(value,
@@ -7073,9 +7349,7 @@ public:
         ASR::expr_t **values = x.m_values;
         size_t n_values = x.n_values;
         bool formatted_value_done = false;
-        if (n_values == 1 && ASR::is_a<ASR::StringFormat_t>(*values[0]) &&
-                string_format_args_are_scalar(
-                    *ASR::down_cast<ASR::StringFormat_t>(values[0]))) {
+        if (n_values == 1 && ASR::is_a<ASR::StringFormat_t>(*values[0])) {
             ASR::StringFormat_t *sf =
                 down_cast<ASR::StringFormat_t>(values[0]);
             FormattedString formatted = emit_string_format(*sf);
