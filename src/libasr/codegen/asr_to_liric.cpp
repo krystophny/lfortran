@@ -785,6 +785,8 @@ public:
             declare_func("_lfortran_flush", ty_void, p, 4, false);
         }
 
+        collect_known_structs(x.m_symtab);
+
         // Visit all symbols
         for (auto &item : x.m_symtab->get_scope()) {
             visit_symbol(*item.second);
@@ -932,6 +934,18 @@ public:
                 item.second);
             if (sym && ASR::is_a<ASR::Struct_t>(*sym)) {
                 register_known_struct(ASR::down_cast<ASR::Struct_t>(sym));
+            } else if (sym && ASR::is_a<ASR::Module_t>(*sym)) {
+                collect_known_structs(ASR::down_cast<ASR::Module_t>(
+                    sym)->m_symtab);
+            } else if (sym && ASR::is_a<ASR::Program_t>(*sym)) {
+                collect_known_structs(ASR::down_cast<ASR::Program_t>(
+                    sym)->m_symtab);
+            } else if (sym && ASR::is_a<ASR::Function_t>(*sym)) {
+                collect_known_structs(ASR::down_cast<ASR::Function_t>(
+                    sym)->m_symtab);
+            } else if (sym && ASR::is_a<ASR::Block_t>(*sym)) {
+                collect_known_structs(ASR::down_cast<ASR::Block_t>(
+                    sym)->m_symtab);
             }
         }
     }
@@ -3985,6 +3999,100 @@ public:
         lr_emit_store(s, V(z1, ty_str_desc), V(desc_ptr, ty_ptr));
     }
 
+    ASR::Variable_t *var_from_expr(ASR::expr_t *expr) {
+        if (!ASR::is_a<ASR::Var_t>(*expr)) {
+            return nullptr;
+        }
+        ASR::Var_t *var = ASR::down_cast<ASR::Var_t>(expr);
+        ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(var->m_v);
+        if (!ASR::is_a<ASR::Variable_t>(*sym)) {
+            return nullptr;
+        }
+        return ASR::down_cast<ASR::Variable_t>(sym);
+    }
+
+    void emit_allocatable_struct_allocation(uint32_t slot,
+                                            ASR::Struct_t *st,
+                                            ASR::Variable_t *target_var) {
+        uint64_t nbytes = st ? struct_storage_size(st) : 8;
+        uint64_t raw_nbytes = nbytes + class_header_bytes();
+        uint32_t allocator = emit_call(
+            "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+        lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
+        declare_func("_lfortran_malloc_alloc", ty_ptr,
+            malloc_params, 2, false);
+        lr_operand_desc_t malloc_args[] = {
+            V(allocator, ty_ptr), I((int64_t)raw_nbytes, ty_i64)
+        };
+        uint32_t raw_data = emit_call("_lfortran_malloc_alloc",
+            ty_ptr, malloc_args, 2);
+        lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
+        declare_func("memset", ty_ptr, memset_params, 3, false);
+        lr_operand_desc_t memset_args[] = {
+            V(raw_data, ty_ptr), I(0, ty_i32),
+            I((int64_t)raw_nbytes, ty_i64)
+        };
+        emit_call("memset", ty_ptr, memset_args, 3);
+        if (st) {
+            lr_emit_store(s, I(struct_symbol_tag(
+                (ASR::symbol_t *)st), ty_i64), V(raw_data, ty_ptr));
+            emit_struct_vtable(raw_data, st);
+        }
+        lr_emit_store(s, V(raw_data, ty_ptr), V(slot, ty_ptr));
+        if (target_var && st) {
+            uint64_t h = get_hash((ASR::asr_t *)target_var);
+            auto tag_it = class_tag_slots.find(h);
+            if (tag_it != class_tag_slots.end()) {
+                lr_emit_store(s, I(struct_symbol_tag(
+                    (ASR::symbol_t *)st), ty_i64),
+                    V(tag_it->second, ty_ptr));
+            }
+        }
+    }
+
+    bool emit_mold_struct_allocation(uint32_t slot,
+                                     ASR::Struct_t *declared,
+                                     ASR::expr_t *mold,
+                                     ASR::Variable_t *target_var) {
+        if (!mold) {
+            return false;
+        }
+        bool was_target = is_target;
+        is_target = true;
+        visit_expr(*mold);
+        is_target = was_target;
+        uint32_t mold_raw = lr_emit_load(s, ty_ptr, V(tmp, ty_ptr));
+        uint32_t mold_tag = load_raw_object_type_tag(mold_raw);
+
+        lr_error_t err;
+        uint32_t done_bb = lr_session_block(s);
+        for (ASR::Struct_t *candidate : known_structs) {
+            if (declared && !struct_derives_from(candidate, declared) &&
+                    get_hash((ASR::asr_t *)candidate) !=
+                    get_hash((ASR::asr_t *)declared)) {
+                continue;
+            }
+            uint32_t then_bb = lr_session_block(s);
+            uint32_t next_bb = lr_session_block(s);
+            uint32_t matches = lr_emit_icmp(s, LR_CMP_EQ,
+                V(mold_tag, ty_i64),
+                I(struct_symbol_tag((ASR::symbol_t *)candidate), ty_i64));
+            lr_emit_condbr(s, V(matches, ty_i1), then_bb, next_bb);
+
+            lr_session_set_block(s, then_bb, &err);
+            emit_allocatable_struct_allocation(slot, candidate, target_var);
+            lr_emit_br(s, done_bb);
+
+            lr_session_set_block(s, next_bb, &err);
+        }
+        if (declared && !declared->m_is_abstract) {
+            emit_allocatable_struct_allocation(slot, declared, target_var);
+        }
+        lr_emit_br(s, done_bb);
+        lr_session_set_block(s, done_bb, &err);
+        return true;
+    }
+
     void visit_Allocate(const ASR::Allocate_t &x) {
         for (size_t i = 0; i < x.n_args; i++) {
             const ASR::alloc_arg_t &arg = x.m_args[i];
@@ -4009,47 +4117,13 @@ public:
                     st = struct_symbol_from_type_decl(
                         ASRUtils::get_struct_sym_from_struct_expr(arg.m_a));
                 }
-                uint64_t nbytes = st ? struct_storage_size(st) :
-                    storage_size_or_default(core, get_type(core));
-                uint64_t raw_nbytes = nbytes + class_header_bytes();
-                uint32_t allocator = emit_call(
-                    "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
-                lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
-                declare_func("_lfortran_malloc_alloc", ty_ptr,
-                    malloc_params, 2, false);
-                lr_operand_desc_t malloc_args[] = {
-                    V(allocator, ty_ptr), I((int64_t)raw_nbytes, ty_i64)
-                };
-                uint32_t raw_data = emit_call("_lfortran_malloc_alloc",
-                    ty_ptr, malloc_args, 2);
-                lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
-                declare_func("memset", ty_ptr, memset_params, 3, false);
-                lr_operand_desc_t memset_args[] = {
-                    V(raw_data, ty_ptr), I(0, ty_i32),
-                    I((int64_t)raw_nbytes, ty_i64)
-                };
-                emit_call("memset", ty_ptr, memset_args, 3);
-                if (st) {
-                    lr_emit_store(s, I(struct_symbol_tag(
-                        (ASR::symbol_t *)st), ty_i64),
-                        V(raw_data, ty_ptr));
-                    emit_struct_vtable(raw_data, st);
+                ASR::Variable_t *target_var = var_from_expr(arg.m_a);
+                if (!arg.m_sym_subclass && x.m_source &&
+                        emit_mold_struct_allocation(
+                            slot, st, x.m_source, target_var)) {
+                    continue;
                 }
-                lr_emit_store(s, V(raw_data, ty_ptr), V(slot, ty_ptr));
-                if (ASR::is_a<ASR::Var_t>(*arg.m_a)) {
-                    ASR::Var_t *var = ASR::down_cast<ASR::Var_t>(arg.m_a);
-                    ASR::symbol_t *sym =
-                        ASRUtils::symbol_get_past_external(var->m_v);
-                    if (ASR::is_a<ASR::Variable_t>(*sym) && st) {
-                        uint64_t h = get_hash((ASR::asr_t *)sym);
-                        auto tag_it = class_tag_slots.find(h);
-                        if (tag_it != class_tag_slots.end()) {
-                            lr_emit_store(s, I(struct_symbol_tag(
-                                (ASR::symbol_t *)st), ty_i64),
-                                V(tag_it->second, ty_ptr));
-                        }
-                    }
-                }
+                emit_allocatable_struct_allocation(slot, st, target_var);
                 continue;
             }
             if (!ASR::is_a<ASR::String_t>(*core)) {
@@ -4109,7 +4183,6 @@ public:
             lr_emit_store(s, I(0, ty_i32), V(slot, ty_ptr));
         }
         (void)x.m_errmsg;
-        (void)x.m_source;
     }
 
     // --- ReAlloc ---
