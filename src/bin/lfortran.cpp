@@ -2038,12 +2038,23 @@ int link_executable(const std::vector<std::string> &infiles,
     if (backend == Backend::liric) {
 #ifdef HAVE_LFORTRAN_LIRIC
         std::vector<std::string> link_inputs(infiles);
-        // The AOT no-link path resolves all symbols from sidecars
-        // (.liric_blob / .liric_ll) on the object inputs.  The user-facing
-        // program needs _lfortran_* symbols from liblfortran_runtime_static.a
-        // and Fortran intrinsic-module symbols from
-        // liblfortran_runtime_fortran.a; pass both as archive inputs so
-        // liric's archive resolver pulls in only the needed members.
+        // The AOT no-link path resolves the lfortran C runtime through
+        // liric's runtime archive (built once at lfortran-build time
+        // from lfortran_intrinsics.c, see scripts/build_liric_runtime_archive.sh).
+        // The lrarch carries both the IR and pre-compiled blobs for
+        // every _lfortran_* / _lcompilers_* / _lpython_* symbol the
+        // compat backend emits, so we do not need to pass the C runtime
+        // static archive as a link input.  That keeps user-code
+        // compiles clang-free.
+        if (!std::getenv("LIRIC_RUNTIME_ARCHIVE")) {
+            std::string rt_lrarch = runtime_library_dir + "/liric_runtime.lrarch";
+            std::ifstream rt_f(rt_lrarch);
+            if (rt_f.good())
+                setenv("LIRIC_RUNTIME_ARCHIVE", rt_lrarch.c_str(), 1);
+        }
+        // Fortran intrinsic-module symbols still live in
+        // liblfortran_runtime_fortran.a (built only when LIRIC_RUNTIME=on);
+        // include it when available.
         auto try_add_archive = [&](const std::string &name) {
             std::vector<std::string> candidates = {
                 runtime_library_dir + "/" + name,
@@ -2059,17 +2070,6 @@ int link_executable(const std::vector<std::string> &infiles,
             return false;
         };
         try_add_archive("liblfortran_runtime_fortran.a");
-        try_add_archive("liblfortran_runtime_static.a");
-        // liric needs its own runtime archive at emit time to provide
-        // libm intrinsics and target stubs.  Point at the one shipped
-        // alongside lfortran's runtime library if the user hasn't set
-        // LIRIC_RUNTIME_ARCHIVE themselves.
-        if (!std::getenv("LIRIC_RUNTIME_ARCHIVE")) {
-            std::string rt_lrarch = runtime_library_dir + "/liric_runtime.lrarch";
-            std::ifstream rt_f(rt_lrarch);
-            if (rt_f.good())
-                setenv("LIRIC_RUNTIME_ARCHIVE", rt_lrarch.c_str(), 1);
-        }
         std::vector<const char *> objects;
         objects.reserve(link_inputs.size());
         for (const std::string &input : link_inputs) {
