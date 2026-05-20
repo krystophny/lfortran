@@ -5081,10 +5081,13 @@ public:
                 // expression evaluation in arg.m_len_expr matters.
                 continue;
             }
-            if (!arg.m_len_expr) {
+            ASR::String_t *string_t = ASR::down_cast<ASR::String_t>(core);
+            ASR::expr_t *len_expr = arg.m_len_expr ? arg.m_len_expr :
+                string_t->m_len;
+            if (!len_expr) {
                 throw CodeGenError(
                     "liric: allocate() of string requires an explicit "
-                    "len= expression");
+                    "or declared len expression");
             }
 
             bool was_target = is_target;
@@ -5093,12 +5096,7 @@ public:
             is_target = was_target;
             uint32_t desc_ptr = tmp;
 
-            visit_expr(*arg.m_len_expr);
-            uint32_t len = tmp;
-            lr_type_t *len_t = get_type(ASRUtils::expr_type(arg.m_len_expr));
-            uint32_t len64 = (len_t == ty_i64)
-                ? len
-                : lr_emit_sext(s, ty_i64, V(len, len_t));
+            uint32_t len64 = emit_i64_expr(len_expr);
 
             uint32_t allocator = emit_call(
                 "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
