@@ -957,11 +957,21 @@ public:
         // subroutine storage.  Putting them in lr_globals up front
         // means both the program body and contained subroutines hit
         // the same global symbol.
+        // First pass: register the program-level Variable hash.  Second
+        // pass: also register the m_external Variable hash for any
+        // ExternalSymbol entries the nested-vars pass injected, pointing
+        // at the *same* global symbol.  Contained subroutines walk
+        // through the ExternalSymbol, so its underlying Variable_t hash
+        // must resolve to the same storage as the program's hash.
+        std::unordered_map<ASR::Variable_t *, uint32_t> var_to_sym;
         for (auto &item : x.m_symtab->get_scope()) {
             if (!is_a<ASR::Variable_t>(*item.second)) continue;
             ASR::Variable_t *v = down_cast<ASR::Variable_t>(item.second);
             uint64_t h = get_hash((ASR::asr_t *)v);
-            if (lr_globals.count(h)) continue;
+            if (lr_globals.count(h)) {
+                var_to_sym[v] = lr_globals[h];
+                continue;
+            }
             uint64_t nbytes = storage_size_for_variable(v);
             std::vector<uint8_t> zeros(nbytes, 0);
             std::string gname = std::string("_lr_pg_") + std::to_string(h)
@@ -969,7 +979,33 @@ public:
             lr_session_global(s, gname.c_str(),
                 lr_type_array_s(s, ty_i8, nbytes),
                 false, zeros.data(), nbytes);
-            lr_globals[h] = lr_session_intern(s, gname.c_str());
+            uint32_t sym = lr_session_intern(s, gname.c_str());
+            lr_globals[h] = sym;
+            var_to_sym[v] = sym;
+        }
+        // Build a name -> sym map of the program-level variables so we
+        // can alias nested-context ExternalSymbols (which point to
+        // separate Variable_t copies introduced by the nested_vars
+        // pass) onto the same global storage as the host variable they
+        // proxy.
+        std::unordered_map<std::string, uint32_t> name_to_sym;
+        for (auto &kv : var_to_sym) {
+            name_to_sym[kv.first->m_name] = kv.second;
+        }
+        for (auto &item : x.m_symtab->get_scope()) {
+            if (!ASR::is_a<ASR::ExternalSymbol_t>(*item.second)) continue;
+            ASR::ExternalSymbol_t *ext =
+                ASR::down_cast<ASR::ExternalSymbol_t>(item.second);
+            if (!ext->m_external) continue;
+            if (!ASR::is_a<ASR::Variable_t>(*ext->m_external)) continue;
+            ASR::Variable_t *target_v =
+                ASR::down_cast<ASR::Variable_t>(ext->m_external);
+            uint64_t target_h = get_hash((ASR::asr_t *)target_v);
+            if (lr_globals.count(target_h)) continue;
+            auto it = name_to_sym.find(target_v->m_name);
+            if (it != name_to_sym.end()) {
+                lr_globals[target_h] = it->second;
+            }
         }
 
         // Visit nested functions first
