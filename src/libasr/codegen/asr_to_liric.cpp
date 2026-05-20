@@ -460,14 +460,32 @@ public:
             }
             return acc;
         }
-        // Use the runtime helper (lfortran ships an integer pow).
-        const char *fn = (t == ty_i64)
-            ? "_lfortran_kpow_int64" : "_lfortran_kpow_int32";
-        lr_type_t *params[] = {t, t};
-        declare_func(fn, t, params, 2, false);
-        lr_operand_desc_t args[] = {V(l, t), V(r, t)};
-        return emit_call(fn, t, args, 2);
-        (void)r;
+        uint32_t acc_ptr = lr_emit_alloca(s, t);
+        uint32_t exp_ptr = lr_emit_alloca(s, t);
+        lr_emit_store(s, I(1, t), V(acc_ptr, ty_ptr));
+        lr_emit_store(s, V(r, t), V(exp_ptr, ty_ptr));
+
+        lr_error_t err;
+        uint32_t head_bb = lr_session_block(s);
+        uint32_t body_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_br(s, head_bb);
+
+        lr_session_set_block(s, head_bb, &err);
+        uint32_t exp = lr_emit_load(s, t, V(exp_ptr, ty_ptr));
+        uint32_t more = lr_emit_icmp(s, LR_CMP_SGT, V(exp, t), I(0, t));
+        lr_emit_condbr(s, V(more, ty_i1), body_bb, done_bb);
+
+        lr_session_set_block(s, body_bb, &err);
+        uint32_t acc = lr_emit_load(s, t, V(acc_ptr, ty_ptr));
+        acc = lr_emit_mul(s, t, V(acc, t), V(l, t));
+        lr_emit_store(s, V(acc, t), V(acc_ptr, ty_ptr));
+        uint32_t next = lr_emit_sub(s, t, V(exp, t), I(1, t));
+        lr_emit_store(s, V(next, t), V(exp_ptr, ty_ptr));
+        lr_emit_br(s, head_bb);
+
+        lr_session_set_block(s, done_bb, &err);
+        return lr_emit_load(s, t, V(acc_ptr, ty_ptr));
     }
 
     // --- One-liner visitors via macros ---
