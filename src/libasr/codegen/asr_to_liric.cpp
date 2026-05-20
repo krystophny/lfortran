@@ -19,6 +19,7 @@
 #include <libasr/pass/intrinsic_function_registry.h>
 #include <libasr/pass/intrinsic_subroutine_registry.h>
 
+#include <cctype>
 #include <cstring>
 #include <string>
 #include <unordered_map>
@@ -867,14 +868,23 @@ public:
         return t != ty_void && lr_type_width(s, t) == 0;
     }
 
+    std::string construct_key(char *name) {
+        std::string key(name);
+        for (char &c: key) {
+            c = static_cast<char>(std::tolower(
+                static_cast<unsigned char>(c)));
+        }
+        return key;
+    }
+
     void push_named_exit(char *name, uint32_t target) {
         if (!name || name[0] == '\0') return;
-        named_exit_blocks[std::string(name)].push_back(target);
+        named_exit_blocks[construct_key(name)].push_back(target);
     }
 
     void pop_named_exit(char *name) {
         if (!name || name[0] == '\0') return;
-        auto it = named_exit_blocks.find(std::string(name));
+        auto it = named_exit_blocks.find(construct_key(name));
         if (it == named_exit_blocks.end() || it->second.empty()) return;
         it->second.pop_back();
         if (it->second.empty()) named_exit_blocks.erase(it);
@@ -887,7 +897,7 @@ public:
             }
             return loop_end_stack.back();
         }
-        auto it = named_exit_blocks.find(std::string(name));
+        auto it = named_exit_blocks.find(construct_key(name));
         if (it == named_exit_blocks.end() || it->second.empty()) {
             throw CodeGenError(std::string("liric: unknown EXIT target ") +
                 name);
@@ -897,12 +907,12 @@ public:
 
     void push_named_cycle(char *name, uint32_t target) {
         if (!name || name[0] == '\0') return;
-        named_cycle_blocks[std::string(name)].push_back(target);
+        named_cycle_blocks[construct_key(name)].push_back(target);
     }
 
     void pop_named_cycle(char *name) {
         if (!name || name[0] == '\0') return;
-        auto it = named_cycle_blocks.find(std::string(name));
+        auto it = named_cycle_blocks.find(construct_key(name));
         if (it == named_cycle_blocks.end() || it->second.empty()) return;
         it->second.pop_back();
         if (it->second.empty()) named_cycle_blocks.erase(it);
@@ -915,7 +925,7 @@ public:
             }
             return loop_head_stack.back();
         }
-        auto it = named_cycle_blocks.find(std::string(name));
+        auto it = named_cycle_blocks.find(construct_key(name));
         if (it == named_cycle_blocks.end() || it->second.empty()) {
             throw CodeGenError(std::string("liric: unknown CYCLE target ") +
                 name);
