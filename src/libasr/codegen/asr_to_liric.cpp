@@ -168,6 +168,7 @@ public:
     std::unordered_map<uint64_t, uint32_t> lr_symtab;
     std::unordered_map<uint64_t, uint32_t> lr_globals;   // variable hash -> intern symbol id
     std::unordered_map<uint64_t, uint32_t> class_tag_slots;
+    std::unordered_set<uint64_t> runtime_pointer_arrays;
     std::unordered_set<uint64_t> known_struct_hashes;
     std::vector<ASR::Struct_t *> known_structs;
     std::unordered_map<uint64_t, lr_type_t *> struct_types;
@@ -1191,6 +1192,100 @@ public:
         return emit_storage_alloca_nbytes(nbytes);
     }
 
+    uint32_t emit_i64_expr(ASR::expr_t *expr) {
+        visit_expr(*expr);
+        lr_type_t *t = get_type(ASRUtils::expr_type(expr));
+        if (t == ty_i64) return tmp;
+        if (lr_type_width(s, t) > 64) {
+            return lr_emit_trunc(s, ty_i64, V(tmp, t));
+        }
+        return lr_emit_sext(s, ty_i64, V(tmp, t));
+    }
+
+    uint32_t emit_array_dim_extent(ASR::Array_t *array_t, size_t dim) {
+        int64_t extent = 1;
+        if (!array_t->m_dims[dim].m_length) {
+            return emit_i64_const(extent);
+        }
+        if (ASRUtils::extract_value(array_t->m_dims[dim].m_length,
+                extent)) {
+            return emit_i64_const(extent);
+        }
+        return emit_i64_expr(array_t->m_dims[dim].m_length);
+    }
+
+    uint32_t emit_array_dim_lbound(ASR::Array_t *array_t, size_t dim) {
+        int64_t lbound = 1;
+        if (!array_t->m_dims[dim].m_start) {
+            return emit_i64_const(lbound);
+        }
+        if (ASRUtils::extract_value(array_t->m_dims[dim].m_start,
+                lbound)) {
+            return emit_i64_const(lbound);
+        }
+        return emit_i64_expr(array_t->m_dims[dim].m_start);
+    }
+
+    bool pointer_array_has_runtime_dims(ASR::Variable_t *v,
+            ASR::Array_t **array_out=nullptr) {
+        ASR::ttype_t *type =
+            ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+        if (!ASR::is_a<ASR::Array_t>(*type)) return false;
+        ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(type);
+        if (array_t->m_physical_type !=
+                ASR::array_physical_typeType::PointerArray) {
+            return false;
+        }
+        bool runtime = false;
+        for (size_t d = 0; d < array_t->n_dims; d++) {
+            int64_t extent = 0;
+            if (!array_t->m_dims[d].m_length ||
+                    !ASRUtils::extract_value(
+                        array_t->m_dims[d].m_length, extent)) {
+                runtime = true;
+                break;
+            }
+        }
+        if (runtime && array_out) *array_out = array_t;
+        return runtime;
+    }
+
+    uint32_t emit_malloc_bytes(uint32_t bytes) {
+        uint32_t allocator = emit_call(
+            "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+        lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
+        declare_func("_lfortran_malloc_alloc", ty_ptr,
+            malloc_params, 2, false);
+        lr_operand_desc_t malloc_args[] = {
+            V(allocator, ty_ptr), V(bytes, ty_i64)
+        };
+        return emit_call("_lfortran_malloc_alloc",
+            ty_ptr, malloc_args, 2);
+    }
+
+    uint32_t emit_runtime_pointer_array_slot(ASR::Variable_t *v,
+            ASR::Array_t *array_t) {
+        uint32_t total = emit_i64_const(1);
+        for (size_t d = 0; d < array_t->n_dims; d++) {
+            uint32_t extent = emit_array_dim_extent(array_t, d);
+            total = lr_emit_mul(s, ty_i64,
+                V(total, ty_i64), V(extent, ty_i64));
+        }
+        uint32_t bytes = lr_emit_mul(s, ty_i64, V(total, ty_i64),
+            I(element_byte_size(array_t->m_type), ty_i64));
+        uint32_t data = emit_malloc_bytes(bytes);
+        lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
+        declare_func("memset", ty_ptr, memset_params, 3, false);
+        lr_operand_desc_t args[] = {
+            V(data, ty_ptr), I(0, ty_i32), V(bytes, ty_i64)
+        };
+        emit_call("memset", ty_ptr, args, 3);
+        uint32_t slot = lr_emit_alloca(s, ty_ptr);
+        lr_emit_store(s, V(data, ty_ptr), V(slot, ty_ptr));
+        runtime_pointer_arrays.insert(get_hash((ASR::asr_t *)v));
+        return slot;
+    }
+
     // --- Program ---
 
     void visit_Program(const ASR::Program_t &x) {
@@ -1390,12 +1485,18 @@ public:
                 ASR::Variable_t *v = down_cast<ASR::Variable_t>(item.second);
                 if (v->m_intent == ASR::intentType::Local
                     || v->m_intent == ASR::intentType::ReturnVar) {
-                    uint32_t slot = emit_storage_alloca_for_var(v);
+                    ASR::Array_t *runtime_array = nullptr;
+                    uint32_t slot = pointer_array_has_runtime_dims(
+                        v, &runtime_array)
+                        ? emit_runtime_pointer_array_slot(v, runtime_array)
+                        : emit_storage_alloca_for_var(v);
                     lr_symtab[get_hash((ASR::asr_t *)v)] = slot;
-                    initialize_local_array_descriptor(slot, v->m_type);
-                    initialize_local_string_descriptor(slot, v->m_type);
-                    initialize_struct_variable_storage(slot, v);
-                    initialize_local_value(v, slot);
+                    if (!runtime_array) {
+                        initialize_local_array_descriptor(slot, v->m_type);
+                        initialize_local_string_descriptor(slot, v->m_type);
+                        initialize_struct_variable_storage(slot, v);
+                        initialize_local_value(v, slot);
+                    }
                     if (is_allocatable_struct_type(v->m_type)) {
                         uint32_t tag_slot = lr_emit_alloca(s, ty_i64);
                         lr_emit_store(s, I(0, ty_i64), V(tag_slot, ty_ptr));
@@ -1535,6 +1636,10 @@ public:
         auto local_it = lr_symtab.find(h);
         if (local_it != lr_symtab.end()) {
             uint32_t slot = local_it->second;
+            if (is_array && runtime_pointer_arrays.count(h)) {
+                tmp = lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
+                return;
+            }
             if (is_target || is_array) {
                 tmp = slot;
             } else {
@@ -2413,6 +2518,35 @@ public:
                     V(dst, ty_ptr), V(rhs, ty_ptr), I(nbytes, ty_i64)
                 };
                 emit_call("memcpy", ty_ptr, memcpy_args, 3);
+                return;
+            }
+            ASR::Array_t *value_array = nullptr;
+            if (expr_is_array(x.m_value, &value_array)) {
+                bool was_target = is_target;
+                is_target = true;
+                visit_expr(*x.m_target);
+                is_target = was_target;
+                uint32_t dst = tmp;
+                if (value_array->m_physical_type ==
+                        ASR::array_physical_typeType::DescriptorArray) {
+                    uint32_t src_desc = desc_ptr_of(x.m_value);
+                    emit_copy_descriptor_to_linear(dst, emit_i64_const(0),
+                        src_desc, value_array);
+                } else {
+                    ArrayLinearView src = emit_array_linear_view(
+                        x.m_value, value_array);
+                    uint32_t target_total =
+                        emit_runtime_array_total(array_t);
+                    uint32_t copy_n = lr_emit_select(s, ty_i64,
+                        V(lr_emit_icmp(s, LR_CMP_SLT,
+                            V(src.total, ty_i64),
+                            V(target_total, ty_i64)), ty_i1),
+                        V(src.total, ty_i64), V(target_total, ty_i64));
+                    uint32_t bytes = lr_emit_mul(s, ty_i64,
+                        V(copy_n, ty_i64),
+                        I(element_byte_size(array_t->m_type), ty_i64));
+                    emit_memcpy_dynamic(dst, src.base, bytes);
+                }
                 return;
             }
         }
@@ -4003,22 +4137,14 @@ public:
             desc_store_i64(desc, 24, emit_i64_const(0));
             uint32_t stride = emit_i64_const(elem_bytes);
             for (size_t d = 0; d < array_t->n_dims; d++) {
-                int64_t lbound = 1;
-                int64_t extent = 1;
-                if (array_t->m_dims[d].m_start) {
-                    ASRUtils::extract_value(
-                        array_t->m_dims[d].m_start, lbound);
-                }
-                if (array_t->m_dims[d].m_length) {
-                    ASRUtils::extract_value(
-                        array_t->m_dims[d].m_length, extent);
-                }
+                uint32_t lbound = emit_array_dim_lbound(array_t, d);
+                uint32_t extent = emit_array_dim_extent(array_t, d);
                 int64_t base_off = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
-                desc_store_i64(desc, base_off + 0, emit_i64_const(lbound));
-                desc_store_i64(desc, base_off + 8, emit_i64_const(extent));
+                desc_store_i64(desc, base_off + 0, lbound);
+                desc_store_i64(desc, base_off + 8, extent);
                 desc_store_i64(desc, base_off + 16, stride);
                 stride = lr_emit_mul(s, ty_i64,
-                    V(stride, ty_i64), I(extent, ty_i64));
+                    V(stride, ty_i64), V(extent, ty_i64));
             }
             tmp = desc;
             return;
@@ -4075,7 +4201,7 @@ public:
             uint32_t base = tmp;
 
             uint32_t lin = 0;
-            int64_t length_prod = 1;
+            uint32_t length_prod = emit_i64_const(1);
             bool first = true;
             for (size_t r = 0; r < x.n_args; r++) {
                 ASR::array_index_t &ai = x.m_args[r];
@@ -4084,40 +4210,30 @@ public:
                 visit_expr(*ai.m_right);
                 is_target = was_target;
                 lr_type_t *it = get_type(ASRUtils::expr_type(ai.m_right));
-                uint32_t idx = (it == ty_i32)
+                uint32_t idx = (it == ty_i64)
                     ? tmp
-                    : ((it == ty_i64)
-                        ? lr_emit_trunc(s, ty_i32, V(tmp, it))
-                        : lr_emit_sext(s, ty_i32, V(tmp, it)));
-                int64_t lbound = 1;
-                if (array_t->m_dims[r].m_start) {
-                    ASRUtils::extract_value(
-                        array_t->m_dims[r].m_start, lbound);
-                }
-                uint32_t off = lr_emit_sub(s, ty_i32,
-                    V(idx, ty_i32), I(lbound, ty_i32));
+                    : lr_emit_sext(s, ty_i64, V(tmp, it));
+                uint32_t lbound = emit_array_dim_lbound(array_t, r);
+                uint32_t off = lr_emit_sub(s, ty_i64,
+                    V(idx, ty_i64), V(lbound, ty_i64));
                 if (first) {
                     // contribution for dim 0 is off * 1 = off
                     lin = off;
                     first = false;
                 } else {
                     // contribution for dim r is off * (length_0 * ... * length_{r-1})
-                    uint32_t contrib = lr_emit_mul(s, ty_i32,
-                        V(off, ty_i32), I(length_prod, ty_i32));
-                    lin = lr_emit_add(s, ty_i32,
-                        V(lin, ty_i32), V(contrib, ty_i32));
+                    uint32_t contrib = lr_emit_mul(s, ty_i64,
+                        V(off, ty_i64), V(length_prod, ty_i64));
+                    lin = lr_emit_add(s, ty_i64,
+                        V(lin, ty_i64), V(contrib, ty_i64));
                 }
-                int64_t length = 1;
-                if (array_t->m_dims[r].m_length) {
-                    ASRUtils::extract_value(
-                        array_t->m_dims[r].m_length, length);
-                }
-                length_prod *= length;
+                uint32_t length = emit_array_dim_extent(array_t, r);
+                length_prod = lr_emit_mul(s, ty_i64,
+                    V(length_prod, ty_i64), V(length, ty_i64));
             }
 
-            uint32_t lin64 = lr_emit_sext(s, ty_i64, V(lin, ty_i32));
             uint32_t byte_off = lr_emit_mul(s, ty_i64,
-                V(lin64, ty_i64),
+                V(lin, ty_i64),
                 I(element_byte_size(array_t->m_type), ty_i64));
             lr_operand_desc_t gep_idx[1] = {V(byte_off, ty_i64)};
             uint32_t elem_ptr = lr_emit_gep(s, ty_i8,
@@ -4273,6 +4389,7 @@ public:
     static constexpr int64_t DESC_DIM_BYTES    = 24;
     static constexpr int64_t DESC_DIM_LBOUND   = 0;
     static constexpr int64_t DESC_DIM_EXTENT   = 8;
+    static constexpr int64_t DESC_DIM_STRIDE   = 16;
 
     // Write i64 value into the descriptor at desc_ptr + byte_offset.
     void desc_store_i64(uint32_t desc_ptr, int64_t byte_offset,
@@ -7543,20 +7660,16 @@ public:
         is_target = true;
         visit_expr(*expr);
         is_target = was_target;
-        int64_t total = ASRUtils::get_fixed_size_of_array(
+        uint32_t base = tmp;
+        int64_t static_total = ASRUtils::get_fixed_size_of_array(
             array_t->m_dims, array_t->n_dims);
-        if (total <= 0) {
-            total = 1;
-            for (size_t d = 0; d < array_t->n_dims; d++) {
-                int64_t extent = 1;
-                if (array_t->m_dims[d].m_length) {
-                    ASRUtils::extract_value(array_t->m_dims[d].m_length,
-                        extent);
-                }
-                total *= extent;
-            }
+        uint32_t total = 0;
+        if (static_total > 0) {
+            total = emit_i64_const(static_total);
+        } else {
+            total = emit_runtime_array_total(array_t);
         }
-        return {tmp, emit_i64_const(total),
+        return {base, total,
             emit_i64_const(element_byte_size(array_t->m_type))};
     }
 
@@ -7570,6 +7683,125 @@ public:
             *array_t = ASR::down_cast<ASR::Array_t>(type);
         }
         return true;
+    }
+
+    ASR::ArrayConstructor_t *array_constructor_value(ASR::expr_t *expr) {
+        if (ASR::expr_t *value = ASRUtils::expr_value(expr)) {
+            if (value != expr) return array_constructor_value(value);
+        }
+        while (ASR::is_a<ASR::ArrayPhysicalCast_t>(*expr) ||
+                ASR::is_a<ASR::Cast_t>(*expr)) {
+            if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*expr)) {
+                expr = ASR::down_cast<ASR::ArrayPhysicalCast_t>(expr)->m_arg;
+            } else {
+                expr = ASR::down_cast<ASR::Cast_t>(expr)->m_arg;
+            }
+        }
+        if (ASR::is_a<ASR::IntrinsicArrayFunction_t>(*expr)) {
+            ASR::IntrinsicArrayFunction_t *fn =
+                ASR::down_cast<ASR::IntrinsicArrayFunction_t>(expr);
+            if (fn->m_value) return array_constructor_value(fn->m_value);
+        }
+        if (ASR::is_a<ASR::ArrayConstructor_t>(*expr)) {
+            return ASR::down_cast<ASR::ArrayConstructor_t>(expr);
+        }
+        return nullptr;
+    }
+
+    ASR::IntrinsicArrayFunction_t *shape_intrinsic(ASR::expr_t *expr) {
+        while (ASR::is_a<ASR::ArrayPhysicalCast_t>(*expr) ||
+                ASR::is_a<ASR::Cast_t>(*expr)) {
+            if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*expr)) {
+                expr = ASR::down_cast<ASR::ArrayPhysicalCast_t>(expr)->m_arg;
+            } else {
+                expr = ASR::down_cast<ASR::Cast_t>(expr)->m_arg;
+            }
+        }
+        if (!ASR::is_a<ASR::IntrinsicArrayFunction_t>(*expr)) {
+            return nullptr;
+        }
+        ASR::IntrinsicArrayFunction_t *fn =
+            ASR::down_cast<ASR::IntrinsicArrayFunction_t>(expr);
+        ASRUtils::IntrinsicArrayFunctions intrinsic =
+            static_cast<ASRUtils::IntrinsicArrayFunctions>(
+                fn->m_arr_intrinsic_id);
+        return intrinsic == ASRUtils::IntrinsicArrayFunctions::Shape
+            ? fn : nullptr;
+    }
+
+    uint32_t emit_runtime_array_total(ASR::Array_t *array_t) {
+        uint32_t total = emit_i64_const(1);
+        for (size_t d = 0; d < array_t->n_dims; d++) {
+            uint32_t extent = emit_array_dim_extent(array_t, d);
+            total = lr_emit_mul(s, ty_i64,
+                V(total, ty_i64), V(extent, ty_i64));
+        }
+        return total;
+    }
+
+    void emit_memcpy_dynamic(uint32_t dst, uint32_t src, uint32_t nbytes) {
+        lr_type_t *memcpy_params[] = {ty_ptr, ty_ptr, ty_i64};
+        declare_func("memcpy", ty_ptr, memcpy_params, 3, false);
+        lr_operand_desc_t memcpy_args[] = {
+            V(dst, ty_ptr), V(src, ty_ptr), V(nbytes, ty_i64)
+        };
+        emit_call("memcpy", ty_ptr, memcpy_args, 3);
+    }
+
+    void emit_copy_descriptor_to_linear(uint32_t dst_base,
+            uint32_t dst_start, uint32_t desc, ASR::Array_t *array_t) {
+        int n_dims = (int)array_t->n_dims;
+        uint32_t src_base = desc_base_addr(desc);
+        uint32_t total = descriptor_array_element_count(desc, n_dims);
+        uint32_t elem_len = desc_load_i64(desc, 8);
+        uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+        lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+
+        lr_error_t err;
+        uint32_t head_bb = lr_session_block(s);
+        uint32_t body_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_br(s, head_bb);
+
+        lr_session_set_block(s, head_bb, &err);
+        uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+        uint32_t more = lr_emit_icmp(s, LR_CMP_SLT,
+            V(idx, ty_i64), V(total, ty_i64));
+        lr_emit_condbr(s, V(more, ty_i1), body_bb, done_bb);
+
+        lr_session_set_block(s, body_bb, &err);
+        uint32_t tmp_idx = idx;
+        uint32_t byte_off = emit_i64_const(0);
+        for (int d = 0; d < n_dims; d++) {
+            uint32_t extent = desc_dim_extent(desc, d);
+            uint32_t coord = lr_emit_srem(s, ty_i64,
+                V(tmp_idx, ty_i64), V(extent, ty_i64));
+            tmp_idx = lr_emit_sdiv(s, ty_i64,
+                V(tmp_idx, ty_i64), V(extent, ty_i64));
+            uint32_t stride = desc_load_i64(desc,
+                DESC_HEADER_BYTES + DESC_DIM_BYTES * d + DESC_DIM_STRIDE);
+            uint32_t contrib = lr_emit_mul(s, ty_i64,
+                V(coord, ty_i64), V(stride, ty_i64));
+            byte_off = lr_emit_add(s, ty_i64,
+                V(byte_off, ty_i64), V(contrib, ty_i64));
+        }
+        lr_operand_desc_t src_off[1] = {V(byte_off, ty_i64)};
+        uint32_t src_elem = lr_emit_gep(s, ty_i8,
+            V(src_base, ty_ptr), src_off, 1);
+        uint32_t dst_idx = lr_emit_add(s, ty_i64,
+            V(dst_start, ty_i64), V(idx, ty_i64));
+        uint32_t dst_byte_off = lr_emit_mul(s, ty_i64,
+            V(dst_idx, ty_i64), V(elem_len, ty_i64));
+        lr_operand_desc_t dst_off[1] = {V(dst_byte_off, ty_i64)};
+        uint32_t dst_elem = lr_emit_gep(s, ty_i8,
+            V(dst_base, ty_ptr), dst_off, 1);
+        emit_memcpy_dynamic(dst_elem, src_elem, elem_len);
+        uint32_t next = lr_emit_add(s, ty_i64,
+            V(idx, ty_i64), I(1, ty_i64));
+        lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+        lr_emit_br(s, head_bb);
+
+        lr_session_set_block(s, done_bb, &err);
     }
 
     void emit_print_newline() {
@@ -8696,6 +8928,104 @@ found_offset:
         return lr_emit_load(s, ty_ptr, V(desc_ptr, ty_ptr));
     }
 
+    void visit_ArrayConstructor(const ASR::ArrayConstructor_t &x) {
+        if (x.m_value) { visit_expr(*x.m_value); return; }
+
+        ASR::ttype_t *type = ASRUtils::type_get_past_allocatable_pointer(
+            x.m_type);
+        if (!ASR::is_a<ASR::Array_t>(*type)) {
+            throw CodeGenError("liric: ArrayConstructor type is not array");
+        }
+        ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(type);
+        ASR::ttype_t *elem_t = ASRUtils::type_get_past_array(
+            ASRUtils::type_get_past_allocatable_pointer(array_t->m_type));
+        lr_type_t *elem_lr = get_type(elem_t);
+        uint32_t elem_len = emit_i64_const(element_byte_size(elem_t));
+
+        struct ConstructorPart {
+            bool is_array;
+            ASR::expr_t *expr;
+            ASR::Array_t *array_t;
+            uint32_t desc;
+            ArrayLinearView view;
+        };
+        std::vector<ConstructorPart> parts;
+        uint32_t total = emit_i64_const(0);
+        for (size_t i = 0; i < x.n_args; i++) {
+            ASR::Array_t *arg_array = nullptr;
+            if (expr_is_array(x.m_args[i], &arg_array)) {
+                if (arg_array->m_physical_type ==
+                        ASR::array_physical_typeType::DescriptorArray) {
+                    uint32_t desc = desc_ptr_of(x.m_args[i]);
+                    uint32_t n = descriptor_array_element_count(
+                        desc, (int)arg_array->n_dims);
+                    parts.push_back({true, x.m_args[i], arg_array, desc,
+                        {0, n, desc_load_i64(desc, 8)}});
+                    total = lr_emit_add(s, ty_i64,
+                        V(total, ty_i64), V(n, ty_i64));
+                } else {
+                    ArrayLinearView view = emit_array_linear_view(
+                        x.m_args[i], arg_array);
+                    parts.push_back({true, x.m_args[i], arg_array, 0,
+                        view});
+                    total = lr_emit_add(s, ty_i64,
+                        V(total, ty_i64), V(view.total, ty_i64));
+                }
+            } else {
+                parts.push_back({false, x.m_args[i], nullptr, 0,
+                    {0, emit_i64_const(1), elem_len}});
+                total = lr_emit_add(s, ty_i64,
+                    V(total, ty_i64), I(1, ty_i64));
+            }
+        }
+
+        uint32_t bytes = lr_emit_mul(s, ty_i64,
+            V(total, ty_i64), V(elem_len, ty_i64));
+        uint32_t data = emit_malloc_bytes(bytes);
+
+        uint32_t cursor = emit_i64_const(0);
+        for (ConstructorPart &part : parts) {
+            if (part.is_array) {
+                if (part.desc) {
+                    emit_copy_descriptor_to_linear(data, cursor, part.desc,
+                        part.array_t);
+                } else {
+                    uint32_t dst_byte_off = lr_emit_mul(s, ty_i64,
+                        V(cursor, ty_i64), V(part.view.elem_len, ty_i64));
+                    lr_operand_desc_t dst_off[1] = {V(dst_byte_off, ty_i64)};
+                    uint32_t dst = lr_emit_gep(s, ty_i8,
+                        V(data, ty_ptr), dst_off, 1);
+                    uint32_t copy_bytes = lr_emit_mul(s, ty_i64,
+                        V(part.view.total, ty_i64),
+                        V(part.view.elem_len, ty_i64));
+                    emit_memcpy_dynamic(dst, part.view.base, copy_bytes);
+                }
+                cursor = lr_emit_add(s, ty_i64,
+                    V(cursor, ty_i64), V(part.view.total, ty_i64));
+                continue;
+            }
+            visit_expr(*part.expr);
+            uint32_t dst_byte_off = lr_emit_mul(s, ty_i64,
+                V(cursor, ty_i64), V(elem_len, ty_i64));
+            lr_operand_desc_t dst_off[1] = {V(dst_byte_off, ty_i64)};
+            uint32_t dst = lr_emit_gep(s, ty_i8,
+                V(data, ty_ptr), dst_off, 1);
+            lr_emit_store(s, V(tmp, elem_lr), V(dst, ty_ptr));
+            cursor = lr_emit_add(s, ty_i64,
+                V(cursor, ty_i64), I(1, ty_i64));
+        }
+
+        uint32_t desc = emit_desc_alloca(1);
+        desc_store_base(desc, data);
+        desc_store_i64(desc, 8, elem_len);
+        desc_store_rank(desc, 1);
+        desc_store_i64(desc, 24, emit_i64_const(0));
+        desc_store_i64(desc, DESC_HEADER_BYTES + 0, emit_i64_const(1));
+        desc_store_i64(desc, DESC_HEADER_BYTES + 8, total);
+        desc_store_i64(desc, DESC_HEADER_BYTES + 16, elem_len);
+        tmp = desc;
+    }
+
     // reshape(arr, shape): for the common case where both source and
     // result are contiguous (FixedSize / Pointer / Descriptor with
     // matching element layout), the in-memory bytes are identical, so
@@ -8704,6 +9034,12 @@ found_offset:
     // the result has no fixed size yet (deferred-shape allocatable).
     void visit_ArrayReshape(const ASR::ArrayReshape_t &x) {
         if (x.m_value) { visit_expr(*x.m_value); return; }
+        if (x.m_order) {
+            throw CodeGenError("liric: reshape order not supported");
+        }
+        if (x.m_pad) {
+            throw CodeGenError("liric: reshape pad not supported");
+        }
 
         ASR::ttype_t *src_t = ASRUtils::expr_type(x.m_array);
         src_t = ASRUtils::type_get_past_allocatable_pointer(src_t);
@@ -8719,6 +9055,122 @@ found_offset:
         ASR::ttype_t *elem_t = ASRUtils::type_get_past_array(res_t);
         elem_t = ASRUtils::type_get_past_allocatable_pointer(elem_t);
         int64_t elem_sz = element_byte_size(elem_t);
+
+        if (res_arr->m_physical_type ==
+                ASR::array_physical_typeType::DescriptorArray) {
+            uint32_t src_desc = 0;
+            ArrayLinearView src_view = {0, 0, 0};
+            if (src_arr->m_physical_type ==
+                    ASR::array_physical_typeType::DescriptorArray) {
+                src_desc = desc_ptr_of(x.m_array);
+            } else {
+                src_view = emit_array_linear_view(x.m_array, src_arr);
+            }
+
+            uint32_t desc = emit_desc_alloca((int)res_arr->n_dims);
+
+            std::vector<uint32_t> extents;
+            ASR::ArrayConstructor_t *shape =
+                array_constructor_value(x.m_shape);
+            if (shape) {
+                for (size_t d = 0; d < shape->n_args; d++) {
+                    extents.push_back(emit_i64_expr(shape->m_args[d]));
+                }
+            } else if (ASR::IntrinsicArrayFunction_t *shape_fn =
+                    shape_intrinsic(x.m_shape)) {
+                if (shape_fn->n_args != 1) {
+                    throw CodeGenError("liric: reshape shape rank mismatch");
+                }
+                ASR::ttype_t *shape_source_type =
+                    ASRUtils::type_get_past_allocatable_pointer(
+                        ASRUtils::expr_type(shape_fn->m_args[0]));
+                if (!ASR::is_a<ASR::Array_t>(*shape_source_type)) {
+                    throw CodeGenError("liric: reshape shape source "
+                        "is not an array");
+                }
+                ASR::Array_t *shape_source =
+                    ASR::down_cast<ASR::Array_t>(shape_source_type);
+                for (size_t d = 0; d < shape_source->n_dims; d++) {
+                    extents.push_back(emit_array_dim_extent(
+                        shape_source, d));
+                }
+            } else if (ASR::Array_t *shape_array = nullptr;
+                    expr_is_array(x.m_shape, &shape_array)) {
+                ArrayLinearView shape_view = emit_array_linear_view(
+                    x.m_shape, shape_array);
+                ASR::ttype_t *shape_elem_t =
+                    ASRUtils::type_get_past_array(
+                        ASRUtils::type_get_past_allocatable_pointer(
+                            shape_array->m_type));
+                lr_type_t *shape_elem_lr = get_type(shape_elem_t);
+                int64_t shape_elem_bytes = element_byte_size(shape_elem_t);
+                for (size_t d = 0; d < res_arr->n_dims; d++) {
+                    lr_operand_desc_t off[1] = {
+                        I((int64_t)(d * shape_elem_bytes), ty_i64)
+                    };
+                    uint32_t p = lr_emit_gep(s, ty_i8,
+                        V(shape_view.base, ty_ptr), off, 1);
+                    uint32_t v = lr_emit_load(s, shape_elem_lr,
+                        V(p, ty_ptr));
+                    extents.push_back(cast_int_value(v, shape_elem_lr,
+                        ty_i64));
+                }
+            } else {
+                for (size_t d = 0; d < res_arr->n_dims; d++) {
+                    extents.push_back(emit_array_dim_extent(res_arr, d));
+                }
+            }
+            if (extents.size() != res_arr->n_dims) {
+                throw CodeGenError("liric: reshape rank mismatch");
+            }
+
+            uint32_t res_total = emit_i64_const(1);
+            for (uint32_t extent : extents) {
+                res_total = lr_emit_mul(s, ty_i64,
+                    V(res_total, ty_i64), V(extent, ty_i64));
+            }
+            desc_store_i64(desc, 8, emit_i64_const(elem_sz));
+            desc_store_rank(desc, (int)res_arr->n_dims);
+            desc_store_i64(desc, 24, emit_i64_const(0));
+            uint32_t stride = emit_i64_const(elem_sz);
+            for (size_t d = 0; d < res_arr->n_dims; d++) {
+                int64_t base_off = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
+                desc_store_i64(desc, base_off + 0, emit_i64_const(1));
+                desc_store_i64(desc, base_off + 8, extents[d]);
+                desc_store_i64(desc, base_off + 16, stride);
+                stride = lr_emit_mul(s, ty_i64,
+                    V(stride, ty_i64), V(extents[d], ty_i64));
+            }
+
+            uint32_t bytes = lr_emit_mul(s, ty_i64,
+                V(res_total, ty_i64), I(elem_sz, ty_i64));
+            uint32_t dst_ptr = emit_malloc_bytes(bytes);
+
+            uint32_t src_base;
+            uint32_t src_total;
+            if (src_desc) {
+                src_base = desc_base_addr(src_desc);
+                src_total = descriptor_array_element_count(
+                    src_desc, (int)src_arr->n_dims);
+            } else {
+                src_base = src_view.base;
+                src_total = src_view.total;
+            }
+            uint32_t dst_total = descriptor_array_element_count(
+                desc, (int)res_arr->n_dims);
+            uint32_t src_smaller = lr_emit_icmp(s, LR_CMP_SLT,
+                V(src_total, ty_i64), V(dst_total, ty_i64));
+            uint32_t copy_n = lr_emit_select(s, ty_i64,
+                V(src_smaller, ty_i1),
+                V(src_total, ty_i64), V(dst_total, ty_i64));
+            uint32_t copy_bytes = lr_emit_mul(s, ty_i64,
+                V(copy_n, ty_i64), I(elem_sz, ty_i64));
+            emit_memcpy_dynamic(dst_ptr, src_base, copy_bytes);
+
+            desc_store_base(desc, dst_ptr);
+            tmp = desc;
+            return;
+        }
 
         int64_t src_n = ASRUtils::get_fixed_size_of_array(
             src_arr->m_dims, src_arr->n_dims);
