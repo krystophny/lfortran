@@ -946,6 +946,32 @@ public:
 
     void visit_Program(const ASR::Program_t &x) {
         goto_blocks.clear();
+
+        // Hoist program-level variables into the .bss section as
+        // globals BEFORE visiting contained subroutines.  Contained
+        // subroutines reference host variables via host association,
+        // and their codegen runs first in our visitor order; if the
+        // variables didn't exist yet, visit_Var inside the contained
+        // subroutine would synthesise a fresh zero-init placeholder
+        // global per variable, decoupling host and contained
+        // subroutine storage.  Putting them in lr_globals up front
+        // means both the program body and contained subroutines hit
+        // the same global symbol.
+        for (auto &item : x.m_symtab->get_scope()) {
+            if (!is_a<ASR::Variable_t>(*item.second)) continue;
+            ASR::Variable_t *v = down_cast<ASR::Variable_t>(item.second);
+            uint64_t h = get_hash((ASR::asr_t *)v);
+            if (lr_globals.count(h)) continue;
+            uint64_t nbytes = storage_size_for_variable(v);
+            std::vector<uint8_t> zeros(nbytes, 0);
+            std::string gname = std::string("_lr_pg_") + std::to_string(h)
+                + "_" + v->m_name;
+            lr_session_global(s, gname.c_str(),
+                lr_type_array_s(s, ty_i8, nbytes),
+                false, zeros.data(), nbytes);
+            lr_globals[h] = lr_session_intern(s, gname.c_str());
+        }
+
         // Visit nested functions first
         for (auto &item : x.m_symtab->get_scope()) {
             if (is_a<ASR::Function_t>(*item.second)) {
@@ -969,20 +995,26 @@ public:
         lr_operand_desc_t init_args[] = {V(argc, ty_i32), V(argv, ty_ptr)};
         emit_call_void("_lpython_call_initial_functions", init_args, 2);
 
-        // Allocate local variables
+        // Initialize program-level variables at runtime entry.  Each
+        // variable's storage already exists in .bss (zeroed); this
+        // step writes the source-level initial value (descriptor
+        // header, ArrayConstant data, etc.) and registers the
+        // allocatable-struct tag slot.
         for (auto &item : x.m_symtab->get_scope()) {
-            if (is_a<ASR::Variable_t>(*item.second)) {
-                ASR::Variable_t *v = down_cast<ASR::Variable_t>(item.second);
-                uint32_t slot = emit_storage_alloca_for_var(v);
-                lr_symtab[get_hash((ASR::asr_t *)v)] = slot;
-                initialize_local_array_descriptor(slot, v->m_type);
-                initialize_local_string_descriptor(slot, v->m_type);
-                initialize_local_value(v, slot);
-                if (is_allocatable_struct_type(v->m_type)) {
-                    uint32_t tag_slot = lr_emit_alloca(s, ty_i64);
-                    lr_emit_store(s, I(0, ty_i64), V(tag_slot, ty_ptr));
-                    class_tag_slots[get_hash((ASR::asr_t *)v)] = tag_slot;
-                }
+            if (!is_a<ASR::Variable_t>(*item.second)) continue;
+            ASR::Variable_t *v = down_cast<ASR::Variable_t>(item.second);
+            uint64_t h = get_hash((ASR::asr_t *)v);
+            uint32_t sym = lr_globals[h];
+            lr_operand_desc_t no_off[1] = {I(0, ty_i64)};
+            uint32_t slot = lr_emit_gep(s, ty_i8,
+                LR_GLOBAL(sym, ty_ptr), no_off, 1);
+            initialize_local_array_descriptor(slot, v->m_type);
+            initialize_local_string_descriptor(slot, v->m_type);
+            initialize_local_value(v, slot);
+            if (is_allocatable_struct_type(v->m_type)) {
+                uint32_t tag_slot = lr_emit_alloca(s, ty_i64);
+                lr_emit_store(s, I(0, ty_i64), V(tag_slot, ty_ptr));
+                class_tag_slots[h] = tag_slot;
             }
         }
 
