@@ -101,8 +101,13 @@ macro(RUN_UTIL RUN_FAIL RUN_NAME RUN_FILE_NAME RUN_LABELS RUN_EXTRAFILES RUN_EXT
                 OR (LFORTRAN_BACKEND STREQUAL "c") OR (LFORTRAN_BACKEND STREQUAL "fortran")
                 OR (LFORTRAN_BACKEND STREQUAL "liric"))
             add_executable(${name} ${file_name}.f90 ${extra_files})
-            target_compile_options(${name} PUBLIC ${extra_args} --backend=${LFORTRAN_BACKEND})
+            target_compile_options(${name} PUBLIC
+                $<$<COMPILE_LANGUAGE:Fortran>:${extra_args}>
+                $<$<COMPILE_LANGUAGE:Fortran>:--backend=${LFORTRAN_BACKEND}>)
             target_link_options(${name} PUBLIC --backend=${LFORTRAN_BACKEND})
+            if (ISO_FORTRAN_BINDING_INCLUDE_DIR)
+                target_include_directories(${name} PRIVATE ${ISO_FORTRAN_BINDING_INCLUDE_DIR})
+            endif()
             add_test(${name} ${CURRENT_BINARY_DIR}/${name})
         elseif (LFORTRAN_BACKEND STREQUAL "wasm")
             # wasm test

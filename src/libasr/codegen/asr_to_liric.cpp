@@ -857,8 +857,8 @@ public:
                 if (lr_globals.count(h)) continue;
                 uint64_t nbytes = storage_size_for_variable(v);
                 std::vector<uint8_t> zeros(nbytes, 0);
-                std::string gname = std::string("_lr_mod_") + x.m_name +
-                    "__" + v->m_name;
+                std::string gname = module_variable_global_name(
+                    item.second, v);
                 lr_session_global(s, gname.c_str(),
                     lr_type_array_s(s, ty_i8, nbytes),
                     false, zeros.data(), nbytes);
@@ -878,6 +878,8 @@ public:
     uint64_t lr_type_size_or_default(lr_type_t *t) {
         unsigned w = lr_type_width(s, t);
         if (w >= 8) return (w + 7) / 8;
+        if (t == ty_f32) return 4;
+        if (t == ty_f64) return 8;
         // For struct types lr_type_width returns 0; we estimate from
         // the descriptor and pointer constants in scope.
         if (t == ty_str_desc) return 16;
@@ -885,7 +887,8 @@ public:
     }
 
     bool return_type_uses_sret(lr_type_t *t) {
-        return t != ty_void && lr_type_width(s, t) == 0;
+        return t != ty_void && lr_type_width(s, t) == 0 &&
+            t != ty_f32 && t != ty_f64;
     }
 
     std::string construct_key(char *name) {
@@ -1458,8 +1461,7 @@ public:
         }
         // bind(c, name=...) declarations resolve to externally provided
         // C symbols, but module procedure implementations still emit.
-        if (ftype->m_abi == ASR::abiType::BindC && ftype->m_bindc_name &&
-                x.n_body == 0) {
+        if (ftype->m_abi == ASR::abiType::BindC && x.n_body == 0) {
             return;
         }
 
@@ -1478,9 +1480,11 @@ public:
         for (size_t i = 0; i < x.n_args; i++) {
             ASR::Var_t *arg_var = down_cast<ASR::Var_t>(x.m_args[i]);
             ASR::Variable_t *v = down_cast<ASR::Variable_t>(arg_var->m_v);
-            // Pass by pointer
-            param_types.push_back(ty_ptr);
-            (void)v;
+            if (ftype->m_abi == ASR::abiType::BindC && v->m_value_attr) {
+                param_types.push_back(get_type(v->m_type));
+            } else {
+                param_types.push_back(ty_ptr);
+            }
         }
 
         lr_error_t err;
@@ -1489,6 +1493,9 @@ public:
         lr_session_func_begin(s, fn_name.c_str(),
             uses_sret ? ty_void : ret_type,
             param_types.data(), param_types.size(), false, &err);
+        if (ftype->m_abi == ASR::abiType::BindC) {
+            lr_session_func_set_llvm_abi(s, true, &err);
+        }
 
         uint32_t entry_block = lr_session_block(s);
         proc_return = lr_session_block(s);
@@ -1502,7 +1509,14 @@ public:
             ASR::Variable_t *v = down_cast<ASR::Variable_t>(arg_var->m_v);
             uint32_t p = lr_session_param(s, i + (uses_sret ? 1 : 0));
             uint64_t h = get_hash((ASR::asr_t *)v);
-            lr_symtab[h] = p;
+            if (ftype->m_abi == ASR::abiType::BindC && v->m_value_attr) {
+                lr_type_t *pt = get_type(v->m_type);
+                uint32_t slot = emit_storage_alloca_for_var(v);
+                lr_emit_store(s, V(p, pt), V(slot, ty_ptr));
+                lr_symtab[h] = slot;
+            } else {
+                lr_symtab[h] = p;
+            }
         }
 
         // Allocate local variables
@@ -1582,6 +1596,9 @@ public:
 
     std::string module_variable_global_name(ASR::symbol_t *symbol,
                                             ASR::Variable_t *v) {
+        if (v->m_abi == ASR::abiType::BindC) {
+            return v->m_bindc_name ? v->m_bindc_name : v->m_name;
+        }
         std::string module_name;
         if (ASR::is_a<ASR::ExternalSymbol_t>(*symbol)) {
             ASR::ExternalSymbol_t *ext =
@@ -5842,8 +5859,9 @@ public:
         if (fn->m_function_signature) {
             ASR::FunctionType_t *ft = down_cast<ASR::FunctionType_t>(
                 fn->m_function_signature);
-            if (ft->m_abi == ASR::abiType::BindC && ft->m_bindc_name) {
-                std::string r = ft->m_bindc_name;
+            if (ft->m_abi == ASR::abiType::BindC) {
+                std::string r = ft->m_bindc_name
+                    ? ft->m_bindc_name : fn->m_name;
                 callable_name_cache[h] = r;
                 return r;
             }
@@ -6160,8 +6178,7 @@ public:
         if (fn) {
             ASR::FunctionType_t *ftype =
                 down_cast<ASR::FunctionType_t>(fn->m_function_signature);
-            if (ftype->m_abi == ASR::abiType::BindC &&
-                    ftype->m_bindc_name) {
+            if (ftype->m_abi == ASR::abiType::BindC) {
                 std::vector<lr_operand_desc_t> cargs;
                 std::vector<lr_type_t *> params;
                 std::vector<BindCCharArrayArg> scratch;
@@ -6312,7 +6329,6 @@ public:
             ASR::FunctionType_t *ftype = down_cast<ASR::FunctionType_t>(
                 fn->m_function_signature);
             if (ftype->m_abi == ASR::abiType::BindC &&
-                    ftype->m_bindc_name &&
                     cname != "_lfortran_get_command_argument_length" &&
                     cname != "_lfortran_get_command_argument_status" &&
                     cname != "_lfortran_get_length_of_environment_variable" &&
