@@ -124,7 +124,7 @@ static inline uint64_t get_hash(ASR::asr_t *node) {
     visit_expr(*(x).m_left); uint32_t _l = tmp; \
     visit_expr(*(x).m_right); uint32_t _r = tmp; \
     lr_type_t *_t = get_type(ASRUtils::expr_type((x).m_left)); \
-    int _p; \
+    int _p = LR_CMP_EQ; \
     switch ((x).m_op) { \
         case ASR::cmpopType::Eq:   _p = LR_CMP_EQ;  break; \
         case ASR::cmpopType::NotEq:_p = LR_CMP_NE;  break; \
@@ -142,7 +142,7 @@ static inline uint64_t get_hash(ASR::asr_t *node) {
     visit_expr(*(x).m_left); uint32_t _l = tmp; \
     visit_expr(*(x).m_right); uint32_t _r = tmp; \
     lr_type_t *_t = get_type(ASRUtils::expr_type((x).m_left)); \
-    int _p; \
+    int _p = LR_FCMP_OEQ; \
     switch ((x).m_op) { \
         case ASR::cmpopType::Eq:   _p = LR_FCMP_OEQ; break; \
         case ASR::cmpopType::NotEq:_p = LR_FCMP_ONE; break; \
