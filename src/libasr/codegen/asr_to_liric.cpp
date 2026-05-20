@@ -5974,6 +5974,23 @@ public:
         return true;
     }
 
+    // Evaluate the dispatch object referenced by FunctionCall::m_dt or
+    // SubroutineCall::m_dt and return its class data pointer (past the
+    // header).  Used for nopass deferred TBP dispatch where no passed-
+    // object arg is available.
+    uint32_t dispatch_data_ptr_from_dt(ASR::expr_t *dt_expr) {
+        bool was_target = is_target;
+        is_target = true;
+        visit_expr(*dt_expr);
+        is_target = was_target;
+        uint32_t addr = tmp;
+        if (expr_is_allocatable_struct(dt_expr)) {
+            uint32_t raw = lr_emit_load(s, ty_ptr, V(addr, ty_ptr));
+            return class_data_ptr(raw);
+        }
+        return addr;
+    }
+
     std::string callable_name(ASR::Function_t *fn) {
         if (!fn) return std::string("<null>");
         uint64_t h = get_hash((ASR::asr_t *)fn);
@@ -6428,6 +6445,14 @@ public:
                 dynamic_method_name(x.m_name, fn), args)) {
             return;
         }
+        if (fn && function_is_interface(fn) && x.m_dt) {
+            uint32_t data_ptr = dispatch_data_ptr_from_dt(x.m_dt);
+            uint32_t fptr = load_object_method_ptr(data_ptr,
+                dynamic_method_name(x.m_name, fn));
+            lr_emit_call_void(s, V(fptr, ty_ptr),
+                args.data(), args.size());
+            return;
+        }
 
         uint32_t sym = lr_session_intern(s, callable_name(fn).c_str());
         lr_emit_call_void(s, LR_GLOBAL(sym, ty_ptr),
@@ -6638,6 +6663,17 @@ public:
         }
         if (fn && function_is_interface(fn) && !args.empty()) {
             uint32_t fptr = load_object_method_ptr(args[0].vreg,
+                dynamic_method_name(x.m_name, fn));
+            tmp = lr_emit_call(s, ret, V(fptr, ty_ptr),
+                args.data(), args.size());
+            return;
+        }
+        if (fn && function_is_interface(fn) && x.m_dt) {
+            // nopass deferred TBP: no passed-object arg, so dispatch
+            // through x.m_dt instead — it holds the dispatch object
+            // (e.g. self%obj for an allocatable class field).
+            uint32_t data_ptr = dispatch_data_ptr_from_dt(x.m_dt);
+            uint32_t fptr = load_object_method_ptr(data_ptr,
                 dynamic_method_name(x.m_name, fn));
             tmp = lr_emit_call(s, ret, V(fptr, ty_ptr),
                 args.data(), args.size());
