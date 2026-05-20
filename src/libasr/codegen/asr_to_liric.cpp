@@ -1937,6 +1937,12 @@ public:
                                                      ASR::Array_t *array_t) {
         uint32_t src_desc = desc_ptr_of(value);
         uint32_t dst_desc = desc_ptr_of(target);
+        emit_allocatable_descriptor_array_assignment_from_desc(dst_desc,
+            src_desc, array_t);
+    }
+
+    void emit_allocatable_descriptor_array_assignment_from_desc(
+            uint32_t dst_desc, uint32_t src_desc, ASR::Array_t *array_t) {
         uint32_t src_base = desc_base_addr(src_desc);
         uint32_t old_base = desc_base_addr(dst_desc);
         uint32_t total = descriptor_array_element_count(
@@ -1972,6 +1978,72 @@ public:
         store_descriptor_shape_with_base(dst_desc, new_base, elem_len,
             src_desc, array_t);
         emit_free_if_nonnull(allocator, old_base);
+    }
+
+    void emit_memcpy_bytes(uint32_t dst, uint32_t src, uint64_t nbytes) {
+        lr_type_t *memcpy_params[] = {ty_ptr, ty_ptr, ty_i64};
+        declare_func("memcpy", ty_ptr, memcpy_params, 3, false);
+        lr_operand_desc_t memcpy_args[] = {
+            V(dst, ty_ptr), V(src, ty_ptr), I((int64_t)nbytes, ty_i64)
+        };
+        emit_call("memcpy", ty_ptr, memcpy_args, 3);
+    }
+
+    void emit_struct_storage_assignment(uint32_t dst, uint32_t src,
+                                        ASR::Struct_t *st) {
+        if (!st) {
+            return;
+        }
+        std::vector<ASR::Variable_t *> members;
+        collect_struct_members_parent_first(st, members);
+        uint64_t byte_offset = 0;
+        for (ASR::Variable_t *member : members) {
+            lr_operand_desc_t off[1] = {I((int64_t)byte_offset, ty_i64)};
+            uint32_t dst_field = lr_emit_gep(s, ty_i8,
+                V(dst, ty_ptr), off, 1);
+            uint32_t src_field = lr_emit_gep(s, ty_i8,
+                V(src, ty_ptr), off, 1);
+
+            ASR::ttype_t *member_type = member->m_type;
+            ASR::Array_t *array_t = nullptr;
+            if (is_descriptor_array_type(member_type, &array_t)) {
+                if (ASRUtils::is_allocatable(member_type)) {
+                    emit_allocatable_descriptor_array_assignment_from_desc(
+                        dst_field, src_field, array_t);
+                } else {
+                    emit_memcpy_bytes(dst_field, src_field,
+                        storage_size_for_variable(member));
+                }
+            } else {
+                ASR::ttype_t *core =
+                    ASRUtils::type_get_past_allocatable_pointer(member_type);
+                core = ASRUtils::type_get_past_array(core);
+                if (ASR::is_a<ASR::String_t>(*core) &&
+                        ASR::down_cast<ASR::String_t>(
+                            core)->m_physical_type == ASR::DescriptorString) {
+                    uint32_t src_desc = lr_emit_load(s, ty_str_desc,
+                        V(src_field, ty_ptr));
+                    if (ASRUtils::is_allocatable(member_type)) {
+                        emit_allocatable_string_assignment(
+                            dst_field, src_desc);
+                    } else {
+                        emit_string_assignment_to_desc_slot(
+                            dst_field, src_desc);
+                    }
+                } else if (ASR::is_a<ASR::StructType_t>(*core) &&
+                        !ASRUtils::is_allocatable(member_type) &&
+                        !ASRUtils::is_pointer(member_type)) {
+                    ASR::Struct_t *member_st = struct_symbol_from_type_decl(
+                        member->m_type_declaration);
+                    emit_struct_storage_assignment(
+                        dst_field, src_field, member_st);
+                } else {
+                    emit_memcpy_bytes(dst_field, src_field,
+                        storage_size_for_variable(member));
+                }
+            }
+            byte_offset += storage_size_for_variable(member);
+        }
     }
 
     void resize_descriptor_array_like(ASR::expr_t *target,
@@ -2312,6 +2384,11 @@ public:
                 is_target = true;
                 visit_expr(*x.m_value);
                 uint32_t src = tmp;
+                if (expr_is_allocatable_struct(x.m_value)) {
+                    uint32_t src_raw = lr_emit_load(s, ty_ptr,
+                        V(src, ty_ptr));
+                    src = class_data_ptr(src_raw);
+                }
                 visit_expr(*x.m_target);
                 is_target = was_target;
                 uint32_t slot = tmp;
@@ -2327,16 +2404,13 @@ public:
                         x.m_target);
                     st = struct_symbol_from_type_decl(sym);
                 }
-                uint64_t nbytes = st ? struct_storage_size(st) :
-                    storage_size_or_default(value_type,
-                        get_type(value_type));
-                lr_type_t *memcpy_params[] = {ty_ptr, ty_ptr, ty_i64};
-                declare_func("memcpy", ty_ptr, memcpy_params, 3, false);
-                lr_operand_desc_t memcpy_args[] = {
-                    V(data, ty_ptr), V(src, ty_ptr),
-                    I((int64_t)nbytes, ty_i64)
-                };
-                emit_call("memcpy", ty_ptr, memcpy_args, 3);
+                if (st) {
+                    emit_struct_storage_assignment(data, src, st);
+                } else {
+                    emit_memcpy_bytes(data, src,
+                        storage_size_or_default(value_type,
+                            get_type(value_type)));
+                }
                 return;
             }
             visit_expr(*x.m_value);
@@ -4011,6 +4085,85 @@ public:
         return ASR::down_cast<ASR::Variable_t>(sym);
     }
 
+    void initialize_heap_string_descriptor(uint32_t desc_ptr,
+                                           ASR::String_t *string_t) {
+        if (string_t->m_physical_type != ASR::DescriptorString) {
+            return;
+        }
+        int64_t len = 0;
+        bool has_static_len = string_t->m_len &&
+            ASRUtils::extract_value(string_t->m_len, len);
+        if (!has_static_len) {
+            uint32_t fld0 = 0;
+            uint32_t fld1 = 1;
+            uint32_t z0 = lr_emit_insertvalue(s, ty_str_desc,
+                LR_UNDEF(ty_str_desc), LR_NULL(ty_ptr), &fld0, 1);
+            uint32_t z1 = lr_emit_insertvalue(s, ty_str_desc,
+                V(z0, ty_str_desc), I(0, ty_i64), &fld1, 1);
+            lr_emit_store(s, V(z1, ty_str_desc), V(desc_ptr, ty_ptr));
+            return;
+        }
+
+        uint32_t allocator = emit_call(
+            "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+        lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
+        declare_func("_lfortran_malloc_alloc", ty_ptr,
+            malloc_params, 2, false);
+        lr_operand_desc_t malloc_args[] = {
+            V(allocator, ty_ptr), I(len > 0 ? len : 1, ty_i64)
+        };
+        uint32_t data = emit_call("_lfortran_malloc_alloc",
+            ty_ptr, malloc_args, 2);
+        lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
+        declare_func("memset", ty_ptr, memset_params, 3, false);
+        lr_operand_desc_t memset_args[] = {
+            V(data, ty_ptr), I(' ', ty_i32), I(len, ty_i64)
+        };
+        emit_call("memset", ty_ptr, memset_args, 3);
+
+        uint32_t fld0 = 0;
+        uint32_t fld1 = 1;
+        uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
+            LR_UNDEF(ty_str_desc), V(data, ty_ptr), &fld0, 1);
+        uint32_t d1 = lr_emit_insertvalue(s, ty_str_desc,
+            V(d0, ty_str_desc), I(len, ty_i64), &fld1, 1);
+        lr_emit_store(s, V(d1, ty_str_desc), V(desc_ptr, ty_ptr));
+    }
+
+    void initialize_struct_storage(ASR::Struct_t *st, uint32_t data_ptr) {
+        if (!st) {
+            return;
+        }
+        std::vector<ASR::Variable_t *> members;
+        collect_struct_members_parent_first(st, members);
+        uint64_t byte_offset = 0;
+        for (ASR::Variable_t *member : members) {
+            lr_operand_desc_t off[1] = {I((int64_t)byte_offset, ty_i64)};
+            uint32_t field_ptr = lr_emit_gep(s, ty_i8,
+                V(data_ptr, ty_ptr), off, 1);
+
+            ASR::ttype_t *member_type = member->m_type;
+            ASR::ttype_t *core =
+                ASRUtils::type_get_past_allocatable_pointer(member_type);
+            if (ASR::is_a<ASR::Array_t>(*core)) {
+                initialize_local_array_descriptor(field_ptr, member_type);
+            } else {
+                core = ASRUtils::type_get_past_array(core);
+                if (ASR::is_a<ASR::String_t>(*core)) {
+                    initialize_heap_string_descriptor(field_ptr,
+                        ASR::down_cast<ASR::String_t>(core));
+                } else if (ASR::is_a<ASR::StructType_t>(*core) &&
+                        !ASRUtils::is_allocatable(member_type) &&
+                        !ASRUtils::is_pointer(member_type)) {
+                    ASR::Struct_t *member_st = struct_symbol_from_type_decl(
+                        member->m_type_declaration);
+                    initialize_struct_storage(member_st, field_ptr);
+                }
+            }
+            byte_offset += storage_size_for_variable(member);
+        }
+    }
+
     void emit_allocatable_struct_allocation(uint32_t slot,
                                             ASR::Struct_t *st,
                                             ASR::Variable_t *target_var) {
@@ -4037,6 +4190,7 @@ public:
             lr_emit_store(s, I(struct_symbol_tag(
                 (ASR::symbol_t *)st), ty_i64), V(raw_data, ty_ptr));
             emit_struct_vtable(raw_data, st);
+            initialize_struct_storage(st, class_data_ptr(raw_data));
         }
         lr_emit_store(s, V(raw_data, ty_ptr), V(slot, ty_ptr));
         if (target_var && st) {
