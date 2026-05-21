@@ -11633,8 +11633,92 @@ public:
         return emit_external_file_read_value(target, unit, iostat);
     }
 
+    bool emit_external_formatted_file_read(const ASR::FileRead_t &x,
+            uint32_t unit) {
+        if (!x.m_fmt || x.n_values == 0) {
+            return false;
+        }
+
+        uint32_t fmt_len = 0;
+        uint32_t fmt = emit_optional_string_ptr(x.m_fmt, fmt_len);
+        uint32_t advance_len = 0;
+        uint32_t advance = emit_optional_string_ptr(x.m_advance,
+            advance_len);
+        uint32_t pad_len = 0;
+        uint32_t pad = emit_optional_string_ptr(x.m_pad, pad_len);
+        uint32_t iostat = emit_iostat_ptr(x.m_iostat);
+        uint32_t chunk = emit_iostat_ptr(x.m_size);
+
+        std::vector<lr_operand_desc_t> call_args;
+        call_args.push_back(V(unit, ty_i32));
+        call_args.push_back(iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr));
+        call_args.push_back(chunk ? V(chunk, ty_ptr) : LR_NULL(ty_ptr));
+        call_args.push_back(advance ? V(advance, ty_ptr) : LR_NULL(ty_ptr));
+        call_args.push_back(advance ? V(advance_len, ty_i64) : I(0, ty_i64));
+        call_args.push_back(V(fmt, ty_ptr));
+        call_args.push_back(V(fmt_len, ty_i64));
+        call_args.push_back(I((int64_t)x.n_values, ty_i32));
+        call_args.push_back(pad ? V(pad, ty_ptr) : LR_NULL(ty_ptr));
+        call_args.push_back(pad ? V(pad_len, ty_i64) : I(0, ty_i64));
+
+        for (size_t i = 0; i < x.n_values; i++) {
+            ASR::ttype_t *type = ASRUtils::expr_type(x.m_values[i]);
+            type = ASRUtils::type_get_past_allocatable_pointer(type);
+            type = ASRUtils::type_get_past_array(type);
+            if (!ASR::is_a<ASR::String_t>(*type)) {
+                return false;
+            }
+            uint32_t desc_ptr = emit_target_ptr(x.m_values[i]);
+            ASR::String_t *st = ASR::down_cast<ASR::String_t>(type);
+            int64_t len_const = -1;
+            uint32_t len = 0;
+            if (st->m_len && ASRUtils::extract_value(st->m_len, len_const)) {
+                len = emit_i64_const(len_const);
+            } else {
+                uint32_t desc = lr_emit_load(s, ty_str_desc,
+                    V(desc_ptr, ty_ptr));
+                uint32_t fld1 = 1;
+                len = lr_emit_extractvalue(s, ty_i64,
+                    V(desc, ty_str_desc), &fld1, 1);
+            }
+            call_args.push_back(I(0, ty_i32));
+            call_args.push_back(I(0, ty_i32));
+            call_args.push_back(V(desc_ptr, ty_ptr));
+            call_args.push_back(V(len, ty_i64));
+        }
+
+        lr_type_t *params[] = {
+            ty_i32, ty_ptr, ty_ptr, ty_ptr, ty_i64,
+            ty_ptr, ty_i64, ty_i32, ty_ptr, ty_i64
+        };
+        declare_func("_lfortran_formatted_read", ty_void,
+            params, 10, true);
+
+        uint32_t sym = lr_session_intern(s, "_lfortran_formatted_read");
+        lr_inst_desc_t d;
+        memset(&d, 0, sizeof(d));
+        std::vector<lr_operand_desc_t> ops(1 + call_args.size());
+        ops[0] = LR_GLOBAL(sym, ty_ptr);
+        for (size_t i = 0; i < call_args.size(); i++) {
+            ops[1 + i] = call_args[i];
+        }
+        d.op = LR_OP_CALL;
+        d.type = ty_void;
+        d.operands = ops.data();
+        d.num_operands = ops.size();
+        d.call_external_abi = true;
+        d.call_vararg = true;
+        d.call_fixed_args = 10;
+        lr_session_emit(s, &d, nullptr);
+        return true;
+    }
+
     bool emit_external_file_read_values(const ASR::FileRead_t &x,
             uint32_t unit) {
+        if (x.m_is_formatted &&
+                emit_external_formatted_file_read(x, unit)) {
+            return true;
+        }
         uint32_t iostat = emit_iostat_ptr(x.m_iostat);
         for (size_t i = 0; i < x.n_values; i++) {
             if (!emit_external_file_read_expr(x.m_values[i], unit, iostat)) {
