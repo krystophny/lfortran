@@ -11387,6 +11387,15 @@ found_offset:
         }
     }
 
+    void visit_CoarrayRef(const ASR::CoarrayRef_t &x) {
+        LIRIC_PASSTHROUGH(x)
+        if (x.m_value) {
+            visit_expr(*x.m_value);
+            return;
+        }
+        visit_expr(*x.m_var);
+    }
+
     // --- CFI descriptor layout (matches asr_to_llvm's SimpleCMODescriptor) ---
     //
     // struct array_desc_<n_dims> {
