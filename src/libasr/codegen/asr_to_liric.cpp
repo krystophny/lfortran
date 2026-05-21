@@ -186,6 +186,7 @@ public:
     lr_type_t *ty_f32, *ty_f64, *ty_ptr;
     lr_type_t *ty_c32, *ty_c64;
     lr_type_t *ty_str_desc;     // Fortran string descriptor: {i8*, i64}
+    lr_type_t *ty_list_desc;    // list descriptor: {data*, len, cap}
     lr_type_t *ty_poly_desc;    // class(*) descriptor: {data*, type_tag}
 
     ASRToLiricVisitor(lr_session_t *session, Allocator &al_,
@@ -217,6 +218,10 @@ public:
         {
             lr_type_t *fields[2] = {ty_ptr, ty_i64};
             ty_str_desc = lr_type_struct_s(s, fields, 2, false);
+        }
+        {
+            lr_type_t *fields[3] = {ty_ptr, ty_i64, ty_i64};
+            ty_list_desc = lr_type_struct_s(s, fields, 3, false);
         }
         {
             lr_type_t *fields[2] = {ty_ptr, ty_i64};
@@ -293,6 +298,8 @@ public:
             }
             case ASR::ttypeType::String:
                 return ty_str_desc;
+            case ASR::ttypeType::List:
+                return ty_list_desc;
             case ASR::ttypeType::StructType:
                 return get_struct_type(down_cast<ASR::StructType_t>(t));
             case ASR::ttypeType::Pointer:
@@ -1009,6 +1016,9 @@ public:
         type = ASRUtils::type_get_past_array(type);
         if (ASR::is_a<ASR::String_t>(*type)) {
             return 16;
+        }
+        if (ASR::is_a<ASR::List_t>(*type)) {
+            return 24;
         }
         return lr_type_size_or_default(liric_type);
     }
@@ -4774,6 +4784,354 @@ public:
         }
     }
 
+    uint32_t list_field_ptr(uint32_t list_ptr, int64_t byte_off) {
+        lr_operand_desc_t off[1] = {I(byte_off, ty_i64)};
+        return lr_emit_gep(s, ty_i8, V(list_ptr, ty_ptr), off, 1);
+    }
+
+    uint32_t list_data(uint32_t list_ptr) {
+        return lr_emit_load(s, ty_ptr, V(list_field_ptr(list_ptr, 0), ty_ptr));
+    }
+
+    uint32_t list_len(uint32_t list_ptr) {
+        return lr_emit_load(s, ty_i64, V(list_field_ptr(list_ptr, 8), ty_ptr));
+    }
+
+    uint32_t list_cap(uint32_t list_ptr) {
+        return lr_emit_load(s, ty_i64, V(list_field_ptr(list_ptr, 16), ty_ptr));
+    }
+
+    void list_store_data(uint32_t list_ptr, uint32_t data) {
+        lr_emit_store(s, V(data, ty_ptr), V(list_field_ptr(list_ptr, 0),
+            ty_ptr));
+    }
+
+    void list_store_len(uint32_t list_ptr, uint32_t len) {
+        lr_emit_store(s, V(len, ty_i64), V(list_field_ptr(list_ptr, 8),
+            ty_ptr));
+    }
+
+    void list_store_cap(uint32_t list_ptr, uint32_t cap) {
+        lr_emit_store(s, V(cap, ty_i64), V(list_field_ptr(list_ptr, 16),
+            ty_ptr));
+    }
+
+    uint32_t list_elem_ptr(uint32_t data, uint32_t idx,
+            int64_t elem_size) {
+        uint32_t off = lr_emit_mul(s, ty_i64,
+            V(idx, ty_i64), I(elem_size, ty_i64));
+        lr_operand_desc_t gep_off[1] = {V(off, ty_i64)};
+        return lr_emit_gep(s, ty_i8, V(data, ty_ptr), gep_off, 1);
+    }
+
+    uint32_t emit_list_ptr(ASR::expr_t *expr) {
+        if (ASR::is_a<ASR::ListConstant_t>(*expr) ||
+                ASR::is_a<ASR::ListConcat_t>(*expr)) {
+            visit_expr(*expr);
+            uint32_t slot = emit_temp_slot(ty_list_desc);
+            lr_emit_store(s, V(tmp, ty_list_desc), V(slot, ty_ptr));
+            return slot;
+        }
+        return emit_target_ptr(expr);
+    }
+
+    uint32_t clone_list_desc(ASR::List_t *list_t, uint32_t src_desc) {
+        uint32_t fld0 = 0, fld1 = 1, fld2 = 2;
+        uint32_t src_data = lr_emit_extractvalue(s, ty_ptr,
+            V(src_desc, ty_list_desc), &fld0, 1);
+        uint32_t len = lr_emit_extractvalue(s, ty_i64,
+            V(src_desc, ty_list_desc), &fld1, 1);
+        int64_t elem_size = element_byte_size(list_t->m_type);
+        uint32_t bytes = lr_emit_mul(s, ty_i64,
+            V(len, ty_i64), I(elem_size, ty_i64));
+        uint32_t dst_data = emit_malloc_bytes(bytes);
+        emit_memcpy_dynamic(dst_data, src_data, bytes);
+        uint32_t d0 = lr_emit_insertvalue(s, ty_list_desc,
+            LR_UNDEF(ty_list_desc), V(dst_data, ty_ptr), &fld0, 1);
+        uint32_t d1 = lr_emit_insertvalue(s, ty_list_desc,
+            V(d0, ty_list_desc), V(len, ty_i64), &fld1, 1);
+        return lr_emit_insertvalue(s, ty_list_desc,
+            V(d1, ty_list_desc), V(len, ty_i64), &fld2, 1);
+    }
+
+    void ensure_list_capacity(uint32_t list_ptr, ASR::ttype_t *elem_t,
+            uint32_t min_cap) {
+        uint32_t cap = list_cap(list_ptr);
+        uint32_t need = lr_emit_icmp(s, LR_CMP_SLT,
+            V(cap, ty_i64), V(min_cap, ty_i64));
+        uint32_t grow_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(need, ty_i1), grow_bb, done_bb);
+
+        lr_error_t err;
+        lr_session_set_block(s, grow_bb, &err);
+        uint32_t doubled = lr_emit_mul(s, ty_i64,
+            V(cap, ty_i64), I(2, ty_i64));
+        uint32_t at_least_four = lr_emit_select(s, ty_i64,
+            V(lr_emit_icmp(s, LR_CMP_SLT, V(doubled, ty_i64),
+                I(4, ty_i64)), ty_i1),
+            I(4, ty_i64), V(doubled, ty_i64));
+        uint32_t new_cap = lr_emit_select(s, ty_i64,
+            V(lr_emit_icmp(s, LR_CMP_SLT, V(at_least_four, ty_i64),
+                V(min_cap, ty_i64)), ty_i1),
+            V(min_cap, ty_i64), V(at_least_four, ty_i64));
+        int64_t elem_size = element_byte_size(elem_t);
+        uint32_t bytes = lr_emit_mul(s, ty_i64,
+            V(new_cap, ty_i64), I(elem_size, ty_i64));
+        uint32_t new_data = emit_malloc_bytes(bytes);
+        uint32_t old_data = list_data(list_ptr);
+        uint32_t len = list_len(list_ptr);
+        uint32_t copy_bytes = lr_emit_mul(s, ty_i64,
+            V(len, ty_i64), I(elem_size, ty_i64));
+        uint32_t copy = lr_emit_and(s, ty_i1,
+            V(lr_emit_icmp(s, LR_CMP_NE, V(old_data, ty_ptr),
+                LR_NULL(ty_ptr)), ty_i1),
+            V(lr_emit_icmp(s, LR_CMP_SGT, V(copy_bytes, ty_i64),
+                I(0, ty_i64)), ty_i1));
+        uint32_t copy_bb = lr_session_block(s);
+        uint32_t store_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(copy, ty_i1), copy_bb, store_bb);
+        lr_session_set_block(s, copy_bb, &err);
+        emit_memcpy_dynamic(new_data, old_data, copy_bytes);
+        lr_emit_br(s, store_bb);
+        lr_session_set_block(s, store_bb, &err);
+        list_store_data(list_ptr, new_data);
+        list_store_cap(list_ptr, new_cap);
+        lr_emit_br(s, done_bb);
+        lr_session_set_block(s, done_bb, &err);
+    }
+
+    void visit_ListConstant(const ASR::ListConstant_t &x) {
+        ASR::List_t *list_t = ASR::down_cast<ASR::List_t>(x.m_type);
+        int64_t elem_size = element_byte_size(list_t->m_type);
+        uint32_t data = 0;
+        if (x.n_args > 0) {
+            uint32_t bytes = emit_i64_const((int64_t)x.n_args * elem_size);
+            data = emit_malloc_bytes(bytes);
+        }
+        lr_type_t *elem_lr = get_type(list_t->m_type);
+        for (size_t i = 0; i < x.n_args; i++) {
+            visit_expr(*x.m_args[i]);
+            uint32_t value = tmp;
+            if (ASR::is_a<ASR::List_t>(*ASRUtils::expr_type(x.m_args[i]))) {
+                value = clone_list_desc(ASR::down_cast<ASR::List_t>(
+                    ASRUtils::expr_type(x.m_args[i])), value);
+            }
+            uint32_t elem_ptr = list_elem_ptr(data, emit_i64_const((int64_t)i),
+                elem_size);
+            lr_emit_store(s, V(value, elem_lr), V(elem_ptr, ty_ptr));
+        }
+        uint32_t fld0 = 0, fld1 = 1, fld2 = 2;
+        lr_operand_desc_t data_op = x.n_args > 0
+            ? V(data, ty_ptr) : LR_NULL(ty_ptr);
+        uint32_t d0 = lr_emit_insertvalue(s, ty_list_desc,
+            LR_UNDEF(ty_list_desc), data_op, &fld0, 1);
+        uint32_t d1 = lr_emit_insertvalue(s, ty_list_desc,
+            V(d0, ty_list_desc), I((int64_t)x.n_args, ty_i64), &fld1, 1);
+        tmp = lr_emit_insertvalue(s, ty_list_desc,
+            V(d1, ty_list_desc), I((int64_t)x.n_args, ty_i64), &fld2, 1);
+    }
+
+    void visit_ListAppend(const ASR::ListAppend_t &x) {
+        ASR::List_t *list_t = ASR::down_cast<ASR::List_t>(
+            ASRUtils::expr_type(x.m_a));
+        uint32_t list_ptr = emit_list_ptr(x.m_a);
+        uint32_t len = list_len(list_ptr);
+        uint32_t new_len = lr_emit_add(s, ty_i64, V(len, ty_i64),
+            I(1, ty_i64));
+        ensure_list_capacity(list_ptr, list_t->m_type, new_len);
+        uint32_t data = list_data(list_ptr);
+        int64_t elem_size = element_byte_size(list_t->m_type);
+        uint32_t elem_ptr = list_elem_ptr(data, len, elem_size);
+        visit_expr(*x.m_ele);
+        uint32_t value = tmp;
+        if (ASR::is_a<ASR::List_t>(*list_t->m_type)) {
+            value = clone_list_desc(ASR::down_cast<ASR::List_t>(
+                list_t->m_type), value);
+        }
+        lr_emit_store(s, V(value, get_type(list_t->m_type)),
+            V(elem_ptr, ty_ptr));
+        list_store_len(list_ptr, new_len);
+    }
+
+    void visit_Expr(const ASR::Expr_t &x) {
+        visit_expr(*x.m_expression);
+    }
+
+    void visit_ListLen(const ASR::ListLen_t &x) {
+        if (x.m_value) { visit_expr(*x.m_value); return; }
+        tmp = list_len(emit_list_ptr(x.m_arg));
+    }
+
+    void visit_ListItem(const ASR::ListItem_t &x) {
+        ASR::List_t *list_t = ASR::down_cast<ASR::List_t>(
+            ASRUtils::expr_type(x.m_a));
+        uint32_t list_ptr = emit_list_ptr(x.m_a);
+        uint32_t data = list_data(list_ptr);
+        uint32_t idx = emit_i64_expr(x.m_pos);
+        uint32_t elem_ptr = list_elem_ptr(data, idx,
+            element_byte_size(list_t->m_type));
+        if (is_target) {
+            tmp = elem_ptr;
+        } else {
+            tmp = lr_emit_load(s, get_type(x.m_type), V(elem_ptr, ty_ptr));
+        }
+    }
+
+    void visit_ListConcat(const ASR::ListConcat_t &x) {
+        if (x.m_value) { visit_expr(*x.m_value); return; }
+        ASR::List_t *list_t = ASR::down_cast<ASR::List_t>(x.m_type);
+        int64_t elem_size = element_byte_size(list_t->m_type);
+        uint32_t left = emit_list_ptr(x.m_left);
+        uint32_t right = emit_list_ptr(x.m_right);
+        uint32_t left_len = list_len(left);
+        uint32_t right_len = list_len(right);
+        uint32_t total = lr_emit_add(s, ty_i64,
+            V(left_len, ty_i64), V(right_len, ty_i64));
+        uint32_t bytes = lr_emit_mul(s, ty_i64,
+            V(total, ty_i64), I(elem_size, ty_i64));
+        uint32_t data = emit_malloc_bytes(bytes);
+        uint32_t left_bytes = lr_emit_mul(s, ty_i64,
+            V(left_len, ty_i64), I(elem_size, ty_i64));
+        uint32_t right_bytes = lr_emit_mul(s, ty_i64,
+            V(right_len, ty_i64), I(elem_size, ty_i64));
+        emit_memcpy_dynamic(data, list_data(left), left_bytes);
+        uint32_t right_dst = list_elem_ptr(data, left_len, elem_size);
+        emit_memcpy_dynamic(right_dst, list_data(right), right_bytes);
+        uint32_t fld0 = 0, fld1 = 1, fld2 = 2;
+        uint32_t d0 = lr_emit_insertvalue(s, ty_list_desc,
+            LR_UNDEF(ty_list_desc), V(data, ty_ptr), &fld0, 1);
+        uint32_t d1 = lr_emit_insertvalue(s, ty_list_desc,
+            V(d0, ty_list_desc), V(total, ty_i64), &fld1, 1);
+        tmp = lr_emit_insertvalue(s, ty_list_desc,
+            V(d1, ty_list_desc), V(total, ty_i64), &fld2, 1);
+    }
+
+    void visit_ListCount(const ASR::ListCount_t &x) {
+        if (x.m_value) { visit_expr(*x.m_value); return; }
+        ASR::List_t *list_t = ASR::down_cast<ASR::List_t>(
+            ASRUtils::expr_type(x.m_arg));
+        uint32_t list_ptr = emit_list_ptr(x.m_arg);
+        visit_expr(*x.m_ele);
+        uint32_t needle = tmp;
+        lr_type_t *elem_lr = get_type(list_t->m_type);
+        uint32_t len = list_len(list_ptr);
+        uint32_t data = list_data(list_ptr);
+        uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+        uint32_t count_ptr = lr_emit_alloca(s, ty_i64);
+        lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+        lr_emit_store(s, I(0, ty_i64), V(count_ptr, ty_ptr));
+        uint32_t head_bb = lr_session_block(s);
+        uint32_t body_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_br(s, head_bb);
+        lr_error_t err;
+        lr_session_set_block(s, head_bb, &err);
+        uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+        uint32_t cond = lr_emit_icmp(s, LR_CMP_SLT, V(idx, ty_i64),
+            V(len, ty_i64));
+        lr_emit_condbr(s, V(cond, ty_i1), body_bb, done_bb);
+        lr_session_set_block(s, body_bb, &err);
+        uint32_t elem = lr_emit_load(s, elem_lr,
+            V(list_elem_ptr(data, idx, element_byte_size(list_t->m_type)),
+                ty_ptr));
+        uint32_t eq;
+        if (elem_lr == ty_f32 || elem_lr == ty_f64) {
+            eq = lr_emit_fcmp(s, LR_FCMP_OEQ, V(elem, elem_lr),
+                V(needle, elem_lr));
+        } else {
+            eq = lr_emit_icmp(s, LR_CMP_EQ, V(elem, elem_lr),
+                V(needle, elem_lr));
+        }
+        uint32_t old_count = lr_emit_load(s, ty_i64, V(count_ptr, ty_ptr));
+        uint32_t inc_count = lr_emit_add(s, ty_i64,
+            V(old_count, ty_i64), I(1, ty_i64));
+        uint32_t new_count = lr_emit_select(s, ty_i64, V(eq, ty_i1),
+            V(inc_count, ty_i64), V(old_count, ty_i64));
+        lr_emit_store(s, V(new_count, ty_i64), V(count_ptr, ty_ptr));
+        uint32_t next = lr_emit_add(s, ty_i64, V(idx, ty_i64),
+            I(1, ty_i64));
+        lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+        lr_emit_br(s, head_bb);
+        lr_session_set_block(s, done_bb, &err);
+        uint32_t result = lr_emit_load(s, ty_i64, V(count_ptr, ty_ptr));
+        tmp = cast_int_value(result, ty_i64, get_type(x.m_type));
+    }
+
+    void emit_list_reverse(ASR::expr_t *arg) {
+        ASR::List_t *list_t = ASR::down_cast<ASR::List_t>(
+            ASRUtils::expr_type(arg));
+        uint32_t list_ptr = emit_list_ptr(arg);
+        uint32_t len = list_len(list_ptr);
+        uint32_t data = list_data(list_ptr);
+        int64_t elem_size = element_byte_size(list_t->m_type);
+        lr_type_t *elem_lr = get_type(list_t->m_type);
+        uint32_t i_ptr = lr_emit_alloca(s, ty_i64);
+        lr_emit_store(s, I(0, ty_i64), V(i_ptr, ty_ptr));
+        uint32_t head_bb = lr_session_block(s);
+        uint32_t body_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_br(s, head_bb);
+        lr_error_t err;
+        lr_session_set_block(s, head_bb, &err);
+        uint32_t i = lr_emit_load(s, ty_i64, V(i_ptr, ty_ptr));
+        uint32_t last = lr_emit_sub(s, ty_i64, V(len, ty_i64),
+            I(1, ty_i64));
+        uint32_t j = lr_emit_sub(s, ty_i64, V(last, ty_i64), V(i, ty_i64));
+        uint32_t cond = lr_emit_icmp(s, LR_CMP_SLT, V(i, ty_i64),
+            V(j, ty_i64));
+        lr_emit_condbr(s, V(cond, ty_i1), body_bb, done_bb);
+        lr_session_set_block(s, body_bb, &err);
+        uint32_t left = list_elem_ptr(data, i, elem_size);
+        uint32_t right = list_elem_ptr(data, j, elem_size);
+        uint32_t lv = lr_emit_load(s, elem_lr, V(left, ty_ptr));
+        uint32_t rv = lr_emit_load(s, elem_lr, V(right, ty_ptr));
+        lr_emit_store(s, V(rv, elem_lr), V(left, ty_ptr));
+        lr_emit_store(s, V(lv, elem_lr), V(right, ty_ptr));
+        uint32_t next = lr_emit_add(s, ty_i64, V(i, ty_i64), I(1, ty_i64));
+        lr_emit_store(s, V(next, ty_i64), V(i_ptr, ty_ptr));
+        lr_emit_br(s, head_bb);
+        lr_session_set_block(s, done_bb, &err);
+    }
+
+    uint32_t emit_list_pop(ASR::expr_t *arg, ASR::expr_t *pos_expr,
+            ASR::ttype_t *result_type) {
+        ASR::List_t *list_t = ASR::down_cast<ASR::List_t>(
+            ASRUtils::expr_type(arg));
+        uint32_t list_ptr = emit_list_ptr(arg);
+        uint32_t data = list_data(list_ptr);
+        uint32_t len = list_len(list_ptr);
+        uint32_t pos = emit_i64_expr(pos_expr);
+        int64_t elem_size = element_byte_size(list_t->m_type);
+        lr_type_t *elem_lr = get_type(result_type);
+        uint32_t elem_ptr = list_elem_ptr(data, pos, elem_size);
+        uint32_t result = lr_emit_load(s, elem_lr, V(elem_ptr, ty_ptr));
+        uint32_t i_ptr = lr_emit_alloca(s, ty_i64);
+        lr_emit_store(s, V(pos, ty_i64), V(i_ptr, ty_ptr));
+        uint32_t head_bb = lr_session_block(s);
+        uint32_t body_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        uint32_t last = lr_emit_sub(s, ty_i64, V(len, ty_i64),
+            I(1, ty_i64));
+        lr_emit_br(s, head_bb);
+        lr_error_t err;
+        lr_session_set_block(s, head_bb, &err);
+        uint32_t i = lr_emit_load(s, ty_i64, V(i_ptr, ty_ptr));
+        uint32_t cond = lr_emit_icmp(s, LR_CMP_SLT, V(i, ty_i64),
+            V(last, ty_i64));
+        lr_emit_condbr(s, V(cond, ty_i1), body_bb, done_bb);
+        lr_session_set_block(s, body_bb, &err);
+        uint32_t next = lr_emit_add(s, ty_i64, V(i, ty_i64), I(1, ty_i64));
+        uint32_t dst = list_elem_ptr(data, i, elem_size);
+        uint32_t src = list_elem_ptr(data, next, elem_size);
+        emit_memcpy_dynamic(dst, src, emit_i64_const(elem_size));
+        lr_emit_store(s, V(next, ty_i64), V(i_ptr, ty_ptr));
+        lr_emit_br(s, head_bb);
+        lr_session_set_block(s, done_bb, &err);
+        list_store_len(list_ptr, last);
+        return result;
+    }
+
     // --- Allocate (string allocatables only) ---
     //
     // Implements the minimal `allocate(character(len=N) :: s)` shape.
@@ -4855,6 +5213,8 @@ public:
             }
             case ASR::ttypeType::String:
                 return 16;            // descriptor
+            case ASR::ttypeType::List:
+                return 24;            // descriptor
             case ASR::ttypeType::StructType: {
                 return (int64_t)struct_type_storage_size_from_signature(t);
             }
@@ -7335,6 +7695,22 @@ public:
                 lr_type_t *rt = get_type(x.m_type);
                 tmp = lr_emit_select(s, rt, V(mask, ty_i1),
                     V(true_value, rt), V(false_value, rt));
+                return;
+            }
+            case ASRUtils::IntrinsicElementalFunctions::ListReverse: {
+                if (x.n_args != 1) {
+                    throw CodeGenError(
+                        "liric: list.reverse() expects one arg");
+                }
+                emit_list_reverse(x.m_args[0]);
+                tmp = 0;
+                return;
+            }
+            case ASRUtils::IntrinsicElementalFunctions::ListPop: {
+                if (x.n_args != 2) {
+                    throw CodeGenError("liric: list.pop() expects two args");
+                }
+                tmp = emit_list_pop(x.m_args[0], x.m_args[1], x.m_type);
                 return;
             }
             case ASRUtils::IntrinsicElementalFunctions::Max:
