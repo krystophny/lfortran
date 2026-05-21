@@ -1912,6 +1912,19 @@ public:
             }
             return;
         }
+        // Parameter scalars with a compile-time m_value (e.g. enum
+        // constants accessed via host association from a contained
+        // subroutine) reach here as ExternalSymbols whose underlying
+        // Variable_t has no allocated storage in either lr_symtab or
+        // lr_globals.  Falling through to the placeholder-global path
+        // would create a zero-initialised .bss slot and the caller
+        // would read 0.  Inline the value instead.
+        if (!is_target && !is_array &&
+                v->m_storage == ASR::storage_typeType::Parameter &&
+                v->m_value) {
+            visit_expr(*v->m_value);
+            return;
+        }
         std::string gname = module_variable_global_name(
             sym_before_external, v);
         if (gname.empty()) {
