@@ -11624,7 +11624,14 @@ public:
         emit_call_void("_lfortran_close", args, 4);
     }
 
-    void visit_FileBackspace(const ASR::FileBackspace_t & /*x*/) {}
+    void visit_FileBackspace(const ASR::FileBackspace_t &x) {
+        uint32_t unit = x.m_unit ? emit_i32_value(x.m_unit) : emit_i32_const(-1);
+        lr_type_t *p[] = {ty_i32};
+        declare_func("_lfortran_backspace", ty_void, p, 1, false);
+        lr_operand_desc_t args[] = {V(unit, ty_i32)};
+        emit_call_void("_lfortran_backspace", args, 1);
+    }
+
     void visit_FileRewind(const ASR::FileRewind_t &x) {
         uint32_t unit = x.m_unit ? emit_i32_value(x.m_unit) : emit_i32_const(-1);
         uint32_t iomsg_len = 0;
@@ -11728,7 +11735,21 @@ public:
         emit_free_if_nonnull(allocator, raw);
     }
 
-    void visit_Flush(const ASR::Flush_t & /*x*/) {}
+    void visit_Flush(const ASR::Flush_t &x) {
+        uint32_t unit = x.m_unit ? emit_i32_value(x.m_unit) : emit_i32_const(-1);
+        uint32_t iomsg_len = 0;
+        uint32_t iomsg = emit_optional_string_ptr(x.m_iomsg, iomsg_len);
+        uint32_t iostat = emit_iostat_ptr(x.m_iostat);
+        lr_type_t *p[] = {ty_i32, ty_ptr, ty_ptr, ty_i64};
+        declare_func("_lfortran_flush", ty_void, p, 4, false);
+        lr_operand_desc_t args[] = {
+            V(unit, ty_i32),
+            iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr),
+            iomsg ? V(iomsg, ty_ptr) : LR_NULL(ty_ptr),
+            V(iomsg_len, ty_i64)
+        };
+        emit_call_void("_lfortran_flush", args, 4);
+    }
 
     // --- StringConstant ---
     //
