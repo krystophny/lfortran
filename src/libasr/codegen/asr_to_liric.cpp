@@ -11387,10 +11387,47 @@ public:
         }
     }
 
+    bool emit_external_file_read_array(ASR::expr_t *target,
+            ASR::Array_t *array_t, uint32_t unit, uint32_t iostat) {
+        ASR::ttype_t *elem_type =
+            ASRUtils::type_get_past_allocatable_pointer(array_t->m_type);
+        elem_type = ASRUtils::type_get_past_array(elem_type);
+        const char *name = nullptr;
+        if (ASR::is_a<ASR::Integer_t>(*elem_type)) {
+            int kind = ASRUtils::extract_kind_from_ttype_t(elem_type);
+            if (kind == 1) name = "_lfortran_read_array_int8";
+            else if (kind == 2) name = "_lfortran_read_array_int16";
+            else if (kind == 4) name = "_lfortran_read_array_int32";
+            else if (kind == 8) name = "_lfortran_read_array_int64";
+            else return false;
+        } else if (ASR::is_a<ASR::Real_t>(*elem_type)) {
+            int kind = ASRUtils::extract_kind_from_ttype_t(elem_type);
+            if (kind == 4) name = "_lfortran_read_array_float";
+            else if (kind == 8) name = "_lfortran_read_array_double";
+            else return false;
+        } else {
+            return false;
+        }
+        ArrayLinearView view = emit_array_linear_view(target, array_t);
+        uint32_t count = cast_int_value(view.total, ty_i64, ty_i32);
+        lr_type_t *p[] = {ty_ptr, ty_i32, ty_i32, ty_i32, ty_ptr};
+        declare_func(name, ty_void, p, 5, false);
+        lr_operand_desc_t args[] = {
+            V(view.base, ty_ptr), V(count, ty_i32), I(1, ty_i32),
+            V(unit, ty_i32), iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr)
+        };
+        emit_call_void(name, args, 5);
+        return true;
+    }
+
     bool emit_external_file_read_value(ASR::expr_t *target, uint32_t unit,
             uint32_t iostat) {
         ASR::ttype_t *type = ASRUtils::expr_type(target);
         type = ASRUtils::type_get_past_allocatable_pointer(type);
+        if (ASR::is_a<ASR::Array_t>(*type)) {
+            return emit_external_file_read_array(target,
+                ASR::down_cast<ASR::Array_t>(type), unit, iostat);
+        }
         type = ASRUtils::type_get_past_array(type);
         if (ASR::is_a<ASR::Integer_t>(*type)) {
             int kind = ASRUtils::extract_kind_from_ttype_t(type);
