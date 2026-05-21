@@ -224,6 +224,17 @@ public:
         }
     }
 
+    int normalized_real_kind(ASR::ttype_t *t) {
+        int kind = ASRUtils::extract_kind_from_ttype_t(t);
+        if (kind == 4 || kind == 8) {
+            return kind;
+        }
+        if (kind >= 1000) {
+            return 4;
+        }
+        return kind;
+    }
+
     // --- Type mapping: ASR type -> liric type ---
 
     lr_type_t *get_type(ASR::ttype_t *t) {
@@ -267,7 +278,7 @@ public:
                 }
             }
             case ASR::ttypeType::Real: {
-                int kind = ASRUtils::extract_kind_from_ttype_t(t);
+                int kind = normalized_real_kind(t);
                 switch (kind) {
                     case 4: return ty_f32;
                     case 8: return ty_f64;
@@ -277,7 +288,7 @@ public:
             case ASR::ttypeType::Logical:
                 return ty_i1;
             case ASR::ttypeType::Complex: {
-                int kind = ASRUtils::extract_kind_from_ttype_t(t);
+                int kind = normalized_real_kind(t);
                 return (kind == 4) ? ty_c32 : ty_c64;
             }
             case ASR::ttypeType::String:
@@ -1599,6 +1610,9 @@ public:
             uint32_t slot = lr_symtab[get_hash((ASR::asr_t *)v)];
             lr_type_t *rt = get_type(v->m_type);
             uint32_t val = lr_emit_load(s, rt, V(slot, ty_ptr));
+            if (rt == ty_f32 || rt == ty_f64) {
+                val = lr_emit_fadd(s, rt, V(val, rt), F(0.0, rt));
+            }
             if (uses_sret) {
                 uint32_t out = lr_session_param(s, 0);
                 lr_emit_store(s, V(val, rt), V(out, ty_ptr));
@@ -2704,6 +2718,49 @@ public:
                 emit_struct_constant_to_storage(
                     *ASR::down_cast<ASR::StructConstant_t>(
                         x.m_value), dst);
+            }
+            return;
+        }
+
+        ASR::ttype_t *value_struct_type = ASRUtils::expr_type(x.m_value);
+        value_struct_type =
+            ASRUtils::type_get_past_allocatable_pointer(value_struct_type);
+        value_struct_type =
+            ASRUtils::type_get_past_array(value_struct_type);
+        if (!target_is_array &&
+                ASR::is_a<ASR::StructType_t>(*target_struct_type) &&
+                expr_is_storage_reference(x.m_value) &&
+                ASR::is_a<ASR::StructType_t>(*value_struct_type)) {
+            bool was_target = is_target;
+            is_target = true;
+            visit_expr(*x.m_value);
+            uint32_t src = tmp;
+            if (expr_is_allocatable_struct(x.m_value)) {
+                uint32_t src_raw = lr_emit_load(s, ty_ptr, V(src, ty_ptr));
+                src = class_data_ptr(src_raw);
+            }
+            visit_expr(*x.m_target);
+            is_target = was_target;
+            uint32_t dst = tmp;
+            if (expr_is_allocatable_struct(x.m_target)) {
+                uint32_t raw = lr_emit_load(s, ty_ptr, V(dst, ty_ptr));
+                dst = class_data_ptr(raw);
+            }
+
+            ASR::Struct_t *st = nullptr;
+            ASR::symbol_t *sym =
+                ASRUtils::get_struct_sym_from_struct_expr(x.m_target);
+            st = struct_symbol_from_type_decl(sym);
+            if (!st) {
+                sym = ASRUtils::get_struct_sym_from_struct_expr(x.m_value);
+                st = struct_symbol_from_type_decl(sym);
+            }
+            if (st) {
+                emit_struct_storage_assignment(dst, src, st);
+            } else {
+                emit_memcpy_bytes(dst, src,
+                    storage_size_or_default(value_struct_type,
+                        get_type(value_struct_type)));
             }
             return;
         }
@@ -4728,13 +4785,15 @@ public:
             case ASR::ttypeType::Integer:
             case ASR::ttypeType::UnsignedInteger:
             case ASR::ttypeType::Real: {
-                int kind = ASRUtils::extract_kind_from_ttype_t(t);
+                int kind = ASR::is_a<ASR::Real_t>(*t)
+                    ? normalized_real_kind(t)
+                    : ASRUtils::extract_kind_from_ttype_t(t);
                 return kind > 0 ? (int64_t)kind : 8;
             }
             case ASR::ttypeType::Logical:
                 return 4;
             case ASR::ttypeType::Complex: {
-                int kind = ASRUtils::extract_kind_from_ttype_t(t);
+                int kind = normalized_real_kind(t);
                 return 2 * (kind > 0 ? (int64_t)kind : 8);
             }
             case ASR::ttypeType::String:
