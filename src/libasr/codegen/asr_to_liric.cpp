@@ -452,13 +452,12 @@ public:
         lr_inst_desc_t d;
         memset(&d, 0, sizeof(d));
         uint32_t nops = 1 + nargs;
-        lr_operand_desc_t ops[32];
-        if (nops > 32) throw CodeGenError("liric: too many call args");
+        std::vector<lr_operand_desc_t> ops(nops);
         ops[0] = LR_GLOBAL(sym, ty_ptr);
         for (uint32_t i = 0; i < nargs; i++) ops[1 + i] = args[i];
         d.op = LR_OP_CALL;
         d.type = ret;
-        d.operands = ops;
+        d.operands = ops.data();
         d.num_operands = nops;
         d.call_external_abi = true;
         return lr_session_emit(s, &d, nullptr);
@@ -470,13 +469,12 @@ public:
         lr_inst_desc_t d;
         memset(&d, 0, sizeof(d));
         uint32_t nops = 1 + nargs;
-        lr_operand_desc_t ops[32];
-        if (nops > 32) throw CodeGenError("liric: too many call args");
+        std::vector<lr_operand_desc_t> ops(nops);
         ops[0] = LR_GLOBAL(sym, ty_ptr);
         for (uint32_t i = 0; i < nargs; i++) ops[1 + i] = args[i];
         d.op = LR_OP_CALL;
         d.type = ty_void;
-        d.operands = ops;
+        d.operands = ops.data();
         d.num_operands = nops;
         d.call_external_abi = true;
         lr_session_emit(s, &d, nullptr);
@@ -12213,115 +12211,171 @@ public:
             return;
         }
 
-        auto store_zero = [&](ASR::expr_t *e, lr_type_t *t) {
-            if (!e) return;
-            bool was_target = is_target;
-            is_target = true;
-            visit_expr(*e);
-            is_target = was_target;
-            uint32_t slot = tmp;
-            if (t == ty_i1)      lr_emit_store(s, I(0, ty_i1), V(slot, ty_ptr));
-            else if (t == ty_i32) lr_emit_store(s, I(0, ty_i32), V(slot, ty_ptr));
-            else if (t == ty_i64) lr_emit_store(s, I(0, ty_i64), V(slot, ty_ptr));
+        struct BoolResult {
+            uint32_t slot;
+            ASR::expr_t *expr;
         };
-        store_zero(x.m_iostat, ty_i32);
-        store_zero(x.m_opened, ty_i1);
-        store_zero(x.m_number, ty_i32);
-        if (x.m_size) {
-            store_zero(x.m_size, value_type_for_expr(x.m_size));
-        }
-        if (x.m_unit && x.m_blank) {
-            uint32_t unit = emit_i32_value(x.m_unit);
-            auto [blank, blank_len] = emit_target_string_data_len(x.m_blank);
-            lr_type_t *p[] = {ty_i32, ty_ptr, ty_i64};
-            declare_func("_lfortran_inquire_unit_blank", ty_void, p, 3,
-                false);
-            lr_operand_desc_t args[] = {
-                V(unit, ty_i32), V(blank, ty_ptr), V(blank_len, ty_i64)
-            };
-            emit_call_void("_lfortran_inquire_unit_blank", args, 3);
-        }
-        if (!x.m_file) {
-            store_zero(x.m_exist, ty_i1);
-            return;
-        }
-
-        visit_expr(*x.m_file);
-        uint32_t desc = tmp;
-        uint32_t fld0 = 0, fld1 = 1;
-        uint32_t data = lr_emit_extractvalue(s, ty_ptr,
-            V(desc, ty_str_desc), &fld0, 1);
-        uint32_t len = lr_emit_extractvalue(s, ty_i64,
-            V(desc, ty_str_desc), &fld1, 1);
-
-        uint32_t allocator = emit_call(
-            "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
-        uint32_t raw_len = lr_emit_add(s, ty_i64,
-            V(len, ty_i64), I(1, ty_i64));
-        lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
-        declare_func("_lfortran_malloc_alloc", ty_ptr, malloc_params, 2, false);
-        lr_operand_desc_t malloc_args[] = {
-            V(allocator, ty_ptr), V(raw_len, ty_i64)
+        struct Int32Result {
+            uint32_t slot;
+            uint32_t target;
+            lr_type_t *target_type;
         };
-        uint32_t raw = emit_call("_lfortran_malloc_alloc",
-            ty_ptr, malloc_args, 2);
-        lr_type_t *memcpy_params[] = {ty_ptr, ty_ptr, ty_i64};
-        declare_func("memcpy", ty_ptr, memcpy_params, 3, false);
-        lr_operand_desc_t copy_args[] = {
-            V(raw, ty_ptr), V(data, ty_ptr), V(len, ty_i64)
+        std::vector<BoolResult> bool_results;
+        std::vector<Int32Result> int32_results;
+
+        auto bool_arg = [&](ASR::expr_t *expr, bool required) {
+            if (!expr && !required) return (uint32_t)0;
+            uint32_t slot = lr_emit_alloca(s, ty_i1);
+            if (expr) bool_results.push_back({slot, expr});
+            return slot;
         };
-        emit_call("memcpy", ty_ptr, copy_args, 3);
-        lr_operand_desc_t nul_off[1] = {V(len, ty_i64)};
-        uint32_t nul_ptr = lr_emit_gep(s, ty_i8, V(raw, ty_ptr), nul_off, 1);
-        lr_emit_store(s, I(0, ty_i8), V(nul_ptr, ty_ptr));
-
-        uint32_t mode_sym = declare_global_cstring("r", "_lr_fopen_mode_r");
-        lr_type_t *fopen_params[] = {ty_ptr, ty_ptr};
-        declare_func("fopen", ty_ptr, fopen_params, 2, false);
-        lr_operand_desc_t fopen_args[] = {
-            V(raw, ty_ptr), LR_GLOBAL(mode_sym, ty_ptr)
+        auto i32_arg = [&](ASR::expr_t *expr) {
+            if (!expr) return (uint32_t)0;
+            lr_type_t *target_type = value_type_for_expr(expr);
+            uint32_t target = emit_target_ptr(expr);
+            if (target_type == ty_i32) return target;
+            uint32_t slot = lr_emit_alloca(s, ty_i32);
+            int32_results.push_back({slot, target, target_type});
+            return slot;
         };
-        uint32_t fp = emit_call("fopen", ty_ptr, fopen_args, 2);
-        uint32_t exists = lr_emit_icmp(s, LR_CMP_NE,
-            V(fp, ty_ptr), LR_NULL(ty_ptr));
+        auto string_arg = [&](ASR::expr_t *expr, uint32_t &len) {
+            if (!expr) {
+                len = emit_i64_const(0);
+                return (uint32_t)0;
+            }
+            uint32_t data = 0;
+            std::tie(data, len) = emit_target_string_data_len(expr);
+            return data;
+        };
 
-        if (x.m_exist) {
-            bool was_target = is_target;
-            is_target = true;
-            visit_expr(*x.m_exist);
-            is_target = was_target;
-            lr_emit_store(s, V(exists, ty_i1), V(tmp, ty_ptr));
+        uint32_t file_len = 0;
+        uint32_t file_data = emit_optional_string_ptr(x.m_file, file_len);
+        uint32_t unit = x.m_unit ? emit_i32_value(x.m_unit)
+            : emit_i32_const(-1);
+        uint32_t exist = bool_arg(x.m_exist, true);
+        uint32_t opened = bool_arg(x.m_opened, false);
+        uint32_t named = bool_arg(x.m_named, false);
+        uint32_t pending = bool_arg(x.m_pending, false);
+
+        uint32_t write_len = 0, read_len = 0, readwrite_len = 0;
+        uint32_t access_len = 0, name_len = 0, blank_len = 0;
+        uint32_t sequential_len = 0, direct_len = 0, form_len = 0;
+        uint32_t formatted_len = 0, unformatted_len = 0;
+        uint32_t decimal_len = 0, sign_len = 0, encoding_len = 0;
+        uint32_t stream_len = 0, iomsg_len = 0, round_len = 0;
+        uint32_t pad_len = 0, asynchronous_len = 0, action_len = 0;
+        uint32_t position_len = 0, delim_len = 0;
+
+        uint32_t write = string_arg(x.m_write, write_len);
+        uint32_t read = string_arg(x.m_read, read_len);
+        uint32_t readwrite = string_arg(x.m_readwrite, readwrite_len);
+        uint32_t access = string_arg(x.m_access, access_len);
+        uint32_t name = string_arg(x.m_name, name_len);
+        uint32_t blank = string_arg(x.m_blank, blank_len);
+        uint32_t sequential = string_arg(x.m_sequential, sequential_len);
+        uint32_t direct = string_arg(x.m_direct, direct_len);
+        uint32_t form = string_arg(x.m_form, form_len);
+        uint32_t formatted = string_arg(x.m_formatted, formatted_len);
+        uint32_t unformatted = string_arg(x.m_unformatted, unformatted_len);
+        uint32_t decimal = string_arg(x.m_decimal, decimal_len);
+        uint32_t sign = string_arg(x.m_sign, sign_len);
+        uint32_t encoding = string_arg(x.m_encoding, encoding_len);
+        uint32_t stream = string_arg(x.m_stream, stream_len);
+        uint32_t iomsg = string_arg(x.m_iomsg, iomsg_len);
+        uint32_t round = string_arg(x.m_round, round_len);
+        uint32_t pad = string_arg(x.m_pad, pad_len);
+        uint32_t asynchronous = string_arg(x.m_asynchronous,
+            asynchronous_len);
+        uint32_t action = string_arg(x.m_action, action_len);
+        uint32_t position = string_arg(x.m_position, position_len);
+        uint32_t delim = string_arg(x.m_delim, delim_len);
+
+        uint32_t size = i32_arg(x.m_size);
+        uint32_t pos = i32_arg(x.m_pos);
+        uint32_t recl = i32_arg(x.m_recl);
+        uint32_t number = i32_arg(x.m_number);
+        uint32_t iostat = i32_arg(x.m_iostat);
+        uint32_t nextrec = i32_arg(x.m_nextrec);
+
+        std::vector<lr_type_t *> params = {
+            ty_ptr, ty_i64, ty_ptr, ty_i32, ty_ptr, ty_ptr, ty_ptr,
+            ty_ptr, ty_i64, ty_ptr, ty_i64, ty_ptr, ty_i64,
+            ty_ptr, ty_i64, ty_ptr, ty_i64, ty_ptr, ty_i64,
+            ty_ptr, ty_ptr, ty_ptr,
+            ty_ptr, ty_i64, ty_ptr, ty_i64, ty_ptr, ty_i64,
+            ty_ptr, ty_i64, ty_ptr, ty_i64,
+            ty_ptr, ty_ptr,
+            ty_ptr, ty_i64, ty_ptr, ty_i64, ty_ptr, ty_i64,
+            ty_ptr, ty_i64, ty_ptr, ty_i64, ty_ptr, ty_i64,
+            ty_ptr,
+            ty_ptr, ty_i64, ty_ptr, ty_i64, ty_ptr, ty_i64,
+            ty_ptr, ty_i64
+        };
+        declare_func("_lfortran_inquire", ty_void, params.data(),
+            params.size(), false);
+
+        std::vector<lr_operand_desc_t> args = {
+            file_data ? V(file_data, ty_ptr) : LR_NULL(ty_ptr),
+            V(file_len, ty_i64),
+            V(exist, ty_ptr), V(unit, ty_i32),
+            opened ? V(opened, ty_ptr) : LR_NULL(ty_ptr),
+            size ? V(size, ty_ptr) : LR_NULL(ty_ptr),
+            pos ? V(pos, ty_ptr) : LR_NULL(ty_ptr),
+            write ? V(write, ty_ptr) : LR_NULL(ty_ptr), V(write_len, ty_i64),
+            read ? V(read, ty_ptr) : LR_NULL(ty_ptr), V(read_len, ty_i64),
+            readwrite ? V(readwrite, ty_ptr) : LR_NULL(ty_ptr),
+            V(readwrite_len, ty_i64),
+            access ? V(access, ty_ptr) : LR_NULL(ty_ptr),
+            V(access_len, ty_i64),
+            name ? V(name, ty_ptr) : LR_NULL(ty_ptr), V(name_len, ty_i64),
+            blank ? V(blank, ty_ptr) : LR_NULL(ty_ptr), V(blank_len, ty_i64),
+            recl ? V(recl, ty_ptr) : LR_NULL(ty_ptr),
+            number ? V(number, ty_ptr) : LR_NULL(ty_ptr),
+            named ? V(named, ty_ptr) : LR_NULL(ty_ptr),
+            sequential ? V(sequential, ty_ptr) : LR_NULL(ty_ptr),
+            V(sequential_len, ty_i64),
+            direct ? V(direct, ty_ptr) : LR_NULL(ty_ptr),
+            V(direct_len, ty_i64),
+            form ? V(form, ty_ptr) : LR_NULL(ty_ptr), V(form_len, ty_i64),
+            formatted ? V(formatted, ty_ptr) : LR_NULL(ty_ptr),
+            V(formatted_len, ty_i64),
+            unformatted ? V(unformatted, ty_ptr) : LR_NULL(ty_ptr),
+            V(unformatted_len, ty_i64),
+            iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr),
+            nextrec ? V(nextrec, ty_ptr) : LR_NULL(ty_ptr),
+            decimal ? V(decimal, ty_ptr) : LR_NULL(ty_ptr),
+            V(decimal_len, ty_i64),
+            sign ? V(sign, ty_ptr) : LR_NULL(ty_ptr), V(sign_len, ty_i64),
+            encoding ? V(encoding, ty_ptr) : LR_NULL(ty_ptr),
+            V(encoding_len, ty_i64),
+            stream ? V(stream, ty_ptr) : LR_NULL(ty_ptr),
+            V(stream_len, ty_i64),
+            iomsg ? V(iomsg, ty_ptr) : LR_NULL(ty_ptr),
+            V(iomsg_len, ty_i64),
+            round ? V(round, ty_ptr) : LR_NULL(ty_ptr), V(round_len, ty_i64),
+            pad ? V(pad, ty_ptr) : LR_NULL(ty_ptr), V(pad_len, ty_i64),
+            pending ? V(pending, ty_ptr) : LR_NULL(ty_ptr),
+            asynchronous ? V(asynchronous, ty_ptr) : LR_NULL(ty_ptr),
+            V(asynchronous_len, ty_i64),
+            action ? V(action, ty_ptr) : LR_NULL(ty_ptr),
+            V(action_len, ty_i64),
+            position ? V(position, ty_ptr) : LR_NULL(ty_ptr),
+            V(position_len, ty_i64),
+            delim ? V(delim, ty_ptr) : LR_NULL(ty_ptr),
+            V(delim_len, ty_i64)
+        };
+        emit_call_void("_lfortran_inquire", args.data(), args.size());
+
+        for (const BoolResult &r: bool_results) {
+            uint32_t value = lr_emit_load(s, ty_i1, V(r.slot, ty_ptr));
+            uint32_t target = emit_target_ptr(r.expr);
+            lr_emit_store(s, V(value, ty_i1), V(target, ty_ptr));
         }
-
-        uint32_t close_bb = lr_session_block(s);
-        uint32_t done_bb = lr_session_block(s);
-        lr_emit_condbr(s, V(exists, ty_i1), close_bb, done_bb);
-        lr_error_t err;
-        lr_session_set_block(s, close_bb, &err);
-        if (x.m_size) {
-            lr_type_t *fseek_params[] = {ty_ptr, ty_i64, ty_i32};
-            declare_func("fseek", ty_i32, fseek_params, 3, false);
-            lr_operand_desc_t fseek_args[] = {
-                V(fp, ty_ptr), I(0, ty_i64), I(2, ty_i32)
-            };
-            (void)emit_call("fseek", ty_i32, fseek_args, 3);
-            lr_type_t *ftell_params[] = {ty_ptr};
-            declare_func("ftell", ty_i64, ftell_params, 1, false);
-            lr_operand_desc_t ftell_args[] = {V(fp, ty_ptr)};
-            uint32_t nbytes = emit_call("ftell", ty_i64, ftell_args, 1);
-            uint32_t size_ptr = emit_target_ptr(x.m_size);
-            lr_type_t *size_t = value_type_for_expr(x.m_size);
-            uint32_t size_value = cast_int_value(nbytes, ty_i64, size_t);
-            lr_emit_store(s, V(size_value, size_t), V(size_ptr, ty_ptr));
+        for (const Int32Result &r: int32_results) {
+            uint32_t value = lr_emit_load(s, ty_i32, V(r.slot, ty_ptr));
+            uint32_t casted = cast_int_value(value, ty_i32, r.target_type);
+            lr_emit_store(s, V(casted, r.target_type), V(r.target, ty_ptr));
         }
-        lr_type_t *fclose_params[] = {ty_ptr};
-        declare_func("fclose", ty_i32, fclose_params, 1, false);
-        lr_operand_desc_t fclose_args[] = {V(fp, ty_ptr)};
-        (void)emit_call("fclose", ty_i32, fclose_args, 1);
-        lr_emit_br(s, done_bb);
-
-        lr_session_set_block(s, done_bb, &err);
-        emit_free_if_nonnull(allocator, raw);
     }
 
     void visit_Flush(const ASR::Flush_t &x) {
