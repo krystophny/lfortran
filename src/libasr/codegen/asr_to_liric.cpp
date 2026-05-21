@@ -171,6 +171,7 @@ public:
     std::unordered_set<uint64_t> class_desc_aliases;
     std::unordered_set<uint64_t> runtime_pointer_arrays;
     std::unordered_set<uint64_t> known_struct_hashes;
+    std::vector<ASR::Variable_t *> module_init_vars;
     std::vector<ASR::Struct_t *> known_structs;
     std::unordered_map<uint64_t, lr_type_t *> struct_types;
     std::unordered_map<int, uint32_t> goto_blocks;
@@ -187,6 +188,7 @@ public:
     lr_type_t *ty_c32, *ty_c64;
     lr_type_t *ty_str_desc;     // Fortran string descriptor: {i8*, i64}
     lr_type_t *ty_list_desc;    // list descriptor: {data*, len, cap}
+    lr_type_t *ty_dict_desc;    // dict descriptor: {keys*, values*, len, cap}
     lr_type_t *ty_poly_desc;    // class(*) descriptor: {data*, type_tag}
 
     ASRToLiricVisitor(lr_session_t *session, Allocator &al_,
@@ -222,6 +224,10 @@ public:
         {
             lr_type_t *fields[3] = {ty_ptr, ty_i64, ty_i64};
             ty_list_desc = lr_type_struct_s(s, fields, 3, false);
+        }
+        {
+            lr_type_t *fields[4] = {ty_ptr, ty_ptr, ty_i64, ty_i64};
+            ty_dict_desc = lr_type_struct_s(s, fields, 4, false);
         }
         {
             lr_type_t *fields[2] = {ty_ptr, ty_i64};
@@ -298,10 +304,23 @@ public:
             }
             case ASR::ttypeType::String:
                 return ty_str_desc;
+            case ASR::ttypeType::Set:
+                return ty_list_desc;
             case ASR::ttypeType::List:
                 return ty_list_desc;
+            case ASR::ttypeType::Tuple: {
+                ASR::Tuple_t *tt = down_cast<ASR::Tuple_t>(t);
+                std::vector<lr_type_t *> fields;
+                for (size_t i = 0; i < tt->n_type; i++) {
+                    fields.push_back(get_type(tt->m_type[i]));
+                }
+                return lr_type_struct_s(s, fields.data(), fields.size(),
+                    false);
+            }
             case ASR::ttypeType::StructType:
                 return get_struct_type(down_cast<ASR::StructType_t>(t));
+            case ASR::ttypeType::Dict:
+                return ty_dict_desc;
             case ASR::ttypeType::Pointer:
                 // Untyped at the liric layer; downstream code that
                 // dereferences a Fortran pointer must supply its own
@@ -884,6 +903,9 @@ public:
                     lr_type_array_s(s, ty_i8, nbytes),
                     false, zeros.data(), nbytes);
                 lr_globals[h] = lr_session_intern(s, gname.c_str());
+                if (v->m_value) {
+                    module_init_vars.push_back(v);
+                }
             }
         }
         for (auto &item : x.m_symtab->get_scope()) {
@@ -1019,6 +1041,21 @@ public:
         }
         if (ASR::is_a<ASR::List_t>(*type)) {
             return 24;
+        }
+        if (ASR::is_a<ASR::Set_t>(*type)) {
+            return 24;
+        }
+        if (ASR::is_a<ASR::Dict_t>(*type)) {
+            return 32;
+        }
+        if (ASR::is_a<ASR::Tuple_t>(*type)) {
+            ASR::Tuple_t *tuple_t = ASR::down_cast<ASR::Tuple_t>(type);
+            uint64_t nbytes = 0;
+            for (size_t i = 0; i < tuple_t->n_type; i++) {
+                nbytes += storage_size_or_default(tuple_t->m_type[i],
+                    get_type(tuple_t->m_type[i]));
+            }
+            return nbytes;
         }
         return lr_type_size_or_default(liric_type);
     }
@@ -1436,6 +1473,19 @@ public:
         // Call _lpython_call_initial_functions(argc, argv)
         lr_operand_desc_t init_args[] = {V(argc, ty_i32), V(argv, ty_ptr)};
         emit_call_void("_lpython_call_initial_functions", init_args, 2);
+
+        for (ASR::Variable_t *v : module_init_vars) {
+            uint64_t h = get_hash((ASR::asr_t *)v);
+            auto it = lr_globals.find(h);
+            if (it == lr_globals.end()) continue;
+            lr_operand_desc_t no_off[1] = {I(0, ty_i64)};
+            uint32_t slot = lr_emit_gep(s, ty_i8,
+                LR_GLOBAL(it->second, ty_ptr), no_off, 1);
+            initialize_local_array_descriptor(slot, v->m_type);
+            initialize_local_string_descriptor(slot, v->m_type);
+            initialize_struct_variable_storage(slot, v);
+            initialize_local_value(v, slot);
+        }
 
         // Initialize program-level variables at runtime entry.  Each
         // variable's storage already exists in .bss (zeroed); this
@@ -5132,6 +5182,365 @@ public:
         return result;
     }
 
+    uint32_t emit_scalar_equal(uint32_t lhs, uint32_t rhs, lr_type_t *type) {
+        if (type == ty_f32 || type == ty_f64) {
+            return lr_emit_fcmp(s, LR_FCMP_OEQ, V(lhs, type), V(rhs, type));
+        }
+        return lr_emit_icmp(s, LR_CMP_EQ, V(lhs, type), V(rhs, type));
+    }
+
+    uint32_t emit_linear_find(uint32_t data, uint32_t len,
+            int64_t elem_size, lr_type_t *elem_lr, uint32_t needle) {
+        uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+        uint32_t found_ptr = lr_emit_alloca(s, ty_i64);
+        lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+        lr_emit_store(s, I(-1, ty_i64), V(found_ptr, ty_ptr));
+        uint32_t head_bb = lr_session_block(s);
+        uint32_t body_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_br(s, head_bb);
+        lr_error_t err;
+        lr_session_set_block(s, head_bb, &err);
+        uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+        uint32_t cond = lr_emit_icmp(s, LR_CMP_SLT, V(idx, ty_i64),
+            V(len, ty_i64));
+        lr_emit_condbr(s, V(cond, ty_i1), body_bb, done_bb);
+        lr_session_set_block(s, body_bb, &err);
+        uint32_t elem = lr_emit_load(s, elem_lr,
+            V(list_elem_ptr(data, idx, elem_size), ty_ptr));
+        uint32_t eq = emit_scalar_equal(elem, needle, elem_lr);
+        uint32_t found = lr_emit_load(s, ty_i64, V(found_ptr, ty_ptr));
+        uint32_t unset = lr_emit_icmp(s, LR_CMP_EQ, V(found, ty_i64),
+            I(-1, ty_i64));
+        uint32_t take = lr_emit_and(s, ty_i1, V(eq, ty_i1),
+            V(unset, ty_i1));
+        uint32_t new_found = lr_emit_select(s, ty_i64, V(take, ty_i1),
+            V(idx, ty_i64), V(found, ty_i64));
+        lr_emit_store(s, V(new_found, ty_i64), V(found_ptr, ty_ptr));
+        uint32_t next = lr_emit_add(s, ty_i64, V(idx, ty_i64), I(1, ty_i64));
+        lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+        lr_emit_br(s, head_bb);
+        lr_session_set_block(s, done_bb, &err);
+        return lr_emit_load(s, ty_i64, V(found_ptr, ty_ptr));
+    }
+
+    uint32_t empty_list_desc() {
+        uint32_t fld0 = 0, fld1 = 1, fld2 = 2;
+        uint32_t d0 = lr_emit_insertvalue(s, ty_list_desc,
+            LR_UNDEF(ty_list_desc), LR_NULL(ty_ptr), &fld0, 1);
+        uint32_t d1 = lr_emit_insertvalue(s, ty_list_desc,
+            V(d0, ty_list_desc), I(0, ty_i64), &fld1, 1);
+        return lr_emit_insertvalue(s, ty_list_desc,
+            V(d1, ty_list_desc), I(0, ty_i64), &fld2, 1);
+    }
+
+    void emit_set_insert_value(uint32_t set_ptr, ASR::ttype_t *elem_t,
+            uint32_t value) {
+        uint32_t data = list_data(set_ptr);
+        uint32_t len = list_len(set_ptr);
+        int64_t elem_size = element_byte_size(elem_t);
+        lr_type_t *elem_lr = get_type(elem_t);
+        uint32_t found = emit_linear_find(data, len, elem_size, elem_lr,
+            value);
+        uint32_t exists = lr_emit_icmp(s, LR_CMP_NE, V(found, ty_i64),
+            I(-1, ty_i64));
+        uint32_t append_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(exists, ty_i1), done_bb, append_bb);
+        lr_error_t err;
+        lr_session_set_block(s, append_bb, &err);
+        uint32_t new_len = lr_emit_add(s, ty_i64, V(len, ty_i64),
+            I(1, ty_i64));
+        ensure_list_capacity(set_ptr, elem_t, new_len);
+        data = list_data(set_ptr);
+        uint32_t elem_ptr = list_elem_ptr(data, len, elem_size);
+        lr_emit_store(s, V(value, elem_lr), V(elem_ptr, ty_ptr));
+        list_store_len(set_ptr, new_len);
+        lr_emit_br(s, done_bb);
+        lr_session_set_block(s, done_bb, &err);
+    }
+
+    uint32_t emit_set_ptr(ASR::expr_t *expr) {
+        if (ASR::is_a<ASR::SetConstant_t>(*expr)) {
+            visit_expr(*expr);
+            uint32_t slot = emit_temp_slot(ty_list_desc);
+            lr_emit_store(s, V(tmp, ty_list_desc), V(slot, ty_ptr));
+            return slot;
+        }
+        return emit_target_ptr(expr);
+    }
+
+    void visit_SetConstant(const ASR::SetConstant_t &x) {
+        ASR::Set_t *set_t = ASR::down_cast<ASR::Set_t>(x.m_type);
+        uint32_t slot = emit_temp_slot(ty_list_desc);
+        lr_emit_store(s, V(empty_list_desc(), ty_list_desc), V(slot, ty_ptr));
+        for (size_t i = 0; i < x.n_elements; i++) {
+            visit_expr(*x.m_elements[i]);
+            emit_set_insert_value(slot, set_t->m_type, tmp);
+        }
+        tmp = lr_emit_load(s, ty_list_desc, V(slot, ty_ptr));
+    }
+
+    void visit_SetInsert(const ASR::SetInsert_t &x) {
+        ASR::Set_t *set_t = ASR::down_cast<ASR::Set_t>(
+            ASRUtils::expr_type(x.m_a));
+        uint32_t set_ptr = emit_set_ptr(x.m_a);
+        visit_expr(*x.m_ele);
+        emit_set_insert_value(set_ptr, set_t->m_type, tmp);
+    }
+
+    void visit_SetLen(const ASR::SetLen_t &x) {
+        if (x.m_value) { visit_expr(*x.m_value); return; }
+        tmp = list_len(emit_set_ptr(x.m_arg));
+    }
+
+    uint32_t dict_field_ptr(uint32_t dict_ptr, int64_t byte_off) {
+        lr_operand_desc_t off[1] = {I(byte_off, ty_i64)};
+        return lr_emit_gep(s, ty_i8, V(dict_ptr, ty_ptr), off, 1);
+    }
+
+    uint32_t dict_keys(uint32_t dict_ptr) {
+        return lr_emit_load(s, ty_ptr, V(dict_field_ptr(dict_ptr, 0),
+            ty_ptr));
+    }
+
+    uint32_t dict_values(uint32_t dict_ptr) {
+        return lr_emit_load(s, ty_ptr, V(dict_field_ptr(dict_ptr, 8),
+            ty_ptr));
+    }
+
+    uint32_t dict_len(uint32_t dict_ptr) {
+        return lr_emit_load(s, ty_i64, V(dict_field_ptr(dict_ptr, 16),
+            ty_ptr));
+    }
+
+    uint32_t dict_cap(uint32_t dict_ptr) {
+        return lr_emit_load(s, ty_i64, V(dict_field_ptr(dict_ptr, 24),
+            ty_ptr));
+    }
+
+    void dict_store_keys(uint32_t dict_ptr, uint32_t keys) {
+        lr_emit_store(s, V(keys, ty_ptr), V(dict_field_ptr(dict_ptr, 0),
+            ty_ptr));
+    }
+
+    void dict_store_values(uint32_t dict_ptr, uint32_t values) {
+        lr_emit_store(s, V(values, ty_ptr), V(dict_field_ptr(dict_ptr, 8),
+            ty_ptr));
+    }
+
+    void dict_store_len(uint32_t dict_ptr, uint32_t len) {
+        lr_emit_store(s, V(len, ty_i64), V(dict_field_ptr(dict_ptr, 16),
+            ty_ptr));
+    }
+
+    void dict_store_cap(uint32_t dict_ptr, uint32_t cap) {
+        lr_emit_store(s, V(cap, ty_i64), V(dict_field_ptr(dict_ptr, 24),
+            ty_ptr));
+    }
+
+    uint32_t empty_dict_desc() {
+        uint32_t fld0 = 0, fld1 = 1, fld2 = 2, fld3 = 3;
+        uint32_t d0 = lr_emit_insertvalue(s, ty_dict_desc,
+            LR_UNDEF(ty_dict_desc), LR_NULL(ty_ptr), &fld0, 1);
+        uint32_t d1 = lr_emit_insertvalue(s, ty_dict_desc,
+            V(d0, ty_dict_desc), LR_NULL(ty_ptr), &fld1, 1);
+        uint32_t d2 = lr_emit_insertvalue(s, ty_dict_desc,
+            V(d1, ty_dict_desc), I(0, ty_i64), &fld2, 1);
+        return lr_emit_insertvalue(s, ty_dict_desc,
+            V(d2, ty_dict_desc), I(0, ty_i64), &fld3, 1);
+    }
+
+    void ensure_dict_capacity(uint32_t dict_ptr, ASR::ttype_t *key_t,
+            ASR::ttype_t *value_t, uint32_t min_cap) {
+        uint32_t cap = dict_cap(dict_ptr);
+        uint32_t need = lr_emit_icmp(s, LR_CMP_SLT, V(cap, ty_i64),
+            V(min_cap, ty_i64));
+        uint32_t grow_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(need, ty_i1), grow_bb, done_bb);
+        lr_error_t err;
+        lr_session_set_block(s, grow_bb, &err);
+        uint32_t doubled = lr_emit_mul(s, ty_i64, V(cap, ty_i64),
+            I(2, ty_i64));
+        uint32_t at_least_four = lr_emit_select(s, ty_i64,
+            V(lr_emit_icmp(s, LR_CMP_SLT, V(doubled, ty_i64),
+                I(4, ty_i64)), ty_i1),
+            I(4, ty_i64), V(doubled, ty_i64));
+        uint32_t new_cap = lr_emit_select(s, ty_i64,
+            V(lr_emit_icmp(s, LR_CMP_SLT, V(at_least_four, ty_i64),
+                V(min_cap, ty_i64)), ty_i1),
+            V(min_cap, ty_i64), V(at_least_four, ty_i64));
+        int64_t key_size = element_byte_size(key_t);
+        int64_t value_size = element_byte_size(value_t);
+        uint32_t key_bytes = lr_emit_mul(s, ty_i64, V(new_cap, ty_i64),
+            I(key_size, ty_i64));
+        uint32_t value_bytes = lr_emit_mul(s, ty_i64, V(new_cap, ty_i64),
+            I(value_size, ty_i64));
+        uint32_t new_keys = emit_malloc_bytes(key_bytes);
+        uint32_t new_values = emit_malloc_bytes(value_bytes);
+        uint32_t len = dict_len(dict_ptr);
+        uint32_t old_keys = dict_keys(dict_ptr);
+        uint32_t old_values = dict_values(dict_ptr);
+        uint32_t old_key_bytes = lr_emit_mul(s, ty_i64, V(len, ty_i64),
+            I(key_size, ty_i64));
+        uint32_t old_value_bytes = lr_emit_mul(s, ty_i64, V(len, ty_i64),
+            I(value_size, ty_i64));
+        uint32_t copy = lr_emit_icmp(s, LR_CMP_SGT,
+            V(old_key_bytes, ty_i64), I(0, ty_i64));
+        uint32_t copy_bb = lr_session_block(s);
+        uint32_t store_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(copy, ty_i1), copy_bb, store_bb);
+        lr_session_set_block(s, copy_bb, &err);
+        emit_memcpy_dynamic(new_keys, old_keys, old_key_bytes);
+        emit_memcpy_dynamic(new_values, old_values, old_value_bytes);
+        lr_emit_br(s, store_bb);
+        lr_session_set_block(s, store_bb, &err);
+        dict_store_keys(dict_ptr, new_keys);
+        dict_store_values(dict_ptr, new_values);
+        dict_store_cap(dict_ptr, new_cap);
+        lr_emit_br(s, done_bb);
+        lr_session_set_block(s, done_bb, &err);
+    }
+
+    uint32_t emit_dict_ptr(ASR::expr_t *expr) {
+        if (ASR::is_a<ASR::DictConstant_t>(*expr)) {
+            visit_expr(*expr);
+            uint32_t slot = emit_temp_slot(ty_dict_desc);
+            lr_emit_store(s, V(tmp, ty_dict_desc), V(slot, ty_ptr));
+            return slot;
+        }
+        return emit_target_ptr(expr);
+    }
+
+    void emit_dict_insert_value(uint32_t dict_ptr, ASR::Dict_t *dict_t,
+            uint32_t key, uint32_t value) {
+        uint32_t keys = dict_keys(dict_ptr);
+        uint32_t len = dict_len(dict_ptr);
+        int64_t key_size = element_byte_size(dict_t->m_key_type);
+        int64_t value_size = element_byte_size(dict_t->m_value_type);
+        lr_type_t *key_lr = get_type(dict_t->m_key_type);
+        lr_type_t *value_lr = get_type(dict_t->m_value_type);
+        uint32_t found = emit_linear_find(keys, len, key_size, key_lr, key);
+        uint32_t exists = lr_emit_icmp(s, LR_CMP_NE, V(found, ty_i64),
+            I(-1, ty_i64));
+        uint32_t update_bb = lr_session_block(s);
+        uint32_t append_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(exists, ty_i1), update_bb, append_bb);
+        lr_error_t err;
+        lr_session_set_block(s, update_bb, &err);
+        uint32_t values = dict_values(dict_ptr);
+        uint32_t value_ptr = list_elem_ptr(values, found, value_size);
+        lr_emit_store(s, V(value, value_lr), V(value_ptr, ty_ptr));
+        lr_emit_br(s, done_bb);
+        lr_session_set_block(s, append_bb, &err);
+        uint32_t new_len = lr_emit_add(s, ty_i64, V(len, ty_i64),
+            I(1, ty_i64));
+        ensure_dict_capacity(dict_ptr, dict_t->m_key_type,
+            dict_t->m_value_type, new_len);
+        keys = dict_keys(dict_ptr);
+        values = dict_values(dict_ptr);
+        uint32_t key_ptr = list_elem_ptr(keys, len, key_size);
+        value_ptr = list_elem_ptr(values, len, value_size);
+        lr_emit_store(s, V(key, key_lr), V(key_ptr, ty_ptr));
+        lr_emit_store(s, V(value, value_lr), V(value_ptr, ty_ptr));
+        dict_store_len(dict_ptr, new_len);
+        lr_emit_br(s, done_bb);
+        lr_session_set_block(s, done_bb, &err);
+    }
+
+    void visit_DictConstant(const ASR::DictConstant_t &x) {
+        ASR::Dict_t *dict_t = ASR::down_cast<ASR::Dict_t>(x.m_type);
+        uint32_t slot = emit_temp_slot(ty_dict_desc);
+        lr_emit_store(s, V(empty_dict_desc(), ty_dict_desc), V(slot, ty_ptr));
+        for (size_t i = 0; i < x.n_keys; i++) {
+            visit_expr(*x.m_keys[i]);
+            uint32_t key = tmp;
+            visit_expr(*x.m_values[i]);
+            emit_dict_insert_value(slot, dict_t, key, tmp);
+        }
+        tmp = lr_emit_load(s, ty_dict_desc, V(slot, ty_ptr));
+    }
+
+    void visit_DictInsert(const ASR::DictInsert_t &x) {
+        ASR::Dict_t *dict_t = ASR::down_cast<ASR::Dict_t>(
+            ASRUtils::expr_type(x.m_a));
+        uint32_t dict_ptr = emit_dict_ptr(x.m_a);
+        visit_expr(*x.m_key);
+        uint32_t key = tmp;
+        visit_expr(*x.m_value);
+        emit_dict_insert_value(dict_ptr, dict_t, key, tmp);
+    }
+
+    void visit_DictLen(const ASR::DictLen_t &x) {
+        if (x.m_value) { visit_expr(*x.m_value); return; }
+        tmp = dict_len(emit_dict_ptr(x.m_arg));
+    }
+
+    void visit_DictItem(const ASR::DictItem_t &x) {
+        if (x.m_value) { visit_expr(*x.m_value); return; }
+        ASR::Dict_t *dict_t = ASR::down_cast<ASR::Dict_t>(
+            ASRUtils::expr_type(x.m_a));
+        uint32_t dict_ptr = emit_dict_ptr(x.m_a);
+        visit_expr(*x.m_key);
+        uint32_t key = tmp;
+        uint32_t found = emit_linear_find(dict_keys(dict_ptr),
+            dict_len(dict_ptr), element_byte_size(dict_t->m_key_type),
+            get_type(dict_t->m_key_type), key);
+        uint32_t value_ptr = list_elem_ptr(dict_values(dict_ptr), found,
+            element_byte_size(dict_t->m_value_type));
+        tmp = lr_emit_load(s, get_type(x.m_type), V(value_ptr, ty_ptr));
+    }
+
+    uint64_t tuple_field_offset(ASR::Tuple_t *tuple_t, size_t index) {
+        uint64_t offset = 0;
+        for (size_t i = 0; i < index; i++) {
+            offset += storage_size_or_default(tuple_t->m_type[i],
+                get_type(tuple_t->m_type[i]));
+        }
+        return offset;
+    }
+
+    void visit_TupleConstant(const ASR::TupleConstant_t &x) {
+        ASR::Tuple_t *tuple_t = ASR::down_cast<ASR::Tuple_t>(x.m_type);
+        lr_type_t *tuple_lr = get_type(x.m_type);
+        uint32_t value = 0;
+        for (size_t i = 0; i < x.n_elements; i++) {
+            visit_expr(*x.m_elements[i]);
+            uint32_t field = (uint32_t)i;
+            lr_operand_desc_t agg = i == 0
+                ? LR_UNDEF(tuple_lr) : V(value, tuple_lr);
+            value = lr_emit_insertvalue(s, tuple_lr, agg,
+                V(tmp, get_type(tuple_t->m_type[i])), &field, 1);
+        }
+        tmp = value;
+    }
+
+    void visit_TupleItem(const ASR::TupleItem_t &x) {
+        if (x.m_value) { visit_expr(*x.m_value); return; }
+        ASR::Tuple_t *tuple_t = ASR::down_cast<ASR::Tuple_t>(
+            ASRUtils::expr_type(x.m_a));
+        int64_t pos = 0;
+        if (!ASRUtils::extract_value(x.m_pos, pos) || pos < 0 ||
+                (size_t)pos >= tuple_t->n_type) {
+            throw CodeGenError("liric: tuple item index must be constant");
+        }
+        if (is_target) {
+            uint32_t tuple_ptr = emit_target_ptr(x.m_a);
+            lr_operand_desc_t off[1] = {
+                I((int64_t)tuple_field_offset(tuple_t, (size_t)pos), ty_i64)
+            };
+            tmp = lr_emit_gep(s, ty_i8, V(tuple_ptr, ty_ptr), off, 1);
+            return;
+        }
+        visit_expr(*x.m_a);
+        uint32_t tuple_value = tmp;
+        uint32_t field = (uint32_t)pos;
+        tmp = lr_emit_extractvalue(s, get_type(x.m_type),
+            V(tuple_value, get_type(ASRUtils::expr_type(x.m_a))), &field, 1);
+    }
+
     // --- Allocate (string allocatables only) ---
     //
     // Implements the minimal `allocate(character(len=N) :: s)` shape.
@@ -5213,8 +5622,21 @@ public:
             }
             case ASR::ttypeType::String:
                 return 16;            // descriptor
+            case ASR::ttypeType::Set:
+                return 24;            // descriptor
             case ASR::ttypeType::List:
                 return 24;            // descriptor
+            case ASR::ttypeType::Dict:
+                return 32;            // descriptor
+            case ASR::ttypeType::Tuple: {
+                ASR::Tuple_t *tuple_t = ASR::down_cast<ASR::Tuple_t>(t);
+                int64_t nbytes = 0;
+                for (size_t i = 0; i < tuple_t->n_type; i++) {
+                    nbytes += (int64_t)storage_size_or_default(
+                        tuple_t->m_type[i], get_type(tuple_t->m_type[i]));
+                }
+                return nbytes;
+            }
             case ASR::ttypeType::StructType: {
                 return (int64_t)struct_type_storage_size_from_signature(t);
             }
@@ -7711,6 +8133,18 @@ public:
                     throw CodeGenError("liric: list.pop() expects two args");
                 }
                 tmp = emit_list_pop(x.m_args[0], x.m_args[1], x.m_type);
+                return;
+            }
+            case ASRUtils::IntrinsicElementalFunctions::SetAdd: {
+                if (x.n_args != 2) {
+                    throw CodeGenError("liric: set.add() expects two args");
+                }
+                ASR::Set_t *set_t = ASR::down_cast<ASR::Set_t>(
+                    ASRUtils::expr_type(x.m_args[0]));
+                uint32_t set_ptr = emit_set_ptr(x.m_args[0]);
+                visit_expr(*x.m_args[1]);
+                emit_set_insert_value(set_ptr, set_t->m_type, tmp);
+                tmp = 0;
                 return;
             }
             case ASRUtils::IntrinsicElementalFunctions::Max:
