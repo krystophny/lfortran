@@ -11392,6 +11392,72 @@ public:
         ASR::ttype_t *elem_type =
             ASRUtils::type_get_past_allocatable_pointer(array_t->m_type);
         elem_type = ASRUtils::type_get_past_array(elem_type);
+        if (ASR::is_a<ASR::String_t>(*elem_type)) {
+            ASR::String_t *st = ASR::down_cast<ASR::String_t>(elem_type);
+            int64_t len_const = -1;
+            ArrayLinearView view = emit_array_linear_view(target, array_t);
+            uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+            lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+
+            lr_error_t err;
+            uint32_t head = lr_session_block(s);
+            uint32_t body = lr_session_block(s);
+            uint32_t done = lr_session_block(s);
+            lr_emit_br(s, head);
+
+            lr_session_set_block(s, head, &err);
+            uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+            uint32_t more = lr_emit_icmp(s, LR_CMP_SLT,
+                V(idx, ty_i64), V(view.total, ty_i64));
+            lr_emit_condbr(s, V(more, ty_i1), body, done);
+
+            lr_session_set_block(s, body, &err);
+            uint32_t off = lr_emit_mul(s, ty_i64,
+                V(idx, ty_i64), V(view.elem_len, ty_i64));
+            lr_operand_desc_t off_op[1] = {V(off, ty_i64)};
+            uint32_t elem_ptr = lr_emit_gep(s, ty_i8,
+                V(view.base, ty_ptr), off_op, 1);
+            uint32_t len = 0;
+            if (st->m_len && ASRUtils::extract_value(st->m_len, len_const)) {
+                len = emit_i64_const(len_const);
+            } else {
+                uint32_t desc = lr_emit_load(s, ty_str_desc,
+                    V(elem_ptr, ty_ptr));
+                uint32_t fld1 = 1;
+                len = lr_emit_extractvalue(s, ty_i64,
+                    V(desc, ty_str_desc), &fld1, 1);
+            }
+            uint32_t allocator = emit_call(
+                "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+            lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
+            declare_func("_lfortran_string_malloc_alloc", ty_ptr,
+                malloc_params, 2, false);
+            lr_operand_desc_t malloc_args[] = {
+                V(allocator, ty_ptr), V(len, ty_i64)
+            };
+            uint32_t data = emit_call("_lfortran_string_malloc_alloc",
+                ty_ptr, malloc_args, 2);
+            uint32_t fld0 = 0, fld1 = 1;
+            uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
+                LR_UNDEF(ty_str_desc), V(data, ty_ptr), &fld0, 1);
+            uint32_t d1 = lr_emit_insertvalue(s, ty_str_desc,
+                V(d0, ty_str_desc), V(len, ty_i64), &fld1, 1);
+            lr_emit_store(s, V(d1, ty_str_desc), V(elem_ptr, ty_ptr));
+            lr_type_t *p[] = {ty_ptr, ty_i64, ty_i32, ty_ptr};
+            declare_func("_lfortran_read_char", ty_void, p, 4, false);
+            lr_operand_desc_t args[] = {
+                V(elem_ptr, ty_ptr), V(len, ty_i64), V(unit, ty_i32),
+                iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr)
+            };
+            emit_call_void("_lfortran_read_char", args, 4);
+            uint32_t next = lr_emit_add(s, ty_i64,
+                V(idx, ty_i64), I(1, ty_i64));
+            lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+            lr_emit_br(s, head);
+
+            lr_session_set_block(s, done, &err);
+            return true;
+        }
         const char *name = nullptr;
         if (ASR::is_a<ASR::Integer_t>(*elem_type)) {
             int kind = ASRUtils::extract_kind_from_ttype_t(elem_type);
