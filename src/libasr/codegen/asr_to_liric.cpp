@@ -12158,6 +12158,61 @@ public:
     }
 
     void visit_FileInquire(const ASR::FileInquire_t &x) {
+        auto iolength_expr_size = [&](ASR::expr_t *expr) {
+            ASR::ttype_t *type = ASRUtils::expr_type(expr);
+            type = ASRUtils::type_get_past_allocatable_pointer(type);
+            ASR::Array_t *array_t = nullptr;
+            bool is_array = ASR::is_a<ASR::Array_t>(*type);
+            ASR::ttype_t *base_type = type;
+            if (is_array) {
+                array_t = ASR::down_cast<ASR::Array_t>(type);
+                base_type = ASRUtils::type_get_past_array(array_t->m_type);
+            }
+            uint32_t elem_size = 0;
+            if (ASR::is_a<ASR::String_t>(*base_type)) {
+                ASR::String_t *st = ASR::down_cast<ASR::String_t>(base_type);
+                int64_t len_const = -1;
+                if (st->m_len &&
+                        ASRUtils::extract_value(st->m_len, len_const)) {
+                    elem_size = emit_i64_const(len_const);
+                } else if (st->m_len) {
+                    elem_size = emit_expr_i64(st->m_len);
+                } else {
+                    elem_size = emit_i64_const(0);
+                }
+            } else {
+                int64_t kind = ASRUtils::extract_kind_from_ttype_t(base_type);
+                if (ASR::is_a<ASR::Complex_t>(*base_type)) {
+                    kind *= 2;
+                }
+                elem_size = emit_i64_const(kind);
+            }
+            if (!is_array) {
+                return elem_size;
+            }
+            int64_t static_total = ASRUtils::get_fixed_size_of_array(
+                array_t->m_dims, array_t->n_dims);
+            uint32_t total = static_total > 0
+                ? emit_i64_const(static_total)
+                : emit_array_linear_view(expr, array_t).total;
+            return lr_emit_mul(s, ty_i64, V(elem_size, ty_i64),
+                V(total, ty_i64));
+        };
+
+        if (x.m_iolength && x.n_iolength_vars > 0) {
+            uint32_t total = emit_i64_const(0);
+            for (size_t i = 0; i < x.n_iolength_vars; i++) {
+                uint32_t n = iolength_expr_size(x.m_iolength_vars[i]);
+                total = lr_emit_add(s, ty_i64, V(total, ty_i64),
+                    V(n, ty_i64));
+            }
+            uint32_t out_ptr = emit_target_ptr(x.m_iolength);
+            lr_type_t *out_t = value_type_for_expr(x.m_iolength);
+            uint32_t out = cast_int_value(total, ty_i64, out_t);
+            lr_emit_store(s, V(out, out_t), V(out_ptr, ty_ptr));
+            return;
+        }
+
         auto store_zero = [&](ASR::expr_t *e, lr_type_t *t) {
             if (!e) return;
             bool was_target = is_target;
