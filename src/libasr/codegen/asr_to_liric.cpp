@@ -3766,21 +3766,26 @@ public:
         tmp = lr_emit_add(s, rt, I((int64_t)nbytes, rt), I(0, rt));
     }
 
+    uint32_t emit_global_string_desc(const std::string &name,
+            const char *data, size_t len) {
+        lr_session_global(s, name.c_str(),
+            lr_type_array_s(s, ty_i8, len + 1),
+            true, data, len + 1);
+        uint32_t sym = lr_session_intern(s, name.c_str());
+        uint32_t fld0 = 0, fld1 = 1;
+        uint32_t c0 = lr_emit_insertvalue(s, ty_str_desc,
+            LR_UNDEF(ty_str_desc), LR_GLOBAL(sym, ty_ptr), &fld0, 1);
+        return lr_emit_insertvalue(s, ty_str_desc,
+            V(c0, ty_str_desc), I((int64_t)len, ty_i64), &fld1, 1);
+    }
+
     // c_compiler_options() etc: return the compiler-options string set
     // by the front-end.  Lower as a global cstring + length descriptor.
     void visit_CompilerOptions(const ASR::CompilerOptions_t &x) {
         std::string name = "_lr_compopts_" + std::to_string(
             get_hash((ASR::asr_t *)&x));
         size_t len = std::strlen(x.m_compiler_options_str);
-        lr_session_global(s, name.c_str(),
-            lr_type_array_s(s, ty_i8, len + 1),
-            true, x.m_compiler_options_str, len + 1);
-        uint32_t sym = lr_session_intern(s, name.c_str());
-        uint32_t fld0 = 0, fld1 = 1;
-        uint32_t c0 = lr_emit_insertvalue(s, ty_str_desc,
-            LR_UNDEF(ty_str_desc), LR_GLOBAL(sym, ty_ptr), &fld0, 1);
-        tmp = lr_emit_insertvalue(s, ty_str_desc,
-            V(c0, ty_str_desc), I((int64_t)len, ty_i64), &fld1, 1);
+        tmp = emit_global_string_desc(name, x.m_compiler_options_str, len);
     }
 
     // -z: negate both fields of the {f,f} struct.
@@ -6441,6 +6446,34 @@ public:
             return;
         }
 
+        std::string resolved_name = fn ? callable_name(fn) : "";
+        if (resolved_name.find("iso_fortran_env") != std::string::npos &&
+                resolved_name.find("compiler_version") !=
+                    std::string::npos) {
+            if (x.n_args != 1 || !x.m_args[0].m_value) {
+                throw CodeGenError(
+                    "liric: compiler_version expects one output arg");
+            }
+            ASR::expr_t *out_arg = x.m_args[0].m_value;
+            uint32_t out_ptr = emit_target_ptr(out_arg);
+            std::string version = std::string("LFortran version ")
+                + LFORTRAN_VERSION;
+            std::string name = "_lr_compver_" + std::to_string(
+                get_hash((ASR::asr_t *)&x));
+            uint32_t desc = emit_global_string_desc(name, version.c_str(),
+                version.size());
+            ASR::ttype_t *out_type = ASRUtils::expr_type(out_arg);
+            ASR::ttype_t *core =
+                ASRUtils::type_get_past_allocatable_pointer(out_type);
+            if (ASRUtils::is_allocatable(out_type) &&
+                    ASR::is_a<ASR::String_t>(*core)) {
+                emit_allocatable_string_assignment(out_ptr, desc);
+            } else {
+                lr_emit_store(s, V(desc, ty_str_desc), V(out_ptr, ty_ptr));
+            }
+            return;
+        }
+
         if (fn && callable_name(fn) == "_lfortran_get_command_argument_value") {
             if (x.n_args != 2 || !x.m_args[0].m_value ||
                     !x.m_args[1].m_value) {
@@ -6687,6 +6720,34 @@ public:
                 "liric: FunctionCall target did not resolve to a Function: ")
                 + (raw ? ASRUtils::symbol_name(raw) : "<null>")
                 + " kind=" + std::to_string(raw ? (int)raw->type : -1));
+        }
+
+        bool is_iso_compiler_version = false;
+        if (x.m_name && ASR::is_a<ASR::ExternalSymbol_t>(*x.m_name)) {
+            ASR::ExternalSymbol_t *ext =
+                ASR::down_cast<ASR::ExternalSymbol_t>(x.m_name);
+            is_iso_compiler_version = ext->m_module_name &&
+                std::string(ext->m_module_name) ==
+                    "lfortran_intrinsic_iso_fortran_env" &&
+                ext->m_original_name &&
+                std::string(ext->m_original_name) == "compiler_version";
+        }
+        std::string resolved_name = fn ? callable_name(fn) : "";
+        if (is_iso_compiler_version ||
+                (fn && std::string(fn->m_name) == "compiler_version") ||
+                (fn && std::string(fn->m_name) ==
+                    "_lfortran_compiler_version") ||
+                (resolved_name.find("iso_fortran_env") !=
+                    std::string::npos &&
+                 resolved_name.find("compiler_version") !=
+                    std::string::npos)) {
+            std::string version = std::string("LFortran version ")
+                + LFORTRAN_VERSION;
+            std::string name = "_lr_compver_" + std::to_string(
+                get_hash((ASR::asr_t *)&x));
+            tmp = emit_global_string_desc(name, version.c_str(),
+                version.size());
+            return;
         }
 
         uint32_t interface_fptr = interface_function_param(fn);
