@@ -5793,6 +5793,15 @@ static void _lfortran_init_standard_units(void) {
     last_index_used = 2;
 }
 
+LFORTRAN_API int32_t _lfortran_get_newunit(void) {
+    _lfortran_init_standard_units();
+    for (int32_t unit = -10; unit >= -1000; unit--) {
+        if (!find_unit(unit)) return unit;
+    }
+    fprintf(stderr, "All unit numbers are utilized\n");
+    exit(1);
+}
+
 LFORTRAN_API void _lfortran_file_write_newline(int32_t unit_num) {
     _lfortran_init_standard_units();
     bool unit_file_bin;
