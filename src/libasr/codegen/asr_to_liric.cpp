@@ -11438,6 +11438,9 @@ public:
     }
 
     void visit_FileRead(const ASR::FileRead_t &x) {
+        if (emit_internal_formatted_read(x)) {
+            return;
+        }
         if (emit_internal_integer_read(x)) {
             return;
         }
@@ -11722,10 +11725,228 @@ public:
         return emit_external_file_read_value(target, unit, iostat);
     }
 
+    int64_t formatted_read_arg_count(ASR::expr_t *target) {
+        ASR::ttype_t *type = ASRUtils::expr_type(target);
+        ASR::Array_t *array_t = nullptr;
+        if (expr_is_array(target, &array_t)) {
+            type = ASRUtils::type_get_past_allocatable_pointer(
+                array_t->m_type);
+            type = ASRUtils::type_get_past_array(type);
+            if (ASR::is_a<ASR::Integer_t>(*type) ||
+                    ASR::is_a<ASR::Real_t>(*type) ||
+                    ASR::is_a<ASR::Complex_t>(*type)) {
+                return 1;
+            }
+            return -1;
+        }
+        type = ASRUtils::type_get_past_allocatable_pointer(type);
+        type = ASRUtils::type_get_past_array(type);
+        if (ASR::is_a<ASR::Complex_t>(*type)) {
+            return 2;
+        }
+        if (ASR::is_a<ASR::String_t>(*type) ||
+                ASR::is_a<ASR::Integer_t>(*type) ||
+                ASR::is_a<ASR::Real_t>(*type)) {
+            return 1;
+        }
+        return -1;
+    }
+
+    bool append_formatted_read_arg(std::vector<lr_operand_desc_t> &call_args,
+            ASR::expr_t *target) {
+        ASR::Array_t *array_t = nullptr;
+        if (expr_is_array(target, &array_t)) {
+            ASR::ttype_t *elem_type =
+                ASRUtils::type_get_past_allocatable_pointer(array_t->m_type);
+            elem_type = ASRUtils::type_get_past_array(elem_type);
+            int32_t type_code = -1;
+            if (ASR::is_a<ASR::Integer_t>(*elem_type)) {
+                int kind = ASRUtils::extract_kind_from_ttype_t(elem_type);
+                if (kind == 4) type_code = 2;
+                else if (kind == 8) type_code = 3;
+                else return false;
+            } else if (ASR::is_a<ASR::Real_t>(*elem_type)) {
+                int kind = ASRUtils::extract_kind_from_ttype_t(elem_type);
+                if (kind == 4) type_code = 4;
+                else if (kind == 8) type_code = 5;
+                else return false;
+            } else if (ASR::is_a<ASR::Complex_t>(*elem_type)) {
+                int kind = ASRUtils::extract_kind_from_ttype_t(elem_type);
+                if (kind == 4) type_code = 6;
+                else if (kind == 8) type_code = 7;
+                else return false;
+            } else {
+                return false;
+            }
+            ArrayLinearView view = emit_array_linear_view(target, array_t);
+            uint32_t count = cast_int_value(view.total, ty_i64, ty_i32);
+            call_args.push_back(I(1, ty_i32));
+            call_args.push_back(I(type_code, ty_i32));
+            call_args.push_back(V(view.base, ty_ptr));
+            call_args.push_back(V(count, ty_i32));
+            call_args.push_back(I(1, ty_i32));
+            return true;
+        }
+        ASR::ttype_t *type = ASRUtils::expr_type(target);
+        type = ASRUtils::type_get_past_allocatable_pointer(type);
+        type = ASRUtils::type_get_past_array(type);
+        if (ASR::is_a<ASR::String_t>(*type)) {
+            uint32_t desc_ptr = emit_target_ptr(target);
+            ASR::String_t *st = ASR::down_cast<ASR::String_t>(type);
+            int64_t len_const = -1;
+            uint32_t len = 0;
+            if (st->m_len && ASRUtils::extract_value(st->m_len, len_const)) {
+                len = emit_i64_const(len_const);
+            } else {
+                uint32_t desc = lr_emit_load(s, ty_str_desc,
+                    V(desc_ptr, ty_ptr));
+                uint32_t fld1 = 1;
+                len = lr_emit_extractvalue(s, ty_i64,
+                    V(desc, ty_str_desc), &fld1, 1);
+            }
+            call_args.push_back(I(0, ty_i32));
+            call_args.push_back(I(0, ty_i32));
+            call_args.push_back(V(desc_ptr, ty_ptr));
+            call_args.push_back(V(len, ty_i64));
+            return true;
+        }
+
+        uint32_t ptr = emit_target_ptr(target);
+        int32_t type_code = -1;
+        if (ASR::is_a<ASR::Integer_t>(*type)) {
+            int kind = ASRUtils::extract_kind_from_ttype_t(type);
+            if (kind == 4) type_code = 2;
+            else if (kind == 8) type_code = 3;
+            else return false;
+        } else if (ASR::is_a<ASR::Real_t>(*type)) {
+            int kind = ASRUtils::extract_kind_from_ttype_t(type);
+            if (kind == 4) type_code = 4;
+            else if (kind == 8) type_code = 5;
+            else return false;
+        } else if (ASR::is_a<ASR::Complex_t>(*type)) {
+            int kind = ASRUtils::extract_kind_from_ttype_t(type);
+            uint32_t im_ptr = 0;
+            if (kind == 4) {
+                type_code = 4;
+                lr_operand_desc_t off[1] = {I(4, ty_i64)};
+                im_ptr = lr_emit_gep(s, ty_i8, V(ptr, ty_ptr), off, 1);
+            } else if (kind == 8) {
+                type_code = 5;
+                lr_operand_desc_t off[1] = {I(8, ty_i64)};
+                im_ptr = lr_emit_gep(s, ty_i8, V(ptr, ty_ptr), off, 1);
+            } else {
+                return false;
+            }
+            call_args.push_back(I(0, ty_i32));
+            call_args.push_back(I(type_code, ty_i32));
+            call_args.push_back(V(ptr, ty_ptr));
+            call_args.push_back(I(0, ty_i32));
+            call_args.push_back(I(type_code, ty_i32));
+            call_args.push_back(V(im_ptr, ty_ptr));
+            return true;
+        } else {
+            return false;
+        }
+        call_args.push_back(I(0, ty_i32));
+        call_args.push_back(I(type_code, ty_i32));
+        call_args.push_back(V(ptr, ty_ptr));
+        return true;
+    }
+
+    bool emit_internal_formatted_read(const ASR::FileRead_t &x) {
+        if (!x.m_unit || !x.m_fmt || x.n_values == 0 ||
+                expr_is_array(x.m_unit, nullptr)) {
+            return false;
+        }
+        ASR::ttype_t *unit_type = ASRUtils::expr_type(x.m_unit);
+        unit_type = ASRUtils::type_get_past_allocatable_pointer(unit_type);
+        unit_type = ASRUtils::type_get_past_array(unit_type);
+        if (!ASR::is_a<ASR::String_t>(*unit_type)) {
+            return false;
+        }
+
+        int64_t no_args = 0;
+        for (size_t i = 0; i < x.n_values; i++) {
+            int64_t n = formatted_read_arg_count(x.m_values[i]);
+            if (n < 0) return false;
+            no_args += n;
+        }
+
+        visit_expr(*x.m_unit);
+        uint32_t unit_desc = tmp;
+        uint32_t fld0 = 0, fld1 = 1;
+        uint32_t data = lr_emit_extractvalue(s, ty_ptr,
+            V(unit_desc, ty_str_desc), &fld0, 1);
+        uint32_t len = lr_emit_extractvalue(s, ty_i64,
+            V(unit_desc, ty_str_desc), &fld1, 1);
+
+        uint32_t fmt_len = 0;
+        uint32_t fmt = emit_optional_string_ptr(x.m_fmt, fmt_len);
+        uint32_t advance_len = 0;
+        uint32_t advance = emit_optional_string_ptr(x.m_advance,
+            advance_len);
+        uint32_t pad_len = 0;
+        uint32_t pad = emit_optional_string_ptr(x.m_pad, pad_len);
+        uint32_t iostat = emit_iostat_ptr(x.m_iostat);
+        uint32_t chunk = emit_iostat_ptr(x.m_size);
+
+        std::vector<lr_operand_desc_t> call_args;
+        call_args.push_back(V(data, ty_ptr));
+        call_args.push_back(V(len, ty_i64));
+        call_args.push_back(iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr));
+        call_args.push_back(chunk ? V(chunk, ty_ptr) : LR_NULL(ty_ptr));
+        call_args.push_back(advance ? V(advance, ty_ptr) : LR_NULL(ty_ptr));
+        call_args.push_back(advance ? V(advance_len, ty_i64) : I(0, ty_i64));
+        call_args.push_back(V(fmt, ty_ptr));
+        call_args.push_back(V(fmt_len, ty_i64));
+        call_args.push_back(I(no_args, ty_i32));
+        call_args.push_back(pad ? V(pad, ty_ptr) : LR_NULL(ty_ptr));
+        call_args.push_back(pad ? V(pad_len, ty_i64) : I(0, ty_i64));
+
+        for (size_t i = 0; i < x.n_values; i++) {
+            if (!append_formatted_read_arg(call_args, x.m_values[i])) {
+                return false;
+            }
+        }
+
+        lr_type_t *params[] = {
+            ty_ptr, ty_i64, ty_ptr, ty_ptr, ty_ptr, ty_i64,
+            ty_ptr, ty_i64, ty_i32, ty_ptr, ty_i64
+        };
+        declare_func("_lfortran_string_formatted_read", ty_void,
+            params, 11, true);
+
+        uint32_t sym = lr_session_intern(s,
+            "_lfortran_string_formatted_read");
+        lr_inst_desc_t d;
+        memset(&d, 0, sizeof(d));
+        std::vector<lr_operand_desc_t> ops(1 + call_args.size());
+        ops[0] = LR_GLOBAL(sym, ty_ptr);
+        for (size_t i = 0; i < call_args.size(); i++) {
+            ops[1 + i] = call_args[i];
+        }
+        d.op = LR_OP_CALL;
+        d.type = ty_void;
+        d.operands = ops.data();
+        d.num_operands = ops.size();
+        d.call_external_abi = true;
+        d.call_vararg = true;
+        d.call_fixed_args = 11;
+        lr_session_emit(s, &d, nullptr);
+        return true;
+    }
+
     bool emit_external_formatted_file_read(const ASR::FileRead_t &x,
             uint32_t unit) {
         if (!x.m_fmt || x.n_values == 0) {
             return false;
+        }
+
+        int64_t no_args = 0;
+        for (size_t i = 0; i < x.n_values; i++) {
+            int64_t n = formatted_read_arg_count(x.m_values[i]);
+            if (n < 0) return false;
+            no_args += n;
         }
 
         uint32_t fmt_len = 0;
@@ -11746,34 +11967,14 @@ public:
         call_args.push_back(advance ? V(advance_len, ty_i64) : I(0, ty_i64));
         call_args.push_back(V(fmt, ty_ptr));
         call_args.push_back(V(fmt_len, ty_i64));
-        call_args.push_back(I((int64_t)x.n_values, ty_i32));
+        call_args.push_back(I(no_args, ty_i32));
         call_args.push_back(pad ? V(pad, ty_ptr) : LR_NULL(ty_ptr));
         call_args.push_back(pad ? V(pad_len, ty_i64) : I(0, ty_i64));
 
         for (size_t i = 0; i < x.n_values; i++) {
-            ASR::ttype_t *type = ASRUtils::expr_type(x.m_values[i]);
-            type = ASRUtils::type_get_past_allocatable_pointer(type);
-            type = ASRUtils::type_get_past_array(type);
-            if (!ASR::is_a<ASR::String_t>(*type)) {
+            if (!append_formatted_read_arg(call_args, x.m_values[i])) {
                 return false;
             }
-            uint32_t desc_ptr = emit_target_ptr(x.m_values[i]);
-            ASR::String_t *st = ASR::down_cast<ASR::String_t>(type);
-            int64_t len_const = -1;
-            uint32_t len = 0;
-            if (st->m_len && ASRUtils::extract_value(st->m_len, len_const)) {
-                len = emit_i64_const(len_const);
-            } else {
-                uint32_t desc = lr_emit_load(s, ty_str_desc,
-                    V(desc_ptr, ty_ptr));
-                uint32_t fld1 = 1;
-                len = lr_emit_extractvalue(s, ty_i64,
-                    V(desc, ty_str_desc), &fld1, 1);
-            }
-            call_args.push_back(I(0, ty_i32));
-            call_args.push_back(I(0, ty_i32));
-            call_args.push_back(V(desc_ptr, ty_ptr));
-            call_args.push_back(V(len, ty_i64));
         }
 
         lr_type_t *params[] = {
