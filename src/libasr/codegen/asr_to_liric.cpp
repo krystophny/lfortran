@@ -4895,7 +4895,37 @@ public:
         uint32_t bytes = lr_emit_mul(s, ty_i64,
             V(len, ty_i64), I(elem_size, ty_i64));
         uint32_t dst_data = emit_malloc_bytes(bytes);
-        emit_memcpy_dynamic(dst_data, src_data, bytes);
+        if (ASR::is_a<ASR::List_t>(*list_t->m_type)) {
+            ASR::List_t *elem_list = ASR::down_cast<ASR::List_t>(
+                list_t->m_type);
+            lr_type_t *elem_lr = get_type(list_t->m_type);
+            uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+            lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+            uint32_t head_bb = lr_session_block(s);
+            uint32_t body_bb = lr_session_block(s);
+            uint32_t done_bb = lr_session_block(s);
+            lr_emit_br(s, head_bb);
+            lr_error_t err;
+            lr_session_set_block(s, head_bb, &err);
+            uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+            uint32_t cond = lr_emit_icmp(s, LR_CMP_SLT, V(idx, ty_i64),
+                V(len, ty_i64));
+            lr_emit_condbr(s, V(cond, ty_i1), body_bb, done_bb);
+            lr_session_set_block(s, body_bb, &err);
+            uint32_t src_elem = list_elem_ptr(src_data, idx, elem_size);
+            uint32_t dst_elem = list_elem_ptr(dst_data, idx, elem_size);
+            uint32_t elem_desc = lr_emit_load(s, elem_lr,
+                V(src_elem, ty_ptr));
+            uint32_t elem_copy = clone_list_desc(elem_list, elem_desc);
+            lr_emit_store(s, V(elem_copy, elem_lr), V(dst_elem, ty_ptr));
+            uint32_t next = lr_emit_add(s, ty_i64, V(idx, ty_i64),
+                I(1, ty_i64));
+            lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+            lr_emit_br(s, head_bb);
+            lr_session_set_block(s, done_bb, &err);
+        } else {
+            emit_memcpy_dynamic(dst_data, src_data, bytes);
+        }
         uint32_t d0 = lr_emit_insertvalue(s, ty_list_desc,
             LR_UNDEF(ty_list_desc), V(dst_data, ty_ptr), &fld0, 1);
         uint32_t d1 = lr_emit_insertvalue(s, ty_list_desc,
@@ -5076,6 +5106,11 @@ public:
         list_store_len(list_ptr, new_len);
         lr_emit_br(s, done_bb);
         lr_session_set_block(s, done_bb, &err);
+    }
+
+    void visit_ListClear(const ASR::ListClear_t &x) {
+        uint32_t list_ptr = emit_list_ptr(x.m_a);
+        list_store_len(list_ptr, emit_i64_const(0));
     }
 
     void visit_ListItem(const ASR::ListItem_t &x) {
