@@ -6607,37 +6607,6 @@ LFORTRAN_API int32_t _lfortran_get_round_mode(int32_t unit_num) {
 
 // // Local decimal mode handled via explicit arguments now. (removed)
 
-LFORTRAN_API void _lfortran_inquire_unit_blank(int32_t unit_num,
-    char *blank, int64_t blank_len)
-{
-    if (blank == NULL) {
-        return;
-    }
-    bool unit_file_bin = false;
-    int access_id = -1;
-    bool read_access = false;
-    bool write_access = false;
-    int delim_mode = 0;
-    bool blank_zero = false;
-    int32_t unit_recl = 0;
-    int sign_mode = 0;
-    int decimal_mode = 0;
-    int encoding_mode = 0;
-    int round_mode_val = 0;
-    int pad_mode = 1;
-    FILE *fp = get_file_pointer_from_unit(unit_num, &unit_file_bin,
-        &access_id, &read_access, &write_access, &delim_mode,
-        &blank_zero, &unit_recl, &sign_mode, &decimal_mode,
-        &encoding_mode, &round_mode_val, &pad_mode);
-    if (unit_file_bin || fp == NULL) {
-        _lfortran_copy_str_and_pad(blank, blank_len, "UNDEFINED", 9);
-    } else if (blank_zero) {
-        _lfortran_copy_str_and_pad(blank, blank_len, "ZERO", 4);
-    } else {
-        _lfortran_copy_str_and_pad(blank, blank_len, "NULL", 4);
-    }
-}
-
 LFORTRAN_API void _lfortran_inquire(const fchar* f_name_data, int64_t f_name_len, bool *exists, int32_t unit_num,
                                     bool *opened, int32_t *size, int32_t *pos,
                                     char *write, int64_t write_len,
