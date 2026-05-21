@@ -11941,7 +11941,10 @@ public:
         store_zero(x.m_iostat, ty_i32);
         store_zero(x.m_opened, ty_i1);
         store_zero(x.m_number, ty_i32);
-        if (!x.m_file || !x.m_exist) {
+        if (x.m_size) {
+            store_zero(x.m_size, value_type_for_expr(x.m_size));
+        }
+        if (!x.m_file) {
             store_zero(x.m_exist, ty_i1);
             return;
         }
@@ -11985,17 +11988,35 @@ public:
         uint32_t exists = lr_emit_icmp(s, LR_CMP_NE,
             V(fp, ty_ptr), LR_NULL(ty_ptr));
 
-        bool was_target = is_target;
-        is_target = true;
-        visit_expr(*x.m_exist);
-        is_target = was_target;
-        lr_emit_store(s, V(exists, ty_i1), V(tmp, ty_ptr));
+        if (x.m_exist) {
+            bool was_target = is_target;
+            is_target = true;
+            visit_expr(*x.m_exist);
+            is_target = was_target;
+            lr_emit_store(s, V(exists, ty_i1), V(tmp, ty_ptr));
+        }
 
         uint32_t close_bb = lr_session_block(s);
         uint32_t done_bb = lr_session_block(s);
         lr_emit_condbr(s, V(exists, ty_i1), close_bb, done_bb);
         lr_error_t err;
         lr_session_set_block(s, close_bb, &err);
+        if (x.m_size) {
+            lr_type_t *fseek_params[] = {ty_ptr, ty_i64, ty_i32};
+            declare_func("fseek", ty_i32, fseek_params, 3, false);
+            lr_operand_desc_t fseek_args[] = {
+                V(fp, ty_ptr), I(0, ty_i64), I(2, ty_i32)
+            };
+            (void)emit_call("fseek", ty_i32, fseek_args, 3);
+            lr_type_t *ftell_params[] = {ty_ptr};
+            declare_func("ftell", ty_i64, ftell_params, 1, false);
+            lr_operand_desc_t ftell_args[] = {V(fp, ty_ptr)};
+            uint32_t nbytes = emit_call("ftell", ty_i64, ftell_args, 1);
+            uint32_t size_ptr = emit_target_ptr(x.m_size);
+            lr_type_t *size_t = value_type_for_expr(x.m_size);
+            uint32_t size_value = cast_int_value(nbytes, ty_i64, size_t);
+            lr_emit_store(s, V(size_value, size_t), V(size_ptr, ty_ptr));
+        }
         lr_type_t *fclose_params[] = {ty_ptr};
         declare_func("fclose", ty_i32, fclose_params, 1, false);
         lr_operand_desc_t fclose_args[] = {V(fp, ty_ptr)};
