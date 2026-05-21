@@ -327,6 +327,8 @@ LFORTRAN_API void _lfortran_inquire(
     char *position, int64_t position_len,
     char *delim, int64_t delim_len
 );
+LFORTRAN_API void _lfortran_inquire_unit_blank(int32_t unit_num,
+    char *blank, int64_t blank_len);
 LFORTRAN_API void _lfortran_seek_record(int32_t unit_num, int32_t rec, int32_t *iostat);
 // Formatted READ: pad/pad_len specify PAD for this statement.
 // If pad is NULL/len==0, the unit's PAD mode is used.
