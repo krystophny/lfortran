@@ -5084,7 +5084,7 @@ public:
         int64_t elem_size = element_byte_size(list_t->m_type);
         lr_type_t *elem_lr = get_type(list_t->m_type);
         uint32_t found = emit_linear_find(data, len, elem_size, elem_lr,
-            needle);
+            needle, list_t->m_type);
         uint32_t exists = lr_emit_icmp(s, LR_CMP_NE, V(found, ty_i64),
             I(-1, ty_i64));
         uint32_t remove_bb = lr_session_block(s);
@@ -5302,6 +5302,83 @@ public:
         return lr_emit_icmp(s, LR_CMP_EQ, V(lhs, type), V(rhs, type));
     }
 
+    uint32_t list_desc_data(uint32_t desc) {
+        uint32_t fld = 0;
+        return lr_emit_extractvalue(s, ty_ptr, V(desc, ty_list_desc),
+            &fld, 1);
+    }
+
+    uint32_t list_desc_len(uint32_t desc) {
+        uint32_t fld = 1;
+        return lr_emit_extractvalue(s, ty_i64, V(desc, ty_list_desc),
+            &fld, 1);
+    }
+
+    uint32_t emit_value_equal(uint32_t lhs, uint32_t rhs, ASR::ttype_t *type) {
+        if (ASR::is_a<ASR::Tuple_t>(*type)) {
+            ASR::Tuple_t *tuple_t = ASR::down_cast<ASR::Tuple_t>(type);
+            lr_type_t *tuple_lr = get_type(type);
+            uint32_t result = lr_emit_icmp(s, LR_CMP_EQ, I(1, ty_i64),
+                I(1, ty_i64));
+            for (size_t i = 0; i < tuple_t->n_type; i++) {
+                uint32_t field = (uint32_t)i;
+                lr_type_t *field_lr = get_type(tuple_t->m_type[i]);
+                uint32_t left = lr_emit_extractvalue(s, field_lr,
+                    V(lhs, tuple_lr), &field, 1);
+                uint32_t right = lr_emit_extractvalue(s, field_lr,
+                    V(rhs, tuple_lr), &field, 1);
+                uint32_t eq = emit_value_equal(left, right,
+                    tuple_t->m_type[i]);
+                result = lr_emit_and(s, ty_i1, V(result, ty_i1),
+                    V(eq, ty_i1));
+            }
+            return result;
+        }
+        if (ASR::is_a<ASR::List_t>(*type)) {
+            ASR::List_t *list_t = ASR::down_cast<ASR::List_t>(type);
+            uint32_t lhs_len = list_desc_len(lhs);
+            uint32_t rhs_len = list_desc_len(rhs);
+            uint32_t result_ptr = lr_emit_alloca(s, ty_i1);
+            uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+            uint32_t same_len = lr_emit_icmp(s, LR_CMP_EQ,
+                V(lhs_len, ty_i64), V(rhs_len, ty_i64));
+            lr_emit_store(s, V(same_len, ty_i1), V(result_ptr, ty_ptr));
+            lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+            uint32_t head_bb = lr_session_block(s);
+            uint32_t body_bb = lr_session_block(s);
+            uint32_t done_bb = lr_session_block(s);
+            lr_emit_br(s, head_bb);
+            lr_error_t err;
+            lr_session_set_block(s, head_bb, &err);
+            uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+            uint32_t still_equal = lr_emit_load(s, ty_i1,
+                V(result_ptr, ty_ptr));
+            uint32_t more = lr_emit_icmp(s, LR_CMP_SLT, V(idx, ty_i64),
+                V(lhs_len, ty_i64));
+            uint32_t keep_going = lr_emit_and(s, ty_i1,
+                V(still_equal, ty_i1), V(more, ty_i1));
+            lr_emit_condbr(s, V(keep_going, ty_i1), body_bb, done_bb);
+            lr_session_set_block(s, body_bb, &err);
+            int64_t elem_size = element_byte_size(list_t->m_type);
+            lr_type_t *elem_lr = get_type(list_t->m_type);
+            uint32_t left = lr_emit_load(s, elem_lr,
+                V(list_elem_ptr(list_desc_data(lhs), idx, elem_size),
+                    ty_ptr));
+            uint32_t right = lr_emit_load(s, elem_lr,
+                V(list_elem_ptr(list_desc_data(rhs), idx, elem_size),
+                    ty_ptr));
+            uint32_t eq = emit_value_equal(left, right, list_t->m_type);
+            lr_emit_store(s, V(eq, ty_i1), V(result_ptr, ty_ptr));
+            uint32_t next = lr_emit_add(s, ty_i64, V(idx, ty_i64),
+                I(1, ty_i64));
+            lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+            lr_emit_br(s, head_bb);
+            lr_session_set_block(s, done_bb, &err);
+            return lr_emit_load(s, ty_i1, V(result_ptr, ty_ptr));
+        }
+        return emit_scalar_equal(lhs, rhs, get_type(type));
+    }
+
     void emit_memmove_dynamic(uint32_t dst, uint32_t src, uint32_t nbytes) {
         lr_type_t *params[] = {ty_ptr, ty_ptr, ty_i64};
         declare_func("memmove", ty_ptr, params, 3, false);
@@ -5312,7 +5389,8 @@ public:
     }
 
     uint32_t emit_linear_find(uint32_t data, uint32_t len,
-            int64_t elem_size, lr_type_t *elem_lr, uint32_t needle) {
+            int64_t elem_size, lr_type_t *elem_lr, uint32_t needle,
+            ASR::ttype_t *elem_t=nullptr) {
         uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
         uint32_t found_ptr = lr_emit_alloca(s, ty_i64);
         lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
@@ -5330,7 +5408,9 @@ public:
         lr_session_set_block(s, body_bb, &err);
         uint32_t elem = lr_emit_load(s, elem_lr,
             V(list_elem_ptr(data, idx, elem_size), ty_ptr));
-        uint32_t eq = emit_scalar_equal(elem, needle, elem_lr);
+        uint32_t eq = elem_t
+            ? emit_value_equal(elem, needle, elem_t)
+            : emit_scalar_equal(elem, needle, elem_lr);
         uint32_t found = lr_emit_load(s, ty_i64, V(found_ptr, ty_ptr));
         uint32_t unset = lr_emit_icmp(s, LR_CMP_EQ, V(found, ty_i64),
             I(-1, ty_i64));
@@ -5363,7 +5443,7 @@ public:
         int64_t elem_size = element_byte_size(elem_t);
         lr_type_t *elem_lr = get_type(elem_t);
         uint32_t found = emit_linear_find(data, len, elem_size, elem_lr,
-            value);
+            value, elem_t);
         uint32_t exists = lr_emit_icmp(s, LR_CMP_NE, V(found, ty_i64),
             I(-1, ty_i64));
         uint32_t append_bb = lr_session_block(s);
@@ -5543,7 +5623,8 @@ public:
         int64_t value_size = element_byte_size(dict_t->m_value_type);
         lr_type_t *key_lr = get_type(dict_t->m_key_type);
         lr_type_t *value_lr = get_type(dict_t->m_value_type);
-        uint32_t found = emit_linear_find(keys, len, key_size, key_lr, key);
+        uint32_t found = emit_linear_find(keys, len, key_size, key_lr, key,
+            dict_t->m_key_type);
         uint32_t exists = lr_emit_icmp(s, LR_CMP_NE, V(found, ty_i64),
             I(-1, ty_i64));
         uint32_t update_bb = lr_session_block(s);
@@ -5609,10 +5690,45 @@ public:
         uint32_t key = tmp;
         uint32_t found = emit_linear_find(dict_keys(dict_ptr),
             dict_len(dict_ptr), element_byte_size(dict_t->m_key_type),
-            get_type(dict_t->m_key_type), key);
+            get_type(dict_t->m_key_type), key, dict_t->m_key_type);
         uint32_t value_ptr = list_elem_ptr(dict_values(dict_ptr), found,
             element_byte_size(dict_t->m_value_type));
         tmp = lr_emit_load(s, get_type(x.m_type), V(value_ptr, ty_ptr));
+    }
+
+    void visit_DictPop(const ASR::DictPop_t &x) {
+        if (x.m_value) { visit_expr(*x.m_value); return; }
+        ASR::Dict_t *dict_t = ASR::down_cast<ASR::Dict_t>(
+            ASRUtils::expr_type(x.m_a));
+        uint32_t dict_ptr = emit_dict_ptr(x.m_a);
+        visit_expr(*x.m_key);
+        uint32_t key = tmp;
+        uint32_t keys = dict_keys(dict_ptr);
+        uint32_t values = dict_values(dict_ptr);
+        uint32_t len = dict_len(dict_ptr);
+        int64_t key_size = element_byte_size(dict_t->m_key_type);
+        int64_t value_size = element_byte_size(dict_t->m_value_type);
+        uint32_t found = emit_linear_find(keys, len, key_size,
+            get_type(dict_t->m_key_type), key, dict_t->m_key_type);
+        uint32_t value_ptr = list_elem_ptr(values, found, value_size);
+        uint32_t result = lr_emit_load(s, get_type(x.m_type),
+            V(value_ptr, ty_ptr));
+        uint32_t next = lr_emit_add(s, ty_i64, V(found, ty_i64),
+            I(1, ty_i64));
+        uint32_t new_len = lr_emit_sub(s, ty_i64, V(len, ty_i64),
+            I(1, ty_i64));
+        uint32_t move_count = lr_emit_sub(s, ty_i64, V(len, ty_i64),
+            V(next, ty_i64));
+        uint32_t key_bytes = lr_emit_mul(s, ty_i64,
+            V(move_count, ty_i64), I(key_size, ty_i64));
+        uint32_t value_bytes = lr_emit_mul(s, ty_i64,
+            V(move_count, ty_i64), I(value_size, ty_i64));
+        emit_memmove_dynamic(list_elem_ptr(keys, found, key_size),
+            list_elem_ptr(keys, next, key_size), key_bytes);
+        emit_memmove_dynamic(list_elem_ptr(values, found, value_size),
+            list_elem_ptr(values, next, value_size), value_bytes);
+        dict_store_len(dict_ptr, new_len);
+        tmp = result;
     }
 
     uint64_t tuple_field_offset(ASR::Tuple_t *tuple_t, size_t index) {
@@ -5661,6 +5777,62 @@ public:
         uint32_t field = (uint32_t)pos;
         tmp = lr_emit_extractvalue(s, get_type(x.m_type),
             V(tuple_value, get_type(ASRUtils::expr_type(x.m_a))), &field, 1);
+    }
+
+    void visit_TupleCompare(const ASR::TupleCompare_t &x) {
+        if (x.m_value) { visit_expr(*x.m_value); return; }
+        visit_expr(*x.m_left);
+        uint32_t left = tmp;
+        visit_expr(*x.m_right);
+        uint32_t right = tmp;
+        uint32_t eq = emit_value_equal(left, right,
+            ASRUtils::expr_type(x.m_left));
+        if (x.m_op == ASR::cmpopType::Eq) {
+            tmp = eq;
+        } else if (x.m_op == ASR::cmpopType::NotEq) {
+            tmp = lr_emit_xor(s, ty_i1, V(eq, ty_i1), I(1, ty_i1));
+        } else {
+            throw CodeGenError("liric: tuple ordering is not implemented");
+        }
+    }
+
+    void visit_TupleConcat(const ASR::TupleConcat_t &x) {
+        if (x.m_value) { visit_expr(*x.m_value); return; }
+        ASR::Tuple_t *left_t = ASR::down_cast<ASR::Tuple_t>(
+            ASRUtils::expr_type(x.m_left));
+        ASR::Tuple_t *right_t = ASR::down_cast<ASR::Tuple_t>(
+            ASRUtils::expr_type(x.m_right));
+        ASR::Tuple_t *result_t = ASR::down_cast<ASR::Tuple_t>(x.m_type);
+        lr_type_t *result_lr = get_type(x.m_type);
+        visit_expr(*x.m_left);
+        uint32_t left = tmp;
+        visit_expr(*x.m_right);
+        uint32_t right = tmp;
+        uint32_t value = 0;
+        size_t out = 0;
+        for (size_t i = 0; i < left_t->n_type; i++, out++) {
+            uint32_t src_field = (uint32_t)i;
+            uint32_t dst_field = (uint32_t)out;
+            uint32_t field = lr_emit_extractvalue(s,
+                get_type(left_t->m_type[i]), V(left, get_type(
+                    ASRUtils::expr_type(x.m_left))), &src_field, 1);
+            lr_operand_desc_t agg = out == 0
+                ? LR_UNDEF(result_lr) : V(value, result_lr);
+            value = lr_emit_insertvalue(s, result_lr, agg,
+                V(field, get_type(result_t->m_type[out])), &dst_field, 1);
+        }
+        for (size_t i = 0; i < right_t->n_type; i++, out++) {
+            uint32_t src_field = (uint32_t)i;
+            uint32_t dst_field = (uint32_t)out;
+            uint32_t field = lr_emit_extractvalue(s,
+                get_type(right_t->m_type[i]), V(right, get_type(
+                    ASRUtils::expr_type(x.m_right))), &src_field, 1);
+            lr_operand_desc_t agg = out == 0
+                ? LR_UNDEF(result_lr) : V(value, result_lr);
+            value = lr_emit_insertvalue(s, result_lr, agg,
+                V(field, get_type(result_t->m_type[out])), &dst_field, 1);
+        }
+        tmp = value;
     }
 
     // --- Allocate (string allocatables only) ---
