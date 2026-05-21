@@ -11555,6 +11555,11 @@ public:
             if (kind == 4) name = "_lfortran_read_array_float";
             else if (kind == 8) name = "_lfortran_read_array_double";
             else return false;
+        } else if (ASR::is_a<ASR::Complex_t>(*elem_type)) {
+            int kind = ASRUtils::extract_kind_from_ttype_t(elem_type);
+            if (kind == 4) name = "_lfortran_read_array_complex_float";
+            else if (kind == 8) name = "_lfortran_read_array_complex_double";
+            else return false;
         } else {
             return false;
         }
