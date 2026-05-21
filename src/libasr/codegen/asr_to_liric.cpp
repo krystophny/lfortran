@@ -9532,6 +9532,74 @@ public:
         lr_session_emit(s, &d, nullptr);
     }
 
+    struct RawWriteChunk {
+        uint32_t len;
+        uint32_t ptr;
+    };
+
+    RawWriteChunk raw_write_chunk_for_value(ASR::expr_t *val) {
+        ASR::ttype_t *vt = ASRUtils::expr_type(val);
+        vt = ASRUtils::type_get_past_allocatable_pointer(vt);
+        if (ASR::is_a<ASR::Array_t>(*vt)) {
+            ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(vt);
+            ArrayLinearView view = emit_array_linear_view(val, array_t);
+            uint32_t bytes = lr_emit_mul(s, ty_i64,
+                V(view.total, ty_i64), V(view.elem_len, ty_i64));
+            return {lr_emit_trunc(s, ty_i32, V(bytes, ty_i64)), view.base};
+        }
+        vt = ASRUtils::type_get_past_array(vt);
+        if (ASR::is_a<ASR::String_t>(*vt)) {
+            visit_expr(*val);
+            uint32_t desc = tmp;
+            uint32_t fld0 = 0, fld1 = 1;
+            uint32_t data = lr_emit_extractvalue(s, ty_ptr,
+                V(desc, ty_str_desc), &fld0, 1);
+            uint32_t len = lr_emit_extractvalue(s, ty_i64,
+                V(desc, ty_str_desc), &fld1, 1);
+            return {lr_emit_trunc(s, ty_i32, V(len, ty_i64)), data};
+        }
+        visit_expr(*val);
+        lr_type_t *lr_t = value_type_for_expr(val);
+        uint32_t slot = emit_temp_slot(lr_t);
+        lr_emit_store(s, V(tmp, lr_t), V(slot, ty_ptr));
+        return {
+            lr_emit_add(s, ty_i32,
+                I((int64_t)storage_size_or_default(vt, lr_t), ty_i32),
+                I(0, ty_i32)),
+            slot
+        };
+    }
+
+    void file_write_runtime_raw(uint32_t unit, uint32_t iostat,
+            const std::vector<RawWriteChunk> &chunks) {
+        uint32_t fmt_sym = declare_global_cstring("", "_lr_fwfmt_raw");
+        lr_type_t *params[] = {ty_i32, ty_ptr, ty_ptr, ty_i64};
+        declare_func("_lfortran_file_write", ty_void, params, 4, true);
+        uint32_t sym = lr_session_intern(s, "_lfortran_file_write");
+        lr_inst_desc_t d;
+        memset(&d, 0, sizeof(d));
+        std::vector<lr_operand_desc_t> ops;
+        ops.reserve(6 + chunks.size() * 2);
+        ops.push_back(LR_GLOBAL(sym, ty_ptr));
+        ops.push_back(V(unit, ty_i32));
+        ops.push_back(iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr));
+        ops.push_back(LR_GLOBAL(fmt_sym, ty_ptr));
+        ops.push_back(I(0, ty_i64));
+        for (const RawWriteChunk &chunk : chunks) {
+            ops.push_back(V(chunk.len, ty_i32));
+            ops.push_back(V(chunk.ptr, ty_ptr));
+        }
+        ops.push_back(I(-1, ty_i32));
+        d.op = LR_OP_CALL;
+        d.type = ty_void;
+        d.operands = ops.data();
+        d.num_operands = ops.size();
+        d.call_external_abi = true;
+        d.call_vararg = true;
+        d.call_fixed_args = 4;
+        lr_session_emit(s, &d, nullptr);
+    }
+
     std::pair<uint32_t, uint32_t> file_write_end_data_len(
             ASR::expr_t *end_expr) {
         if (end_expr) {
@@ -10708,6 +10776,15 @@ public:
         ASR::expr_t **values = x.m_values;
         size_t n_values = x.n_values;
         bool formatted_value_done = false;
+        if (external_integer_write && !x.m_is_formatted) {
+            std::vector<RawWriteChunk> chunks;
+            chunks.reserve(n_values);
+            for (size_t i = 0; i < n_values; i++) {
+                chunks.push_back(raw_write_chunk_for_value(values[i]));
+            }
+            file_write_runtime_raw(external_unit, external_iostat, chunks);
+            return;
+        }
         if (n_values == 1 && ASR::is_a<ASR::StringFormat_t>(*values[0])) {
             ASR::StringFormat_t *sf =
                 down_cast<ASR::StringFormat_t>(values[0]);
