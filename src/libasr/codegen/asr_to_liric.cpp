@@ -10912,6 +10912,18 @@ found_offset:
         // it appears outside Print context, which we don't support yet.
         throw CodeGenError("liric: StringFormat outside Print not supported");
     }
+
+    // --- ImpliedDoLoop (clean stub to avoid base-visitor ICE) ---
+    //
+    // The base ASR visitor throws an LCompilersException ("not implemented")
+    // for ImpliedDoLoop, which surfaces as an Internal Compiler Error.  We
+    // do not yet lower implied-do constructs in FileRead/FileWrite/Print
+    // contexts, so throw a clean CodeGenError instead so make sees the
+    // failure as a normal codegen-not-supported case.
+    void visit_ImpliedDoLoop(const ASR::ImpliedDoLoop_t & /*x*/) {
+        throw CodeGenError(
+            "liric: implied-do loop value not yet supported");
+    }
 };
 
 } // anonymous namespace
