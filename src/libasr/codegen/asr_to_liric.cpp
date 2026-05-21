@@ -319,6 +319,16 @@ public:
             }
             case ASR::ttypeType::StructType:
                 return get_struct_type(down_cast<ASR::StructType_t>(t));
+            case ASR::ttypeType::UnionType: {
+                ASR::UnionType_t *ut = down_cast<ASR::UnionType_t>(t);
+                uint64_t nbytes = 1;
+                for (size_t i = 0; i < ut->n_data_member_types; i++) {
+                    nbytes = std::max(nbytes, storage_size_or_default(
+                        ut->m_data_member_types[i],
+                        get_type(ut->m_data_member_types[i])));
+                }
+                return lr_type_array_s(s, ty_i8, nbytes);
+            }
             case ASR::ttypeType::Dict:
                 return ty_dict_desc;
             case ASR::ttypeType::Pointer:
@@ -4137,7 +4147,8 @@ public:
     bool expr_is_storage_reference(ASR::expr_t *expr) {
         if (ASR::is_a<ASR::Var_t>(*expr) ||
                 ASR::is_a<ASR::ArrayItem_t>(*expr) ||
-                ASR::is_a<ASR::StructInstanceMember_t>(*expr)) {
+                ASR::is_a<ASR::StructInstanceMember_t>(*expr) ||
+                ASR::is_a<ASR::UnionInstanceMember_t>(*expr)) {
             return true;
         }
         if (ASR::is_a<ASR::Cast_t>(*expr)) {
@@ -8240,6 +8251,55 @@ public:
             case ASR::cast_kindType::UnsignedIntegerToCPtr:
                 tmp = lr_emit_inttoptr(s, dst_t, V(val, src_t));
                 break;
+            case ASR::cast_kindType::IntegerToString:
+            case ASR::cast_kindType::RealToString: {
+                ASR::ttype_t *arg_t = ASRUtils::expr_type(x.m_arg);
+                int kind = ASRUtils::extract_kind_from_ttype_t(arg_t);
+                if (x.m_kind == ASR::cast_kindType::RealToString) {
+                    kind = normalized_real_kind(arg_t);
+                }
+                std::string func = x.m_kind ==
+                    ASR::cast_kindType::IntegerToString
+                    ? "_lfortran_int_to_str" + std::to_string(kind) + "_alloc"
+                    : "_lfortran_float_to_str" + std::to_string(kind) + "_alloc";
+                lr_type_t *params[] = {ty_ptr, src_t};
+                declare_func(func.c_str(), ty_ptr, params, 2, false);
+                uint32_t allocator = emit_call(
+                    "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+                lr_operand_desc_t args[] = {V(allocator, ty_ptr),
+                    V(val, src_t)};
+                uint32_t data = emit_call(func.c_str(), ty_ptr, args, 2);
+                lr_type_t *len_params[] = {ty_ptr};
+                declare_func("_lfortran_str_len", ty_i64, len_params, 1,
+                    false);
+                lr_operand_desc_t len_args[] = {V(data, ty_ptr)};
+                uint32_t len = emit_call("_lfortran_str_len", ty_i64,
+                    len_args, 1);
+                uint32_t fld0 = 0, fld1 = 1;
+                uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
+                    LR_UNDEF(ty_str_desc), V(data, ty_ptr), &fld0, 1);
+                tmp = lr_emit_insertvalue(s, ty_str_desc,
+                    V(d0, ty_str_desc), V(len, ty_i64), &fld1, 1);
+                break;
+            }
+            case ASR::cast_kindType::LogicalToString: {
+                uint32_t false_sym = declare_global_cstring("False",
+                    "_lr_bool_false");
+                uint32_t true_sym = declare_global_cstring("True",
+                    "_lr_bool_true");
+                uint32_t is_true = lr_emit_icmp(s, LR_CMP_NE,
+                    V(val, src_t), I(0, src_t));
+                uint32_t data = lr_emit_select(s, ty_ptr, V(is_true, ty_i1),
+                    LR_GLOBAL(true_sym, ty_ptr), LR_GLOBAL(false_sym, ty_ptr));
+                uint32_t len = lr_emit_select(s, ty_i64, V(is_true, ty_i1),
+                    I(4, ty_i64), I(5, ty_i64));
+                uint32_t fld0 = 0, fld1 = 1;
+                uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
+                    LR_UNDEF(ty_str_desc), V(data, ty_ptr), &fld0, 1);
+                tmp = lr_emit_insertvalue(s, ty_str_desc,
+                    V(d0, ty_str_desc), V(len, ty_i64), &fld1, 1);
+                break;
+            }
             default:
                 throw CodeGenError(
                     std::string("liric: unsupported cast kind ")
@@ -11310,6 +11370,20 @@ found_offset:
         } else {
             lr_type_t *mt = get_type(x.m_type);
             tmp = lr_emit_load(s, mt, V(mem_ptr, ty_ptr));
+        }
+    }
+
+    void visit_UnionInstanceMember(const ASR::UnionInstanceMember_t &x) {
+        LIRIC_PASSTHROUGH(x)
+        bool was_target = is_target;
+        is_target = true;
+        visit_expr(*x.m_v);
+        is_target = was_target;
+        uint32_t base = tmp;
+        if (is_target) {
+            tmp = base;
+        } else {
+            tmp = lr_emit_load(s, get_type(x.m_type), V(base, ty_ptr));
         }
     }
 
