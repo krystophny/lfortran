@@ -7467,11 +7467,29 @@ public:
         }
     }
 
+    bool is_tbp_call_symbol(ASR::symbol_t *call_sym) {
+        if (!call_sym) return false;
+        if (ASR::is_a<ASR::StructMethodDeclaration_t>(*call_sym)) {
+            return true;
+        }
+        ASR::symbol_t *raw = ASRUtils::symbol_get_past_external(call_sym);
+        return raw && ASR::is_a<ASR::StructMethodDeclaration_t>(*raw);
+    }
+
     bool emit_dynamic_subroutine_dispatch(ASR::Function_t *fn,
+            ASR::symbol_t *call_sym,
             const std::string &method_name,
             const std::vector<lr_operand_desc_t> &args) {
         if (!function_is_interface(fn) || args.empty() ||
                 method_name.empty()) {
+            return false;
+        }
+        // Interface functions can come from either a type-bound procedure
+        // binding (real vtable dispatch) or a plain `interface ... end
+        // interface` block declaring an external function.  Only the
+        // former wants method-pointer load + indirect call; the latter
+        // must fall through to a direct global call.
+        if (!is_tbp_call_symbol(call_sym)) {
             return false;
         }
         uint32_t fptr = load_object_method_ptr(args[0].vreg, method_name);
@@ -8300,7 +8318,7 @@ public:
             return;
         }
 
-        if (fn && emit_dynamic_subroutine_dispatch(fn,
+        if (fn && emit_dynamic_subroutine_dispatch(fn, x.m_name,
                 dynamic_method_name(x.m_name, fn), args)) {
             return;
         }
@@ -8539,6 +8557,7 @@ public:
                 sret_args.insert(sret_args.end(), args.begin(), args.end());
                 lr_emit_call_void(s, V(interface_fptr, ty_ptr),
                     sret_args.data(), sret_args.size());
+                if (is_target) { tmp = ret_slot; return; }
                 tmp = lr_emit_load(s, ret, V(ret_slot, ty_ptr));
                 return;
             }
@@ -8556,7 +8575,8 @@ public:
                                args.data(), args.size());
             return;
         }
-        if (fn && function_is_interface(fn) && !args.empty()) {
+        if (fn && function_is_interface(fn) && !args.empty() &&
+                is_tbp_call_symbol(x.m_name)) {
             uint32_t fptr = load_object_method_ptr(args[0].vreg,
                 dynamic_method_name(x.m_name, fn));
             tmp = lr_emit_call(s, ret, V(fptr, ty_ptr),
@@ -8582,6 +8602,7 @@ public:
             sret_args.insert(sret_args.end(), args.begin(), args.end());
             lr_emit_call_void(s, LR_GLOBAL(sym, ty_ptr),
                 sret_args.data(), sret_args.size());
+            if (is_target) { tmp = ret_slot; return; }
             tmp = lr_emit_load(s, ret, V(ret_slot, ty_ptr));
             return;
         }
