@@ -178,6 +178,8 @@ public:
     std::unordered_map<std::string, std::vector<uint32_t>> named_cycle_blocks;
     std::vector<uint32_t> loop_head_stack;
     std::vector<uint32_t> loop_end_stack;
+    uint32_t scratch_io_data_sym;
+    uint32_t scratch_io_len_sym;
 
     // Cached types
     lr_type_t *ty_void, *ty_i1, *ty_i8, *ty_i16, *ty_i32, *ty_i64;
@@ -189,7 +191,8 @@ public:
     ASRToLiricVisitor(lr_session_t *session, Allocator &al_,
                       CompilerOptions &co_, diag::Diagnostics &d)
         : s(session), tmp(0), is_target(false), proc_return(0),
-          al(al_), co(co_), diag(d)
+          al(al_), co(co_), diag(d), scratch_io_data_sym(0),
+          scratch_io_len_sym(0)
     {
         ty_void = lr_type_void_s(s);
         ty_i1   = lr_type_i1_s(s);
@@ -1075,6 +1078,12 @@ public:
             if (!ASR::is_a<ASR::Variable_t>(*member_sym)) continue;
             ASR::Variable_t *member =
                 ASR::down_cast<ASR::Variable_t>(member_sym);
+            ASR::Array_t *member_array = nullptr;
+            if (is_descriptor_array_type(member->m_type, &member_array)) {
+                nbytes += DESC_HEADER_BYTES + DESC_DIM_BYTES *
+                    (member_array->n_dims > 0 ? member_array->n_dims : 1);
+                continue;
+            }
             ASR::Struct_t *member_struct =
                 struct_symbol_from_type_decl(member->m_type_declaration);
             if (member_struct) {
@@ -1152,6 +1161,10 @@ public:
             v->m_type_declaration);
         if (st) {
             return struct_storage_size(st);
+        }
+        core = ASRUtils::type_get_past_array(core);
+        if (ASR::is_a<ASR::StructType_t>(*core)) {
+            return struct_type_storage_size_from_signature(core);
         }
         return storage_size_or_default(v->m_type, get_type(v->m_type));
     }
@@ -4668,6 +4681,12 @@ public:
                 ASRUtils::type_get_past_allocatable_pointer(member_type);
             if (ASR::is_a<ASR::Array_t>(*core)) {
                 ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(core);
+                if (array_t->m_physical_type ==
+                        ASR::array_physical_typeType::DescriptorArray) {
+                    nbytes += DESC_HEADER_BYTES + DESC_DIM_BYTES *
+                        (array_t->n_dims > 0 ? array_t->n_dims : 1);
+                    continue;
+                }
                 int64_t total = 1;
                 for (size_t d = 0; d < array_t->n_dims; d++) {
                     int64_t extent = 0;
@@ -4985,6 +5004,12 @@ public:
                 V(data_ptr, ty_ptr), off, 1);
 
             ASR::ttype_t *member_type = member->m_type;
+            if (member->m_value && !ASRUtils::is_allocatable(member_type) &&
+                    !ASRUtils::is_pointer(member_type)) {
+                visit_expr(*member->m_value);
+                lr_type_t *value_type = value_type_for_expr(member->m_value);
+                lr_emit_store(s, V(tmp, value_type), V(field_ptr, ty_ptr));
+            }
             ASR::ttype_t *core =
                 ASRUtils::type_get_past_allocatable_pointer(member_type);
             if (ASR::is_a<ASR::Array_t>(*core)) {
@@ -5013,6 +5038,9 @@ public:
         std::vector<ASR::Variable_t *> members;
         collect_struct_members_parent_first(st, members);
         for (ASR::Variable_t *member : members) {
+            if (member->m_value) {
+                return true;
+            }
             ASR::ttype_t *member_type = member->m_type;
             if (ASRUtils::is_allocatable(member_type) ||
                     ASRUtils::is_pointer(member_type)) {
@@ -6255,6 +6283,23 @@ public:
                 "liric: SubroutineCall target did not resolve: ")
                 + (raw ? ASRUtils::symbol_name(raw) : "<null>")
                 + " kind=" + std::to_string(raw ? (int)raw->type : -1));
+        }
+
+        std::string call_sym_name = x.m_name ?
+            ASRUtils::symbol_name(x.m_name) : "";
+        std::string fn_name = fn ? fn->m_name : "";
+        if (fn && (call_sym_name.find("newunit_int_") != std::string::npos ||
+                   fn_name.find("newunit_int_") != std::string::npos)) {
+            if (x.n_args != 1 || !x.m_args[0].m_value) {
+                throw CodeGenError("liric: newunit expects one output arg");
+            }
+            ASR::expr_t *unit_arg = x.m_args[0].m_value;
+            uint32_t unit_ptr = emit_target_ptr(unit_arg);
+            lr_type_t *unit_lr = get_type(ASRUtils::expr_type(unit_arg));
+            uint32_t unit_value = cast_int_value(
+                emit_i64_const(10), ty_i64, unit_lr);
+            lr_emit_store(s, V(unit_value, unit_lr), V(unit_ptr, ty_ptr));
+            return;
         }
 
         if (fn && callable_name(fn) == "_lfortran_get_command_argument_value") {
@@ -7731,13 +7776,9 @@ public:
 
     // --- FileWrite ---
     //
-    // Minimal implementation: emit each value through _lfortran_printf,
-    // separated by " " and terminated by m_end (or "\n").  Strings are
-    // written via their {data,len}; integers/reals/logicals go through
-    // _lcompilers_string_format_fortran so the runtime handles the
-    // formatting.  Both unit==null (write(*,...)) and integer-unit
-    // (write(stdout,...)) cases land in the same printf-based path
-    // because lfortran's _lfortran_printf already writes to stdout.
+    // Minimal implementation: emit each stdout value through printf.
+    // Integer-unit writes keep one scratch record so a later read can
+    // round-trip simple list-directed integer input.
 
     void file_write_emit_string(uint32_t data, uint32_t len64) {
         uint32_t fmt_sym = declare_global_cstring("%.*s", "_lr_fwfmt_pct_s");
@@ -7761,6 +7802,53 @@ public:
         d.call_vararg = true;
         d.call_fixed_args = 1;
         lr_session_emit(s, &d, nullptr);
+    }
+
+    uint32_t scratch_io_data_ptr() {
+        if (!scratch_io_data_sym) {
+            std::vector<uint8_t> zeros(4096, 0);
+            const char *name = "_lr_scratch_unit_data";
+            lr_session_global(s, name, lr_type_array_s(s, ty_i8, zeros.size()),
+                false, zeros.data(), zeros.size());
+            scratch_io_data_sym = lr_session_intern(s, name);
+        }
+        lr_operand_desc_t off[1] = {I(0, ty_i64)};
+        return lr_emit_gep(s, ty_i8, LR_GLOBAL(scratch_io_data_sym, ty_ptr),
+            off, 1);
+    }
+
+    uint32_t scratch_io_len_ptr() {
+        if (!scratch_io_len_sym) {
+            int64_t zero = 0;
+            const char *name = "_lr_scratch_unit_len";
+            lr_session_global(s, name, ty_i64, false, &zero, sizeof(zero));
+            scratch_io_len_sym = lr_session_intern(s, name);
+        }
+        lr_operand_desc_t off[1] = {I(0, ty_i64)};
+        return lr_emit_gep(s, ty_i8, LR_GLOBAL(scratch_io_len_sym, ty_ptr),
+            off, 1);
+    }
+
+    void scratch_io_clear() {
+        lr_emit_store(s, I(0, ty_i64), V(scratch_io_len_ptr(), ty_ptr));
+    }
+
+    void scratch_io_append(uint32_t data, uint32_t len) {
+        uint32_t len_ptr = scratch_io_len_ptr();
+        uint32_t old_len = lr_emit_load(s, ty_i64, V(len_ptr, ty_ptr));
+        uint32_t room = lr_emit_sub(s, ty_i64, I(4095, ty_i64),
+            V(old_len, ty_i64));
+        uint32_t fits = lr_emit_icmp(s, LR_CMP_SLT,
+            V(len, ty_i64), V(room, ty_i64));
+        uint32_t copy_len = lr_emit_select(s, ty_i64,
+            V(fits, ty_i1), V(len, ty_i64), V(room, ty_i64));
+        lr_operand_desc_t off[1] = {V(old_len, ty_i64)};
+        uint32_t dst = lr_emit_gep(s, ty_i8, V(scratch_io_data_ptr(), ty_ptr),
+            off, 1);
+        emit_memcpy_dynamic(dst, data, copy_len);
+        uint32_t new_len = lr_emit_add(s, ty_i64,
+            V(old_len, ty_i64), V(copy_len, ty_i64));
+        lr_emit_store(s, V(new_len, ty_i64), V(len_ptr, ty_ptr));
     }
 
     // Declare/intern a private c-string and return its symbol id for
@@ -8837,6 +8925,7 @@ public:
         uint32_t internal_unit_desc_ptr = 0;
         uint32_t internal_unit_desc = 0;
         bool internal_unit_is_value = false;
+        bool external_integer_write = false;
         if (x.m_unit) {
             ASR::ttype_t *ut = ASRUtils::expr_type(x.m_unit);
             ut = ASRUtils::type_get_past_allocatable_pointer(ut);
@@ -8856,10 +8945,10 @@ public:
                     internal_unit_desc_ptr = tmp;
                 }
             } else if (ASR::is_a<ASR::Integer_t>(*ut)) {
-                // Integer unit value is evaluated but ignored:
-                // _lfortran_printf always writes to stdout.
                 visit_expr(*x.m_unit);
                 (void)tmp;
+                external_integer_write = true;
+                scratch_io_clear();
             } else {
                 throw CodeGenError(
                     "liric: write() unit must be integer or string");
@@ -8885,6 +8974,10 @@ public:
                     internal_write_chunk(internal_unit_desc_ptr,
                         formatted.data, formatted.len);
                 }
+                return;
+            }
+            if (external_integer_write) {
+                scratch_io_append(formatted.data, formatted.len);
                 return;
             }
             file_write_emit_string(formatted.data, formatted.len);
@@ -8931,6 +9024,8 @@ public:
                 } else {
                     internal_write_chunk(internal_unit_desc_ptr, data, len);
                 }
+            } else if (external_integer_write) {
+                scratch_io_append(data, len);
             } else {
                 file_write_emit_string(data, len);
             }
@@ -8941,6 +9036,14 @@ public:
         // Internal-file writes never append a trailing newline; the caller
         // is responsible for the buffer's contents.
         if (internal_string_write) {
+            return;
+        }
+        if (external_integer_write) {
+            uint32_t nl_sym = declare_global_cstring("\n", "_lr_fwnl");
+            lr_operand_desc_t off[1] = {I(0, ty_i64)};
+            uint32_t nl_data = lr_emit_gep(s, ty_i8,
+                LR_GLOBAL(nl_sym, ty_ptr), off, 1);
+            scratch_io_append(nl_data, emit_i64_const(1));
             return;
         }
         if (x.m_end) {
@@ -9214,18 +9317,242 @@ public:
 
     // --- FileRead ---
 
+    uint32_t emit_expr_i64(ASR::expr_t *expr) {
+        visit_expr(*expr);
+        lr_type_t *t = value_type_for_expr(expr);
+        return cast_int_value(tmp, t, ty_i64);
+    }
+
+    uint32_t emit_target_ptr(ASR::expr_t *expr) {
+        bool was_target = is_target;
+        is_target = true;
+        visit_expr(*expr);
+        is_target = was_target;
+        return tmp;
+    }
+
+    uint32_t emit_internal_read_int_token(uint32_t data, uint32_t len,
+            uint32_t pos_ptr) {
+        uint32_t acc_ptr = lr_emit_alloca(s, ty_i64);
+        uint32_t sign_ptr = lr_emit_alloca(s, ty_i64);
+        lr_emit_store(s, I(0, ty_i64), V(acc_ptr, ty_ptr));
+        lr_emit_store(s, I(1, ty_i64), V(sign_ptr, ty_ptr));
+
+        lr_error_t err;
+        uint32_t skip_head = lr_session_block(s);
+        uint32_t skip_body = lr_session_block(s);
+        uint32_t sign_check = lr_session_block(s);
+        lr_emit_br(s, skip_head);
+
+        lr_session_set_block(s, skip_head, &err);
+        uint32_t pos = lr_emit_load(s, ty_i64, V(pos_ptr, ty_ptr));
+        uint32_t has_char = lr_emit_icmp(s, LR_CMP_SLT,
+            V(pos, ty_i64), V(len, ty_i64));
+        uint32_t char_check = lr_session_block(s);
+        lr_emit_condbr(s, V(has_char, ty_i1), char_check, sign_check);
+
+        lr_session_set_block(s, char_check, &err);
+        lr_operand_desc_t pos_off[1] = {V(pos, ty_i64)};
+        uint32_t ch_ptr = lr_emit_gep(s, ty_i8, V(data, ty_ptr),
+            pos_off, 1);
+        uint32_t ch = lr_emit_load(s, ty_i8, V(ch_ptr, ty_ptr));
+        uint32_t is_space = lr_emit_icmp(s, LR_CMP_SLE,
+            V(ch, ty_i8), I(' ', ty_i8));
+        uint32_t is_comma = lr_emit_icmp(s, LR_CMP_EQ,
+            V(ch, ty_i8), I(',', ty_i8));
+        uint32_t is_sep = lr_emit_or(s, ty_i1,
+            V(is_space, ty_i1), V(is_comma, ty_i1));
+        lr_emit_condbr(s, V(is_sep, ty_i1), skip_body, sign_check);
+
+        lr_session_set_block(s, skip_body, &err);
+        uint32_t next_pos = lr_emit_add(s, ty_i64,
+            V(pos, ty_i64), I(1, ty_i64));
+        lr_emit_store(s, V(next_pos, ty_i64), V(pos_ptr, ty_ptr));
+        lr_emit_br(s, skip_head);
+
+        uint32_t sign_body = lr_session_block(s);
+        uint32_t digit_head = lr_session_block(s);
+        lr_session_set_block(s, sign_check, &err);
+        pos = lr_emit_load(s, ty_i64, V(pos_ptr, ty_ptr));
+        has_char = lr_emit_icmp(s, LR_CMP_SLT,
+            V(pos, ty_i64), V(len, ty_i64));
+        uint32_t sign_char = lr_session_block(s);
+        lr_emit_condbr(s, V(has_char, ty_i1), sign_char, digit_head);
+
+        lr_session_set_block(s, sign_char, &err);
+        lr_operand_desc_t sign_off[1] = {V(pos, ty_i64)};
+        ch_ptr = lr_emit_gep(s, ty_i8, V(data, ty_ptr), sign_off, 1);
+        ch = lr_emit_load(s, ty_i8, V(ch_ptr, ty_ptr));
+        uint32_t is_minus = lr_emit_icmp(s, LR_CMP_EQ,
+            V(ch, ty_i8), I('-', ty_i8));
+        uint32_t is_plus = lr_emit_icmp(s, LR_CMP_EQ,
+            V(ch, ty_i8), I('+', ty_i8));
+        uint32_t has_sign = lr_emit_or(s, ty_i1,
+            V(is_minus, ty_i1), V(is_plus, ty_i1));
+        lr_emit_condbr(s, V(has_sign, ty_i1), sign_body, digit_head);
+
+        lr_session_set_block(s, sign_body, &err);
+        uint32_t sign_val = lr_emit_select(s, ty_i64,
+            V(is_minus, ty_i1), I(-1, ty_i64), I(1, ty_i64));
+        lr_emit_store(s, V(sign_val, ty_i64), V(sign_ptr, ty_ptr));
+        next_pos = lr_emit_add(s, ty_i64, V(pos, ty_i64), I(1, ty_i64));
+        lr_emit_store(s, V(next_pos, ty_i64), V(pos_ptr, ty_ptr));
+        lr_emit_br(s, digit_head);
+
+        uint32_t digit_body = lr_session_block(s);
+        uint32_t done = lr_session_block(s);
+        lr_session_set_block(s, digit_head, &err);
+        pos = lr_emit_load(s, ty_i64, V(pos_ptr, ty_ptr));
+        has_char = lr_emit_icmp(s, LR_CMP_SLT,
+            V(pos, ty_i64), V(len, ty_i64));
+        uint32_t digit_char = lr_session_block(s);
+        lr_emit_condbr(s, V(has_char, ty_i1), digit_char, done);
+
+        lr_session_set_block(s, digit_char, &err);
+        lr_operand_desc_t digit_off[1] = {V(pos, ty_i64)};
+        ch_ptr = lr_emit_gep(s, ty_i8, V(data, ty_ptr), digit_off, 1);
+        ch = lr_emit_load(s, ty_i8, V(ch_ptr, ty_ptr));
+        uint32_t ge_zero = lr_emit_icmp(s, LR_CMP_SGE,
+            V(ch, ty_i8), I('0', ty_i8));
+        uint32_t le_nine = lr_emit_icmp(s, LR_CMP_SLE,
+            V(ch, ty_i8), I('9', ty_i8));
+        uint32_t is_digit = lr_emit_and(s, ty_i1,
+            V(ge_zero, ty_i1), V(le_nine, ty_i1));
+        lr_emit_condbr(s, V(is_digit, ty_i1), digit_body, done);
+
+        lr_session_set_block(s, digit_body, &err);
+        uint32_t acc = lr_emit_load(s, ty_i64, V(acc_ptr, ty_ptr));
+        uint32_t ch64 = lr_emit_sext(s, ty_i64, V(ch, ty_i8));
+        uint32_t digit = lr_emit_sub(s, ty_i64,
+            V(ch64, ty_i64), I('0', ty_i64));
+        uint32_t acc10 = lr_emit_mul(s, ty_i64, V(acc, ty_i64),
+            I(10, ty_i64));
+        uint32_t next_acc = lr_emit_add(s, ty_i64,
+            V(acc10, ty_i64), V(digit, ty_i64));
+        lr_emit_store(s, V(next_acc, ty_i64), V(acc_ptr, ty_ptr));
+        next_pos = lr_emit_add(s, ty_i64, V(pos, ty_i64), I(1, ty_i64));
+        lr_emit_store(s, V(next_pos, ty_i64), V(pos_ptr, ty_ptr));
+        lr_emit_br(s, digit_head);
+
+        lr_session_set_block(s, done, &err);
+        acc = lr_emit_load(s, ty_i64, V(acc_ptr, ty_ptr));
+        uint32_t sign = lr_emit_load(s, ty_i64, V(sign_ptr, ty_ptr));
+        return lr_emit_mul(s, ty_i64, V(acc, ty_i64), V(sign, ty_i64));
+    }
+
+    bool emit_internal_integer_read_value(ASR::expr_t *target,
+            uint32_t data, uint32_t len, uint32_t pos_ptr) {
+        ASR::ttype_t *target_type = ASRUtils::expr_type(target);
+        target_type = ASRUtils::type_get_past_allocatable_pointer(target_type);
+        target_type = ASRUtils::type_get_past_array(target_type);
+        if (!ASR::is_a<ASR::Integer_t>(*target_type)) {
+            return false;
+        }
+        uint32_t value = emit_internal_read_int_token(data, len, pos_ptr);
+        lr_type_t *target_lr = get_type(target_type);
+        uint32_t target_value = cast_int_value(value, ty_i64, target_lr);
+        uint32_t target_ptr = emit_target_ptr(target);
+        lr_emit_store(s, V(target_value, target_lr), V(target_ptr, ty_ptr));
+        return true;
+    }
+
+    bool emit_internal_integer_read_idl(ASR::ImpliedDoLoop_t *idl,
+            uint32_t data, uint32_t len, uint32_t pos_ptr) {
+        if (!ASR::is_a<ASR::Var_t>(*idl->m_var)) {
+            return false;
+        }
+        uint32_t start = emit_expr_i64(idl->m_start);
+        uint32_t end = emit_expr_i64(idl->m_end);
+        uint32_t step = idl->m_increment
+            ? emit_expr_i64(idl->m_increment)
+            : emit_i64_const(1);
+
+        uint32_t loop_ptr = emit_target_ptr(idl->m_var);
+        lr_type_t *loop_lr = value_type_for_expr(idl->m_var);
+        uint32_t cur_ptr = lr_emit_alloca(s, ty_i64);
+        lr_emit_store(s, V(start, ty_i64), V(cur_ptr, ty_ptr));
+
+        lr_error_t err;
+        uint32_t head = lr_session_block(s);
+        uint32_t body = lr_session_block(s);
+        uint32_t done = lr_session_block(s);
+        lr_emit_br(s, head);
+
+        lr_session_set_block(s, head, &err);
+        uint32_t cur = lr_emit_load(s, ty_i64, V(cur_ptr, ty_ptr));
+        uint32_t step_pos = lr_emit_icmp(s, LR_CMP_SGT,
+            V(step, ty_i64), I(0, ty_i64));
+        uint32_t asc = lr_emit_icmp(s, LR_CMP_SLE,
+            V(cur, ty_i64), V(end, ty_i64));
+        uint32_t desc = lr_emit_icmp(s, LR_CMP_SGE,
+            V(cur, ty_i64), V(end, ty_i64));
+        uint32_t more = lr_emit_select(s, ty_i1,
+            V(step_pos, ty_i1), V(asc, ty_i1), V(desc, ty_i1));
+        lr_emit_condbr(s, V(more, ty_i1), body, done);
+
+        lr_session_set_block(s, body, &err);
+        uint32_t loop_val = cast_int_value(cur, ty_i64, loop_lr);
+        lr_emit_store(s, V(loop_val, loop_lr), V(loop_ptr, ty_ptr));
+        for (size_t i = 0; i < idl->n_values; i++) {
+            ASR::expr_t *value = idl->m_values[i];
+            bool ok = ASR::is_a<ASR::ImpliedDoLoop_t>(*value)
+                ? emit_internal_integer_read_idl(
+                    ASR::down_cast<ASR::ImpliedDoLoop_t>(value),
+                    data, len, pos_ptr)
+                : emit_internal_integer_read_value(value, data, len, pos_ptr);
+            if (!ok) return false;
+        }
+        uint32_t next = lr_emit_add(s, ty_i64,
+            V(cur, ty_i64), V(step, ty_i64));
+        lr_emit_store(s, V(next, ty_i64), V(cur_ptr, ty_ptr));
+        lr_emit_br(s, head);
+
+        lr_session_set_block(s, done, &err);
+        uint32_t final_val = lr_emit_load(s, ty_i64, V(cur_ptr, ty_ptr));
+        final_val = cast_int_value(final_val, ty_i64, loop_lr);
+        lr_emit_store(s, V(final_val, loop_lr), V(loop_ptr, ty_ptr));
+        return true;
+    }
+
+    bool emit_internal_integer_read_expr(ASR::expr_t *target,
+            uint32_t data, uint32_t len, uint32_t pos_ptr) {
+        if (ASR::is_a<ASR::ImpliedDoLoop_t>(*target)) {
+            return emit_internal_integer_read_idl(
+                ASR::down_cast<ASR::ImpliedDoLoop_t>(target),
+                data, len, pos_ptr);
+        }
+        return emit_internal_integer_read_value(target, data, len, pos_ptr);
+    }
+
+    bool emit_integer_read_values(const ASR::FileRead_t &x, uint32_t data,
+            uint32_t len) {
+        uint32_t pos_ptr = lr_emit_alloca(s, ty_i64);
+        uint32_t stat_ptr = lr_emit_alloca(s, ty_i32);
+        lr_emit_store(s, I(0, ty_i64), V(pos_ptr, ty_ptr));
+        lr_emit_store(s, I(0, ty_i32), V(stat_ptr, ty_ptr));
+
+        for (size_t i = 0; i < x.n_values; i++) {
+            if (!emit_internal_integer_read_expr(x.m_values[i],
+                    data, len, pos_ptr)) {
+                return false;
+            }
+        }
+        if (x.m_iostat) {
+            uint32_t iostat_ptr = emit_target_ptr(x.m_iostat);
+            uint32_t stat = lr_emit_load(s, ty_i32, V(stat_ptr, ty_ptr));
+            lr_emit_store(s, V(stat, ty_i32), V(iostat_ptr, ty_ptr));
+        }
+        return true;
+    }
+
     bool emit_internal_integer_read(const ASR::FileRead_t &x) {
-        if (!x.m_unit || x.n_values != 1) {
+        if (!x.m_unit || x.n_values == 0) {
             return false;
         }
         ASR::ttype_t *unit_type = ASRUtils::expr_type(x.m_unit);
         unit_type = ASRUtils::type_get_past_allocatable_pointer(unit_type);
         unit_type = ASRUtils::type_get_past_array(unit_type);
-        ASR::ttype_t *value_type = ASRUtils::expr_type(x.m_values[0]);
-        value_type = ASRUtils::type_get_past_allocatable_pointer(value_type);
-        value_type = ASRUtils::type_get_past_array(value_type);
-        if (!ASR::is_a<ASR::String_t>(*unit_type) ||
-                !ASR::is_a<ASR::Integer_t>(*value_type)) {
+        if (!ASR::is_a<ASR::String_t>(*unit_type)) {
             return false;
         }
 
@@ -9237,86 +9564,27 @@ public:
         uint32_t len = lr_emit_extractvalue(s, ty_i64,
             V(unit_desc, ty_str_desc), &fld1, 1);
 
-        bool was_target = is_target;
-        is_target = true;
-        visit_expr(*x.m_values[0]);
-        is_target = was_target;
-        uint32_t out_ptr = tmp;
-        lr_type_t *out_type = get_type(ASRUtils::expr_type(x.m_values[0]));
-
-        uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
-        uint32_t acc_ptr = lr_emit_alloca(s, ty_i64);
-        uint32_t stat_ptr = lr_emit_alloca(s, ty_i32);
-        lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
-        lr_emit_store(s, I(0, ty_i64), V(acc_ptr, ty_ptr));
-        lr_emit_store(s, I(0, ty_i32), V(stat_ptr, ty_ptr));
-
-        lr_error_t err;
-        uint32_t head_bb = lr_session_block(s);
-        uint32_t body_bb = lr_session_block(s);
-        uint32_t bad_bb = lr_session_block(s);
-        uint32_t done_bb = lr_session_block(s);
-        lr_emit_br(s, head_bb);
-
-        lr_session_set_block(s, head_bb, &err);
-        uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
-        uint32_t more = lr_emit_icmp(s, LR_CMP_SLT,
-            V(idx, ty_i64), V(len, ty_i64));
-        lr_emit_condbr(s, V(more, ty_i1), body_bb, done_bb);
-
-        lr_session_set_block(s, body_bb, &err);
-        lr_operand_desc_t off[1] = {V(idx, ty_i64)};
-        uint32_t char_ptr = lr_emit_gep(s, ty_i8, V(data, ty_ptr), off, 1);
-        uint32_t ch = lr_emit_load(s, ty_i8, V(char_ptr, ty_ptr));
-        uint32_t ge_zero = lr_emit_icmp(s, LR_CMP_SGE,
-            V(ch, ty_i8), I('0', ty_i8));
-        uint32_t le_nine = lr_emit_icmp(s, LR_CMP_SLE,
-            V(ch, ty_i8), I('9', ty_i8));
-        uint32_t is_digit = lr_emit_and(s, ty_i1,
-            V(ge_zero, ty_i1), V(le_nine, ty_i1));
-        uint32_t digit_bb = lr_session_block(s);
-        lr_emit_condbr(s, V(is_digit, ty_i1), digit_bb, bad_bb);
-
-        lr_session_set_block(s, digit_bb, &err);
-        uint32_t acc = lr_emit_load(s, ty_i64, V(acc_ptr, ty_ptr));
-        uint32_t ch64 = lr_emit_sext(s, ty_i64, V(ch, ty_i8));
-        uint32_t digit = lr_emit_sub(s, ty_i64,
-            V(ch64, ty_i64), I('0', ty_i64));
-        uint32_t acc10 = lr_emit_mul(s, ty_i64, V(acc, ty_i64),
-            I(10, ty_i64));
-        uint32_t next_acc = lr_emit_add(s, ty_i64,
-            V(acc10, ty_i64), V(digit, ty_i64));
-        lr_emit_store(s, V(next_acc, ty_i64), V(acc_ptr, ty_ptr));
-        uint32_t next_idx = lr_emit_add(s, ty_i64,
-            V(idx, ty_i64), I(1, ty_i64));
-        lr_emit_store(s, V(next_idx, ty_i64), V(idx_ptr, ty_ptr));
-        lr_emit_br(s, head_bb);
-
-        lr_session_set_block(s, bad_bb, &err);
-        lr_emit_store(s, I(1, ty_i32), V(stat_ptr, ty_ptr));
-        lr_emit_br(s, done_bb);
-
-        lr_session_set_block(s, done_bb, &err);
-        uint32_t result64 = lr_emit_load(s, ty_i64, V(acc_ptr, ty_ptr));
-        uint32_t result = result64;
-        if (out_type != ty_i64) {
-            result = lr_emit_trunc(s, out_type, V(result64, ty_i64));
-        }
-        lr_emit_store(s, V(result, out_type), V(out_ptr, ty_ptr));
-        if (x.m_iostat) {
-            was_target = is_target;
-            is_target = true;
-            visit_expr(*x.m_iostat);
-            is_target = was_target;
-            uint32_t stat = lr_emit_load(s, ty_i32, V(stat_ptr, ty_ptr));
-            lr_emit_store(s, V(stat, ty_i32), V(tmp, ty_ptr));
-        }
-        return true;
+        return emit_integer_read_values(x, data, len);
     }
 
     void visit_FileRead(const ASR::FileRead_t &x) {
         if (emit_internal_integer_read(x)) {
             return;
+        }
+        if (x.m_unit && x.n_values > 0) {
+            ASR::ttype_t *unit_type = ASRUtils::expr_type(x.m_unit);
+            unit_type = ASRUtils::type_get_past_allocatable_pointer(unit_type);
+            unit_type = ASRUtils::type_get_past_array(unit_type);
+            if (ASR::is_a<ASR::Integer_t>(*unit_type)) {
+                visit_expr(*x.m_unit);
+                (void)tmp;
+                uint32_t data = scratch_io_data_ptr();
+                uint32_t len = lr_emit_load(s, ty_i64,
+                    V(scratch_io_len_ptr(), ty_ptr));
+                if (emit_integer_read_values(x, data, len)) {
+                    return;
+                }
+            }
         }
         // Touch unit/values so any side effects (var binding) are at
         // least evaluated, then call an unimplemented runtime helper
