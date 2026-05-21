@@ -9639,8 +9639,7 @@ public:
                 return "R" + std::to_string(
                     ASRUtils::extract_kind_from_ttype_t(at));
             case ASR::ttypeType::Logical:
-                return "L" + std::to_string(
-                    ASRUtils::extract_kind_from_ttype_t(at) * 8);
+                return "L8";
             case ASR::ttypeType::Complex: {
                 std::string real_serial = "R" + std::to_string(
                     ASRUtils::extract_kind_from_ttype_t(at));
@@ -11424,6 +11423,17 @@ public:
                 iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr)
             };
             emit_call_void(name, args, 3);
+            return true;
+        }
+        if (ASR::is_a<ASR::Logical_t>(*type)) {
+            uint32_t ptr = emit_target_ptr(target);
+            lr_type_t *p[] = {ty_ptr, ty_i32, ty_ptr};
+            declare_func("_lfortran_read_logical", ty_void, p, 3, false);
+            lr_operand_desc_t args[] = {
+                V(ptr, ty_ptr), V(unit, ty_i32),
+                iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr)
+            };
+            emit_call_void("_lfortran_read_logical", args, 3);
             return true;
         }
         if (ASR::is_a<ASR::String_t>(*type)) {
