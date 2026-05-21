@@ -11186,6 +11186,31 @@ public:
         return {data, len};
     }
 
+    std::pair<uint32_t, uint32_t> emit_target_string_data_len(
+            ASR::expr_t *expr) {
+        uint32_t desc_ptr = emit_target_ptr(expr);
+        uint32_t desc = lr_emit_load(s, ty_str_desc, V(desc_ptr, ty_ptr));
+        uint32_t fld0 = 0, fld1 = 1;
+        uint32_t data = lr_emit_extractvalue(s, ty_ptr,
+            V(desc, ty_str_desc), &fld0, 1);
+        uint32_t len = 0;
+        ASR::ttype_t *type = ASRUtils::expr_type(expr);
+        type = ASRUtils::type_get_past_allocatable_pointer(type);
+        type = ASRUtils::type_get_past_array(type);
+        if (ASR::is_a<ASR::String_t>(*type)) {
+            ASR::String_t *st = ASR::down_cast<ASR::String_t>(type);
+            int64_t len_const = -1;
+            if (st->m_len && ASRUtils::extract_value(st->m_len, len_const)) {
+                len = emit_i64_const(len_const);
+            }
+        }
+        if (!len) {
+            len = lr_emit_extractvalue(s, ty_i64,
+                V(desc, ty_str_desc), &fld1, 1);
+        }
+        return {data, len};
+    }
+
     uint32_t emit_iostat_ptr(ASR::expr_t *expr) {
         if (!expr) return 0;
         return emit_target_ptr(expr);
@@ -12149,6 +12174,17 @@ public:
         store_zero(x.m_number, ty_i32);
         if (x.m_size) {
             store_zero(x.m_size, value_type_for_expr(x.m_size));
+        }
+        if (x.m_unit && x.m_blank) {
+            uint32_t unit = emit_i32_value(x.m_unit);
+            auto [blank, blank_len] = emit_target_string_data_len(x.m_blank);
+            lr_type_t *p[] = {ty_i32, ty_ptr, ty_i64};
+            declare_func("_lfortran_inquire_unit_blank", ty_void, p, 3,
+                false);
+            lr_operand_desc_t args[] = {
+                V(unit, ty_i32), V(blank, ty_ptr), V(blank_len, ty_i64)
+            };
+            emit_call_void("_lfortran_inquire_unit_blank", args, 3);
         }
         if (!x.m_file) {
             store_zero(x.m_exist, ty_i1);
