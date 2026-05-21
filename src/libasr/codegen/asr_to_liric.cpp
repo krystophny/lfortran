@@ -170,6 +170,13 @@ public:
     std::unordered_map<uint64_t, uint32_t> class_tag_slots;
     std::unordered_set<uint64_t> class_desc_aliases;
     std::unordered_set<uint64_t> runtime_pointer_arrays;
+    // For each runtime-dim PointerArray local, the per-dim extent values
+    // are snapshotted at the allocation site (function entry) into i64
+    // slots so later size() / ArrayItem / print queries return the
+    // declared-time extent rather than re-evaluating the dim expression
+    // against the possibly-mutated source variable.
+    std::unordered_map<uint64_t, std::vector<uint32_t>>
+        runtime_pointer_array_extents;
     std::unordered_set<uint64_t> known_struct_hashes;
     std::vector<ASR::Variable_t *> module_init_vars;
     std::vector<ASR::Struct_t *> known_structs;
@@ -1447,9 +1454,14 @@ public:
 
     uint32_t emit_runtime_pointer_array_slot(ASR::Variable_t *v,
             ASR::Array_t *array_t) {
+        uint64_t v_hash = get_hash((ASR::asr_t *)v);
+        std::vector<uint32_t> extent_slots(array_t->n_dims, 0);
         uint32_t total = emit_i64_const(1);
         for (size_t d = 0; d < array_t->n_dims; d++) {
             uint32_t extent = emit_array_dim_extent(array_t, d);
+            uint32_t extent_slot = lr_emit_alloca(s, ty_i64);
+            lr_emit_store(s, V(extent, ty_i64), V(extent_slot, ty_ptr));
+            extent_slots[d] = extent_slot;
             total = lr_emit_mul(s, ty_i64,
                 V(total, ty_i64), V(extent, ty_i64));
         }
@@ -1464,8 +1476,36 @@ public:
         emit_call("memset", ty_ptr, args, 3);
         uint32_t slot = lr_emit_alloca(s, ty_ptr);
         lr_emit_store(s, V(data, ty_ptr), V(slot, ty_ptr));
-        runtime_pointer_arrays.insert(get_hash((ASR::asr_t *)v));
+        runtime_pointer_arrays.insert(v_hash);
+        runtime_pointer_array_extents[v_hash] = std::move(extent_slots);
         return slot;
+    }
+
+    // Try to find a snapshotted extent for `expr` at dimension `dim`.
+    // Returns the loaded i64 extent, or 0 if no snapshot applies.
+    uint32_t try_load_snapshot_extent(ASR::expr_t *expr, size_t dim) {
+        if (!expr) return 0;
+        ASR::expr_t *e = expr;
+        while (ASR::is_a<ASR::ArrayPhysicalCast_t>(*e)) {
+            e = ASR::down_cast<ASR::ArrayPhysicalCast_t>(e)->m_arg;
+        }
+        if (!ASR::is_a<ASR::Var_t>(*e)) return 0;
+        ASR::Var_t *var = ASR::down_cast<ASR::Var_t>(e);
+        ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(var->m_v);
+        if (!sym || !ASR::is_a<ASR::Variable_t>(*sym)) return 0;
+        uint64_t h = get_hash((ASR::asr_t *)
+            ASR::down_cast<ASR::Variable_t>(sym));
+        auto it = runtime_pointer_array_extents.find(h);
+        if (it == runtime_pointer_array_extents.end()) return 0;
+        if (dim >= it->second.size()) return 0;
+        return lr_emit_load(s, ty_i64, V(it->second[dim], ty_ptr));
+    }
+
+    uint32_t emit_array_dim_extent_for_expr(ASR::expr_t *expr,
+            ASR::Array_t *array_t, size_t dim) {
+        uint32_t snap = try_load_snapshot_extent(expr, dim);
+        if (snap) return snap;
+        return emit_array_dim_extent(array_t, dim);
     }
 
     // --- Program ---
@@ -4996,7 +5036,8 @@ public:
                     lin = lr_emit_add(s, ty_i64,
                         V(lin, ty_i64), V(contrib, ty_i64));
                 }
-                uint32_t length = emit_array_dim_extent(array_t, r);
+                uint32_t length = emit_array_dim_extent_for_expr(
+                    x.m_v, array_t, r);
                 length_prod = lr_emit_mul(s, ty_i64,
                     V(length_prod, ty_i64), V(length, ty_i64));
             }
@@ -10383,7 +10424,7 @@ public:
         if (static_total > 0) {
             total = emit_i64_const(static_total);
         } else {
-            total = emit_runtime_array_total(array_t);
+            total = emit_runtime_array_total_for_expr(expr, array_t);
         }
         return {base, total,
             emit_i64_const(element_byte_size(array_t->m_type))};
@@ -10485,6 +10526,18 @@ public:
         uint32_t total = emit_i64_const(1);
         for (size_t d = 0; d < array_t->n_dims; d++) {
             uint32_t extent = emit_array_dim_extent(array_t, d);
+            total = lr_emit_mul(s, ty_i64,
+                V(total, ty_i64), V(extent, ty_i64));
+        }
+        return total;
+    }
+
+    uint32_t emit_runtime_array_total_for_expr(ASR::expr_t *expr,
+            ASR::Array_t *array_t) {
+        uint32_t total = emit_i64_const(1);
+        for (size_t d = 0; d < array_t->n_dims; d++) {
+            uint32_t extent = emit_array_dim_extent_for_expr(
+                expr, array_t, d);
             total = lr_emit_mul(s, ty_i64,
                 V(total, ty_i64), V(extent, ty_i64));
         }
@@ -13494,24 +13547,76 @@ found_offset:
                 int req_dim;
                 ASRUtils::extract_value(x.m_dim, req_dim);
                 req_dim--;
+                lr_type_t *rt = get_type(x.m_type);
                 int64_t lbound = 1;
-                if (array_t->m_dims[req_dim].m_start) {
-                    ASRUtils::extract_value(
-                        array_t->m_dims[req_dim].m_start, lbound);
+                bool lbound_const = true;
+                if (array_t->m_dims[req_dim].m_start &&
+                        !ASRUtils::extract_value(
+                            array_t->m_dims[req_dim].m_start, lbound)) {
+                    lbound_const = false;
                 }
                 int64_t length = 0;
-                bool has_length = array_t->m_dims[req_dim].m_length &&
-                    ASRUtils::extract_value(
+                bool length_const = false;
+                bool has_length = array_t->m_dims[req_dim].m_length != nullptr;
+                if (has_length) {
+                    length_const = ASRUtils::extract_value(
                         array_t->m_dims[req_dim].m_length, length);
-                int64_t bound = 0;
-                if (x.m_bound == ASR::arrayboundType::LBound) {
-                    bound = (has_length && length == 0) ? 1 : lbound;
-                } else {
-                    bound = (has_length && length == 0)
-                        ? 0 : (length + lbound - 1);
                 }
-                lr_type_t *rt = get_type(x.m_type);
-                tmp = lr_emit_add(s, rt, I(bound, rt), I(0, rt));
+                if (x.m_bound == ASR::arrayboundType::LBound) {
+                    if (lbound_const) {
+                        int64_t bound = (length_const && length == 0)
+                            ? 1 : lbound;
+                        tmp = lr_emit_add(s, rt, I(bound, rt), I(0, rt));
+                        return;
+                    }
+                    visit_expr(*array_t->m_dims[req_dim].m_start);
+                    lr_type_t *lt = get_type(ASRUtils::expr_type(
+                        array_t->m_dims[req_dim].m_start));
+                    tmp = cast_int_value(tmp, lt, rt);
+                    return;
+                }
+                if (length_const && length == 0) {
+                    tmp = lr_emit_add(s, rt, I(0, rt), I(0, rt));
+                    return;
+                }
+                if (length_const && lbound_const) {
+                    int64_t bound = length + lbound - 1;
+                    tmp = lr_emit_add(s, rt, I(bound, rt), I(0, rt));
+                    return;
+                }
+                uint32_t length_v = 0;
+                if (length_const) {
+                    length_v = cast_int_value(
+                        lr_emit_add(s, ty_i64, I(length, ty_i64),
+                            I(0, ty_i64)),
+                        ty_i64, rt);
+                } else {
+                    uint32_t snap = try_load_snapshot_extent(x.m_v,
+                        (size_t)req_dim);
+                    if (snap) {
+                        length_v = cast_int_value(snap, ty_i64, rt);
+                    } else {
+                        visit_expr(*array_t->m_dims[req_dim].m_length);
+                        lr_type_t *lt = get_type(ASRUtils::expr_type(
+                            array_t->m_dims[req_dim].m_length));
+                        length_v = cast_int_value(tmp, lt, rt);
+                    }
+                }
+                uint32_t lbound_v = 0;
+                if (lbound_const) {
+                    lbound_v = cast_int_value(
+                        lr_emit_add(s, ty_i64, I(lbound, ty_i64),
+                            I(0, ty_i64)),
+                        ty_i64, rt);
+                } else {
+                    visit_expr(*array_t->m_dims[req_dim].m_start);
+                    lr_type_t *lt = get_type(ASRUtils::expr_type(
+                        array_t->m_dims[req_dim].m_start));
+                    lbound_v = cast_int_value(tmp, lt, rt);
+                }
+                uint32_t sum = lr_emit_add(s, rt,
+                    V(length_v, rt), V(lbound_v, rt));
+                tmp = lr_emit_sub(s, rt, V(sum, rt), I(1, rt));
                 return;
             }
             if (array_t->m_physical_type !=
@@ -13662,6 +13767,10 @@ found_offset:
                 }
                 if (extract_int_const(length, extent)) {
                     return lr_emit_add(s, rt, I(extent, rt), I(0, rt));
+                }
+                uint32_t snap = try_load_snapshot_extent(x.m_v, (size_t)dim);
+                if (snap) {
+                    return cast_int_value(snap, ty_i64, rt);
                 }
                 visit_expr(*length);
                 lr_type_t *lt = get_type(ASRUtils::expr_type(length));
