@@ -9879,6 +9879,10 @@ public:
                 visit_expr(*sf.m_args[i]);
                 is_target = was_target;
                 uint32_t arg_ptr = tmp;
+                if (array_t->m_physical_type ==
+                        ASR::array_physical_typeType::DescriptorArray) {
+                    arg_ptr = desc_base_addr(arg_ptr);
+                }
                 ASR::ttype_t *elem_type =
                     ASRUtils::type_get_past_allocatable_pointer(
                         array_t->m_type);
