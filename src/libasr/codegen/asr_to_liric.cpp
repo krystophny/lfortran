@@ -1601,6 +1601,13 @@ public:
         proc_return = lr_session_block(s);
         lr_session_set_block(s, entry_block, &err);
 
+        struct CfiArrayWriteback {
+            uint32_t cfi;
+            uint32_t internal;
+            ASR::Variable_t *formal;
+        };
+        std::vector<CfiArrayWriteback> cfi_array_writebacks;
+
         // Map parameters: each formal arg is passed as a pointer to its
         // caller-side storage.  We keep the param vreg in lr_symtab; reads
         // dereference it, writes go through the pointer.
@@ -1622,6 +1629,13 @@ public:
                 uint32_t slot = emit_storage_alloca_for_var(v);
                 lr_emit_store(s, V(p, pt), V(slot, ty_ptr));
                 lr_symtab[h] = slot;
+            } else if (ftype->m_abi == ASR::abiType::BindC &&
+                    bindc_formal_is_cfi_array(v)) {
+                uint32_t internal = emit_internal_desc_from_cfi(p, v);
+                lr_symtab[h] = internal;
+                if (v->m_intent != ASR::intentType::In) {
+                    cfi_array_writebacks.push_back({p, internal, v});
+                }
             } else {
                 lr_symtab[h] = p;
             }
@@ -1657,6 +1671,9 @@ public:
         // Visit body
         for (size_t i = 0; i < x.n_body; i++) {
             visit_stmt(*x.m_body[i]);
+        }
+        for (CfiArrayWriteback &wb : cfi_array_writebacks) {
+            emit_cfi_writeback_from_internal(wb.cfi, wb.internal, wb.formal);
         }
 
         lr_emit_br(s, proc_return);
@@ -7400,6 +7417,303 @@ public:
         return true;
     }
 
+    int cfi_type_code(ASR::ttype_t *type) {
+        type = ASRUtils::type_get_past_allocatable_pointer(type);
+        type = ASRUtils::type_get_past_array(type);
+        switch (type->type) {
+            case ASR::ttypeType::Integer: {
+                int kind = ASR::down_cast<ASR::Integer_t>(type)->m_kind;
+                if (kind == 1) return 7;
+                if (kind == 2) return 8;
+                if (kind == 4) return 9;
+                if (kind == 8) return 10;
+                return 3;
+            }
+            case ASR::ttypeType::Real: {
+                int kind = ASR::down_cast<ASR::Real_t>(type)->m_kind;
+                return kind == 8 ? 28 : 27;
+            }
+            case ASR::ttypeType::Complex: {
+                int kind = ASR::down_cast<ASR::Complex_t>(type)->m_kind;
+                return kind == 8 ? 35 : 34;
+            }
+            case ASR::ttypeType::Logical:
+                return 39;
+            case ASR::ttypeType::String:
+                return 40;
+            case ASR::ttypeType::CPtr:
+                return 41;
+            case ASR::ttypeType::StructType:
+                return 42;
+            default:
+                return -1;
+        }
+    }
+
+    int cfi_attribute_code(ASR::ttype_t *type) {
+        if (ASRUtils::is_pointer(type)) return 1;
+        if (ASRUtils::is_allocatable(type)) return 2;
+        return 0;
+    }
+
+    void store_i32_at(uint32_t ptr, int64_t byte_offset, int32_t value) {
+        lr_operand_desc_t off[1] = {I(byte_offset, ty_i64)};
+        uint32_t p = lr_emit_gep(s, ty_i8, V(ptr, ty_ptr), off, 1);
+        lr_emit_store(s, I(value, ty_i32), V(p, ty_ptr));
+    }
+
+    void store_i8_at(uint32_t ptr, int64_t byte_offset, int value) {
+        lr_operand_desc_t off[1] = {I(byte_offset, ty_i64)};
+        uint32_t p = lr_emit_gep(s, ty_i8, V(ptr, ty_ptr), off, 1);
+        lr_emit_store(s, I(value, ty_i8), V(p, ty_ptr));
+    }
+
+    bool prepare_bindc_cfi_array_arg(ASR::expr_t *actual,
+            ASR::Variable_t *formal, std::vector<lr_operand_desc_t> &args,
+            std::vector<lr_type_t *> &params,
+            std::vector<BindCCharArrayArg> &scratch) {
+        ASR::ttype_t *formal_type =
+            ASRUtils::type_get_past_allocatable_pointer(formal->m_type);
+        if (!ASR::is_a<ASR::Array_t>(*formal_type)) return false;
+        ASR::Array_t *formal_array =
+            ASR::down_cast<ASR::Array_t>(formal_type);
+        if (formal_array->m_physical_type !=
+                    ASR::array_physical_typeType::DescriptorArray &&
+                formal_array->m_physical_type !=
+                    ASR::array_physical_typeType::AssumedRankArray) {
+            return false;
+        }
+
+        ASR::ttype_t *actual_type = ASRUtils::expr_type(actual);
+        ASR::ttype_t *actual_naked =
+            ASRUtils::type_get_past_allocatable_pointer(actual_type);
+        if (!ASR::is_a<ASR::Array_t>(*actual_naked)) return false;
+        ASR::Array_t *actual_array =
+            ASR::down_cast<ASR::Array_t>(actual_naked);
+        int n_dims = (int)actual_array->n_dims;
+        ASR::ttype_t *elem_type = ASRUtils::type_get_past_array(
+            ASRUtils::type_get_past_allocatable_pointer(
+                actual_array->m_type));
+        bool is_char_array = ASR::is_a<ASR::String_t>(*elem_type);
+
+        int64_t cfi_header_bytes = 24;
+        uint32_t cfi = emit_storage_alloca_nbytes(
+            cfi_header_bytes + DESC_DIM_BYTES * (n_dims > 0 ? n_dims : 0));
+        int64_t elem_bytes_i64 = element_byte_size(actual_array->m_type);
+        uint32_t elem_bytes = emit_i64_const(elem_bytes_i64);
+
+        bool actual_is_descriptor =
+            actual_array->m_physical_type ==
+                ASR::array_physical_typeType::DescriptorArray ||
+            actual_array->m_physical_type ==
+                ASR::array_physical_typeType::AssumedRankArray;
+
+        if (actual_is_descriptor) {
+            uint32_t desc = desc_ptr_of(actual);
+            uint32_t cfi_base;
+            uint32_t cfi_elem_len;
+            if (is_char_array) {
+                uint32_t total = descriptor_array_element_count(
+                    desc, n_dims);
+                int64_t fixed_len = 0;
+                if (get_fixed_string_len(actual_array->m_type, fixed_len)) {
+                    cfi_elem_len = emit_i64_const(fixed_len);
+                } else {
+                    uint32_t base = desc_base_addr(desc);
+                    uint32_t first = lr_emit_load(s, ty_str_desc,
+                        V(base, ty_ptr));
+                    uint32_t len_idx = 1;
+                    cfi_elem_len = lr_emit_extractvalue(s, ty_i64,
+                        V(first, ty_str_desc), &len_idx, 1);
+                }
+                uint32_t raw_bytes = lr_emit_mul(s, ty_i64,
+                    V(total, ty_i64), V(cfi_elem_len, ty_i64));
+                uint32_t allocator = emit_call(
+                    "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+                lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
+                declare_func("_lfortran_malloc_alloc", ty_ptr,
+                    malloc_params, 2, false);
+                lr_operand_desc_t malloc_args[] = {
+                    V(allocator, ty_ptr), V(raw_bytes, ty_i64)
+                };
+                cfi_base = emit_call("_lfortran_malloc_alloc",
+                    ty_ptr, malloc_args, 2);
+                emit_descriptor_chars_copy(desc, cfi_base, total,
+                    cfi_elem_len, false);
+                scratch.push_back({desc, cfi_base, total, cfi_elem_len,
+                    allocator, formal->m_intent != ASR::intentType::In});
+            } else {
+                uint32_t base = desc_base_addr(desc);
+                uint32_t offset = desc_load_i64(desc, 24);
+                lr_operand_desc_t off[1] = {V(offset, ty_i64)};
+                cfi_base = lr_emit_gep(s, ty_i8,
+                    V(base, ty_ptr), off, 1);
+                cfi_elem_len = desc_load_i64(desc, 8);
+            }
+            desc_store_base(cfi, cfi_base);
+            desc_store_i64(cfi, 8, cfi_elem_len);
+            uint32_t cfi_stride = cfi_elem_len;
+            for (int d = 0; d < n_dims; d++) {
+                int64_t src_off = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
+                int64_t dst_off = cfi_header_bytes + DESC_DIM_BYTES * d;
+                desc_store_i64(cfi, dst_off + DESC_DIM_LBOUND,
+                    desc_load_i64(desc, src_off + DESC_DIM_LBOUND));
+                uint32_t extent =
+                    desc_load_i64(desc, src_off + DESC_DIM_EXTENT);
+                desc_store_i64(cfi, dst_off + DESC_DIM_EXTENT, extent);
+                if (is_char_array) {
+                    desc_store_i64(cfi, dst_off + DESC_DIM_STRIDE,
+                        cfi_stride);
+                    cfi_stride = lr_emit_mul(s, ty_i64,
+                        V(cfi_stride, ty_i64), V(extent, ty_i64));
+                } else {
+                    desc_store_i64(cfi, dst_off + DESC_DIM_STRIDE,
+                        desc_load_i64(desc, src_off + DESC_DIM_STRIDE));
+                }
+            }
+        } else {
+            bool was_target = is_target;
+            is_target = true;
+            visit_expr(*actual);
+            is_target = was_target;
+            desc_store_base(cfi, tmp);
+            desc_store_i64(cfi, 8, elem_bytes);
+
+            uint32_t stride = elem_bytes;
+            for (int d = 0; d < n_dims; d++) {
+                uint32_t lbound = emit_i64_const(1);
+                if (actual_array->m_dims[d].m_start) {
+                    lbound = emit_i64_expr(actual_array->m_dims[d].m_start);
+                }
+                uint32_t extent = emit_i64_const(1);
+                if (actual_array->m_dims[d].m_length) {
+                    extent = emit_i64_expr(actual_array->m_dims[d].m_length);
+                }
+                int64_t dst_off = cfi_header_bytes + DESC_DIM_BYTES * d;
+                desc_store_i64(cfi, dst_off + DESC_DIM_LBOUND, lbound);
+                desc_store_i64(cfi, dst_off + DESC_DIM_EXTENT, extent);
+                desc_store_i64(cfi, dst_off + DESC_DIM_STRIDE, stride);
+                stride = lr_emit_mul(s, ty_i64,
+                    V(stride, ty_i64), V(extent, ty_i64));
+            }
+        }
+
+        store_i32_at(cfi, 16, 20260322);
+        store_i8_at(cfi, 20, n_dims);
+        store_i8_at(cfi, 21, cfi_type_code(actual_type));
+        store_i8_at(cfi, 22, cfi_attribute_code(formal->m_type));
+        store_i8_at(cfi, 23, 0);
+        args.push_back(V(cfi, ty_ptr));
+        params.push_back(ty_ptr);
+        return true;
+    }
+
+    bool prepare_bindc_cfi_scalar_arg(ASR::expr_t *actual,
+            ASR::Variable_t *formal, std::vector<lr_operand_desc_t> &args,
+            std::vector<lr_type_t *> &params) {
+        if (ASRUtils::is_array(formal->m_type)) return false;
+        if (!ASRUtils::is_allocatable(formal->m_type) &&
+                !ASRUtils::is_pointer(formal->m_type)) {
+            return false;
+        }
+        ASR::ttype_t *formal_core =
+            ASRUtils::type_get_past_allocatable_pointer(formal->m_type);
+        if (ASR::is_a<ASR::String_t>(*formal_core)) return false;
+
+        ASR::ttype_t *actual_type = ASRUtils::expr_type(actual);
+        ASR::ttype_t *actual_core =
+            ASRUtils::type_get_past_allocatable_pointer(actual_type);
+        if (ASR::is_a<ASR::Array_t>(*actual_core)) return false;
+
+        bool was_target = is_target;
+        is_target = true;
+        visit_expr(*actual);
+        is_target = was_target;
+        uint32_t base = tmp;
+
+        uint32_t cfi = emit_storage_alloca_nbytes(24);
+        desc_store_base(cfi, base);
+        desc_store_i64(cfi, 8,
+            emit_i64_const(element_byte_size(actual_core)));
+        store_i32_at(cfi, 16, 20260322);
+        store_i8_at(cfi, 20, 0);
+        store_i8_at(cfi, 21, cfi_type_code(actual_core));
+        store_i8_at(cfi, 22, cfi_attribute_code(formal->m_type));
+        store_i8_at(cfi, 23, 0);
+        args.push_back(V(cfi, ty_ptr));
+        params.push_back(ty_ptr);
+        return true;
+    }
+
+    bool bindc_formal_is_cfi_array(ASR::Variable_t *formal,
+            ASR::Array_t **array_type = nullptr) {
+        ASR::ttype_t *type =
+            ASRUtils::type_get_past_allocatable_pointer(formal->m_type);
+        if (!ASR::is_a<ASR::Array_t>(*type)) return false;
+        ASR::Array_t *array = ASR::down_cast<ASR::Array_t>(type);
+        if (array->m_physical_type !=
+                    ASR::array_physical_typeType::DescriptorArray &&
+                array->m_physical_type !=
+                    ASR::array_physical_typeType::AssumedRankArray) {
+            return false;
+        }
+        if (array_type) *array_type = array;
+        return true;
+    }
+
+    uint32_t emit_internal_desc_from_cfi(uint32_t cfi,
+            ASR::Variable_t *formal) {
+        ASR::Array_t *array = nullptr;
+        if (!bindc_formal_is_cfi_array(formal, &array)) {
+            return cfi;
+        }
+        int n_dims = (int)array->n_dims;
+        uint32_t internal = emit_desc_alloca(n_dims);
+        desc_store_base(internal, desc_base_addr(cfi));
+        desc_store_i64(internal, 8, desc_load_i64(cfi, 8));
+        desc_store_rank(internal, n_dims);
+        desc_store_i64(internal, 24, emit_i64_const(0));
+        for (int d = 0; d < n_dims; d++) {
+            int64_t cfi_off = 24 + DESC_DIM_BYTES * d;
+            int64_t int_off = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
+            desc_store_i64(internal, int_off + DESC_DIM_LBOUND,
+                desc_load_i64(cfi, cfi_off + DESC_DIM_LBOUND));
+            desc_store_i64(internal, int_off + DESC_DIM_EXTENT,
+                desc_load_i64(cfi, cfi_off + DESC_DIM_EXTENT));
+            desc_store_i64(internal, int_off + DESC_DIM_STRIDE,
+                desc_load_i64(cfi, cfi_off + DESC_DIM_STRIDE));
+        }
+        return internal;
+    }
+
+    void emit_cfi_writeback_from_internal(uint32_t cfi, uint32_t internal,
+            ASR::Variable_t *formal) {
+        ASR::Array_t *array = nullptr;
+        if (!bindc_formal_is_cfi_array(formal, &array)) return;
+        int n_dims = (int)array->n_dims;
+        uint32_t base = desc_base_addr(internal);
+        uint32_t offset = desc_load_i64(internal, 24);
+        lr_operand_desc_t off[1] = {V(offset, ty_i64)};
+        uint32_t cfi_base = lr_emit_gep(s, ty_i8, V(base, ty_ptr), off, 1);
+        desc_store_base(cfi, cfi_base);
+        desc_store_i64(cfi, 8, desc_load_i64(internal, 8));
+        store_i32_at(cfi, 16, 20260322);
+        store_i8_at(cfi, 20, n_dims);
+        store_i8_at(cfi, 21, cfi_type_code(formal->m_type));
+        store_i8_at(cfi, 22, cfi_attribute_code(formal->m_type));
+        store_i8_at(cfi, 23, 0);
+        for (int d = 0; d < n_dims; d++) {
+            int64_t cfi_off = 24 + DESC_DIM_BYTES * d;
+            int64_t int_off = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
+            desc_store_i64(cfi, cfi_off + DESC_DIM_LBOUND,
+                desc_load_i64(internal, int_off + DESC_DIM_LBOUND));
+            desc_store_i64(cfi, cfi_off + DESC_DIM_EXTENT,
+                desc_load_i64(internal, int_off + DESC_DIM_EXTENT));
+            desc_store_i64(cfi, cfi_off + DESC_DIM_STRIDE,
+                desc_load_i64(internal, int_off + DESC_DIM_STRIDE));
+        }
+    }
+
     void emit_descriptor_chars_copy(uint32_t desc, uint32_t raw,
             uint32_t total, uint32_t elem_chars, bool raw_to_desc) {
         uint32_t base = desc_base_addr(desc);
@@ -7673,6 +7987,14 @@ public:
                             cargs, params, scratch)) {
                         continue;
                     }
+                    if (prepare_bindc_cfi_array_arg(actual, formal,
+                            cargs, params, scratch)) {
+                        continue;
+                    }
+                    if (prepare_bindc_cfi_scalar_arg(actual, formal,
+                            cargs, params)) {
+                        continue;
+                    }
                     if (expr_is_storage_reference(actual)) {
                         bool was_target = is_target;
                         is_target = true;
@@ -7869,6 +8191,14 @@ public:
                     } else {
                         if (prepare_bindc_cchar_array_arg(actual, formal,
                                 cargs, params, scratch)) {
+                            continue;
+                        }
+                        if (prepare_bindc_cfi_array_arg(actual, formal,
+                                cargs, params, scratch)) {
+                            continue;
+                        }
+                        if (prepare_bindc_cfi_scalar_arg(actual, formal,
+                                cargs, params)) {
                             continue;
                         }
                         if (expr_is_storage_reference(actual)) {
@@ -10647,8 +10977,17 @@ public:
 
     void visit_PointerAssociated(const ASR::PointerAssociated_t &x) {
         LIRIC_PASSTHROUGH(x)
-        visit_expr(*x.m_ptr);
-        uint32_t p = tmp;
+        ASR::ttype_t *ptr_type = ASRUtils::expr_type(x.m_ptr);
+        ASR::ttype_t *ptr_core =
+            ASRUtils::type_get_past_allocatable_pointer(ptr_type);
+        bool ptr_is_array = ASR::is_a<ASR::Array_t>(*ptr_core);
+        uint32_t p;
+        if (ptr_is_array) {
+            p = desc_base_addr(desc_ptr_of(x.m_ptr));
+        } else {
+            visit_expr(*x.m_ptr);
+            p = tmp;
+        }
         if (x.m_tgt) {
             bool was_target = is_target;
             is_target = true;
