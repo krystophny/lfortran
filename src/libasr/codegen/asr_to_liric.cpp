@@ -9498,6 +9498,49 @@ public:
         lr_session_emit(s, &d, nullptr);
     }
 
+    void file_write_runtime_record(uint32_t unit, uint32_t iostat,
+            uint32_t data, uint32_t len, uint32_t end_data,
+            uint32_t end_len) {
+        uint32_t fmt_sym = declare_global_cstring("%s%s", "_lr_fwfmt_file");
+        uint32_t fmt_len = emit_i64_const(4);
+        lr_type_t *params[] = {ty_i32, ty_ptr, ty_ptr, ty_i64};
+        declare_func("_lfortran_file_write", ty_void, params, 4, true);
+        uint32_t sym = lr_session_intern(s, "_lfortran_file_write");
+        lr_inst_desc_t d;
+        memset(&d, 0, sizeof(d));
+        lr_operand_desc_t ops[9] = {
+            LR_GLOBAL(sym, ty_ptr),
+            V(unit, ty_i32),
+            iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr),
+            LR_GLOBAL(fmt_sym, ty_ptr),
+            V(fmt_len, ty_i64),
+            V(data, ty_ptr),
+            V(len, ty_i64),
+            V(end_data, ty_ptr),
+            V(end_len, ty_i64)
+        };
+        d.op = LR_OP_CALL;
+        d.type = ty_void;
+        d.operands = ops;
+        d.num_operands = 9;
+        d.call_external_abi = true;
+        d.call_vararg = true;
+        d.call_fixed_args = 4;
+        lr_session_emit(s, &d, nullptr);
+    }
+
+    std::pair<uint32_t, uint32_t> file_write_end_data_len(
+            ASR::expr_t *end_expr) {
+        if (end_expr) {
+            return emit_string_data_len(end_expr);
+        }
+        uint32_t nl_sym = declare_global_cstring("\n", "_lr_fwnl");
+        lr_operand_desc_t off[1] = {I(0, ty_i64)};
+        uint32_t data = lr_emit_gep(s, ty_i8,
+            LR_GLOBAL(nl_sym, ty_ptr), off, 1);
+        return {data, emit_i64_const(1)};
+    }
+
     uint32_t scratch_io_data_ptr() {
         if (!scratch_io_data_sym) {
             std::vector<uint8_t> zeros(4096, 0);
@@ -10620,6 +10663,8 @@ public:
         uint32_t internal_unit_desc = 0;
         bool internal_unit_is_value = false;
         bool external_integer_write = false;
+        uint32_t external_unit = 0;
+        uint32_t external_iostat = emit_iostat_ptr(x.m_iostat);
         if (x.m_unit) {
             ASR::ttype_t *ut = ASRUtils::expr_type(x.m_unit);
             ut = ASRUtils::type_get_past_allocatable_pointer(ut);
@@ -10640,7 +10685,8 @@ public:
                 }
             } else if (ASR::is_a<ASR::Integer_t>(*ut)) {
                 visit_expr(*x.m_unit);
-                (void)tmp;
+                external_unit = cast_int_value(tmp,
+                    value_type_for_expr(x.m_unit), ty_i32);
                 external_integer_write = true;
                 scratch_io_clear();
             } else {
@@ -10672,6 +10718,12 @@ public:
             }
             if (external_integer_write) {
                 scratch_io_append(formatted.data, formatted.len);
+                uint32_t end_data = 0, end_len = 0;
+                std::tie(end_data, end_len) = file_write_end_data_len(x.m_end);
+                file_write_runtime_record(external_unit, external_iostat,
+                    scratch_io_data_ptr(),
+                    lr_emit_load(s, ty_i64, V(scratch_io_len_ptr(), ty_ptr)),
+                    end_data, end_len);
                 return;
             }
             file_write_emit_string(formatted.data, formatted.len);
@@ -10733,11 +10785,12 @@ public:
             return;
         }
         if (external_integer_write) {
-            uint32_t nl_sym = declare_global_cstring("\n", "_lr_fwnl");
-            lr_operand_desc_t off[1] = {I(0, ty_i64)};
-            uint32_t nl_data = lr_emit_gep(s, ty_i8,
-                LR_GLOBAL(nl_sym, ty_ptr), off, 1);
-            scratch_io_append(nl_data, emit_i64_const(1));
+            uint32_t end_data = 0, end_len = 0;
+            std::tie(end_data, end_len) = file_write_end_data_len(x.m_end);
+            file_write_runtime_record(external_unit, external_iostat,
+                scratch_io_data_ptr(),
+                lr_emit_load(s, ty_i64, V(scratch_io_len_ptr(), ty_ptr)),
+                end_data, end_len);
             return;
         }
         if (x.m_end) {
@@ -11026,12 +11079,43 @@ public:
         return cast_int_value(tmp, t, ty_i64);
     }
 
+    uint32_t emit_i32_const(int32_t value) {
+        return lr_emit_add(s, ty_i32, I(value, ty_i32), I(0, ty_i32));
+    }
+
     uint32_t emit_target_ptr(ASR::expr_t *expr) {
         bool was_target = is_target;
         is_target = true;
         visit_expr(*expr);
         is_target = was_target;
         return tmp;
+    }
+
+    std::pair<uint32_t, uint32_t> emit_string_data_len(
+            ASR::expr_t *expr) {
+        visit_expr(*expr);
+        uint32_t desc = tmp;
+        uint32_t fld0 = 0, fld1 = 1;
+        uint32_t data = lr_emit_extractvalue(s, ty_ptr,
+            V(desc, ty_str_desc), &fld0, 1);
+        uint32_t len = lr_emit_extractvalue(s, ty_i64,
+            V(desc, ty_str_desc), &fld1, 1);
+        return {data, len};
+    }
+
+    uint32_t emit_iostat_ptr(ASR::expr_t *expr) {
+        if (!expr) return 0;
+        return emit_target_ptr(expr);
+    }
+
+    uint32_t emit_optional_string_ptr(ASR::expr_t *expr, uint32_t &len) {
+        if (!expr) {
+            len = emit_i64_const(0);
+            return 0;
+        }
+        uint32_t data = 0;
+        std::tie(data, len) = emit_string_data_len(expr);
+        return data;
     }
 
     uint32_t emit_internal_read_int_token(uint32_t data, uint32_t len,
@@ -11280,11 +11364,9 @@ public:
             unit_type = ASRUtils::type_get_past_array(unit_type);
             if (ASR::is_a<ASR::Integer_t>(*unit_type)) {
                 visit_expr(*x.m_unit);
-                (void)tmp;
-                uint32_t data = scratch_io_data_ptr();
-                uint32_t len = lr_emit_load(s, ty_i64,
-                    V(scratch_io_len_ptr(), ty_ptr));
-                if (emit_integer_read_values(x, data, len)) {
+                uint32_t unit = cast_int_value(tmp,
+                    value_type_for_expr(x.m_unit), ty_i32);
+                if (emit_external_file_read_values(x, unit)) {
                     return;
                 }
             }
@@ -11306,52 +11388,187 @@ public:
         }
     }
 
-    // --- File I/O stubs (FileOpen/Close/Inquire/etc.) ---
-    //
-    // fpm does open and close files for build-system bookkeeping but
-    // never reads or writes through them in the modules we currently
-    // compile.  We emit calls into named (placeholder) runtime helpers
-    // so the IR builds; if these get exercised at runtime they will
-    // resolve to unimplemented stubs and trigger a clear error.
+    bool emit_external_file_read_value(ASR::expr_t *target, uint32_t unit,
+            uint32_t iostat) {
+        ASR::ttype_t *type = ASRUtils::expr_type(target);
+        type = ASRUtils::type_get_past_allocatable_pointer(type);
+        type = ASRUtils::type_get_past_array(type);
+        if (ASR::is_a<ASR::Integer_t>(*type)) {
+            int kind = ASRUtils::extract_kind_from_ttype_t(type);
+            uint32_t ptr = emit_target_ptr(target);
+            const char *name = nullptr;
+            if (kind == 2) name = "_lfortran_read_int16";
+            else if (kind == 4) name = "_lfortran_read_int32";
+            else if (kind == 8) name = "_lfortran_read_int64";
+            else return false;
+            lr_type_t *p[] = {ty_ptr, ty_i32, ty_ptr};
+            declare_func(name, ty_void, p, 3, false);
+            lr_operand_desc_t args[] = {
+                V(ptr, ty_ptr), V(unit, ty_i32),
+                iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr)
+            };
+            emit_call_void(name, args, 3);
+            return true;
+        }
+        if (ASR::is_a<ASR::Real_t>(*type)) {
+            int kind = ASRUtils::extract_kind_from_ttype_t(type);
+            uint32_t ptr = emit_target_ptr(target);
+            const char *name = nullptr;
+            if (kind == 4) name = "_lfortran_read_float";
+            else if (kind == 8) name = "_lfortran_read_double";
+            else return false;
+            lr_type_t *p[] = {ty_ptr, ty_i32, ty_ptr};
+            declare_func(name, ty_void, p, 3, false);
+            lr_operand_desc_t args[] = {
+                V(ptr, ty_ptr), V(unit, ty_i32),
+                iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr)
+            };
+            emit_call_void(name, args, 3);
+            return true;
+        }
+        if (ASR::is_a<ASR::String_t>(*type)) {
+            uint32_t desc_ptr = emit_target_ptr(target);
+            ASR::String_t *st = ASR::down_cast<ASR::String_t>(type);
+            int64_t len_const = -1;
+            uint32_t len = 0;
+            if (st->m_len && ASRUtils::extract_value(st->m_len, len_const)) {
+                len = emit_i64_const(len_const);
+            } else {
+                uint32_t desc = lr_emit_load(s, ty_str_desc,
+                    V(desc_ptr, ty_ptr));
+                uint32_t fld1 = 1;
+                len = lr_emit_extractvalue(s, ty_i64,
+                    V(desc, ty_str_desc), &fld1, 1);
+            }
+            lr_type_t *p[] = {ty_ptr, ty_i64, ty_i32, ty_ptr};
+            declare_func("_lfortran_read_char", ty_void, p, 4, false);
+            lr_operand_desc_t args[] = {
+                V(desc_ptr, ty_ptr), V(len, ty_i64), V(unit, ty_i32),
+                iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr)
+            };
+            emit_call_void("_lfortran_read_char", args, 4);
+            return true;
+        }
+        return false;
+    }
+
+    bool emit_external_file_read_values(const ASR::FileRead_t &x,
+            uint32_t unit) {
+        uint32_t iostat = emit_iostat_ptr(x.m_iostat);
+        for (size_t i = 0; i < x.n_values; i++) {
+            if (!emit_external_file_read_value(x.m_values[i], unit, iostat)) {
+                return false;
+            }
+        }
+        lr_type_t *p[] = {ty_i32, ty_ptr, ty_i32};
+        declare_func("_lfortran_empty_read", ty_void, p, 3, false);
+        lr_operand_desc_t args[] = {
+            V(unit, ty_i32), iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr),
+            I(0, ty_i32)
+        };
+        emit_call_void("_lfortran_empty_read", args, 3);
+        return true;
+    }
 
     void visit_FileOpen(const ASR::FileOpen_t &x) {
-        // Set iostat to 0 when present so callers think the open
-        // succeeded - good enough for the static analysis of fpm's
-        // build code we are currently passing through.
-        if (x.m_iostat) {
-            bool was_target = is_target;
-            is_target = true;
-            visit_expr(*x.m_iostat);
-            is_target = was_target;
-            uint32_t slot = tmp;
-            lr_emit_store(s, I(0, ty_i32), V(slot, ty_ptr));
-        }
-        // Evaluate newunit if present so the caller's unit variable is
-        // bound to a (placeholder) number.
-        if (x.m_newunit) {
-            bool was_target = is_target;
-            is_target = true;
-            visit_expr(*x.m_newunit);
-            is_target = was_target;
-            uint32_t slot = tmp;
-            lr_emit_store(s, I(99, ty_i32), V(slot, ty_ptr));
-        }
+        uint32_t unit = x.m_newunit ? emit_i32_value(x.m_newunit) : emit_i32_const(-1);
+        uint32_t filename_len = 0, status_len = 0, form_len = 0;
+        uint32_t access_len = 0, iomsg_len = 0, action_len = 0;
+        uint32_t delim_len = 0, position_len = 0, blank_len = 0;
+        uint32_t encoding_len = 0, sign_len = 0, decimal_len = 0;
+        uint32_t round_len = 0, pad_len = 0;
+        uint32_t filename = emit_optional_string_ptr(x.m_filename, filename_len);
+        uint32_t status = emit_optional_string_ptr(x.m_status, status_len);
+        uint32_t form = emit_optional_string_ptr(x.m_form, form_len);
+        uint32_t access = emit_optional_string_ptr(x.m_access, access_len);
+        uint32_t iomsg = emit_optional_string_ptr(x.m_iomsg, iomsg_len);
+        uint32_t action = emit_optional_string_ptr(x.m_action, action_len);
+        uint32_t delim = emit_optional_string_ptr(x.m_delim, delim_len);
+        uint32_t position = emit_optional_string_ptr(x.m_position, position_len);
+        uint32_t blank = emit_optional_string_ptr(x.m_blank, blank_len);
+        uint32_t encoding = emit_optional_string_ptr(x.m_encoding, encoding_len);
+        uint32_t sign = emit_optional_string_ptr(x.m_sign, sign_len);
+        uint32_t decimal = emit_optional_string_ptr(x.m_decimal, decimal_len);
+        uint32_t round = emit_optional_string_ptr(x.m_round, round_len);
+        uint32_t pad = emit_optional_string_ptr(x.m_pad, pad_len);
+        uint32_t recl = x.m_recl ? emit_target_ptr(x.m_recl) : 0;
+        uint32_t iostat = emit_iostat_ptr(x.m_iostat);
+
+        lr_type_t *p[] = {
+            ty_i32, ty_ptr, ty_i64, ty_ptr, ty_i64, ty_ptr, ty_i64,
+            ty_ptr, ty_i64, ty_ptr, ty_i64, ty_ptr, ty_ptr, ty_i64,
+            ty_ptr, ty_i64, ty_ptr, ty_i64, ty_ptr, ty_i64, ty_ptr,
+            ty_i64, ty_ptr, ty_i64, ty_ptr, ty_i64, ty_ptr, ty_i64,
+            ty_ptr, ty_i64, ty_ptr, ty_i64
+        };
+        declare_func("_lfortran_open", ty_i64, p, 31, false);
+        lr_operand_desc_t args[] = {
+            V(unit, ty_i32),
+            filename ? V(filename, ty_ptr) : LR_NULL(ty_ptr),
+            V(filename_len, ty_i64),
+            status ? V(status, ty_ptr) : LR_NULL(ty_ptr),
+            V(status_len, ty_i64),
+            form ? V(form, ty_ptr) : LR_NULL(ty_ptr), V(form_len, ty_i64),
+            access ? V(access, ty_ptr) : LR_NULL(ty_ptr),
+            V(access_len, ty_i64),
+            iomsg ? V(iomsg, ty_ptr) : LR_NULL(ty_ptr), V(iomsg_len, ty_i64),
+            iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr),
+            action ? V(action, ty_ptr) : LR_NULL(ty_ptr), V(action_len, ty_i64),
+            delim ? V(delim, ty_ptr) : LR_NULL(ty_ptr), V(delim_len, ty_i64),
+            position ? V(position, ty_ptr) : LR_NULL(ty_ptr),
+            V(position_len, ty_i64),
+            blank ? V(blank, ty_ptr) : LR_NULL(ty_ptr), V(blank_len, ty_i64),
+            encoding ? V(encoding, ty_ptr) : LR_NULL(ty_ptr),
+            V(encoding_len, ty_i64),
+            recl ? V(recl, ty_ptr) : LR_NULL(ty_ptr),
+            sign ? V(sign, ty_ptr) : LR_NULL(ty_ptr), V(sign_len, ty_i64),
+            decimal ? V(decimal, ty_ptr) : LR_NULL(ty_ptr),
+            V(decimal_len, ty_i64),
+            round ? V(round, ty_ptr) : LR_NULL(ty_ptr), V(round_len, ty_i64),
+            pad ? V(pad, ty_ptr) : LR_NULL(ty_ptr), V(pad_len, ty_i64)
+        };
+        (void)emit_call("_lfortran_open", ty_i64, args, 31);
     }
 
     void visit_FileClose(const ASR::FileClose_t &x) {
-        if (x.m_iostat) {
-            bool was_target = is_target;
-            is_target = true;
-            visit_expr(*x.m_iostat);
-            is_target = was_target;
-            uint32_t slot = tmp;
-            lr_emit_store(s, I(0, ty_i32), V(slot, ty_ptr));
-        }
+        uint32_t unit = x.m_unit ? emit_i32_value(x.m_unit) : emit_i32_const(-1);
+        uint32_t status_len = 0;
+        uint32_t status = emit_optional_string_ptr(x.m_status, status_len);
+        uint32_t iostat = emit_iostat_ptr(x.m_iostat);
+        lr_type_t *p[] = {ty_i32, ty_ptr, ty_i64, ty_ptr};
+        declare_func("_lfortran_close", ty_void, p, 4, false);
+        lr_operand_desc_t args[] = {
+            V(unit, ty_i32),
+            status ? V(status, ty_ptr) : LR_NULL(ty_ptr),
+            V(status_len, ty_i64),
+            iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr)
+        };
+        emit_call_void("_lfortran_close", args, 4);
     }
 
     void visit_FileBackspace(const ASR::FileBackspace_t & /*x*/) {}
-    void visit_FileRewind(const ASR::FileRewind_t & /*x*/) {}
-    void visit_FileEndfile(const ASR::FileEndfile_t & /*x*/) {}
+    void visit_FileRewind(const ASR::FileRewind_t &x) {
+        uint32_t unit = x.m_unit ? emit_i32_value(x.m_unit) : emit_i32_const(-1);
+        uint32_t iomsg_len = 0;
+        uint32_t iomsg = emit_optional_string_ptr(x.m_iomsg, iomsg_len);
+        uint32_t iostat = emit_iostat_ptr(x.m_iostat);
+        lr_type_t *p[] = {ty_i32, ty_ptr, ty_ptr, ty_i64};
+        declare_func("_lfortran_rewind", ty_void, p, 4, false);
+        lr_operand_desc_t args[] = {
+            V(unit, ty_i32),
+            iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr),
+            iomsg ? V(iomsg, ty_ptr) : LR_NULL(ty_ptr),
+            V(iomsg_len, ty_i64)
+        };
+        emit_call_void("_lfortran_rewind", args, 4);
+    }
+    void visit_FileEndfile(const ASR::FileEndfile_t &x) {
+        uint32_t unit = x.m_unit ? emit_i32_value(x.m_unit) : emit_i32_const(-1);
+        lr_type_t *p[] = {ty_i32};
+        declare_func("_lfortran_endfile", ty_void, p, 1, false);
+        lr_operand_desc_t args[] = {V(unit, ty_i32)};
+        emit_call_void("_lfortran_endfile", args, 1);
+    }
 
     void visit_FileInquire(const ASR::FileInquire_t &x) {
         auto store_zero = [&](ASR::expr_t *e, lr_type_t *t) {
