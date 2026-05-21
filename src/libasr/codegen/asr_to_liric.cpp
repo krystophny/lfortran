@@ -11360,7 +11360,7 @@ public:
         if (emit_internal_integer_read(x)) {
             return;
         }
-        if (x.m_unit && x.n_values > 0) {
+        if (x.m_unit) {
             ASR::ttype_t *unit_type = ASRUtils::expr_type(x.m_unit);
             unit_type = ASRUtils::type_get_past_allocatable_pointer(unit_type);
             unit_type = ASRUtils::type_get_past_array(unit_type);
@@ -11732,7 +11732,7 @@ public:
         declare_func("_lfortran_empty_read", ty_void, p, 3, false);
         lr_operand_desc_t args[] = {
             V(unit, ty_i32), iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr),
-            I(0, ty_i32)
+            I(x.n_values == 0 ? 1 : 0, ty_i32)
         };
         emit_call_void("_lfortran_empty_read", args, 3);
         return true;
