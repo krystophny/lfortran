@@ -5013,6 +5013,71 @@ public:
         tmp = list_len(emit_list_ptr(x.m_arg));
     }
 
+    void visit_ListInsert(const ASR::ListInsert_t &x) {
+        ASR::List_t *list_t = ASR::down_cast<ASR::List_t>(
+            ASRUtils::expr_type(x.m_a));
+        uint32_t list_ptr = emit_list_ptr(x.m_a);
+        uint32_t pos = emit_i64_expr(x.m_pos);
+        uint32_t len = list_len(list_ptr);
+        uint32_t new_len = lr_emit_add(s, ty_i64, V(len, ty_i64),
+            I(1, ty_i64));
+        ensure_list_capacity(list_ptr, list_t->m_type, new_len);
+        uint32_t data = list_data(list_ptr);
+        int64_t elem_size = element_byte_size(list_t->m_type);
+        uint32_t src = list_elem_ptr(data, pos, elem_size);
+        uint32_t dst_pos = lr_emit_add(s, ty_i64, V(pos, ty_i64),
+            I(1, ty_i64));
+        uint32_t dst = list_elem_ptr(data, dst_pos, elem_size);
+        uint32_t move_count = lr_emit_sub(s, ty_i64, V(len, ty_i64),
+            V(pos, ty_i64));
+        uint32_t move_bytes = lr_emit_mul(s, ty_i64, V(move_count, ty_i64),
+            I(elem_size, ty_i64));
+        emit_memmove_dynamic(dst, src, move_bytes);
+        visit_expr(*x.m_ele);
+        uint32_t value = tmp;
+        if (ASR::is_a<ASR::List_t>(*list_t->m_type)) {
+            value = clone_list_desc(ASR::down_cast<ASR::List_t>(
+                list_t->m_type), value);
+        }
+        lr_emit_store(s, V(value, get_type(list_t->m_type)), V(src, ty_ptr));
+        list_store_len(list_ptr, new_len);
+    }
+
+    void visit_ListRemove(const ASR::ListRemove_t &x) {
+        ASR::List_t *list_t = ASR::down_cast<ASR::List_t>(
+            ASRUtils::expr_type(x.m_a));
+        uint32_t list_ptr = emit_list_ptr(x.m_a);
+        visit_expr(*x.m_ele);
+        uint32_t needle = tmp;
+        uint32_t data = list_data(list_ptr);
+        uint32_t len = list_len(list_ptr);
+        int64_t elem_size = element_byte_size(list_t->m_type);
+        lr_type_t *elem_lr = get_type(list_t->m_type);
+        uint32_t found = emit_linear_find(data, len, elem_size, elem_lr,
+            needle);
+        uint32_t exists = lr_emit_icmp(s, LR_CMP_NE, V(found, ty_i64),
+            I(-1, ty_i64));
+        uint32_t remove_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(exists, ty_i1), remove_bb, done_bb);
+        lr_error_t err;
+        lr_session_set_block(s, remove_bb, &err);
+        uint32_t next = lr_emit_add(s, ty_i64, V(found, ty_i64),
+            I(1, ty_i64));
+        uint32_t new_len = lr_emit_sub(s, ty_i64, V(len, ty_i64),
+            I(1, ty_i64));
+        uint32_t dst = list_elem_ptr(data, found, elem_size);
+        uint32_t src = list_elem_ptr(data, next, elem_size);
+        uint32_t move_count = lr_emit_sub(s, ty_i64, V(len, ty_i64),
+            V(next, ty_i64));
+        uint32_t move_bytes = lr_emit_mul(s, ty_i64, V(move_count, ty_i64),
+            I(elem_size, ty_i64));
+        emit_memmove_dynamic(dst, src, move_bytes);
+        list_store_len(list_ptr, new_len);
+        lr_emit_br(s, done_bb);
+        lr_session_set_block(s, done_bb, &err);
+    }
+
     void visit_ListItem(const ASR::ListItem_t &x) {
         ASR::List_t *list_t = ASR::down_cast<ASR::List_t>(
             ASRUtils::expr_type(x.m_a));
@@ -5183,10 +5248,32 @@ public:
     }
 
     uint32_t emit_scalar_equal(uint32_t lhs, uint32_t rhs, lr_type_t *type) {
+        if (type == ty_str_desc) {
+            uint32_t fld0 = 0, fld1 = 1;
+            uint32_t l_data = lr_emit_extractvalue(s, ty_ptr,
+                V(lhs, ty_str_desc), &fld0, 1);
+            uint32_t l_len = lr_emit_extractvalue(s, ty_i64,
+                V(lhs, ty_str_desc), &fld1, 1);
+            uint32_t r_data = lr_emit_extractvalue(s, ty_ptr,
+                V(rhs, ty_str_desc), &fld0, 1);
+            uint32_t r_len = lr_emit_extractvalue(s, ty_i64,
+                V(rhs, ty_str_desc), &fld1, 1);
+            return emit_string_compare_value(l_data, l_len, r_data, r_len,
+                LR_CMP_EQ);
+        }
         if (type == ty_f32 || type == ty_f64) {
             return lr_emit_fcmp(s, LR_FCMP_OEQ, V(lhs, type), V(rhs, type));
         }
         return lr_emit_icmp(s, LR_CMP_EQ, V(lhs, type), V(rhs, type));
+    }
+
+    void emit_memmove_dynamic(uint32_t dst, uint32_t src, uint32_t nbytes) {
+        lr_type_t *params[] = {ty_ptr, ty_ptr, ty_i64};
+        declare_func("memmove", ty_ptr, params, 3, false);
+        lr_operand_desc_t args[] = {
+            V(dst, ty_ptr), V(src, ty_ptr), V(nbytes, ty_i64)
+        };
+        emit_call("memmove", ty_ptr, args, 3);
     }
 
     uint32_t emit_linear_find(uint32_t data, uint32_t len,
