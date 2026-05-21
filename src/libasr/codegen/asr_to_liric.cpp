@@ -11452,11 +11452,79 @@ public:
         return false;
     }
 
+    bool emit_external_file_read_idl(ASR::ImpliedDoLoop_t *idl,
+            uint32_t unit, uint32_t iostat) {
+        if (!ASR::is_a<ASR::Var_t>(*idl->m_var)) {
+            return false;
+        }
+        uint32_t start = emit_expr_i64(idl->m_start);
+        uint32_t end = emit_expr_i64(idl->m_end);
+        uint32_t step = idl->m_increment
+            ? emit_expr_i64(idl->m_increment)
+            : emit_i64_const(1);
+
+        uint32_t loop_ptr = emit_target_ptr(idl->m_var);
+        lr_type_t *loop_lr = value_type_for_expr(idl->m_var);
+        uint32_t cur_ptr = lr_emit_alloca(s, ty_i64);
+        lr_emit_store(s, V(start, ty_i64), V(cur_ptr, ty_ptr));
+
+        lr_error_t err;
+        uint32_t head = lr_session_block(s);
+        uint32_t body = lr_session_block(s);
+        uint32_t done = lr_session_block(s);
+        lr_emit_br(s, head);
+
+        lr_session_set_block(s, head, &err);
+        uint32_t cur = lr_emit_load(s, ty_i64, V(cur_ptr, ty_ptr));
+        uint32_t step_pos = lr_emit_icmp(s, LR_CMP_SGT,
+            V(step, ty_i64), I(0, ty_i64));
+        uint32_t asc = lr_emit_icmp(s, LR_CMP_SLE,
+            V(cur, ty_i64), V(end, ty_i64));
+        uint32_t desc = lr_emit_icmp(s, LR_CMP_SGE,
+            V(cur, ty_i64), V(end, ty_i64));
+        uint32_t more = lr_emit_select(s, ty_i1,
+            V(step_pos, ty_i1), V(asc, ty_i1), V(desc, ty_i1));
+        lr_emit_condbr(s, V(more, ty_i1), body, done);
+
+        lr_session_set_block(s, body, &err);
+        uint32_t loop_val = cast_int_value(cur, ty_i64, loop_lr);
+        lr_emit_store(s, V(loop_val, loop_lr), V(loop_ptr, ty_ptr));
+        for (size_t i = 0; i < idl->n_values; i++) {
+            ASR::expr_t *value = idl->m_values[i];
+            bool ok = ASR::is_a<ASR::ImpliedDoLoop_t>(*value)
+                ? emit_external_file_read_idl(
+                    ASR::down_cast<ASR::ImpliedDoLoop_t>(value),
+                    unit, iostat)
+                : emit_external_file_read_value(value, unit, iostat);
+            if (!ok) return false;
+        }
+        uint32_t next = lr_emit_add(s, ty_i64,
+            V(cur, ty_i64), V(step, ty_i64));
+        lr_emit_store(s, V(next, ty_i64), V(cur_ptr, ty_ptr));
+        lr_emit_br(s, head);
+
+        lr_session_set_block(s, done, &err);
+        uint32_t final_val = lr_emit_load(s, ty_i64, V(cur_ptr, ty_ptr));
+        final_val = cast_int_value(final_val, ty_i64, loop_lr);
+        lr_emit_store(s, V(final_val, loop_lr), V(loop_ptr, ty_ptr));
+        return true;
+    }
+
+    bool emit_external_file_read_expr(ASR::expr_t *target, uint32_t unit,
+            uint32_t iostat) {
+        if (ASR::is_a<ASR::ImpliedDoLoop_t>(*target)) {
+            return emit_external_file_read_idl(
+                ASR::down_cast<ASR::ImpliedDoLoop_t>(target),
+                unit, iostat);
+        }
+        return emit_external_file_read_value(target, unit, iostat);
+    }
+
     bool emit_external_file_read_values(const ASR::FileRead_t &x,
             uint32_t unit) {
         uint32_t iostat = emit_iostat_ptr(x.m_iostat);
         for (size_t i = 0; i < x.n_values; i++) {
-            if (!emit_external_file_read_value(x.m_values[i], unit, iostat)) {
+            if (!emit_external_file_read_expr(x.m_values[i], unit, iostat)) {
                 return false;
             }
         }
