@@ -7841,8 +7841,11 @@ public:
             ASR::expr_t *unit_arg = x.m_args[0].m_value;
             uint32_t unit_ptr = emit_target_ptr(unit_arg);
             lr_type_t *unit_lr = get_type(ASRUtils::expr_type(unit_arg));
-            uint32_t unit_value = cast_int_value(
-                emit_i64_const(10), ty_i64, unit_lr);
+            declare_func("_lfortran_get_newunit", ty_i32, nullptr, 0,
+                false);
+            uint32_t newunit = emit_call("_lfortran_get_newunit", ty_i32,
+                nullptr, 0);
+            uint32_t unit_value = cast_int_value(newunit, ty_i32, unit_lr);
             lr_emit_store(s, V(unit_value, unit_lr), V(unit_ptr, ty_ptr));
             return;
         }
