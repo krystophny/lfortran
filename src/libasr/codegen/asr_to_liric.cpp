@@ -819,6 +819,45 @@ public:
 
     void visit_LogicalNot(const ASR::LogicalNot_t &x) {
         LIRIC_PASSTHROUGH(x)
+        ASR::Array_t *array_t = nullptr;
+        if (expr_is_array(x.m_arg, &array_t)) {
+            ArrayLinearView src = emit_array_linear_view(x.m_arg, array_t);
+            uint32_t bytes = lr_emit_mul(s, ty_i64,
+                V(src.total, ty_i64), V(src.elem_len, ty_i64));
+            uint32_t dst = emit_storage_alloca_nbytes(bytes);
+            uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+            lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+
+            lr_error_t err;
+            uint32_t head = lr_session_block(s);
+            uint32_t body = lr_session_block(s);
+            uint32_t done = lr_session_block(s);
+            lr_emit_br(s, head);
+
+            lr_session_set_block(s, head, &err);
+            uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+            uint32_t more = lr_emit_icmp(s, LR_CMP_SLT,
+                V(idx, ty_i64), V(src.total, ty_i64));
+            lr_emit_condbr(s, V(more, ty_i1), body, done);
+
+            lr_session_set_block(s, body, &err);
+            uint32_t src_elem = emit_linear_elem_ptr(
+                src.base, idx, src.elem_len);
+            uint32_t dst_elem = emit_linear_elem_ptr(
+                dst, idx, src.elem_len);
+            uint32_t value = lr_emit_load(s, ty_i1, V(src_elem, ty_ptr));
+            uint32_t not_value = lr_emit_xor(s, ty_i1,
+                V(value, ty_i1), I(1, ty_i1));
+            lr_emit_store(s, V(not_value, ty_i1), V(dst_elem, ty_ptr));
+            uint32_t next = lr_emit_add(s, ty_i64,
+                V(idx, ty_i64), I(1, ty_i64));
+            lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+            lr_emit_br(s, head);
+
+            lr_session_set_block(s, done, &err);
+            tmp = dst;
+            return;
+        }
         visit_expr(*x.m_arg);
         tmp = lr_emit_xor(s, ty_i1, V(tmp, ty_i1), I(1, ty_i1));
     }
@@ -865,9 +904,58 @@ public:
 
         collect_known_structs(x.m_symtab);
 
-        // Visit all symbols
+        // Pre-pass: register module variable globals and seed
+        // module_init_vars BEFORE any visit_Program runs the main-entry
+        // init loop.  Function emission order still follows the
+        // symtab-iteration order below, so host-association inside
+        // module-defined contained subroutines is unchanged; only the
+        // globals/init-vars side of visit_Module is hoisted out.
+        for (auto &item : x.m_symtab->get_scope()) {
+            if (is_a<ASR::Module_t>(*item.second)) {
+                register_module_globals(
+                    *down_cast<ASR::Module_t>(item.second),
+                    /*init_vars_only=*/true);
+            }
+        }
+
+        // Visit all symbols (functions, programs, modules) in symtab
+        // order.  visit_Module's own register_module_globals call is a
+        // no-op the second time around because lr_globals already
+        // contains the entries.
         for (auto &item : x.m_symtab->get_scope()) {
             visit_symbol(*item.second);
+        }
+    }
+
+    // Register module-level Variable globals and seed module_init_vars.
+    // Idempotent: lr_globals.count(h) guards re-registration.  Used by
+    // the visit_TranslationUnit pre-pass and by visit_Module itself.
+    //
+    // When called from the pre-pass (init_vars_only=true) we only emit
+    // globals for vars that need module_init_vars seeding (those with
+    // m_value).  Otherwise this is the original visit_Module behaviour:
+    // emit globals for every module-level Variable.
+    void register_module_globals(const ASR::Module_t &x,
+            bool init_vars_only=false) {
+        if (x.m_intrinsic) return;
+        if (x.m_loaded_from_mod) return;
+        for (auto &item : x.m_symtab->get_scope()) {
+            if (!is_a<ASR::Variable_t>(*item.second)) continue;
+            ASR::Variable_t *v = down_cast<ASR::Variable_t>(item.second);
+            if (init_vars_only && !v->m_value) continue;
+            uint64_t h = get_hash((ASR::asr_t *)v);
+            if (lr_globals.count(h)) continue;
+            uint64_t nbytes = storage_size_for_variable(v);
+            std::vector<uint8_t> zeros(nbytes, 0);
+            std::string gname = module_variable_global_name(
+                item.second, v);
+            lr_session_global(s, gname.c_str(),
+                lr_type_array_s(s, ty_i8, nbytes),
+                false, zeros.data(), nbytes);
+            lr_globals[h] = lr_session_intern(s, gname.c_str());
+            if (v->m_value) {
+                module_init_vars.push_back(v);
+            }
         }
     }
 
@@ -898,24 +986,11 @@ public:
         // are emitted in the .o file that defines them; emitting them
         // here would create duplicate definitions in every consumer.
         if (x.m_loaded_from_mod) return;
-        for (auto &item : x.m_symtab->get_scope()) {
-            if (is_a<ASR::Variable_t>(*item.second)) {
-                ASR::Variable_t *v = down_cast<ASR::Variable_t>(item.second);
-                uint64_t h = get_hash((ASR::asr_t *)v);
-                if (lr_globals.count(h)) continue;
-                uint64_t nbytes = storage_size_for_variable(v);
-                std::vector<uint8_t> zeros(nbytes, 0);
-                std::string gname = module_variable_global_name(
-                    item.second, v);
-                lr_session_global(s, gname.c_str(),
-                    lr_type_array_s(s, ty_i8, nbytes),
-                    false, zeros.data(), nbytes);
-                lr_globals[h] = lr_session_intern(s, gname.c_str());
-                if (v->m_value) {
-                    module_init_vars.push_back(v);
-                }
-            }
-        }
+        // Idempotent: visit_TranslationUnit's pre-pass usually already
+        // ran this, but for nested modules (visited recursively from a
+        // parent symtab) the pre-pass may not have covered them, so we
+        // still call it here.
+        register_module_globals(x);
         for (auto &item : x.m_symtab->get_scope()) {
             if (is_a<ASR::Function_t>(*item.second)) {
                 visit_symbol(*item.second);
@@ -2657,6 +2732,128 @@ public:
         if (target_is_array) {
             ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(
                 target_naked);
+            auto unwrapped_array_value = [&]() {
+                ASR::expr_t *value = x.m_value;
+                while (ASR::is_a<ASR::ArrayPhysicalCast_t>(*value) ||
+                        ASR::is_a<ASR::Cast_t>(*value)) {
+                    if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*value)) {
+                        value = ASR::down_cast<ASR::ArrayPhysicalCast_t>(
+                            value)->m_arg;
+                    } else {
+                        value = ASR::down_cast<ASR::Cast_t>(value)->m_arg;
+                    }
+                }
+                return value;
+            };
+            auto emit_array_broadcast_assignment = [&]() {
+                ASR::expr_t *rhs_value = unwrapped_array_value();
+                if (!ASR::is_a<ASR::ArrayBroadcast_t>(*rhs_value)) {
+                    return false;
+                }
+                ASR::ArrayBroadcast_t *broadcast =
+                    ASR::down_cast<ASR::ArrayBroadcast_t>(rhs_value);
+                ASR::ttype_t *elem_type =
+                    ASRUtils::type_get_past_allocatable_pointer(
+                        array_t->m_type);
+                elem_type = ASRUtils::type_get_past_array(elem_type);
+                if (ASR::is_a<ASR::String_t>(*elem_type)) {
+                    return false;
+                }
+
+                ASR::expr_t *scalar = broadcast->m_value
+                    ? broadcast->m_value : broadcast->m_array;
+                visit_expr(*scalar);
+                uint32_t scalar_value = tmp;
+                lr_type_t *elem_lr = get_type(elem_type);
+                ArrayLinearView dst = emit_array_linear_view(
+                    x.m_target, array_t);
+                uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+                lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+
+                lr_error_t err;
+                uint32_t head = lr_session_block(s);
+                uint32_t body = lr_session_block(s);
+                uint32_t done = lr_session_block(s);
+                lr_emit_br(s, head);
+
+                lr_session_set_block(s, head, &err);
+                uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+                uint32_t more = lr_emit_icmp(s, LR_CMP_SLT,
+                    V(idx, ty_i64), V(dst.total, ty_i64));
+                lr_emit_condbr(s, V(more, ty_i1), body, done);
+
+                lr_session_set_block(s, body, &err);
+                uint32_t dst_elem = emit_linear_elem_ptr(
+                    dst.base, idx, dst.elem_len);
+                lr_emit_store(s, V(scalar_value, elem_lr),
+                    V(dst_elem, ty_ptr));
+                uint32_t next = lr_emit_add(s, ty_i64,
+                    V(idx, ty_i64), I(1, ty_i64));
+                lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+                lr_emit_br(s, head);
+
+                lr_session_set_block(s, done, &err);
+                return true;
+            };
+            if (emit_array_broadcast_assignment()) {
+                return;
+            }
+            auto emit_logical_not_assignment = [&]() {
+                ASR::expr_t *rhs_value = unwrapped_array_value();
+                if (!ASR::is_a<ASR::LogicalNot_t>(*rhs_value)) {
+                    return false;
+                }
+                ASR::LogicalNot_t *logical_not =
+                    ASR::down_cast<ASR::LogicalNot_t>(rhs_value);
+                ASR::Array_t *source_array = nullptr;
+                if (!expr_is_array(logical_not->m_arg, &source_array)) {
+                    return false;
+                }
+                ArrayLinearView src = emit_array_linear_view(
+                    logical_not->m_arg, source_array);
+                ArrayLinearView dst = emit_array_linear_view(
+                    x.m_target, array_t);
+                uint32_t copy_n = lr_emit_select(s, ty_i64,
+                    V(lr_emit_icmp(s, LR_CMP_SLT,
+                        V(src.total, ty_i64), V(dst.total, ty_i64)),
+                        ty_i1),
+                    V(src.total, ty_i64), V(dst.total, ty_i64));
+                uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+                lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+
+                lr_error_t err;
+                uint32_t head = lr_session_block(s);
+                uint32_t body = lr_session_block(s);
+                uint32_t done = lr_session_block(s);
+                lr_emit_br(s, head);
+
+                lr_session_set_block(s, head, &err);
+                uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+                uint32_t more = lr_emit_icmp(s, LR_CMP_SLT,
+                    V(idx, ty_i64), V(copy_n, ty_i64));
+                lr_emit_condbr(s, V(more, ty_i1), body, done);
+
+                lr_session_set_block(s, body, &err);
+                uint32_t src_elem = emit_linear_elem_ptr(
+                    src.base, idx, src.elem_len);
+                uint32_t dst_elem = emit_linear_elem_ptr(
+                    dst.base, idx, dst.elem_len);
+                uint32_t value = lr_emit_load(s, ty_i1,
+                    V(src_elem, ty_ptr));
+                uint32_t not_value = lr_emit_xor(s, ty_i1,
+                    V(value, ty_i1), I(1, ty_i1));
+                lr_emit_store(s, V(not_value, ty_i1), V(dst_elem, ty_ptr));
+                uint32_t next = lr_emit_add(s, ty_i64,
+                    V(idx, ty_i64), I(1, ty_i64));
+                lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+                lr_emit_br(s, head);
+
+                lr_session_set_block(s, done, &err);
+                return true;
+            };
+            if (emit_logical_not_assignment()) {
+                return;
+            }
             if (array_t->m_physical_type ==
                     ASR::array_physical_typeType::DescriptorArray) {
                 if (!ASRUtils::is_allocatable(target_expr_type) &&
@@ -10159,7 +10356,7 @@ public:
     }
 
     bool expr_is_array(ASR::expr_t *expr, ASR::Array_t **array_t) {
-        ASR::ttype_t *type = ASRUtils::expr_type(expr);
+        ASR::ttype_t *type = expr_storage_type(expr);
         type = ASRUtils::type_get_past_allocatable_pointer(type);
         if (!ASR::is_a<ASR::Array_t>(*type)) {
             return false;
@@ -10780,6 +10977,9 @@ public:
             for (size_t i = 0; i < n_values; i++) {
                 chunks.push_back(raw_write_chunk_for_value(values[i]));
             }
+            if (x.m_rec) {
+                emit_seek_record(x.m_rec, external_unit, external_iostat);
+            }
             file_write_runtime_raw(external_unit, external_iostat, chunks);
             return;
         }
@@ -10801,6 +11001,9 @@ public:
                 scratch_io_append(formatted.data, formatted.len);
                 uint32_t end_data = 0, end_len = 0;
                 std::tie(end_data, end_len) = file_write_end_data_len(x.m_end);
+                if (x.m_rec) {
+                    emit_seek_record(x.m_rec, external_unit, external_iostat);
+                }
                 file_write_runtime_record(external_unit, external_iostat,
                     scratch_io_data_ptr(),
                     lr_emit_load(s, ty_i64, V(scratch_io_len_ptr(), ty_ptr)),
@@ -10868,6 +11071,9 @@ public:
         if (external_integer_write) {
             uint32_t end_data = 0, end_len = 0;
             std::tie(end_data, end_len) = file_write_end_data_len(x.m_end);
+            if (x.m_rec) {
+                emit_seek_record(x.m_rec, external_unit, external_iostat);
+            }
             file_write_runtime_record(external_unit, external_iostat,
                 scratch_io_data_ptr(),
                 lr_emit_load(s, ty_i64, V(scratch_io_len_ptr(), ty_ptr)),
@@ -11162,6 +11368,17 @@ public:
 
     uint32_t emit_i32_const(int32_t value) {
         return lr_emit_add(s, ty_i32, I(value, ty_i32), I(0, ty_i32));
+    }
+
+    void emit_seek_record(ASR::expr_t *rec, uint32_t unit, uint32_t iostat) {
+        uint32_t rec_value = emit_i32_value(rec);
+        lr_type_t *p[] = {ty_i32, ty_i32, ty_ptr};
+        declare_func("_lfortran_seek_record", ty_void, p, 3, false);
+        lr_operand_desc_t args[] = {
+            V(unit, ty_i32), V(rec_value, ty_i32),
+            iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr)
+        };
+        emit_call_void("_lfortran_seek_record", args, 3);
     }
 
     uint32_t emit_target_ptr(ASR::expr_t *expr) {
@@ -11475,7 +11692,11 @@ public:
                 visit_expr(*x.m_unit);
                 uint32_t unit = cast_int_value(tmp,
                     value_type_for_expr(x.m_unit), ty_i32);
-                if (emit_external_file_read_values(x, unit)) {
+                uint32_t iostat = emit_iostat_ptr(x.m_iostat);
+                if (x.m_rec) {
+                    emit_seek_record(x.m_rec, unit, iostat);
+                }
+                if (emit_external_file_read_values(x, unit, iostat)) {
                     return;
                 }
             }
@@ -11586,6 +11807,22 @@ public:
             if (kind == 4) name = "_lfortran_read_array_complex_float";
             else if (kind == 8) name = "_lfortran_read_array_complex_double";
             else return false;
+        } else if (ASR::is_a<ASR::Logical_t>(*elem_type)) {
+            int kind = ASRUtils::extract_kind_from_ttype_t(elem_type);
+            ArrayLinearView view = emit_array_linear_view(target, array_t);
+            uint32_t count = cast_int_value(view.total, ty_i64, ty_i32);
+            lr_type_t *p[] = {
+                ty_ptr, ty_i32, ty_i32, ty_i32, ty_i32, ty_ptr
+            };
+            declare_func("_lfortran_read_array_logical", ty_void, p, 6,
+                false);
+            lr_operand_desc_t args[] = {
+                V(view.base, ty_ptr), V(count, ty_i32), I(kind, ty_i32),
+                I(1, ty_i32), V(unit, ty_i32),
+                iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr)
+            };
+            emit_call_void("_lfortran_read_array_logical", args, 6);
+            return true;
         } else {
             return false;
         }
@@ -11960,7 +12197,7 @@ public:
     }
 
     bool emit_external_formatted_file_read(const ASR::FileRead_t &x,
-            uint32_t unit) {
+            uint32_t unit, uint32_t iostat) {
         if (!x.m_fmt || x.n_values == 0) {
             return false;
         }
@@ -11979,7 +12216,6 @@ public:
             advance_len);
         uint32_t pad_len = 0;
         uint32_t pad = emit_optional_string_ptr(x.m_pad, pad_len);
-        uint32_t iostat = emit_iostat_ptr(x.m_iostat);
         uint32_t chunk = emit_iostat_ptr(x.m_size);
 
         std::vector<lr_operand_desc_t> call_args;
@@ -12027,12 +12263,11 @@ public:
     }
 
     bool emit_external_file_read_values(const ASR::FileRead_t &x,
-            uint32_t unit) {
+            uint32_t unit, uint32_t iostat) {
         if (x.m_is_formatted &&
-                emit_external_formatted_file_read(x, unit)) {
+                emit_external_formatted_file_read(x, unit, iostat)) {
             return true;
         }
-        uint32_t iostat = emit_iostat_ptr(x.m_iostat);
         for (size_t i = 0; i < x.n_values; i++) {
             if (!emit_external_file_read_expr(x.m_values[i], unit, iostat)) {
                 return false;
@@ -13131,14 +13366,13 @@ found_offset:
     // slot with the same scalar value.  Mirrors the LLVM backend's
     // alloca + per-element store loop.
     void visit_ArrayBroadcast(const ASR::ArrayBroadcast_t &x) {
-        if (x.m_value) { visit_expr(*x.m_value); return; }
         ASR::ttype_t *elem_t = ASRUtils::type_get_past_array(x.m_type);
         elem_t = ASRUtils::type_get_past_allocatable_pointer(elem_t);
         int64_t n_eles = ASRUtils::get_fixed_size_of_array(x.m_type);
         if (n_eles <= 0) n_eles = 1;
         int64_t elem_sz = element_byte_size(elem_t);
 
-        visit_expr(*x.m_array);
+        visit_expr(*(x.m_value ? x.m_value : x.m_array));
         uint32_t val = tmp;
         lr_type_t *et = get_type(elem_t);
         uint32_t buf = emit_storage_alloca_nbytes(
