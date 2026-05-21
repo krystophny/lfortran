@@ -5644,8 +5644,30 @@ public:
         lr_emit_unreachable(s);
     }
 
-    void visit_ErrorStop(const ASR::ErrorStop_t &) {
-        lr_operand_desc_t args[] = {I(1, ty_i32)};
+    void visit_ErrorStop(const ASR::ErrorStop_t &x) {
+        // Spec: error stop terminates with the stop code as exit status.
+        // gfortran echoes 'ERROR STOP <code>' to stderr but the exit
+        // status is the integer code (0 for 'error stop 0' even though
+        // the message is still printed).  We honour the integer code so
+        // tests like error_stop_03 that assert the process exits 0 pass.
+        uint32_t code = 0;
+        if (x.m_code) {
+            ASR::ttype_t *ct = ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(x.m_code));
+            if (ASR::is_a<ASR::Integer_t>(*ct)) {
+                visit_expr(*x.m_code);
+                lr_type_t *t = get_type(ct);
+                code = (t == ty_i32) ? tmp
+                    : (t == ty_i64) ? lr_emit_trunc(s, ty_i32, V(tmp, t))
+                    : lr_emit_sext(s, ty_i32, V(tmp, t));
+            } else {
+                // Non-integer stop code (string, etc.): exit non-zero.
+                code = lr_emit_add(s, ty_i32, I(1, ty_i32), I(0, ty_i32));
+            }
+        } else {
+            code = lr_emit_add(s, ty_i32, I(1, ty_i32), I(0, ty_i32));
+        }
+        lr_operand_desc_t args[] = {V(code, ty_i32)};
         emit_call_void("exit", args, 1);
         lr_emit_unreachable(s);
     }
