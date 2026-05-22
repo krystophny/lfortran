@@ -788,8 +788,11 @@ public:
 
     void visit_RealConstant(const ASR::RealConstant_t &x) {
         lr_type_t *t = get_type(x.m_type);
-        // Materialize via fadd(imm, 0.0) so liric sees a concrete vreg
-        tmp = lr_emit_fadd(s, t, F(x.m_r, t), F(0.0, t));
+        // Materialize via fsub(imm, 0.0) so liric sees a concrete vreg.
+        // fsub preserves the sign of imm including -0.0, while
+        // fadd(-0.0, 0.0) collapses to +0.0 per IEEE 754 and breaks
+        // sign(x, -0.0).
+        tmp = lr_emit_fsub(s, t, F(x.m_r, t), F(0.0, t));
     }
 
     // --- LogicalConstant ---
@@ -4054,23 +4057,17 @@ public:
             LR_NULL(ty_ptr), nullptr, 0);
     }
 
-    // --- RealCopySign: sign(a, b) = |a| * sgn(b), elemental real ---
+    // --- RealCopySign: sign(a, b) copies sign of b onto |a|.  Use
+    // libm copysign so the result honors negative zero (sign(1.0, -0.0)
+    // must be -1.0, not 1.0; an `fcmp olt` test treats -0.0 as not
+    // less than 0.0).
 
     void visit_RealCopySign(const ASR::RealCopySign_t &x) {
         LIRIC_PASSTHROUGH(x)
         visit_expr(*x.m_target); uint32_t a = tmp;
         visit_expr(*x.m_source); uint32_t b = tmp;
         lr_type_t *t = get_type(x.m_type);
-        uint32_t neg_a = lr_emit_fneg(s, t, V(a, t));
-        uint32_t a_lt0 = lr_emit_fcmp(s, LR_FCMP_OLT,
-            V(a, t), F(0.0, t));
-        uint32_t abs_a = lr_emit_select(s, t,
-            V(a_lt0, ty_i1), V(neg_a, t), V(a, t));
-        uint32_t neg_abs = lr_emit_fneg(s, t, V(abs_a, t));
-        uint32_t b_lt0 = lr_emit_fcmp(s, LR_FCMP_OLT,
-            V(b, t), F(0.0, t));
-        tmp = lr_emit_select(s, t,
-            V(b_lt0, ty_i1), V(neg_abs, t), V(abs_a, t));
+        tmp = emit_real_libm_call2("copysignf", "copysign", a, b, t);
     }
 
     // --- ComplexConstant ---
