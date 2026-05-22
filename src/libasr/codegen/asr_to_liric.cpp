@@ -1368,6 +1368,55 @@ public:
         return emit_storage_alloca_nbytes(storage_size_for_variable(v));
     }
 
+    // Fill `bytes` with the compile-time value of `expr` (which must
+    // be a scalar constant compatible with `target_type`).  Returns
+    // true if a known constant was encoded, false if expr is not a
+    // compile-time constant the helper recognises.
+    bool encode_scalar_constant_bytes(ASR::expr_t *expr,
+            ASR::ttype_t *target_type, std::vector<uint8_t> &bytes) {
+        if (!expr) return false;
+        ASR::expr_t *val = ASRUtils::expr_value(expr);
+        if (val) expr = val;
+        ASR::ttype_t *tt =
+            ASRUtils::type_get_past_allocatable_pointer(target_type);
+        if (ASR::is_a<ASR::Integer_t>(*tt)) {
+            int64_t iv = 0;
+            if (!ASRUtils::extract_value(expr, iv)) return false;
+            int kind = ASRUtils::extract_kind_from_ttype_t(tt);
+            bytes.assign(kind, 0);
+            for (int b = 0; b < kind; b++) {
+                bytes[b] = (uint8_t)((iv >> (8 * b)) & 0xff);
+            }
+            return true;
+        }
+        if (ASR::is_a<ASR::Real_t>(*tt)) {
+            int kind = normalized_real_kind(tt);
+            double rv = 0.0;
+            if (!ASR::is_a<ASR::RealConstant_t>(*expr)) return false;
+            rv = ASR::down_cast<ASR::RealConstant_t>(expr)->m_r;
+            bytes.assign(kind, 0);
+            if (kind == 4) {
+                float f = (float)rv;
+                std::memcpy(bytes.data(), &f, 4);
+            } else if (kind == 8) {
+                std::memcpy(bytes.data(), &rv, 8);
+            } else {
+                return false;
+            }
+            return true;
+        }
+        if (ASR::is_a<ASR::Logical_t>(*tt)) {
+            bool lv = false;
+            if (!ASR::is_a<ASR::LogicalConstant_t>(*expr)) return false;
+            lv = ASR::down_cast<ASR::LogicalConstant_t>(expr)->m_value;
+            int kind = ASRUtils::extract_kind_from_ttype_t(tt);
+            bytes.assign(kind, 0);
+            bytes[0] = lv ? 1 : 0;
+            return true;
+        }
+        return false;
+    }
+
     // SAVE locals (or PARAMETERs in a function scope) need static
     // storage: they survive across calls.  Emit a zero-initialised
     // global keyed by the variable hash and return a GEP-flavoured
@@ -1381,12 +1430,26 @@ public:
                 LR_GLOBAL(it->second, ty_ptr), no_off, 1);
         }
         uint64_t nbytes = storage_size_for_variable(v);
-        std::vector<uint8_t> zeros(nbytes, 0);
+        std::vector<uint8_t> init_bytes(nbytes, 0);
+        if (v->m_value) {
+            std::vector<uint8_t> scalar_bytes;
+            if (encode_scalar_constant_bytes(v->m_value, v->m_type,
+                    scalar_bytes) && scalar_bytes.size() <= nbytes) {
+                // The scalar value lives at the low-address bytes of
+                // the global's storage; the rest stays zero.  Storage
+                // can be larger than the value width (e.g. logical(4)
+                // is stored in a 32-byte slot but the runtime treats
+                // byte 0 as the boolean).
+                for (size_t i = 0; i < scalar_bytes.size(); i++) {
+                    init_bytes[i] = scalar_bytes[i];
+                }
+            }
+        }
         std::string gname = std::string("_lr_save_")
             + std::to_string(h) + "_" + v->m_name;
         lr_session_global(s, gname.c_str(),
             lr_type_array_s(s, ty_i8, nbytes),
-            false, zeros.data(), nbytes);
+            false, init_bytes.data(), nbytes);
         uint32_t sym = lr_session_intern(s, gname.c_str());
         lr_globals[h] = sym;
         lr_operand_desc_t no_off[1] = {I(0, ty_i64)};
