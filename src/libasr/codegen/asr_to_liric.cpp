@@ -1693,8 +1693,20 @@ public:
                 continue;
             }
             ASR::Variable_t *v = down_cast<ASR::Variable_t>(arg_sym);
-            if (ftype->m_abi == ASR::abiType::BindC && v->m_value_attr) {
-                param_types.push_back(get_type(v->m_type));
+            bool bindc = ftype->m_abi == ASR::abiType::BindC;
+            if (v->m_value_attr) {
+                // Bind(c) value attr already handled here for the C ABI;
+                // for non-BindC Fortran, pass the scalar by value too so
+                // mutations inside the callee do not leak back.  Array-
+                // by-value would need a full copy and is not handled.
+                ASR::ttype_t *vt = ASRUtils::type_get_past_allocatable_pointer(
+                    v->m_type);
+                bool is_array_ty = ASR::is_a<ASR::Array_t>(*vt);
+                if (bindc || !is_array_ty) {
+                    param_types.push_back(get_type(v->m_type));
+                } else {
+                    param_types.push_back(ty_ptr);
+                }
             } else {
                 param_types.push_back(ty_ptr);
             }
@@ -1737,7 +1749,11 @@ public:
             }
             ASR::Variable_t *v = down_cast<ASR::Variable_t>(arg_sym);
             uint64_t h = get_hash((ASR::asr_t *)v);
-            if (ftype->m_abi == ASR::abiType::BindC && v->m_value_attr) {
+            ASR::ttype_t *vt_naked =
+                ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+            bool v_is_array_ty = ASR::is_a<ASR::Array_t>(*vt_naked);
+            bool bindc = ftype->m_abi == ASR::abiType::BindC;
+            if (v->m_value_attr && (bindc || !v_is_array_ty)) {
                 lr_type_t *pt = get_type(v->m_type);
                 uint32_t slot = emit_storage_alloca_for_var(v);
                 lr_emit_store(s, V(p, pt), V(slot, ty_ptr));
@@ -8292,10 +8308,22 @@ public:
             }
         }
 
+        ASR::FunctionType_t *fn_ftype = fn ?
+            ASR::down_cast<ASR::FunctionType_t>(fn->m_function_signature)
+            : nullptr;
+        bool fn_is_bindc = fn_ftype &&
+            fn_ftype->m_abi == ASR::abiType::BindC;
         std::vector<lr_operand_desc_t> args;
         for (size_t i = 0; i < x.n_args; i++) {
             if (x.m_args[i].m_value) {
                 ASR::expr_t *arg = x.m_args[i].m_value;
+                ASR::Variable_t *formal_v = formal_arg_var(fn, i);
+                if (formal_v && formal_v->m_value_attr && !fn_is_bindc) {
+                    visit_expr(*arg);
+                    lr_type_t *vt = get_type(formal_v->m_type);
+                    args.push_back(V(tmp, vt));
+                    continue;
+                }
                 if (formal_is_unlimited_polymorphic_assumed_rank(fn, i)) {
                     args.push_back(V(emit_polymorphic_assumed_rank_actual(arg),
                         ty_ptr));
@@ -8543,10 +8571,22 @@ public:
             }
         }
 
+        ASR::FunctionType_t *fn_ftype = fn ?
+            ASR::down_cast<ASR::FunctionType_t>(fn->m_function_signature)
+            : nullptr;
+        bool fn_is_bindc = fn_ftype &&
+            fn_ftype->m_abi == ASR::abiType::BindC;
         std::vector<lr_operand_desc_t> args;
         for (size_t i = 0; i < x.n_args; i++) {
             if (x.m_args[i].m_value) {
                 ASR::expr_t *arg = x.m_args[i].m_value;
+                ASR::Variable_t *formal_v = formal_arg_var(fn, i);
+                if (formal_v && formal_v->m_value_attr && !fn_is_bindc) {
+                    visit_expr(*arg);
+                    lr_type_t *vt = get_type(formal_v->m_type);
+                    args.push_back(V(tmp, vt));
+                    continue;
+                }
                 if (formal_is_unlimited_polymorphic_assumed_rank(fn, i)) {
                     args.push_back(V(emit_polymorphic_assumed_rank_actual(arg),
                         ty_ptr));
