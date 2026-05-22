@@ -1368,6 +1368,32 @@ public:
         return emit_storage_alloca_nbytes(storage_size_for_variable(v));
     }
 
+    // SAVE locals (or PARAMETERs in a function scope) need static
+    // storage: they survive across calls.  Emit a zero-initialised
+    // global keyed by the variable hash and return a GEP-flavoured
+    // pointer that callers can use exactly like an alloca slot.
+    uint32_t emit_save_global_for_var(ASR::Variable_t *v) {
+        uint64_t h = get_hash((ASR::asr_t *)v);
+        auto it = lr_globals.find(h);
+        if (it != lr_globals.end()) {
+            lr_operand_desc_t no_off[1] = {I(0, ty_i64)};
+            return lr_emit_gep(s, ty_i8,
+                LR_GLOBAL(it->second, ty_ptr), no_off, 1);
+        }
+        uint64_t nbytes = storage_size_for_variable(v);
+        std::vector<uint8_t> zeros(nbytes, 0);
+        std::string gname = std::string("_lr_save_")
+            + std::to_string(h) + "_" + v->m_name;
+        lr_session_global(s, gname.c_str(),
+            lr_type_array_s(s, ty_i8, nbytes),
+            false, zeros.data(), nbytes);
+        uint32_t sym = lr_session_intern(s, gname.c_str());
+        lr_globals[h] = sym;
+        lr_operand_desc_t no_off[1] = {I(0, ty_i64)};
+        return lr_emit_gep(s, ty_i8,
+            LR_GLOBAL(sym, ty_ptr), no_off, 1);
+    }
+
     uint32_t emit_temp_slot(lr_type_t *type) {
         return lr_emit_alloca(s, type);
     }
@@ -1777,12 +1803,20 @@ public:
                 if (v->m_intent == ASR::intentType::Local
                     || v->m_intent == ASR::intentType::ReturnVar) {
                     ASR::Array_t *runtime_array = nullptr;
-                    uint32_t slot = pointer_array_has_runtime_dims(
-                        v, &runtime_array)
-                        ? emit_runtime_pointer_array_slot(v, runtime_array)
-                        : emit_storage_alloca_for_var(v);
+                    bool needs_static_storage =
+                        v->m_storage == ASR::storage_typeType::Save;
+                    uint32_t slot;
+                    if (needs_static_storage) {
+                        slot = emit_save_global_for_var(v);
+                    } else if (pointer_array_has_runtime_dims(
+                            v, &runtime_array)) {
+                        slot = emit_runtime_pointer_array_slot(
+                            v, runtime_array);
+                    } else {
+                        slot = emit_storage_alloca_for_var(v);
+                    }
                     lr_symtab[get_hash((ASR::asr_t *)v)] = slot;
-                    if (!runtime_array) {
+                    if (!runtime_array && !needs_static_storage) {
                         initialize_local_array_descriptor(slot, v->m_type);
                         initialize_local_string_descriptor(slot, v->m_type);
                         initialize_struct_variable_storage(slot, v);
