@@ -3993,6 +3993,28 @@ public:
                 V(d0, ty_str_desc), I(len, ty_i64), &fld1, 1);
             return;
         }
+        // Array source bit-cast to a scalar destination
+        // (`transfer(byte_array, scalar)`): read the destination
+        // type's bytes from the array's base pointer.  Without this,
+        // we passed the array value through and the caller treated
+        // it as an integer, reading garbage.
+        if (ASR::is_a<ASR::Array_t>(*src_type) &&
+                !ASR::is_a<ASR::Array_t>(*dst_type) &&
+                !ASR::is_a<ASR::String_t>(*dst_type)) {
+            bool was_target = is_target;
+            is_target = true;
+            visit_expr(*x.m_source);
+            is_target = was_target;
+            uint32_t src_ptr = tmp;
+            ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(src_type);
+            if (array_t->m_physical_type ==
+                    ASR::array_physical_typeType::DescriptorArray) {
+                src_ptr = desc_base_addr(src_ptr);
+            }
+            lr_type_t *dst_lr = get_type(dst_type);
+            tmp = lr_emit_load(s, dst_lr, V(src_ptr, ty_ptr));
+            return;
+        }
         visit_expr(*x.m_source);
         // Source and destination share the same bit pattern.  For
         // scalars (Integer/Real of the same kind) the value flows
