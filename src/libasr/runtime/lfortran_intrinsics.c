@@ -2485,10 +2485,19 @@ void move_containing_ptr_next(Serialization_Info* s_info){
         sizeof(int32_t)/*LOGICAL_32*/, sizeof(int16_t)/*LOGICAL_16*/,
         sizeof(int64_t)/*LOGICAL_64*/,
         16/*FLOAT_128: 16 bytes = 128 bits*/ };
-    if( !stack_empty(s_info->array_sizes_stack) && 
-        (get_stack_top(s_info->array_sizes_stack) > 0) && 
-        (s_info->current_element_type == CHAR_PTR_TYPE ||
-            s_info->current_element_type == STRING_DESCRIPTOR_TYPE)){ // Array of strings (Consecutive memory)
+    if( !stack_empty(s_info->array_sizes_stack) &&
+        (get_stack_top(s_info->array_sizes_stack) > 0) &&
+        s_info->current_element_type == STRING_DESCRIPTOR_TYPE){
+        // Direct mode stores array elements of fixed-length strings as
+        // back-to-back {char*, int64} descriptors, not one big char
+        // buffer.  Advance by the descriptor stride so the next read
+        // lands on the next descriptor.
+        s_info->current_arg_info.current_arg = (void*)
+            ((char*)s_info->current_arg_info.current_arg +
+                primitive_type_sizes[STRING_DESCRIPTOR_TYPE]);
+    } else if( !stack_empty(s_info->array_sizes_stack) &&
+        (get_stack_top(s_info->array_sizes_stack) > 0) &&
+        s_info->current_element_type == CHAR_PTR_TYPE){ // Array of strings (Consecutive memory)
         char* arr_str_ptr = *(char**)s_info->current_arg_info.current_arg;
         s_info->temp_char_pp =  arr_str_ptr + s_info->current_arg_info.current_string_len;
         s_info->current_arg_info.current_arg = (void*)&s_info->temp_char_pp;

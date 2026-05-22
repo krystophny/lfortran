@@ -10116,8 +10116,16 @@ public:
             case ASR::ttypeType::Real:
                 return "R" + std::to_string(
                     ASRUtils::extract_kind_from_ttype_t(at));
-            case ASR::ttypeType::Logical:
-                return "L8";
+            case ASR::ttypeType::Logical: {
+                // The runtime stride for logical arrays is keyed on the
+                // bit width in the serialization: L8 -> i8 stride, L16
+                // -> i16, etc.  The direct backend stores logical(N) as
+                // N*8 bits, so encode the matching width to keep array
+                // print walks aligned with element_byte_size().
+                int kind = ASRUtils::extract_kind_from_ttype_t(at);
+                int bits = (kind > 0 ? kind : 4) * 8;
+                return "L" + std::to_string(bits);
+            }
             case ASR::ttypeType::Complex: {
                 std::string real_serial = "R" + std::to_string(
                     ASRUtils::extract_kind_from_ttype_t(at));
