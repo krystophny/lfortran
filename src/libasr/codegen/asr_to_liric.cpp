@@ -7125,6 +7125,55 @@ public:
 
         ASR::ttype_t *elem_type =
             ASRUtils::type_get_past_allocatable_pointer(array_t->m_type);
+
+        // Struct elements with non-trivial default initialisers
+        // (e.g. `type t; integer :: v = 7; end type` then
+        // `allocate(arr(N))`) must run the default-init helper on
+        // each element so reads of `arr(i)%v` see 7 instead of 0.
+        if (ASR::is_a<ASR::StructType_t>(*elem_type)) {
+            ASR::Variable_t *target_var = var_from_expr(arg.m_a);
+            ASR::Struct_t *st = nullptr;
+            if (target_var) {
+                st = struct_symbol_from_type_decl(
+                    target_var->m_type_declaration);
+            }
+            if (!st) {
+                st = struct_symbol_from_type_decl(
+                    ASRUtils::get_struct_sym_from_struct_expr(arg.m_a));
+            }
+            if (st && struct_storage_needs_initialization(st)) {
+                lr_error_t err;
+                uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+                lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+                uint32_t head_bb = lr_session_block(s);
+                uint32_t body_bb = lr_session_block(s);
+                uint32_t done_bb = lr_session_block(s);
+                lr_emit_br(s, head_bb);
+
+                lr_session_set_block(s, head_bb, &err);
+                uint32_t idx = lr_emit_load(s, ty_i64,
+                    V(idx_ptr, ty_ptr));
+                uint32_t more = lr_emit_icmp(s, LR_CMP_SLT,
+                    V(idx, ty_i64), V(total, ty_i64));
+                lr_emit_condbr(s, V(more, ty_i1), body_bb, done_bb);
+
+                lr_session_set_block(s, body_bb, &err);
+                uint32_t byte_off = lr_emit_mul(s, ty_i64,
+                    V(idx, ty_i64), I(elem_bytes, ty_i64));
+                lr_operand_desc_t off[1] = {V(byte_off, ty_i64)};
+                uint32_t elem_ptr = lr_emit_gep(s, ty_i8,
+                    V(data, ty_ptr), off, 1);
+                initialize_struct_storage(st, elem_ptr);
+                uint32_t next = lr_emit_add(s, ty_i64,
+                    V(idx, ty_i64), I(1, ty_i64));
+                lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+                lr_emit_br(s, head_bb);
+
+                lr_session_set_block(s, done_bb, &err);
+            }
+            return;
+        }
+
         if (!ASR::is_a<ASR::String_t>(*elem_type)) {
             return;
         }
