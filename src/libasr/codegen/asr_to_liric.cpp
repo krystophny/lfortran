@@ -5196,6 +5196,29 @@ public:
         uint32_t desc = desc_ptr_of(x.m_v);
         uint32_t base = desc_base_addr(desc);
 
+        // Assumed-shape dummy lbound override: the dummy's declared
+        // lbound is authoritative; the actual's descriptor records
+        // wherever the caller's array started.  Walk the underlying
+        // Variable_t's m_type directly so any ArrayPhysicalCast on
+        // the expression doesn't shadow Allocatable/Pointer.
+        ASR::Variable_t *holder_var_v = ASR::is_a<ASR::Var_t>(*x.m_v)
+            ? var_from_expr(x.m_v) : nullptr;
+        ASR::Array_t *formal_array_v = nullptr;
+        if (holder_var_v && holder_var_v->m_intent !=
+                ASR::intentType::Local &&
+                holder_var_v->m_intent !=
+                    ASR::intentType::ReturnVar &&
+                !ASRUtils::is_allocatable(holder_var_v->m_type) &&
+                !ASRUtils::is_pointer(holder_var_v->m_type)) {
+            ASR::ttype_t *holder_naked =
+                ASRUtils::type_get_past_allocatable_pointer(
+                    holder_var_v->m_type);
+            if (ASR::is_a<ASR::Array_t>(*holder_naked)) {
+                formal_array_v =
+                    ASR::down_cast<ASR::Array_t>(holder_naked);
+            }
+        }
+
         uint32_t byte_off = 0;
         bool first = true;
         for (size_t r = 0; r < x.n_args; r++) {
@@ -5210,7 +5233,24 @@ public:
                 : ((it == ty_i32)
                     ? lr_emit_sext(s, ty_i64, V(tmp, it))
                     : lr_emit_sext(s, ty_i64, V(tmp, it)));
-            uint32_t lb = desc_dim_lbound(desc, r);
+            uint32_t lb;
+            int64_t formal_lb = 1;
+            bool use_formal_lb = false;
+            if (formal_array_v && r < formal_array_v->n_dims &&
+                    !formal_array_v->m_dims[r].m_length) {
+                ASR::expr_t *start =
+                    formal_array_v->m_dims[r].m_start;
+                if (!start) { use_formal_lb = true; formal_lb = 1; }
+                else if (ASRUtils::extract_value(start, formal_lb)) {
+                    use_formal_lb = true;
+                }
+            }
+            if (use_formal_lb) {
+                lb = lr_emit_add(s, ty_i64,
+                    I(formal_lb, ty_i64), I(0, ty_i64));
+            } else {
+                lb = desc_dim_lbound(desc, r);
+            }
             uint32_t delta = lr_emit_sub(s, ty_i64,
                 V(idx64, ty_i64), V(lb, ty_i64));
             // dim[r].stride is in bytes (CFI "sm" / lfortran's stride).
@@ -13959,7 +13999,52 @@ found_offset:
         ASRUtils::extract_value(x.m_dim, req_dim);
         req_dim--;
 
-        uint32_t lbound = desc_dim_lbound(desc, req_dim);
+        // Assumed-shape rule: when x.m_v resolves to a non-Local,
+        // non-ReturnVar, non-allocatable, non-pointer dummy arg whose
+        // declared dim has a compile-time-constant m_start, the lbound
+        // is the dummy's declaration (Fortran 2018 16.9.115) and not
+        // whatever the actual argument's descriptor records.  Walk the
+        // underlying Variable_t's m_type directly so casts (e.g.
+        // array_struct_temporary's ArrayPhysicalCast) don't shadow the
+        // Allocatable wrapper.
+        uint32_t lbound = 0;
+        bool used_declared_start = false;
+        if (ASR::is_a<ASR::Var_t>(*x.m_v)) {
+            ASR::Variable_t *vv = var_from_expr(x.m_v);
+            if (vv && vv->m_intent != ASR::intentType::Local
+                    && vv->m_intent != ASR::intentType::ReturnVar
+                    && !ASRUtils::is_allocatable(vv->m_type)
+                    && !ASRUtils::is_pointer(vv->m_type)) {
+                ASR::ttype_t *vt_naked =
+                    ASRUtils::type_get_past_allocatable_pointer(
+                        vv->m_type);
+                if (ASR::is_a<ASR::Array_t>(*vt_naked)) {
+                    ASR::Array_t *array_v =
+                        ASR::down_cast<ASR::Array_t>(vt_naked);
+                    if ((size_t)req_dim < array_v->n_dims) {
+                        ASR::expr_t *start =
+                            array_v->m_dims[req_dim].m_start;
+                        ASR::expr_t *length =
+                            array_v->m_dims[req_dim].m_length;
+                        int64_t lb_val = 1;
+                        bool start_const = (!start) ||
+                            ASRUtils::extract_value(start, lb_val);
+                        // Only the assumed-shape case (no compile-time
+                        // length) lets the dummy override the actual's
+                        // lbound; explicit-shape dummies are bound by
+                        // the actual.
+                        if (!length && start_const) {
+                            lbound = lr_emit_add(s, ty_i64,
+                                I(lb_val, ty_i64), I(0, ty_i64));
+                            used_declared_start = true;
+                        }
+                    }
+                }
+            }
+        }
+        if (!used_declared_start) {
+            lbound = desc_dim_lbound(desc, req_dim);
+        }
         uint32_t result;
         if (x.m_bound == ASR::arrayboundType::LBound) {
             result = lbound;
