@@ -6504,6 +6504,34 @@ public:
             lr_emit_store(s, V(d1, ty_str_desc), V(desc_ptr, ty_ptr));
             return;
         }
+        // Non-allocatable string with a runtime-evaluated length
+        // (e.g. `character(len=func(x)) :: s`).  Evaluate the length
+        // expression once at the declaration site, malloc that many
+        // bytes (memset to space), and store {data, len} in the
+        // descriptor.  Without this, len(s) read out as 0 because the
+        // descriptor stayed at the {NULL, 0} fallback.
+        if (!is_alloc && string_t->m_len) {
+            uint32_t len_val = emit_i64_expr(string_t->m_len);
+            uint32_t storage_len = lr_emit_select(s, ty_i64,
+                V(lr_emit_icmp(s, LR_CMP_SGT,
+                    V(len_val, ty_i64), I(0, ty_i64)), ty_i1),
+                V(len_val, ty_i64), I(1, ty_i64));
+            uint32_t data = emit_malloc_bytes(storage_len);
+            lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
+            declare_func("memset", ty_ptr, memset_params, 3, false);
+            lr_operand_desc_t args[] = {
+                V(data, ty_ptr), I(' ', ty_i32), V(storage_len, ty_i64)
+            };
+            emit_call("memset", ty_ptr, args, 3);
+            uint32_t fld0 = 0;
+            uint32_t fld1 = 1;
+            uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
+                LR_UNDEF(ty_str_desc), V(data, ty_ptr), &fld0, 1);
+            uint32_t d1 = lr_emit_insertvalue(s, ty_str_desc,
+                V(d0, ty_str_desc), V(len_val, ty_i64), &fld1, 1);
+            lr_emit_store(s, V(d1, ty_str_desc), V(desc_ptr, ty_ptr));
+            return;
+        }
         uint32_t fld0 = 0;
         uint32_t fld1 = 1;
         uint32_t z0 = lr_emit_insertvalue(s, ty_str_desc,
