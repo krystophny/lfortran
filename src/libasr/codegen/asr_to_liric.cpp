@@ -13937,7 +13937,35 @@ found_offset:
         ASRUtils::extract_value(x.m_dim, req_dim);
         req_dim--;
 
-        uint32_t lbound = desc_dim_lbound(desc, req_dim);
+        // For assumed-shape descriptor arrays, lbound is what the
+        // dummy declared (Fortran 2018 16.9.115), not what the actual
+        // argument's descriptor says.  Honour a compile-time-constant
+        // m_start; runtime m_start expressions fall back to the
+        // descriptor (the source already handles those rarely).
+        ASR::ttype_t *vt_db =
+            ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(x.m_v));
+        ASR::Array_t *array_db = ASR::is_a<ASR::Array_t>(*vt_db)
+            ? ASR::down_cast<ASR::Array_t>(vt_db) : nullptr;
+        bool assumed_shape = array_db &&
+            array_db->m_physical_type ==
+                ASR::array_physical_typeType::DescriptorArray &&
+            (size_t)req_dim < array_db->n_dims &&
+            !array_db->m_dims[req_dim].m_length;
+        int64_t declared_start = 1;
+        bool declared_start_const = !assumed_shape;
+        if (assumed_shape) {
+            if (!array_db->m_dims[req_dim].m_start) {
+                declared_start_const = true;
+            } else {
+                declared_start_const = ASRUtils::extract_value(
+                    array_db->m_dims[req_dim].m_start, declared_start);
+            }
+        }
+        uint32_t lbound = (assumed_shape && declared_start_const)
+            ? lr_emit_add(s, ty_i64, I(declared_start, ty_i64),
+                          I(0, ty_i64))
+            : desc_dim_lbound(desc, req_dim);
         uint32_t result;
         if (x.m_bound == ASR::arrayboundType::LBound) {
             result = lbound;
