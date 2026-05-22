@@ -11607,6 +11607,20 @@ public:
 
     void visit_ArrayIsContiguous(const ASR::ArrayIsContiguous_t &x) {
         LIRIC_PASSTHROUGH(x)
+        ASR::ttype_t *at = ASRUtils::expr_type(x.m_array);
+        at = ASRUtils::type_get_past_allocatable_pointer(at);
+        if (ASR::is_a<ASR::Array_t>(*at)) {
+            ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(at);
+            if (array_t->m_physical_type !=
+                    ASR::array_physical_typeType::DescriptorArray) {
+                // FixedSizeArray / PointerArray (incl. fresh array
+                // constructors and locally-allocated fixed arrays) are
+                // always contiguous by construction; no descriptor to
+                // probe for stride.
+                tmp = lr_emit_add(s, ty_i1, I(1, ty_i1), I(0, ty_i1));
+                return;
+            }
+        }
         uint32_t desc = desc_ptr_of(x.m_array);
         uint32_t elem_len = desc_load_i64(desc, 8);
         uint32_t stride0 = desc_load_i64(desc,
