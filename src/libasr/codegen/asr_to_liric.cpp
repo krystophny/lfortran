@@ -9461,9 +9461,20 @@ public:
                 V(tmp, ty_ptr), LR_NULL(ty_ptr));
             return;
         }
+        ASRUtils::IntrinsicElementalFunctions intrinsic =
+            static_cast<ASRUtils::IntrinsicElementalFunctions>(
+                x.m_intrinsic_id);
+        ASR::ttype_t *result_type = ASRUtils::type_get_past_array(
+            ASRUtils::type_get_past_allocatable(x.m_type));
+        if ((intrinsic == ASRUtils::IntrinsicElementalFunctions::Max ||
+                intrinsic == ASRUtils::IntrinsicElementalFunctions::Min) &&
+                ASR::is_a<ASR::String_t>(*result_type)) {
+            emit_min_max(x,
+                intrinsic == ASRUtils::IntrinsicElementalFunctions::Max);
+            return;
+        }
         if (x.m_value) { visit_expr(*x.m_value); return; }
-        switch (static_cast<ASRUtils::IntrinsicElementalFunctions>(
-                x.m_intrinsic_id)) {
+        switch (intrinsic) {
             case ASRUtils::IntrinsicElementalFunctions::Merge: {
                 if (x.n_args != 3) {
                     throw CodeGenError("liric: merge() expects three args");
@@ -10009,10 +10020,42 @@ public:
             throw CodeGenError(
                 "liric: min/max needs at least one argument");
         }
+        ASR::ttype_t *result_type = ASRUtils::type_get_past_array(
+            ASRUtils::type_get_past_allocatable(x.m_type));
+        if (ASR::is_a<ASR::String_t>(*result_type)) {
+            uint32_t fld0 = 0, fld1 = 1;
+            visit_expr(*x.m_args[0]);
+            uint32_t acc = tmp;
+            uint32_t acc_data = lr_emit_extractvalue(s, ty_ptr,
+                V(acc, ty_str_desc), &fld0, 1);
+            uint32_t acc_len = lr_emit_extractvalue(s, ty_i64,
+                V(acc, ty_str_desc), &fld1, 1);
+            for (size_t i = 1; i < x.n_args; i++) {
+                visit_expr(*x.m_args[i]);
+                uint32_t v = tmp;
+                uint32_t v_data = lr_emit_extractvalue(s, ty_ptr,
+                    V(v, ty_str_desc), &fld0, 1);
+                uint32_t v_len = lr_emit_extractvalue(s, ty_i64,
+                    V(v, ty_str_desc), &fld1, 1);
+                uint32_t keep_acc = emit_string_compare_value(
+                    acc_data, acc_len, v_data, v_len,
+                    is_max ? LR_CMP_SGT : LR_CMP_SLT);
+                acc_data = lr_emit_select(s, ty_ptr,
+                    V(keep_acc, ty_i1), V(acc_data, ty_ptr),
+                    V(v_data, ty_ptr));
+                acc_len = lr_emit_select(s, ty_i64,
+                    V(keep_acc, ty_i1), V(acc_len, ty_i64),
+                    V(v_len, ty_i64));
+            }
+            uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
+                LR_UNDEF(ty_str_desc), V(acc_data, ty_ptr), &fld0, 1);
+            tmp = lr_emit_insertvalue(s, ty_str_desc,
+                V(d0, ty_str_desc), V(acc_len, ty_i64), &fld1, 1);
+            return;
+        }
         lr_type_t *t = get_type(x.m_type);
         bool is_int = ASR::is_a<ASR::Integer_t>(
-            *ASRUtils::type_get_past_array(
-                ASRUtils::type_get_past_allocatable(x.m_type)));
+            *result_type);
         visit_expr(*x.m_args[0]);
         uint32_t acc = tmp;
         for (size_t i = 1; i < x.n_args; i++) {
