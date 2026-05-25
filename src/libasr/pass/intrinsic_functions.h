@@ -7477,9 +7477,14 @@ namespace Max {
         }
         if (is_compile_time) {
             ASR::expr_t *value = eval_Max(al, loc, expr_type(args[0]), arg_values, diag);
+            ASR::ttype_t *return_type = ASRUtils::expr_type(args[0]);
+            if (value && ASR::is_a<ASR::String_t>(
+                    *ASRUtils::extract_type(return_type))) {
+                return_type = ASRUtils::expr_type(value);
+            }
             return ASRUtils::make_IntrinsicElementalFunction_t_util(al, loc,
                 static_cast<int64_t>(IntrinsicElementalFunctions::Max),
-                args.p, args.n, 0, ASRUtils::expr_type(args[0]), value);
+                args.p, args.n, 0, return_type, value);
         } else {
             return ASRUtils::make_IntrinsicElementalFunction_t_util(al, loc,
                 static_cast<int64_t>(IntrinsicElementalFunctions::Max),
@@ -7585,10 +7590,12 @@ namespace Min {
             return ASR::down_cast<ASR::expr_t>(ASR::make_IntegerConstant_t(al, loc, min_val, arg_type));
         } else if (ASR::is_a<ASR::String_t>(*arg_type)) {
             char* min_val = ASR::down_cast<ASR::StringConstant_t>(args[0])->m_s;
+            arg_type = expr_type(args[0]);
             for (size_t i = 1; i < args.size(); i++) {
                 char* val = ASR::down_cast<ASR::StringConstant_t>(args[i])->m_s;
                 if (strcmp(val, min_val) < 0) {
                     min_val = val;
+                    arg_type = expr_type(args[i]);
                 }
             }
             return ASR::down_cast<ASR::expr_t>(ASR::make_StringConstant_t(al, loc, min_val, arg_type));
@@ -7650,9 +7657,14 @@ namespace Min {
         }
         if (is_compile_time) {
             ASR::expr_t *value = eval_Min(al, loc, expr_type(args[0]), arg_values, diag);
+            ASR::ttype_t *return_type = ASRUtils::expr_type(args[0]);
+            if (value && ASR::is_a<ASR::String_t>(
+                    *ASRUtils::extract_type(return_type))) {
+                return_type = ASRUtils::expr_type(value);
+            }
             return ASRUtils::make_IntrinsicElementalFunction_t_util(al, loc,
                 static_cast<int64_t>(IntrinsicElementalFunctions::Min),
-                args.p, args.n, 0, ASRUtils::expr_type(args[0]), value);
+                args.p, args.n, 0, return_type, value);
         } else {
             return ASRUtils::make_IntrinsicElementalFunction_t_util(al, loc,
                 static_cast<int64_t>(IntrinsicElementalFunctions::Min),
