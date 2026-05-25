@@ -1,0 +1,9 @@
+semantic error: Cannot extend sealed derived type `parent_t`
+  --> tests/errors/sealed_02.f90:8:5 - 10:21
+   |
+ 8 |        type, extends(parent_t) :: child_t
+   |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^...
+...
+   |
+10 |        end type child_t
+   | ...^^^^^^^^^^^^^^^^^^^^^ 

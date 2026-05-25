@@ -322,6 +322,7 @@ simple_attribute
     | AttrRecursive
     | AttrNonRecursive
     | AttrSave
+    | AttrSealed
     | AttrSequence
     | AttrTarget
     | AttrValue

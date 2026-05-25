@@ -272,6 +272,7 @@ public:
             ATTRTYPE(Pure)
             ATTRTYPE(Recursive)
             ATTRTYPE(Save)
+            ATTRTYPE(Sealed)
             ATTRTYPE(Target)
             ATTRTYPE(Value)
             default :
