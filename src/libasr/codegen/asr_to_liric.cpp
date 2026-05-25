@@ -4079,8 +4079,39 @@ public:
     // Strings and arrays still throw because their descriptor layout
     // doesn't match a raw bit-cast.
 
+    uint32_t array_item_linear_index(const ASR::ArrayItem_t &item,
+            ASR::Array_t *array_t) {
+        uint32_t lin = emit_i64_const(0);
+        uint32_t stride = emit_i64_const(1);
+        uint32_t desc = 0;
+        if (array_t->m_physical_type ==
+                ASR::array_physical_typeType::DescriptorArray) {
+            desc = desc_ptr_of(item.m_v);
+        }
+        for (size_t r = 0; r < item.n_args; r++) {
+            ASR::array_index_t &ai = item.m_args[r];
+            if (!ai.m_right) {
+                throw CodeGenError(
+                    "liric: transfer scalar mold must be an array element");
+            }
+            uint32_t idx = emit_i64_expr(ai.m_right);
+            uint32_t lbound = desc ? desc_dim_lbound(desc, r)
+                : emit_array_dim_lbound(array_t, r);
+            uint32_t off = lr_emit_sub(s, ty_i64,
+                V(idx, ty_i64), V(lbound, ty_i64));
+            uint32_t contrib = lr_emit_mul(s, ty_i64,
+                V(off, ty_i64), V(stride, ty_i64));
+            lin = lr_emit_add(s, ty_i64, V(lin, ty_i64),
+                V(contrib, ty_i64));
+            uint32_t extent = desc ? desc_dim_extent(desc, r)
+                : emit_array_dim_extent_for_expr(item.m_v, array_t, r);
+            stride = lr_emit_mul(s, ty_i64,
+                V(stride, ty_i64), V(extent, ty_i64));
+        }
+        return lin;
+    }
+
     void visit_BitCast(const ASR::BitCast_t &x) {
-        LIRIC_PASSTHROUGH(x)
         ASR::ttype_t *dst_type = ASRUtils::type_get_past_allocatable_pointer(
             x.m_type);
         ASR::ttype_t *src_type = ASRUtils::expr_type(x.m_source);
@@ -4229,6 +4260,38 @@ public:
             }
         }
         if (ASR::is_a<ASR::String_t>(*dst_type) &&
+                ASR::is_a<ASR::String_t>(*src_type) &&
+                ASR::is_a<ASR::ArrayItem_t>(*x.m_mold)) {
+            ASR::ArrayItem_t *mold_item =
+                ASR::down_cast<ASR::ArrayItem_t>(x.m_mold);
+            ASR::ttype_t *mold_array_type =
+                ASRUtils::type_get_past_allocatable_pointer(
+                    ASRUtils::expr_type(mold_item->m_v));
+            if (ASR::is_a<ASR::Array_t>(*mold_array_type)) {
+                ASR::Array_t *mold_array =
+                    ASR::down_cast<ASR::Array_t>(mold_array_type);
+                int64_t elem_chars = 1;
+                get_fixed_string_len(dst_type, elem_chars);
+                uint32_t idx = array_item_linear_index(
+                    *mold_item, mold_array);
+                visit_expr(*x.m_source);
+                uint32_t src_desc = tmp;
+                uint32_t fld0 = 0, fld1 = 1;
+                uint32_t src_data = lr_emit_extractvalue(s, ty_ptr,
+                    V(src_desc, ty_str_desc), &fld0, 1);
+                uint32_t byte_off = lr_emit_mul(s, ty_i64,
+                    V(idx, ty_i64), I(elem_chars, ty_i64));
+                lr_operand_desc_t off[1] = {V(byte_off, ty_i64)};
+                uint32_t data = lr_emit_gep(s, ty_i8,
+                    V(src_data, ty_ptr), off, 1);
+                uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
+                    LR_UNDEF(ty_str_desc), V(data, ty_ptr), &fld0, 1);
+                tmp = lr_emit_insertvalue(s, ty_str_desc,
+                    V(d0, ty_str_desc), I(elem_chars, ty_i64), &fld1, 1);
+                return;
+            }
+        }
+        if (ASR::is_a<ASR::String_t>(*dst_type) &&
                 ASR::is_a<ASR::Integer_t>(*src_type)) {
             visit_expr(*x.m_source);
             lr_type_t *src_lr = get_type(src_type);
@@ -4277,6 +4340,7 @@ public:
             tmp = lr_emit_load(s, dst_lr, V(src_ptr, ty_ptr));
             return;
         }
+        LIRIC_PASSTHROUGH(x)
         visit_expr(*x.m_source);
         // Source and destination share the same bit pattern.  For
         // scalars (Integer/Real of the same kind) the value flows
