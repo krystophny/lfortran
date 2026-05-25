@@ -1560,12 +1560,11 @@ public:
         uint32_t bytes = lr_emit_mul(s, ty_i64, V(total, ty_i64),
             I(element_byte_size(array_t->m_type), ty_i64));
         uint32_t data = emit_malloc_bytes(bytes);
-        lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
-        declare_func("memset", ty_ptr, memset_params, 3, false);
-        lr_operand_desc_t args[] = {
-            V(data, ty_ptr), I(0, ty_i32), V(bytes, ty_i64)
-        };
-        emit_call("memset", ty_ptr, args, 3);
+        // Do NOT zero-initialize: Fortran leaves local/automatic arrays
+        // undefined (the LLVM backend does not zero them either), and an
+        // unconditional memset over the full extent hangs for arrays with
+        // a huge declared size that are only queried via size() and never
+        // touched (e.g. INTEGER,DIMENSION(huge_var) :: a; print*,size(a)).
         uint32_t slot = lr_emit_alloca(s, ty_ptr);
         lr_emit_store(s, V(data, ty_ptr), V(slot, ty_ptr));
         runtime_pointer_arrays.insert(v_hash);
