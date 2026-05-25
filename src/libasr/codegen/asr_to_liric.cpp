@@ -4479,6 +4479,35 @@ public:
     // void*.
     void visit_PointerToCPtr(const ASR::PointerToCPtr_t &x) {
         if (x.m_value) { visit_expr(*x.m_value); return; }
+        // EQUIVALENCE sets a Pointer var via
+        // CPtrToPointer(PointerToCPtr(GetPointer(base_elem)), ptr).  For a
+        // plain LOCAL (non-SAVE/COMMON) scalar or array element the
+        // GetPointer result is already the storage address -- the pointer
+        // value itself -- so the trailing load below would wrongly
+        // dereference it.  Restrict this no-load path to exactly that
+        // provably-safe case; everything else (character descriptors,
+        // allocatable/pointer indirection, SAVE/COMMON global storage,
+        // whole arrays, non-Var bases) keeps the original load, matching
+        // baseline behaviour.
+        if (ASR::is_a<ASR::GetPointer_t>(*x.m_arg)) {
+            ASR::GetPointer_t *gp = ASR::down_cast<ASR::GetPointer_t>(x.m_arg);
+            ASR::ttype_t *at = ASRUtils::expr_type(gp->m_arg);
+            ASR::expr_t *base = gp->m_arg;
+            if (ASR::is_a<ASR::ArrayItem_t>(*base)) {
+                base = ASR::down_cast<ASR::ArrayItem_t>(base)->m_v;
+            }
+            ASR::Variable_t *bv = ASR::is_a<ASR::Var_t>(*base)
+                ? ASRUtils::EXPR2VAR(base) : nullptr;
+            bool safe_local = bv
+                && bv->m_intent == ASR::intentType::Local
+                && bv->m_storage == ASR::storage_typeType::Default;
+            if (safe_local && !ASRUtils::is_character(*at)
+                && !ASRUtils::is_allocatable(at)
+                && !ASRUtils::is_pointer(at)) {
+                visit_expr(*x.m_arg);
+                return;
+            }
+        }
         bool was_target = is_target;
         is_target = true;
         visit_expr(*x.m_arg);
