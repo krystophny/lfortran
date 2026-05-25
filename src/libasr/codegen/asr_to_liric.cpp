@@ -6892,11 +6892,9 @@ public:
     // pointing at heap): allocate fresh data and copy, so dst does not
     // alias src's storage (which caused double-free / dangling-after-
     // deallocate and uninitialised-descriptor flakiness).
-    void emit_struct_source_copy(uint32_t slot, uint32_t src_data,
+    void emit_struct_source_copy(uint32_t dst_data, uint32_t src_data,
                                  ASR::Struct_t *st) {
         if (!st) return;
-        uint32_t dst_data =
-            class_data_ptr(lr_emit_load(s, ty_ptr, V(slot, ty_ptr)));
         uint64_t nbytes = struct_storage_size(st);
         lr_type_t *memcpy_params[] = {ty_ptr, ty_ptr, ty_i64};
         declare_func("memcpy", ty_ptr, memcpy_params, 3, false);
@@ -6974,14 +6972,14 @@ public:
 
             lr_session_set_block(s, then_bb, &err);
             emit_allocatable_struct_allocation(slot, candidate, target_var);
-            emit_struct_source_copy(slot, mold_data, candidate);
+            emit_struct_source_copy(class_data_ptr(lr_emit_load(s, ty_ptr, V(slot, ty_ptr))), mold_data, candidate);
             lr_emit_br(s, done_bb);
 
             lr_session_set_block(s, next_bb, &err);
         }
         if (declared && !declared->m_is_abstract) {
             emit_allocatable_struct_allocation(slot, declared, target_var);
-            emit_struct_source_copy(slot, mold_data, declared);
+            emit_struct_source_copy(class_data_ptr(lr_emit_load(s, ty_ptr, V(slot, ty_ptr))), mold_data, declared);
         }
         lr_emit_br(s, done_bb);
         lr_session_set_block(s, done_bb, &err);
@@ -7067,6 +7065,50 @@ public:
                         ASRUtils::get_struct_sym_from_struct_expr(arg.m_a));
                 }
                 ASR::Variable_t *target_var = var_from_expr(arg.m_a);
+                if (st && ASRUtils::is_pointer(at)
+                        && !ASRUtils::is_allocatable(at)) {
+                    // Non-polymorphic pointer-to-struct: allocate WITHOUT a
+                    // class header (tag+vtable).  Member access for a pointer
+                    // base does not strip the header (only allocatable bases
+                    // do, via class_data_ptr) and p=>x targets are headerless,
+                    // so a headered allocation would shift every component by
+                    // the header size -> garbage reads / flaky crashes
+                    // (allocate_53).
+                    uint64_t nbytes = struct_storage_size(st);
+                    uint32_t allocator = emit_call(
+                        "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+                    lr_type_t *mp[] = {ty_ptr, ty_i64};
+                    declare_func("_lfortran_malloc_alloc", ty_ptr, mp, 2, false);
+                    lr_operand_desc_t ma[] = {
+                        V(allocator, ty_ptr), I((int64_t)nbytes, ty_i64)
+                    };
+                    uint32_t data = emit_call("_lfortran_malloc_alloc",
+                        ty_ptr, ma, 2);
+                    lr_type_t *msp[] = {ty_ptr, ty_i32, ty_i64};
+                    declare_func("memset", ty_ptr, msp, 3, false);
+                    lr_operand_desc_t msa[] = {
+                        V(data, ty_ptr), I(0, ty_i32), I((int64_t)nbytes, ty_i64)
+                    };
+                    emit_call("memset", ty_ptr, msa, 3);
+                    initialize_struct_storage(st, data);
+                    lr_emit_store(s, V(data, ty_ptr), V(slot, ty_ptr));
+                    if (x.m_source) {
+                        bool wt = is_target;
+                        is_target = true;
+                        visit_expr(*x.m_source);
+                        is_target = wt;
+                        uint32_t sptr = tmp;
+                        uint32_t src_data =
+                            (expr_is_allocatable_struct(x.m_source)
+                            || ASRUtils::is_class_type(ASRUtils::extract_type(
+                                ASRUtils::expr_type(x.m_source))))
+                            ? class_data_ptr(lr_emit_load(s, ty_ptr,
+                                V(sptr, ty_ptr)))
+                            : sptr;
+                        emit_struct_source_copy(data, src_data, st);
+                    }
+                    continue;
+                }
                 if (!arg.m_sym_subclass && x.m_source &&
                         emit_mold_struct_allocation(
                             slot, st, x.m_source, target_var)) {
