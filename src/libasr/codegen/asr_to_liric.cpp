@@ -6886,6 +6886,47 @@ public:
         return class_data_ptr(raw);
     }
 
+    // Copy a source struct (allocate(dst, source=src)) into the freshly
+    // allocated dst.  Shallow-copy all fields, then DEEP-copy scalar
+    // allocatable/fixed string components (each is a {data,len} descriptor
+    // pointing at heap): allocate fresh data and copy, so dst does not
+    // alias src's storage (which caused double-free / dangling-after-
+    // deallocate and uninitialised-descriptor flakiness).
+    void emit_struct_source_copy(uint32_t slot, uint32_t src_raw,
+                                 ASR::Struct_t *st) {
+        if (!st) return;
+        uint32_t dst_data =
+            class_data_ptr(lr_emit_load(s, ty_ptr, V(slot, ty_ptr)));
+        uint32_t src_data = class_data_ptr(src_raw);
+        uint64_t nbytes = struct_storage_size(st);
+        lr_type_t *memcpy_params[] = {ty_ptr, ty_ptr, ty_i64};
+        declare_func("memcpy", ty_ptr, memcpy_params, 3, false);
+        lr_operand_desc_t margs[] = {
+            V(dst_data, ty_ptr), V(src_data, ty_ptr), I((int64_t)nbytes, ty_i64)
+        };
+        emit_call("memcpy", ty_ptr, margs, 3);
+        std::vector<ASR::Variable_t *> members;
+        collect_struct_members_parent_first(st, members);
+        uint64_t off = 0;
+        for (ASR::Variable_t *m : members) {
+            ASR::ttype_t *naked =
+                ASRUtils::type_get_past_allocatable_pointer(m->m_type);
+            ASR::ttype_t *core = ASRUtils::type_get_past_array(naked);
+            if (ASR::is_a<ASR::String_t>(*core) &&
+                    !ASR::is_a<ASR::Array_t>(*naked)) {
+                lr_operand_desc_t o[1] = {I((int64_t)off, ty_i64)};
+                uint32_t dst_field = lr_emit_gep(s, ty_i8,
+                    V(dst_data, ty_ptr), o, 1);
+                uint32_t src_field = lr_emit_gep(s, ty_i8,
+                    V(src_data, ty_ptr), o, 1);
+                uint32_t src_desc = lr_emit_load(s, ty_str_desc,
+                    V(src_field, ty_ptr));
+                emit_copy_string_to_uninit_desc(dst_field, src_desc);
+            }
+            off += storage_size_for_variable(m);
+        }
+    }
+
     bool emit_mold_struct_allocation(uint32_t slot,
                                      ASR::Struct_t *declared,
                                      ASR::expr_t *mold,
@@ -6917,12 +6958,14 @@ public:
 
             lr_session_set_block(s, then_bb, &err);
             emit_allocatable_struct_allocation(slot, candidate, target_var);
+            emit_struct_source_copy(slot, mold_raw, candidate);
             lr_emit_br(s, done_bb);
 
             lr_session_set_block(s, next_bb, &err);
         }
         if (declared && !declared->m_is_abstract) {
             emit_allocatable_struct_allocation(slot, declared, target_var);
+            emit_struct_source_copy(slot, mold_raw, declared);
         }
         lr_emit_br(s, done_bb);
         lr_session_set_block(s, done_bb, &err);
