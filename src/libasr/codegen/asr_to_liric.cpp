@@ -4633,12 +4633,13 @@ public:
             return false;
         }
         type = ASRUtils::type_get_past_allocatable_pointer(type);
-        if (!ASR::is_a<ASR::Array_t>(*type)) {
-            return false;
-        }
-        ASR::Array_t *array = ASR::down_cast<ASR::Array_t>(type);
-        return array->m_physical_type ==
-            ASR::array_physical_typeType::AssumedRankArray;
+        // Any unlimited-polymorphic ARRAY (assumed-rank g(..), assumed-shape
+        // g(:), explicit/pointer) must carry a shaped descriptor with the
+        // type tag at offset 24, not the scalar {data,tag} ty_poly_desc
+        // (which loses extents/strides -> size() garbage, g(i) crash).
+        // emit_polymorphic_assumed_rank_actual handles all ranks by stamping
+        // the tag onto the actual's real descriptor.
+        return ASR::is_a<ASR::Array_t>(*type);
     }
 
     bool formal_is_unlimited_polymorphic_assumed_rank(
