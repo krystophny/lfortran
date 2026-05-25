@@ -2765,8 +2765,57 @@ public:
         emit_call("memcpy", ty_ptr, memcpy_args, 3);
     }
 
+    uint32_t emit_struct_deep_copy_temp(uint32_t src, ASR::Struct_t *st,
+                                        int depth = 0) {
+        uint64_t nbytes = st ? struct_storage_size(st) : 1;
+        uint32_t tmp_storage = emit_storage_alloca_nbytes(nbytes);
+        lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
+        declare_func("memset", ty_ptr, memset_params, 3, false);
+        lr_operand_desc_t memset_args[] = {
+            V(tmp_storage, ty_ptr), I(0, ty_i32), I((int64_t)nbytes, ty_i64)
+        };
+        emit_call("memset", ty_ptr, memset_args, 3);
+        if (st) {
+            initialize_struct_storage(st, tmp_storage);
+            emit_struct_storage_assignment(tmp_storage, src, st, depth + 1);
+        }
+        return tmp_storage;
+    }
+
+    void emit_allocatable_struct_component_assignment(uint32_t dst_slot,
+            uint32_t src_slot, ASR::Struct_t *st, int depth = 0) {
+        uint32_t src_raw = lr_emit_load(s, ty_ptr, V(src_slot, ty_ptr));
+        uint32_t src_is_null = lr_emit_icmp(s, LR_CMP_EQ,
+            V(src_raw, ty_ptr), LR_NULL(ty_ptr));
+
+        lr_error_t err;
+        uint32_t null_bb = lr_session_block(s);
+        uint32_t copy_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(src_is_null, ty_i1), null_bb, copy_bb);
+
+        lr_session_set_block(s, null_bb, &err);
+        lr_emit_store(s, LR_NULL(ty_ptr), V(dst_slot, ty_ptr));
+        lr_emit_br(s, done_bb);
+
+        lr_session_set_block(s, copy_bb, &err);
+        uint32_t src_data = class_data_ptr(src_raw);
+        uint32_t dst_data = ensure_allocatable_struct_data(
+            dst_slot, st, nullptr);
+        if (depth >= 4) {
+            emit_memcpy_bytes(dst_data, src_data, struct_storage_size(st));
+        } else {
+            uint32_t src_copy = emit_struct_deep_copy_temp(
+                src_data, st, depth + 1);
+            emit_struct_storage_assignment(dst_data, src_copy, st, depth + 1);
+        }
+        lr_emit_br(s, done_bb);
+
+        lr_session_set_block(s, done_bb, &err);
+    }
+
     void emit_struct_storage_assignment(uint32_t dst, uint32_t src,
-                                        ASR::Struct_t *st) {
+                                        ASR::Struct_t *st, int depth = 0) {
         if (!st) {
             return;
         }
@@ -2807,12 +2856,18 @@ public:
                             dst_field, src_desc);
                     }
                 } else if (ASR::is_a<ASR::StructType_t>(*core) &&
+                        ASRUtils::is_allocatable(member_type)) {
+                    ASR::Struct_t *member_st = struct_symbol_from_type_decl(
+                        member->m_type_declaration);
+                    emit_allocatable_struct_component_assignment(
+                        dst_field, src_field, member_st, depth + 1);
+                } else if (ASR::is_a<ASR::StructType_t>(*core) &&
                         !ASRUtils::is_allocatable(member_type) &&
                         !ASRUtils::is_pointer(member_type)) {
                     ASR::Struct_t *member_st = struct_symbol_from_type_decl(
                         member->m_type_declaration);
                     emit_struct_storage_assignment(
-                        dst_field, src_field, member_st);
+                        dst_field, src_field, member_st, depth + 1);
                 } else {
                     emit_memcpy_bytes(dst_field, src_field,
                         storage_size_for_variable(member));
@@ -3362,7 +3417,9 @@ public:
                     dst, st, var_from_expr(x.m_target));
             }
             if (st) {
-                emit_struct_storage_assignment(dst, src, st);
+                uint32_t copy_src = expr_is_allocatable_struct(x.m_target)
+                    ? emit_struct_deep_copy_temp(src, st) : src;
+                emit_struct_storage_assignment(dst, copy_src, st);
             } else {
                 emit_memcpy_bytes(dst, src,
                     storage_size_or_default(value_struct_type,
@@ -3403,7 +3460,8 @@ public:
                 uint32_t data = ensure_allocatable_struct_data(
                     slot, st, var_from_expr(x.m_target));
                 if (st) {
-                    emit_struct_storage_assignment(data, src, st);
+                    uint32_t copy_src = emit_struct_deep_copy_temp(src, st);
+                    emit_struct_storage_assignment(data, copy_src, st);
                 } else {
                     emit_memcpy_bytes(data, src,
                         storage_size_or_default(value_type,
