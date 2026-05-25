@@ -128,8 +128,9 @@ def run_test(backend, std, test_pattern=None):
             j_flag = f" -j{NO_OF_THREADS}"
         v_flag = " -v" if verbose and use_ninja else ""
         v_env = "VERBOSE=1 " if verbose and not use_ninja else ""
-        for test_name in test_names:
-            run_cmd(f"{v_env}{build_cmd}{j_flag}{v_flag} {test_name}", cwd=cwd)
+        run_cmd(
+            f"{v_env}{build_cmd}{j_flag}{v_flag} {' '.join(test_names)}",
+            cwd=cwd)
     else:
         # Build all tests
         build_cmd = "ninja" if use_ninja else "make"
