@@ -6892,12 +6892,11 @@ public:
     // pointing at heap): allocate fresh data and copy, so dst does not
     // alias src's storage (which caused double-free / dangling-after-
     // deallocate and uninitialised-descriptor flakiness).
-    void emit_struct_source_copy(uint32_t slot, uint32_t src_raw,
+    void emit_struct_source_copy(uint32_t slot, uint32_t src_data,
                                  ASR::Struct_t *st) {
         if (!st) return;
         uint32_t dst_data =
             class_data_ptr(lr_emit_load(s, ty_ptr, V(slot, ty_ptr)));
-        uint32_t src_data = class_data_ptr(src_raw);
         uint64_t nbytes = struct_storage_size(st);
         lr_type_t *memcpy_params[] = {ty_ptr, ty_ptr, ty_i64};
         declare_func("memcpy", ty_ptr, memcpy_params, 3, false);
@@ -6940,6 +6939,14 @@ public:
         is_target = was_target;
         uint32_t mold_raw = lr_emit_load(s, ty_ptr, V(tmp, ty_ptr));
         uint32_t mold_tag = load_raw_object_type_tag(mold_raw);
+        // Source data pointer: allocatable/class sources carry a class
+        // header (tag+vtable) before the data; a plain type(..) source
+        // (e.g. a non-poly intent(in) dummy) does not, so stripping a
+        // header there would read past the data and corrupt the copy.
+        uint32_t mold_data = (expr_is_allocatable_struct(mold)
+                || ASRUtils::is_class_type(
+                    ASRUtils::extract_type(ASRUtils::expr_type(mold))))
+            ? class_data_ptr(mold_raw) : mold_raw;
 
         lr_error_t err;
         uint32_t done_bb = lr_session_block(s);
@@ -6958,14 +6965,14 @@ public:
 
             lr_session_set_block(s, then_bb, &err);
             emit_allocatable_struct_allocation(slot, candidate, target_var);
-            emit_struct_source_copy(slot, mold_raw, candidate);
+            emit_struct_source_copy(slot, mold_data, candidate);
             lr_emit_br(s, done_bb);
 
             lr_session_set_block(s, next_bb, &err);
         }
         if (declared && !declared->m_is_abstract) {
             emit_allocatable_struct_allocation(slot, declared, target_var);
-            emit_struct_source_copy(slot, mold_raw, declared);
+            emit_struct_source_copy(slot, mold_data, declared);
         }
         lr_emit_br(s, done_bb);
         lr_session_set_block(s, done_bb, &err);
