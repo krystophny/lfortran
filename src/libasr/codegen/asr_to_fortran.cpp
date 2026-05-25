@@ -291,6 +291,9 @@ public:
             } case ASR::ttypeType::CPtr: {
                 r = "type(c_ptr)";
                 break;
+            } case ASR::ttypeType::TypeInfo: {
+                r = "type(type_info)";
+                break;
             } case ASR::ttypeType::FunctionType: {
                 if (!type_decl) {
                     throw LCompilersException("Missing procedure symbol while generating Fortran type spec");
