@@ -1261,7 +1261,10 @@ public:
     }
 
     uint64_t storage_size_for_variable(ASR::Variable_t *v) {
-        if (ASRUtils::is_unlimited_polymorphic_type(v->m_type)) {
+        ASR::ttype_t *upoly_core =
+            ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+        if (ASRUtils::is_unlimited_polymorphic_type(v->m_type) &&
+                !ASR::is_a<ASR::Array_t>(*upoly_core)) {
             return 16;
         }
         if (is_allocatable_struct_type(v->m_type)) {
@@ -2570,7 +2573,11 @@ public:
         desc_store_base(dst_desc, new_base);
         desc_store_i64(dst_desc, 8, elem_len);
         desc_store_rank(dst_desc, n_dims);
-        desc_store_i64(dst_desc, 24, emit_i64_const(0));
+        uint32_t offset = emit_i64_const(0);
+        if (ASRUtils::is_unlimited_polymorphic_type(array_t->m_type)) {
+            offset = desc_load_i64(src_desc, 24);
+        }
+        desc_store_i64(dst_desc, 24, offset);
 
         uint32_t stride = elem_len;
         for (int d = 0; d < n_dims; d++) {
@@ -2700,7 +2707,8 @@ public:
 
     void resize_descriptor_array_like(ASR::expr_t *target,
                                       ASR::expr_t *source,
-                                      ASR::Array_t *array_t) {
+                                      ASR::Array_t *array_t,
+                                      bool copy_data) {
         uint32_t src_desc = desc_ptr_of(source);
         uint32_t dst_desc = desc_ptr_of(target);
         uint32_t old_base = desc_base_addr(dst_desc);
@@ -2725,12 +2733,17 @@ public:
         uint32_t new_base = emit_call("_lfortran_malloc_alloc",
             ty_ptr, malloc_args, 2);
 
-        lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
-        declare_func("memset", ty_ptr, memset_params, 3, false);
-        lr_operand_desc_t memset_args[] = {
-            V(new_base, ty_ptr), I(0, ty_i32), V(bytes, ty_i64)
-        };
-        emit_call("memset", ty_ptr, memset_args, 3);
+        if (copy_data) {
+            emit_copy_descriptor_to_linear(new_base, emit_i64_const(0),
+                src_desc, array_t);
+        } else {
+            lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
+            declare_func("memset", ty_ptr, memset_params, 3, false);
+            lr_operand_desc_t memset_args[] = {
+                V(new_base, ty_ptr), I(0, ty_i32), V(bytes, ty_i64)
+            };
+            emit_call("memset", ty_ptr, memset_args, 3);
+        }
 
         store_descriptor_shape_with_base(dst_desc, new_base, elem_len,
             src_desc, array_t);
@@ -3869,8 +3882,10 @@ public:
         if (ASR::is_a<ASR::String_t>(*elem_type)) {
             return;
         }
+        bool copy_data =
+            ASRUtils::is_unlimited_polymorphic_type(target_array->m_type);
         resize_descriptor_array_like(
-            x.m_target, x.m_components[0], target_array);
+            x.m_target, x.m_components[0], target_array, copy_data);
     }
 
     // --- BitCast ---
@@ -4771,18 +4786,26 @@ public:
     }
 
     uint32_t emit_polymorphic_assumed_rank_actual(ASR::expr_t *actual) {
+        ASR::ttype_t *expr_type = ASRUtils::expr_type(actual);
+        ASR::ttype_t *actual_type = ASRUtils::type_get_past_allocatable_pointer(
+            expr_type);
+        if (ASR::is_a<ASR::Array_t>(*actual_type)) {
+            uint32_t desc = desc_ptr_of(actual);
+            if (!type_is_unlimited_polymorphic_array(expr_type)) {
+                int64_t tag = polymorphic_actual_tag(actual);
+                if (tag == 0) {
+                    throw CodeGenError(
+                        "liric: unsupported class(*) actual type");
+                }
+                desc_store_i64(desc, 24, emit_i64_const(tag));
+            }
+            return desc;
+        }
+
         int64_t tag = polymorphic_actual_tag(actual);
         if (tag == 0) {
             throw CodeGenError(
                 "liric: unsupported class(*) actual type");
-        }
-
-        ASR::ttype_t *actual_type = ASRUtils::type_get_past_allocatable_pointer(
-            ASRUtils::expr_type(actual));
-        if (ASR::is_a<ASR::Array_t>(*actual_type)) {
-            uint32_t desc = desc_ptr_of(actual);
-            desc_store_i64(desc, 24, emit_i64_const(tag));
-            return desc;
         }
 
         uint32_t data_ptr = 0;
@@ -5125,11 +5148,15 @@ public:
                 }
             }
         }
-        visit_expr(*x.m_value);
-        uint32_t rhs = tmp;
-        lr_type_t *t = value_type_for_expr(x.m_value);
+        uint32_t rhs = 0;
+        lr_type_t *t = nullptr;
         if (value_is_descriptor_pointer) {
+            rhs = desc_ptr_of(x.m_value);
             t = ty_ptr;
+        } else {
+            visit_expr(*x.m_value);
+            rhs = tmp;
+            t = value_type_for_expr(x.m_value);
         }
         is_target = true;
         visit_expr(*x.m_target);
@@ -7300,9 +7327,12 @@ public:
         desc_store_i64(desc_ptr, 8,
             lr_emit_add(s, ty_i64, I(elem_bytes, ty_i64), I(0, ty_i64)));
         desc_store_rank(desc_ptr, n_dims);
-        // offset at byte 24
-        desc_store_i64(desc_ptr, 24,
-            lr_emit_add(s, ty_i64, I(0, ty_i64), I(0, ty_i64)));
+        // For class(*) array descriptors this slot carries the dynamic tag.
+        int64_t offset_or_tag = 0;
+        if (ASRUtils::is_unlimited_polymorphic_type(at) && arg.m_type) {
+            offset_or_tag = polymorphic_type_tag(arg.m_type);
+        }
+        desc_store_i64(desc_ptr, 24, emit_i64_const(offset_or_tag));
 
         // dim[d].{lbound, extent, stride}: stride in bytes, row-major
         uint32_t cur_stride = lr_emit_add(s, ty_i64,
