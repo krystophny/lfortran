@@ -6937,16 +6937,25 @@ public:
         is_target = true;
         visit_expr(*mold);
         is_target = was_target;
-        uint32_t mold_raw = lr_emit_load(s, ty_ptr, V(tmp, ty_ptr));
-        uint32_t mold_tag = load_raw_object_type_tag(mold_raw);
-        // Source data pointer: allocatable/class sources carry a class
-        // header (tag+vtable) before the data; a plain type(..) source
-        // (e.g. a non-poly intent(in) dummy) does not, so stripping a
-        // header there would read past the data and corrupt the copy.
-        uint32_t mold_data = (expr_is_allocatable_struct(mold)
+        uint32_t mold_ptr = tmp;
+        // Resolve the source object/data pointer like emit_polymorphic_actual:
+        // an allocatable/class source holds a pointer to headered storage
+        // (load it, then strip the tag+vtable header); a by-reference source
+        // (a plain type(..) intent(in) dummy, or any storage reference) is
+        // ALREADY the data pointer, so loading again would dereference one
+        // level too far and copy garbage.
+        uint32_t mold_raw;
+        uint32_t mold_data;
+        if (expr_is_allocatable_struct(mold)
                 || ASRUtils::is_class_type(
-                    ASRUtils::extract_type(ASRUtils::expr_type(mold))))
-            ? class_data_ptr(mold_raw) : mold_raw;
+                    ASRUtils::extract_type(ASRUtils::expr_type(mold)))) {
+            mold_raw = lr_emit_load(s, ty_ptr, V(mold_ptr, ty_ptr));
+            mold_data = class_data_ptr(mold_raw);
+        } else {
+            mold_raw = mold_ptr;
+            mold_data = mold_ptr;
+        }
+        uint32_t mold_tag = load_raw_object_type_tag(mold_raw);
 
         lr_error_t err;
         uint32_t done_bb = lr_session_block(s);
