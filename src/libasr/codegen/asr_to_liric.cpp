@@ -4049,6 +4049,7 @@ public:
         }
         lr_emit_br(s, end_bb);
         lr_session_set_block(s, end_bb, &err);
+        emit_scope_finalizers(blk->m_symtab);
         pop_named_exit(blk->m_name);
     }
 
@@ -10012,6 +10013,77 @@ public:
         lr_type_t *rt = get_type(x.m_type);
         tmp = (rt == ty_i64) ? count64 :
             lr_emit_trunc(s, rt, V(count64, ty_i64));
+    }
+
+    void emit_user_finalizers(uint32_t storage, ASR::Struct_t *st) {
+        if (!st || st->n_member_functions == 0) return;
+        for (size_t i = 0; i < st->n_member_functions; i++) {
+            ASR::symbol_t *final_sym =
+                st->m_symtab->parent->get_symbol(st->m_member_functions[i]);
+            if (!final_sym) continue;
+            final_sym = ASRUtils::symbol_get_past_external(final_sym);
+            if (!ASR::is_a<ASR::Function_t>(*final_sym)) continue;
+            ASR::Function_t *final_fn = ASR::down_cast<ASR::Function_t>(
+                final_sym);
+            if (final_fn->n_args != 1) continue;
+            uint32_t sym = lr_session_intern(s,
+                callable_name(final_fn).c_str());
+            lr_operand_desc_t args[1] = {V(storage, ty_ptr)};
+            lr_emit_call_void(s, LR_GLOBAL(sym, ty_ptr), args, 1);
+        }
+    }
+
+    void emit_struct_finalizers(uint32_t storage, ASR::Struct_t *st,
+            std::unordered_set<uint64_t> &active) {
+        if (!st) return;
+        uint64_t h = get_hash((ASR::asr_t *)st);
+        if (!active.insert(h).second) return;
+
+        emit_user_finalizers(storage, st);
+
+        std::vector<ASR::Variable_t *> members;
+        collect_struct_members_parent_first(st, members);
+        uint64_t byte_offset = 0;
+        for (ASR::Variable_t *member : members) {
+            ASR::ttype_t *member_type =
+                ASRUtils::type_get_past_allocatable_pointer(member->m_type);
+            member_type = ASRUtils::type_get_past_array(member_type);
+            if (ASR::is_a<ASR::StructType_t>(*member_type) &&
+                    !ASRUtils::is_allocatable(member->m_type) &&
+                    !ASRUtils::is_pointer(member->m_type)) {
+                ASR::Struct_t *member_st = struct_symbol_from_type_decl(
+                    member->m_type_declaration);
+                if (member_st) {
+                    lr_operand_desc_t off[1] = {
+                        I((int64_t)byte_offset, ty_i64)
+                    };
+                    uint32_t member_ptr = lr_emit_gep(s, ty_i8,
+                        V(storage, ty_ptr), off, 1);
+                    emit_struct_finalizers(member_ptr, member_st, active);
+                }
+            }
+            byte_offset += storage_size_for_variable(member);
+        }
+        active.erase(h);
+    }
+
+    void emit_scope_finalizers(SymbolTable *symtab) {
+        for (auto &item : symtab->get_scope()) {
+            if (!ASR::is_a<ASR::Variable_t>(*item.second)) continue;
+            ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(
+                item.second);
+            if (v->m_intent != ASR::intentType::Local ||
+                    v->m_storage != ASR::storage_typeType::Default) {
+                continue;
+            }
+            ASR::Struct_t *st = struct_symbol_from_type_decl(
+                v->m_type_declaration);
+            if (!st) continue;
+            auto it = lr_symtab.find(get_hash((ASR::asr_t *)v));
+            if (it == lr_symtab.end()) continue;
+            std::unordered_set<uint64_t> active;
+            emit_struct_finalizers(it->second, st, active);
+        }
     }
 
     void emit_min_max(const ASR::IntrinsicElementalFunction_t &x,
