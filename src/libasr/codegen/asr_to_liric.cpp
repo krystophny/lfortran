@@ -2175,6 +2175,10 @@ public:
         auto global_it = lr_globals.find(h);
         if (global_it != lr_globals.end()) {
             uint32_t sym = global_it->second;
+            if (is_array && runtime_pointer_arrays.count(h)) {
+                tmp = lr_emit_load(s, ty_ptr, LR_GLOBAL(sym, ty_ptr));
+                return;
+            }
             if (is_target || is_array) {
                 // Address of the global - emit by computing it via a
                 // no-op GEP, so callers get a vreg-flavoured ptr.
@@ -5469,10 +5473,37 @@ public:
             rhs = tmp;
             t = value_type_for_expr(x.m_value);
         }
-        is_target = true;
-        visit_expr(*x.m_target);
-        is_target = false;
-        lr_emit_store(s, V(rhs, t), V(tmp, ty_ptr));
+        uint32_t dst = 0;
+        if (value_is_descriptor_pointer &&
+                ASR::is_a<ASR::Var_t>(*x.m_target)) {
+            ASR::Var_t *target = ASR::down_cast<ASR::Var_t>(x.m_target);
+            ASR::symbol_t *sym =
+                ASRUtils::symbol_get_past_external(target->m_v);
+            if (ASR::is_a<ASR::Variable_t>(*sym)) {
+                ASR::Variable_t *target_var =
+                    ASR::down_cast<ASR::Variable_t>(sym);
+                uint64_t h = get_hash((ASR::asr_t *)target_var);
+                auto local_it = lr_symtab.find(h);
+                if (local_it != lr_symtab.end()) {
+                    dst = local_it->second;
+                } else {
+                    auto global_it = lr_globals.find(h);
+                    if (global_it != lr_globals.end()) {
+                        lr_operand_desc_t no_off[1] = {I(0, ty_i64)};
+                        dst = lr_emit_gep(s, ty_i8,
+                            LR_GLOBAL(global_it->second, ty_ptr),
+                            no_off, 1);
+                    }
+                }
+            }
+        }
+        if (!dst) {
+            is_target = true;
+            visit_expr(*x.m_target);
+            is_target = false;
+            dst = tmp;
+        }
+        lr_emit_store(s, V(rhs, t), V(dst, ty_ptr));
         if (mark_runtime_pointer_array) {
             runtime_pointer_arrays.insert(runtime_pointer_array_hash);
         }
