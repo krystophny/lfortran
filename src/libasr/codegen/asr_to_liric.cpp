@@ -4628,7 +4628,7 @@ public:
         return formal && ASRUtils::is_unlimited_polymorphic_type(formal->m_type);
     }
 
-    bool type_is_unlimited_polymorphic_assumed_rank(ASR::ttype_t *type) {
+    bool type_is_unlimited_polymorphic_array(ASR::ttype_t *type) {
         if (!ASRUtils::is_unlimited_polymorphic_type(type)) {
             return false;
         }
@@ -4642,11 +4642,11 @@ public:
         return ASR::is_a<ASR::Array_t>(*type);
     }
 
-    bool formal_is_unlimited_polymorphic_assumed_rank(
+    bool formal_is_unlimited_polymorphic_array(
             ASR::Function_t *fn, size_t i) {
         ASR::Variable_t *formal = formal_arg_var(fn, i);
         return formal &&
-            type_is_unlimited_polymorphic_assumed_rank(formal->m_type);
+            type_is_unlimited_polymorphic_array(formal->m_type);
     }
 
     bool formal_is_optional(ASR::Function_t *fn, size_t i) {
@@ -5096,7 +5096,7 @@ public:
                 ASR::array_physical_typeType::DescriptorArray;
         }
         bool value_is_descriptor_pointer = value_is_descriptor_array ||
-            type_is_unlimited_polymorphic_assumed_rank(
+            type_is_unlimited_polymorphic_array(
                 ASRUtils::expr_type(x.m_value));
         bool mark_runtime_pointer_array = false;
         uint64_t runtime_pointer_array_hash = 0;
@@ -5108,7 +5108,7 @@ public:
                 ASR::Variable_t *target_var =
                     ASR::down_cast<ASR::Variable_t>(sym);
                 uint64_t h = get_hash((ASR::asr_t *)target_var);
-                if (type_is_unlimited_polymorphic_assumed_rank(
+                if (type_is_unlimited_polymorphic_array(
                         ASRUtils::expr_type(x.m_value))) {
                     class_desc_aliases.insert(h);
                 } else {
@@ -8586,7 +8586,7 @@ public:
                     args.push_back(V(tmp, vt));
                     continue;
                 }
-                if (formal_is_unlimited_polymorphic_assumed_rank(fn, i)) {
+                if (formal_is_unlimited_polymorphic_array(fn, i)) {
                     args.push_back(V(emit_polymorphic_assumed_rank_actual(arg),
                         ty_ptr));
                 } else if (formal_is_unlimited_polymorphic(fn, i)) {
@@ -8849,7 +8849,7 @@ public:
                     args.push_back(V(tmp, vt));
                     continue;
                 }
-                if (formal_is_unlimited_polymorphic_assumed_rank(fn, i)) {
+                if (formal_is_unlimited_polymorphic_array(fn, i)) {
                     args.push_back(V(emit_polymorphic_assumed_rank_actual(arg),
                         ty_ptr));
                 } else if (formal_is_unlimited_polymorphic(fn, i)) {
@@ -11669,7 +11669,7 @@ public:
         visit_expr(*x.m_selector);
         is_target = was_target;
         uint32_t selector_tag = 0;
-        if (type_is_unlimited_polymorphic_assumed_rank(
+        if (type_is_unlimited_polymorphic_array(
                 ASRUtils::expr_type(x.m_selector))) {
             selector_tag = desc_load_i64(tmp, 24);
         } else {
