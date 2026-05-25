@@ -551,7 +551,124 @@ public:
     void visit_UnsignedIntegerBinOp(const ASR::UnsignedIntegerBinOp_t &x) {
         LIRIC_BINOP_INT(x, lr_emit_udiv);
     }
+    void emit_array_binop_real(const ASR::RealBinOp_t &x,
+                               ASR::Array_t *res_array) {
+        ASR::Array_t *left_array = nullptr;
+        ASR::Array_t *right_array = nullptr;
+        bool left_arr = expr_is_array(x.m_left, &left_array);
+        bool right_arr = expr_is_array(x.m_right, &right_array);
+        if (!left_arr && !right_arr) {
+            throw CodeGenError(
+                "liric: real array binop needs at least one array operand");
+        }
+
+        ArrayLinearView left_view = {0, 0, 0};
+        ArrayLinearView right_view = {0, 0, 0};
+        if (left_arr) {
+            left_view = emit_array_linear_view(x.m_left, left_array);
+        }
+        if (right_arr) {
+            right_view = emit_array_linear_view(x.m_right, right_array);
+        }
+        uint32_t total = left_arr ? left_view.total : right_view.total;
+
+        ASR::ttype_t *elem_type =
+            ASRUtils::type_get_past_array(res_array->m_type);
+        lr_type_t *elem_lr_t = get_type(elem_type);
+        int64_t elem_bytes = element_byte_size(elem_type);
+
+        uint32_t left_scalar = 0;
+        if (!left_arr) {
+            visit_expr(*x.m_left);
+            left_scalar = tmp;
+        }
+        uint32_t right_scalar = 0;
+        if (!right_arr) {
+            visit_expr(*x.m_right);
+            right_scalar = tmp;
+        }
+
+        uint32_t bytes = lr_emit_mul(s, ty_i64,
+            V(total, ty_i64), I(elem_bytes, ty_i64));
+        uint32_t allocator = emit_call(
+            "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+        lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
+        declare_func("_lfortran_malloc_alloc", ty_ptr,
+            malloc_params, 2, false);
+        lr_operand_desc_t malloc_args[] = {
+            V(allocator, ty_ptr), V(bytes, ty_i64)
+        };
+        uint32_t dst = emit_call("_lfortran_malloc_alloc",
+            ty_ptr, malloc_args, 2);
+
+        uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+        lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+
+        lr_error_t err;
+        uint32_t head_bb = lr_session_block(s);
+        uint32_t body_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_br(s, head_bb);
+
+        lr_session_set_block(s, head_bb, &err);
+        uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+        uint32_t more = lr_emit_icmp(s, LR_CMP_SLT,
+            V(idx, ty_i64), V(total, ty_i64));
+        lr_emit_condbr(s, V(more, ty_i1), body_bb, done_bb);
+
+        lr_session_set_block(s, body_bb, &err);
+        uint32_t lv = left_scalar;
+        if (left_arr) {
+            uint32_t src_elem = emit_linear_elem_ptr(
+                left_view.base, idx, left_view.elem_len);
+            lv = lr_emit_load(s, elem_lr_t, V(src_elem, ty_ptr));
+        }
+        uint32_t rv = right_scalar;
+        if (right_arr) {
+            uint32_t src_elem = emit_linear_elem_ptr(
+                right_view.base, idx, right_view.elem_len);
+            rv = lr_emit_load(s, elem_lr_t, V(src_elem, ty_ptr));
+        }
+        uint32_t value = 0;
+        switch (x.m_op) {
+            case ASR::binopType::Add:
+                value = lr_emit_fadd(s, elem_lr_t,
+                    V(lv, elem_lr_t), V(rv, elem_lr_t));
+                break;
+            case ASR::binopType::Sub:
+                value = lr_emit_fsub(s, elem_lr_t,
+                    V(lv, elem_lr_t), V(rv, elem_lr_t));
+                break;
+            case ASR::binopType::Mul:
+                value = lr_emit_fmul(s, elem_lr_t,
+                    V(lv, elem_lr_t), V(rv, elem_lr_t));
+                break;
+            case ASR::binopType::Div:
+                value = lr_emit_fdiv(s, elem_lr_t,
+                    V(lv, elem_lr_t), V(rv, elem_lr_t));
+                break;
+            default:
+                throw CodeGenError("liric: unsupported real array binop");
+        }
+        uint32_t dst_elem = emit_linear_elem_ptr(
+            dst, idx, emit_i64_const(elem_bytes));
+        lr_emit_store(s, V(value, elem_lr_t), V(dst_elem, ty_ptr));
+
+        uint32_t next = lr_emit_add(s, ty_i64,
+            V(idx, ty_i64), I(1, ty_i64));
+        lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+        lr_emit_br(s, head_bb);
+
+        lr_session_set_block(s, done_bb, &err);
+        tmp = dst;
+    }
     void visit_RealBinOp(const ASR::RealBinOp_t &x) {
+        ASR::ttype_t *res_type =
+            ASRUtils::type_get_past_allocatable_pointer(x.m_type);
+        if (ASR::is_a<ASR::Array_t>(*res_type)) {
+            emit_array_binop_real(x, ASR::down_cast<ASR::Array_t>(res_type));
+            return;
+        }
         if (x.m_op != ASR::binopType::Pow) {
             LIRIC_BINOP_REAL(x);
             return;
@@ -2754,6 +2871,15 @@ public:
                                           ASR::expr_t *value,
                                           ASR::Array_t *array_t,
                                           bool target_allocatable) {
+        ASR::Array_t *value_array = nullptr;
+        if (!target_allocatable && expr_is_array(value, &value_array) &&
+                value_array->m_physical_type !=
+                    ASR::array_physical_typeType::DescriptorArray) {
+            uint32_t dst_desc = desc_ptr_of(target);
+            ArrayLinearView src = emit_array_linear_view(value, value_array);
+            emit_copy_linear_to_descriptor(dst_desc, src, array_t);
+            return;
+        }
         uint32_t src_desc = desc_ptr_of(value);
         uint32_t dst_desc = desc_ptr_of(target);
         uint32_t src_base = desc_base_addr(src_desc);
@@ -5167,7 +5293,7 @@ public:
         }
     }
 
-    // --- ArrayItem (FixedSizeArray, single-dim only for now) ---
+    // ArrayItem for raw arrays, single-dim only for now.
     //
     // Compute column-major linear index (Fortran semantics) from the
     // supplied dim indices and GEP into the array storage.  Matches the
@@ -5190,6 +5316,8 @@ public:
 
         if (array_t->m_physical_type
                 == ASR::array_physical_typeType::FixedSizeArray ||
+                array_t->m_physical_type
+                == ASR::array_physical_typeType::SIMDArray ||
                 array_t->m_physical_type
                 == ASR::array_physical_typeType::PointerArray) {
             bool was_target = is_target;
@@ -11367,6 +11495,59 @@ public:
         uint32_t dst_elem = lr_emit_gep(s, ty_i8,
             V(dst_base, ty_ptr), dst_off, 1);
         emit_memcpy_dynamic(dst_elem, src_elem, elem_len);
+        uint32_t next = lr_emit_add(s, ty_i64,
+            V(idx, ty_i64), I(1, ty_i64));
+        lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+        lr_emit_br(s, head_bb);
+
+        lr_session_set_block(s, done_bb, &err);
+    }
+
+    void emit_copy_linear_to_descriptor(uint32_t dst_desc,
+            ArrayLinearView src, ASR::Array_t *array_t) {
+        int n_dims = (int)array_t->n_dims;
+        uint32_t dst_base = desc_base_addr(dst_desc);
+        uint32_t total = descriptor_array_element_count(dst_desc, n_dims);
+        uint32_t dst_elem_len = desc_load_i64(dst_desc, 8);
+        uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+        lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+
+        lr_error_t err;
+        uint32_t head_bb = lr_session_block(s);
+        uint32_t body_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_br(s, head_bb);
+
+        lr_session_set_block(s, head_bb, &err);
+        uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+        uint32_t more = lr_emit_icmp(s, LR_CMP_SLT,
+            V(idx, ty_i64), V(total, ty_i64));
+        lr_emit_condbr(s, V(more, ty_i1), body_bb, done_bb);
+
+        lr_session_set_block(s, body_bb, &err);
+        uint32_t src_elem = emit_linear_elem_ptr(
+            src.base, idx, src.elem_len);
+
+        uint32_t tmp_idx = idx;
+        uint32_t byte_off = emit_i64_const(0);
+        for (int d = 0; d < n_dims; d++) {
+            uint32_t extent = desc_dim_extent(dst_desc, d);
+            uint32_t coord = lr_emit_srem(s, ty_i64,
+                V(tmp_idx, ty_i64), V(extent, ty_i64));
+            tmp_idx = lr_emit_sdiv(s, ty_i64,
+                V(tmp_idx, ty_i64), V(extent, ty_i64));
+            uint32_t stride = desc_load_i64(dst_desc,
+                DESC_HEADER_BYTES + DESC_DIM_BYTES * d + DESC_DIM_STRIDE);
+            uint32_t contrib = lr_emit_mul(s, ty_i64,
+                V(coord, ty_i64), V(stride, ty_i64));
+            byte_off = lr_emit_add(s, ty_i64,
+                V(byte_off, ty_i64), V(contrib, ty_i64));
+        }
+        lr_operand_desc_t dst_off[1] = {V(byte_off, ty_i64)};
+        uint32_t dst_elem = lr_emit_gep(s, ty_i8,
+            V(dst_base, ty_ptr), dst_off, 1);
+        emit_memcpy_dynamic(dst_elem, src_elem, dst_elem_len);
+
         uint32_t next = lr_emit_add(s, ty_i64,
             V(idx, ty_i64), I(1, ty_i64));
         lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
