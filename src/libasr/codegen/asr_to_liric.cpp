@@ -4683,18 +4683,38 @@ public:
                 break;
             }
             case ASR::binopType::Div: {
-                // (a+bi)/(c+di) = ((ac+bd) + (bc-ad)i) / (c^2+d^2)
-                uint32_t ac = lr_emit_fmul(s, ft, V(lre, ft), V(rre, ft));
-                uint32_t bd = lr_emit_fmul(s, ft, V(lim, ft), V(rim, ft));
-                uint32_t bc = lr_emit_fmul(s, ft, V(lim, ft), V(rre, ft));
-                uint32_t ad = lr_emit_fmul(s, ft, V(lre, ft), V(rim, ft));
-                uint32_t cc = lr_emit_fmul(s, ft, V(rre, ft), V(rre, ft));
-                uint32_t dd = lr_emit_fmul(s, ft, V(rim, ft), V(rim, ft));
-                uint32_t denom = lr_emit_fadd(s, ft, V(cc, ft), V(dd, ft));
-                uint32_t num_re = lr_emit_fadd(s, ft, V(ac, ft), V(bd, ft));
-                uint32_t num_im = lr_emit_fsub(s, ft, V(bc, ft), V(ad, ft));
-                re = lr_emit_fdiv(s, ft, V(num_re, ft), V(denom, ft));
-                im = lr_emit_fdiv(s, ft, V(num_im, ft), V(denom, ft));
+                // Smith's algorithm (scaled division) to avoid overflow of
+                // the naive c^2+d^2 denominator for large |c|,|d| (e.g.
+                // 1e200), matching the LLVM backend's _lfortran_complex_div.
+                // Divide by the larger-magnitude component first.
+                uint32_t abs_c = emit_real_libm_call("fabsf", "fabs", rre, ft);
+                uint32_t abs_d = emit_real_libm_call("fabsf", "fabs", rim, ft);
+                uint32_t cond = lr_emit_fcmp(s, LR_FCMP_OGE,
+                    V(abs_c, ft), V(abs_d, ft));
+                // |c| >= |d|: r = d/c
+                uint32_t r_ge = lr_emit_fdiv(s, ft, V(rim, ft), V(rre, ft));
+                uint32_t den_ge = lr_emit_fadd(s, ft, V(rre, ft),
+                    V(lr_emit_fmul(s, ft, V(rim, ft), V(r_ge, ft)), ft));
+                uint32_t nre_ge = lr_emit_fadd(s, ft, V(lre, ft),
+                    V(lr_emit_fmul(s, ft, V(lim, ft), V(r_ge, ft)), ft));
+                uint32_t nim_ge = lr_emit_fsub(s, ft, V(lim, ft),
+                    V(lr_emit_fmul(s, ft, V(lre, ft), V(r_ge, ft)), ft));
+                uint32_t re_ge = lr_emit_fdiv(s, ft, V(nre_ge, ft), V(den_ge, ft));
+                uint32_t im_ge = lr_emit_fdiv(s, ft, V(nim_ge, ft), V(den_ge, ft));
+                // |c| < |d|: r = c/d
+                uint32_t r_lt = lr_emit_fdiv(s, ft, V(rre, ft), V(rim, ft));
+                uint32_t den_lt = lr_emit_fadd(s, ft, V(rim, ft),
+                    V(lr_emit_fmul(s, ft, V(rre, ft), V(r_lt, ft)), ft));
+                uint32_t nre_lt = lr_emit_fadd(s, ft,
+                    V(lr_emit_fmul(s, ft, V(lre, ft), V(r_lt, ft)), ft), V(lim, ft));
+                uint32_t nim_lt = lr_emit_fsub(s, ft,
+                    V(lr_emit_fmul(s, ft, V(lim, ft), V(r_lt, ft)), ft), V(lre, ft));
+                uint32_t re_lt = lr_emit_fdiv(s, ft, V(nre_lt, ft), V(den_lt, ft));
+                uint32_t im_lt = lr_emit_fdiv(s, ft, V(nim_lt, ft), V(den_lt, ft));
+                re = lr_emit_select(s, ft, V(cond, ty_i1),
+                    V(re_ge, ft), V(re_lt, ft));
+                im = lr_emit_select(s, ft, V(cond, ty_i1),
+                    V(im_ge, ft), V(im_lt, ft));
                 break;
             }
             case ASR::binopType::Pow: {
