@@ -1987,31 +1987,7 @@ public:
                 ASR::Variable_t *v = down_cast<ASR::Variable_t>(item.second);
                 if (v->m_intent == ASR::intentType::Local
                     || v->m_intent == ASR::intentType::ReturnVar) {
-                    ASR::Array_t *runtime_array = nullptr;
-                    bool needs_static_storage =
-                        v->m_storage == ASR::storage_typeType::Save;
-                    uint32_t slot;
-                    if (needs_static_storage) {
-                        slot = emit_save_global_for_var(v);
-                    } else if (pointer_array_has_runtime_dims(
-                            v, &runtime_array)) {
-                        slot = emit_runtime_pointer_array_slot(
-                            v, runtime_array);
-                    } else {
-                        slot = emit_storage_alloca_for_var(v);
-                    }
-                    lr_symtab[get_hash((ASR::asr_t *)v)] = slot;
-                    if (!runtime_array && !needs_static_storage) {
-                        initialize_local_array_descriptor(slot, v->m_type);
-                        initialize_local_string_descriptor(slot, v->m_type);
-                        initialize_struct_variable_storage(slot, v);
-                        initialize_local_value(v, slot);
-                    }
-                    if (is_allocatable_struct_type(v->m_type)) {
-                        uint32_t tag_slot = lr_emit_alloca(s, ty_i64);
-                        lr_emit_store(s, I(0, ty_i64), V(tag_slot, ty_ptr));
-                        class_tag_slots[get_hash((ASR::asr_t *)v)] = tag_slot;
-                    }
+                    emit_local_variable(v);
                 }
             }
         }
@@ -4360,6 +4336,37 @@ public:
     // around the block; an associate inside a hot loop will leak alloca
     // slots, but this is sufficient for the modules fpm hits.
 
+    // Allocate storage for one local variable and apply its initializer.
+    // Shared by function-scope locals and block-scope (BlockCall) locals so
+    // both paths get identical SAVE/runtime-array storage selection plus
+    // descriptor, string, struct, and scalar-value initialization.
+    void emit_local_variable(ASR::Variable_t *v) {
+        uint64_t h = get_hash((ASR::asr_t *)v);
+        ASR::Array_t *runtime_array = nullptr;
+        bool needs_static_storage =
+            v->m_storage == ASR::storage_typeType::Save;
+        uint32_t slot;
+        if (needs_static_storage) {
+            slot = emit_save_global_for_var(v);
+        } else if (pointer_array_has_runtime_dims(v, &runtime_array)) {
+            slot = emit_runtime_pointer_array_slot(v, runtime_array);
+        } else {
+            slot = emit_storage_alloca_for_var(v);
+        }
+        lr_symtab[h] = slot;
+        if (!runtime_array && !needs_static_storage) {
+            initialize_local_array_descriptor(slot, v->m_type);
+            initialize_local_string_descriptor(slot, v->m_type);
+            initialize_struct_variable_storage(slot, v);
+            initialize_local_value(v, slot);
+        }
+        if (is_allocatable_struct_type(v->m_type)) {
+            uint32_t tag_slot = lr_emit_alloca(s, ty_i64);
+            lr_emit_store(s, I(0, ty_i64), V(tag_slot, ty_ptr));
+            class_tag_slots[h] = tag_slot;
+        }
+    }
+
     void visit_BlockCall(const ASR::BlockCall_t &x) {
         ASR::Block_t *blk = down_cast<ASR::Block_t>(
             ASRUtils::symbol_get_past_external(x.m_m));
@@ -4371,9 +4378,7 @@ public:
             ASR::Variable_t *v = down_cast<ASR::Variable_t>(item.second);
             uint64_t h = get_hash((ASR::asr_t *)v);
             if (lr_symtab.count(h)) continue;
-            lr_type_t *vt = get_type(v->m_type);
-            uint32_t slot = lr_emit_alloca(s, vt);
-            lr_symtab[h] = slot;
+            emit_local_variable(v);
         }
         for (size_t i = 0; i < blk->n_body; i++) {
             visit_stmt(*blk->m_body[i]);
