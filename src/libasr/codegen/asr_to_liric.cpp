@@ -4330,6 +4330,47 @@ public:
                 V(d0, ty_str_desc), I(len, ty_i64), &fld1, 1);
             return;
         }
+        // Array source bit-cast to an array destination
+        // (`transfer(byte_array, mold_array)` or with SIZE): reinterpret
+        // the source bytes as the destination element type into fresh
+        // contiguous storage.  The destination type's dims already encode
+        // the result element count (incl. an explicit SIZE).  Without this
+        // the value passed through and only the first element was copied.
+        if (ASR::is_a<ASR::Array_t>(*src_type) &&
+                ASR::is_a<ASR::Array_t>(*dst_type)) {
+            ASR::Array_t *dst_arr = ASR::down_cast<ASR::Array_t>(dst_type);
+            ASR::Array_t *src_arr = ASR::down_cast<ASR::Array_t>(src_type);
+            ASR::ttype_t *dst_elem = ASRUtils::type_get_past_array(
+                ASRUtils::type_get_past_allocatable_pointer(dst_arr->m_type));
+            if (!ASR::is_a<ASR::String_t>(*dst_elem)) {
+                int64_t dst_count = ASRUtils::get_fixed_size_of_array(
+                    dst_arr->m_dims, dst_arr->n_dims);
+                int64_t src_count = ASRUtils::get_fixed_size_of_array(
+                    src_arr->m_dims, src_arr->n_dims);
+                int64_t dst_eb = element_byte_size(dst_arr->m_type);
+                int64_t src_eb = element_byte_size(src_arr->m_type);
+                if (dst_count > 0 && dst_eb > 0) {
+                    bool was_target = is_target;
+                    is_target = true;
+                    visit_expr(*x.m_source);
+                    is_target = was_target;
+                    uint32_t src_ptr = tmp;
+                    if (src_arr->m_physical_type ==
+                            ASR::array_physical_typeType::DescriptorArray) {
+                        src_ptr = desc_base_addr(src_ptr);
+                    }
+                    uint64_t dst_bytes = (uint64_t)dst_count * dst_eb;
+                    uint64_t src_bytes = src_count > 0 && src_eb > 0
+                        ? (uint64_t)src_count * src_eb : dst_bytes;
+                    uint64_t copy_bytes =
+                        dst_bytes < src_bytes ? dst_bytes : src_bytes;
+                    uint32_t out = emit_storage_alloca_nbytes(dst_bytes);
+                    emit_memcpy_bytes(out, src_ptr, copy_bytes);
+                    tmp = out;
+                    return;
+                }
+            }
+        }
         // Array source bit-cast to a scalar destination
         // (`transfer(byte_array, scalar)`): read the destination
         // type's bytes from the array's base pointer.  Without this,
@@ -8255,20 +8296,35 @@ public:
         if (is_procedure_dummy_arg(v)) {
             return lr_symtab[h];
         }
-        uint32_t storage;
         auto local_it = lr_symtab.find(h);
         if (local_it != lr_symtab.end()) {
-            storage = local_it->second;
-        } else {
-            auto global_it = lr_globals.find(h);
-            if (global_it == lr_globals.end()) {
-                throw CodeGenError(std::string(
-                    "liric: procedure pointer has no storage: ") + v->m_name);
-            }
-            lr_operand_desc_t no_off[1] = {I(0, ty_i64)};
-            storage = lr_emit_gep(s, ty_i8,
-                LR_GLOBAL(global_it->second, ty_ptr), no_off, 1);
+            return lr_emit_load(s, ty_ptr, V(local_it->second, ty_ptr));
         }
+        uint32_t sym;
+        auto global_it = lr_globals.find(h);
+        if (global_it != lr_globals.end()) {
+            sym = global_it->second;
+        } else {
+            // Module/program procedure-pointer global owned by another
+            // compilation unit (--separate-compilation): declare it on
+            // demand exactly like visit_Var's lazy-global path.
+            std::string gname = module_variable_global_name(
+                (ASR::symbol_t *)v, v);
+            if (gname.empty()) {
+                gname = std::string("_lr_var_") + std::to_string(h) + "_"
+                    + v->m_name;
+            }
+            uint64_t nbytes = storage_size_for_variable(v);
+            std::vector<uint8_t> zeros(nbytes, 0);
+            lr_session_global(s, gname.c_str(),
+                lr_type_array_s(s, ty_i8, nbytes), false,
+                zeros.data(), nbytes);
+            sym = lr_session_intern(s, gname.c_str());
+            lr_globals[h] = sym;
+        }
+        lr_operand_desc_t no_off[1] = {I(0, ty_i64)};
+        uint32_t storage = lr_emit_gep(s, ty_i8,
+            LR_GLOBAL(sym, ty_ptr), no_off, 1);
         return lr_emit_load(s, ty_ptr, V(storage, ty_ptr));
     }
 
