@@ -1310,6 +1310,11 @@ public:
         if (!ASRUtils::is_pointer(type) || ASRUtils::is_allocatable(type)) {
             return false;
         }
+        // Polymorphic (class) pointers point at class-headered storage that
+        // needs class_data_ptr handling, not the plain-struct deref here.
+        if (ASRUtils::is_class_type(ASRUtils::extract_type(type))) {
+            return false;
+        }
         ASR::ttype_t *core =
             ASRUtils::type_get_past_allocatable_pointer(type);
         return !ASR::is_a<ASR::Array_t>(*core) &&
