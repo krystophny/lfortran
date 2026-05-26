@@ -12267,6 +12267,17 @@ public:
     // character).  Derived-type members, character arrays, and
     // allocatable/pointer/descriptor arrays are not yet handled; for those
     // we fall back to the prior behaviour rather than abort codegen.
+    // Only external (integer-unit) namelist I/O is lowered here.  Internal
+    // namelist I/O to a character string/array uses the runtime's _str /
+    // _str_array variants and is not yet handled; let it fall back.
+    bool namelist_external_unit(ASR::expr_t *unit) {
+        if (!unit) return true;
+        ASR::ttype_t *t = ASRUtils::type_get_past_allocatable_pointer(
+            ASRUtils::expr_type(unit));
+        t = ASRUtils::type_get_past_array(t);
+        return ASR::is_a<ASR::Integer_t>(*t);
+    }
+
     bool namelist_supported(ASR::symbol_t *nml_sym) {
         nml_sym = ASRUtils::symbol_get_past_external(nml_sym);
         ASR::Namelist_t *nml = ASR::down_cast<ASR::Namelist_t>(nml_sym);
@@ -12425,7 +12436,8 @@ public:
     }
 
     void visit_FileWrite(const ASR::FileWrite_t &x) {
-        if (x.m_nml && namelist_supported(x.m_nml)) {
+        if (x.m_nml && namelist_external_unit(x.m_unit) &&
+                namelist_supported(x.m_nml)) {
             uint32_t unit;
             if (x.m_unit) {
                 visit_expr(*x.m_unit);
@@ -13293,7 +13305,8 @@ public:
     }
 
     void visit_FileRead(const ASR::FileRead_t &x) {
-        if (x.m_nml && namelist_supported(x.m_nml)) {
+        if (x.m_nml && namelist_external_unit(x.m_unit) &&
+                namelist_supported(x.m_nml)) {
             uint32_t unit;
             if (x.m_unit) {
                 visit_expr(*x.m_unit);
