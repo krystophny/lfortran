@@ -1062,6 +1062,16 @@ public:
     // globals for vars that need module_init_vars seeding (those with
     // m_value).  Otherwise this is the original visit_Module behaviour:
     // emit globals for every module-level Variable.
+    // A module/program variable needs a runtime initializer if it has a
+    // value expression, or if it is a procedure pointer with a `=> target`
+    // default (held in m_symbolic_value, not m_value).
+    bool var_needs_runtime_init(ASR::Variable_t *v) {
+        if (v->m_value) return true;
+        ASR::ttype_t *t =
+            ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+        return ASR::is_a<ASR::FunctionType_t>(*t) && v->m_symbolic_value;
+    }
+
     void register_module_globals(const ASR::Module_t &x,
             bool init_vars_only=false) {
         if (x.m_intrinsic) return;
@@ -1069,7 +1079,7 @@ public:
         for (auto &item : x.m_symtab->get_scope()) {
             if (!is_a<ASR::Variable_t>(*item.second)) continue;
             ASR::Variable_t *v = down_cast<ASR::Variable_t>(item.second);
-            if (init_vars_only && !v->m_value) continue;
+            if (init_vars_only && !var_needs_runtime_init(v)) continue;
             uint64_t h = get_hash((ASR::asr_t *)v);
             if (lr_globals.count(h)) continue;
             uint64_t nbytes = storage_size_for_variable(v);
@@ -1080,7 +1090,7 @@ public:
                 lr_type_array_s(s, ty_i8, nbytes),
                 false, zeros.data(), nbytes);
             lr_globals[h] = lr_session_intern(s, gname.c_str());
-            if (v->m_value) {
+            if (var_needs_runtime_init(v)) {
                 module_init_vars.push_back(v);
             }
         }
@@ -5325,6 +5335,18 @@ public:
     }
 
     void initialize_local_value(ASR::Variable_t *v, uint32_t slot) {
+        ASR::ttype_t *vt0 =
+            ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+        if (ASR::is_a<ASR::FunctionType_t>(*vt0)) {
+            // Procedure pointer with a `=> target` initializer: store the
+            // target function's address into the pointer's storage.  The
+            // initializer is held in m_symbolic_value (m_value is null).
+            if (v->m_symbolic_value) {
+                visit_expr(*v->m_symbolic_value);
+                lr_emit_store(s, V(tmp, ty_ptr), V(slot, ty_ptr));
+            }
+            return;
+        }
         if (!v->m_value || ASRUtils::is_allocatable(v->m_type)) {
             return;
         }
@@ -8175,6 +8197,32 @@ public:
             v->m_intent != ASR::intentType::ReturnVar;
     }
 
+    // Function-pointer value to call through for a procedure-pointer symbol.
+    // A procedure dummy's slot already holds the callee address; a local or
+    // module/program-global procedure pointer holds the address in its
+    // storage, so load it (handling both lr_symtab and lr_globals).
+    uint32_t proc_pointer_callee(ASR::Variable_t *v) {
+        uint64_t h = get_hash((ASR::asr_t *)v);
+        if (is_procedure_dummy_arg(v)) {
+            return lr_symtab[h];
+        }
+        uint32_t storage;
+        auto local_it = lr_symtab.find(h);
+        if (local_it != lr_symtab.end()) {
+            storage = local_it->second;
+        } else {
+            auto global_it = lr_globals.find(h);
+            if (global_it == lr_globals.end()) {
+                throw CodeGenError(std::string(
+                    "liric: procedure pointer has no storage: ") + v->m_name);
+            }
+            lr_operand_desc_t no_off[1] = {I(0, ty_i64)};
+            storage = lr_emit_gep(s, ty_i8,
+                LR_GLOBAL(global_it->second, ty_ptr), no_off, 1);
+        }
+        return lr_emit_load(s, ty_ptr, V(storage, ty_ptr));
+    }
+
     int64_t class_vtable_slots() const {
         return 128;
     }
@@ -9172,9 +9220,7 @@ public:
             // Procedure dummy args already hold the callee address.
             ASR::Variable_t *v = down_cast<ASR::Variable_t>(raw);
             pad_proc_pointer_args(v, args);
-            uint32_t slot = lr_symtab[get_hash((ASR::asr_t *)v)];
-            uint32_t fptr = is_procedure_dummy_arg(v) ? slot :
-                lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
+            uint32_t fptr = proc_pointer_callee(v);
             lr_emit_call_void(s, V(fptr, ty_ptr),
                               args.data(), args.size());
             emit_class_writebacks();
@@ -9455,9 +9501,7 @@ public:
         if (is_proc_ptr) {
             ASR::Variable_t *v = down_cast<ASR::Variable_t>(raw);
             pad_proc_pointer_args(v, args);
-            uint32_t slot = lr_symtab[get_hash((ASR::asr_t *)v)];
-            uint32_t fptr = is_procedure_dummy_arg(v) ? slot :
-                lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
+            uint32_t fptr = proc_pointer_callee(v);
             tmp = lr_emit_call(s, ret, V(fptr, ty_ptr),
                                args.data(), args.size());
             return;
