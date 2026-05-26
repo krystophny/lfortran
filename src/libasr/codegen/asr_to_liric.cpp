@@ -12278,6 +12278,16 @@ public:
         return ASR::is_a<ASR::Integer_t>(*t);
     }
 
+    // Internal namelist read from a scalar character variable uses the
+    // runtime's _str variant.  Array character units (_str_array) are not
+    // handled here yet.
+    bool namelist_char_scalar_unit(ASR::expr_t *unit) {
+        if (!unit) return false;
+        ASR::ttype_t *t = ASRUtils::type_get_past_allocatable_pointer(
+            ASRUtils::expr_type(unit));
+        return ASR::is_a<ASR::String_t>(*t);
+    }
+
     // Recursively check one namelist entry: scalar/fixed-array
     // integer/real/logical/complex, scalar character, or a scalar
     // derived type whose leaf members are all themselves supported.
@@ -13361,6 +13371,24 @@ public:
             uint32_t iostat = emit_iostat_ptr(x.m_iostat);
             uint32_t group = build_namelist_group(x.m_nml);
             emit_namelist_io("_lfortran_namelist_read", unit, iostat, group);
+            return;
+        }
+        if (x.m_nml && x.m_unit && namelist_char_scalar_unit(x.m_unit) &&
+                namelist_supported(x.m_nml)) {
+            // Internal namelist read from a scalar character variable.
+            uint32_t len;
+            uint32_t data = emit_optional_string_ptr(x.m_unit, len);
+            uint32_t iostat = emit_iostat_ptr(x.m_iostat);
+            uint32_t group = build_namelist_group(x.m_nml);
+            lr_type_t *params[] = {ty_ptr, ty_i64, ty_ptr, ty_ptr};
+            declare_func("_lfortran_namelist_read_str", ty_void,
+                params, 4, false);
+            lr_operand_desc_t args[4] = {
+                V(data, ty_ptr), V(len, ty_i64),
+                iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr),
+                V(group, ty_ptr)
+            };
+            emit_call_void("_lfortran_namelist_read_str", args, 4);
             return;
         }
         if (emit_internal_formatted_read(x)) {
