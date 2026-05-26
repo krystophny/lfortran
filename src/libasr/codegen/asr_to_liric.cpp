@@ -12278,6 +12278,54 @@ public:
         return ASR::is_a<ASR::Integer_t>(*t);
     }
 
+    // Recursively check one namelist entry: scalar/fixed-array
+    // integer/real/logical/complex, scalar character, or a scalar
+    // derived type whose leaf members are all themselves supported.
+    bool namelist_type_supported(ASR::ttype_t *vtype,
+            ASR::symbol_t *type_decl) {
+        if (ASRUtils::is_allocatable(vtype) ||
+                ASRUtils::is_pointer(vtype)) {
+            return false;
+        }
+        ASR::ttype_t *vt =
+            ASRUtils::type_get_past_allocatable_pointer(vtype);
+        bool is_arr = ASR::is_a<ASR::Array_t>(*vt);
+        ASR::ttype_t *elem = ASRUtils::type_get_past_array(vt);
+        if (ASR::is_a<ASR::StructType_t>(*elem)) {
+            if (is_arr) return false;  // arrays of derived types not handled
+            ASR::Struct_t *st = struct_symbol_from_type_decl(type_decl);
+            if (!st) return false;
+            std::vector<ASR::Variable_t *> members;
+            collect_struct_members_parent_first(st, members);
+            for (ASR::Variable_t *m : members) {
+                if (!namelist_type_supported(m->m_type, m->m_type_declaration)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        if (namelist_type_code(elem) < 0) return false;
+        if (is_arr) {
+            if (ASR::is_a<ASR::String_t>(*elem)) return false;
+            ASR::Array_t *arr = ASR::down_cast<ASR::Array_t>(vt);
+            if (arr->m_physical_type !=
+                    ASR::array_physical_typeType::FixedSizeArray &&
+                    arr->m_physical_type !=
+                    ASR::array_physical_typeType::SIMDArray) {
+                return false;
+            }
+            for (size_t d = 0; d < arr->n_dims; d++) {
+                int64_t ext = 0;
+                if (!arr->m_dims[d].m_length ||
+                        !ASRUtils::extract_value(
+                            arr->m_dims[d].m_length, ext)) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
     bool namelist_supported(ASR::symbol_t *nml_sym) {
         nml_sym = ASRUtils::symbol_get_past_external(nml_sym);
         ASR::Namelist_t *nml = ASR::down_cast<ASR::Namelist_t>(nml_sym);
@@ -12286,32 +12334,8 @@ public:
                 ASRUtils::symbol_get_past_external(nml->m_var_list[i]);
             if (!ASR::is_a<ASR::Variable_t>(*vs)) return false;
             ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(vs);
-            if (ASRUtils::is_allocatable(v->m_type) ||
-                    ASRUtils::is_pointer(v->m_type)) {
+            if (!namelist_type_supported(v->m_type, v->m_type_declaration)) {
                 return false;
-            }
-            ASR::ttype_t *vt =
-                ASRUtils::type_get_past_allocatable_pointer(v->m_type);
-            bool is_arr = ASR::is_a<ASR::Array_t>(*vt);
-            ASR::ttype_t *elem = ASRUtils::type_get_past_array(vt);
-            if (namelist_type_code(elem) < 0) return false;
-            if (is_arr) {
-                if (ASR::is_a<ASR::String_t>(*elem)) return false;
-                ASR::Array_t *arr = ASR::down_cast<ASR::Array_t>(vt);
-                if (arr->m_physical_type !=
-                        ASR::array_physical_typeType::FixedSizeArray &&
-                        arr->m_physical_type !=
-                        ASR::array_physical_typeType::SIMDArray) {
-                    return false;
-                }
-                for (size_t d = 0; d < arr->n_dims; d++) {
-                    int64_t ext = 0;
-                    if (!arr->m_dims[d].m_length ||
-                            !ASRUtils::extract_value(
-                                arr->m_dims[d].m_length, ext)) {
-                        return false;
-                    }
-                }
             }
         }
         return true;
@@ -12322,92 +12346,111 @@ public:
     // data@24, shape@32.  Group (24 bytes): group_name@0, n_items@8, items@16.
     // Common case only: scalar/fixed-array integer/real/logical/complex and
     // scalar character.  Unsupported shapes throw a clean CodeGenError.
+    struct NmlItem {
+        std::string name;
+        int32_t code;
+        int32_t rank;
+        int64_t elem_len;
+        uint32_t data;
+        bool shape_null;
+        uint32_t shape;
+    };
+
+    // Append leaf namelist items reachable from storage at `addr`.  A
+    // derived-type scalar recurses into its members (names become
+    // `name%member`), matching the LLVM backend's add_struct_members.
+    void collect_namelist_items(const std::string &name, ASR::ttype_t *vtype,
+            ASR::symbol_t *type_decl, uint32_t addr,
+            std::vector<NmlItem> &out) {
+        ASR::ttype_t *vt = ASRUtils::type_get_past_allocatable_pointer(vtype);
+        ASR::ttype_t *elem = ASRUtils::type_get_past_array(vt);
+        bool is_arr = ASR::is_a<ASR::Array_t>(*vt);
+        if (ASR::is_a<ASR::StructType_t>(*elem) && !is_arr) {
+            ASR::Struct_t *st = struct_symbol_from_type_decl(type_decl);
+            if (!st) {
+                throw CodeGenError(
+                    "liric: namelist derived type missing declaration");
+            }
+            std::vector<ASR::Variable_t *> members;
+            collect_struct_members_parent_first(st, members);
+            uint64_t off = 0;
+            for (ASR::Variable_t *m : members) {
+                lr_operand_desc_t o[1] = {I((int64_t)off, ty_i64)};
+                uint32_t maddr = lr_emit_gep(s, ty_i8, V(addr, ty_ptr), o, 1);
+                collect_namelist_items(
+                    name + "%" + LCompilers::to_lower(m->m_name),
+                    m->m_type, m->m_type_declaration, maddr, out);
+                off += storage_size_for_variable(m);
+            }
+            return;
+        }
+        NmlItem item;
+        item.name = name;
+        item.code = namelist_type_code(elem);
+        item.rank = 0;
+        item.elem_len = 0;
+        item.data = addr;
+        item.shape_null = true;
+        item.shape = 0;
+        if (ASR::is_a<ASR::String_t>(*elem)) {
+            // Scalar character: slot holds a {data_ptr,len} descriptor.
+            item.data = lr_emit_load(s, ty_ptr, V(addr, ty_ptr));
+            int64_t len_const = 0;
+            ASR::String_t *st = ASR::down_cast<ASR::String_t>(elem);
+            if (st->m_len &&
+                    ASRUtils::extract_value(st->m_len, len_const)) {
+                item.elem_len = len_const;
+            }
+        }
+        if (is_arr) {
+            ASR::Array_t *arr = ASR::down_cast<ASR::Array_t>(vt);
+            item.rank = (int32_t)arr->n_dims;
+            uint32_t shape_arr = emit_storage_alloca_nbytes(
+                (uint64_t)item.rank * 8);
+            for (int d = 0; d < item.rank; d++) {
+                int64_t ext = 0;
+                ASRUtils::extract_value(arr->m_dims[d].m_length, ext);
+                lr_operand_desc_t off[1] = {I((int64_t)d * 8, ty_i64)};
+                uint32_t ep = lr_emit_gep(s, ty_i8,
+                    V(shape_arr, ty_ptr), off, 1);
+                lr_emit_store(s, I(ext, ty_i64), V(ep, ty_ptr));
+            }
+            item.shape = shape_arr;
+            item.shape_null = false;
+        }
+        out.push_back(item);
+    }
+
     uint32_t build_namelist_group(ASR::symbol_t *nml_sym) {
         nml_sym = ASRUtils::symbol_get_past_external(nml_sym);
         ASR::Namelist_t *nml = ASR::down_cast<ASR::Namelist_t>(nml_sym);
         std::string gname = LCompilers::to_lower(nml->m_group_name);
         uint32_t gname_sym = declare_global_cstring(gname.c_str(),
             "_lr_nmlgrp");
-        size_t n = nml->n_var_list;
-        uint32_t items = emit_storage_alloca_nbytes((uint64_t)n * 40);
-        for (size_t i = 0; i < n; i++) {
+        std::vector<NmlItem> items_desc;
+        for (size_t i = 0; i < nml->n_var_list; i++) {
             ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(
                 ASRUtils::symbol_get_past_external(nml->m_var_list[i]));
-            ASR::ttype_t *vt =
-                ASRUtils::type_get_past_allocatable_pointer(v->m_type);
-            ASR::ttype_t *elem = ASRUtils::type_get_past_array(vt);
-            int32_t code = namelist_type_code(elem);
-            if (code < 0) {
-                throw CodeGenError(std::string(
-                    "liric: namelist type not supported for ") + v->m_name);
-            }
-            bool is_arr = ASR::is_a<ASR::Array_t>(*vt);
-            if (is_arr && ASR::is_a<ASR::String_t>(*elem)) {
-                throw CodeGenError(
-                    "liric: namelist character arrays not yet supported");
-            }
-            if (ASRUtils::is_allocatable(v->m_type) ||
-                    ASRUtils::is_pointer(v->m_type)) {
-                throw CodeGenError(
-                    "liric: namelist allocatable/pointer not yet supported");
-            }
-            uint32_t addr = emit_variable_address(v);
-            uint32_t data = addr;
-            int64_t elem_len = 0;
-            if (ASR::is_a<ASR::String_t>(*elem)) {
-                // Scalar character: slot holds a {data_ptr,len} descriptor.
-                data = lr_emit_load(s, ty_ptr, V(addr, ty_ptr));
-                int64_t len_const = 0;
-                ASR::String_t *st = ASR::down_cast<ASR::String_t>(elem);
-                if (st->m_len &&
-                        ASRUtils::extract_value(st->m_len, len_const)) {
-                    elem_len = len_const;
-                }
-            }
-            uint32_t shape = 0;
-            bool shape_null = true;
-            int32_t rank = 0;
-            if (is_arr) {
-                ASR::Array_t *arr = ASR::down_cast<ASR::Array_t>(vt);
-                if (arr->m_physical_type !=
-                        ASR::array_physical_typeType::FixedSizeArray &&
-                        arr->m_physical_type !=
-                        ASR::array_physical_typeType::SIMDArray) {
-                    throw CodeGenError(
-                        "liric: namelist non-fixed array not yet supported");
-                }
-                rank = (int32_t)arr->n_dims;
-                uint32_t shape_arr = emit_storage_alloca_nbytes(
-                    (uint64_t)rank * 8);
-                for (int d = 0; d < rank; d++) {
-                    int64_t ext = 0;
-                    if (!arr->m_dims[d].m_length ||
-                            !ASRUtils::extract_value(
-                                arr->m_dims[d].m_length, ext)) {
-                        throw CodeGenError(
-                            "liric: namelist array needs constant extents");
-                    }
-                    lr_operand_desc_t off[1] = {I((int64_t)d * 8, ty_i64)};
-                    uint32_t ep = lr_emit_gep(s, ty_i8,
-                        V(shape_arr, ty_ptr), off, 1);
-                    lr_emit_store(s, I(ext, ty_i64), V(ep, ty_ptr));
-                }
-                shape = shape_arr;
-                shape_null = false;
-            }
+            collect_namelist_items(LCompilers::to_lower(v->m_name),
+                v->m_type, v->m_type_declaration,
+                emit_variable_address(v), items_desc);
+        }
+        size_t n = items_desc.size();
+        uint32_t items = emit_storage_alloca_nbytes((uint64_t)n * 40);
+        for (size_t i = 0; i < n; i++) {
+            const NmlItem &it = items_desc[i];
             lr_operand_desc_t ibase_off[1] = {I((int64_t)i * 40, ty_i64)};
             uint32_t ibase = lr_emit_gep(s, ty_i8, V(items, ty_ptr),
                 ibase_off, 1);
-            std::string iname = LCompilers::to_lower(v->m_name);
-            uint32_t iname_sym = declare_global_cstring(iname.c_str(),
+            uint32_t iname_sym = declare_global_cstring(it.name.c_str(),
                 "_lr_nmlvar");
             nml_store_field(ibase, 0, LR_GLOBAL(iname_sym, ty_ptr));
-            nml_store_field(ibase, 8, I(code, ty_i32));
-            nml_store_field(ibase, 12, I(rank, ty_i32));
-            nml_store_field(ibase, 16, I(elem_len, ty_i64));
-            nml_store_field(ibase, 24, V(data, ty_ptr));
+            nml_store_field(ibase, 8, I(it.code, ty_i32));
+            nml_store_field(ibase, 12, I(it.rank, ty_i32));
+            nml_store_field(ibase, 16, I(it.elem_len, ty_i64));
+            nml_store_field(ibase, 24, V(it.data, ty_ptr));
             nml_store_field(ibase, 32,
-                shape_null ? LR_NULL(ty_ptr) : V(shape, ty_ptr));
+                it.shape_null ? LR_NULL(ty_ptr) : V(it.shape, ty_ptr));
         }
         uint32_t group = emit_storage_alloca_nbytes(24);
         nml_store_field(group, 0, LR_GLOBAL(gname_sym, ty_ptr));
