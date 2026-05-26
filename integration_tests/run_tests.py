@@ -3,6 +3,7 @@
 import argparse
 import subprocess as sp
 import os
+import shlex
 
 # Initialization
 NO_OF_THREADS = 8 # default no of threads is 8
@@ -97,7 +98,7 @@ def run_test(backend, std, test_pattern=None):
     # If a test pattern is provided, find matching tests and build only those
     if test_pattern:
         # Query ctest to find which tests match the pattern
-        result = sp.run(f"ctest -N -R {test_pattern}", shell=True, cwd=cwd,
+        result = sp.run(f"ctest -N -R {shlex.quote(test_pattern)}", shell=True, cwd=cwd,
                        stdout=sp.PIPE, stderr=sp.PIPE, text=True)
         if result.returncode != 0:
             print("Failed to query tests with ctest")
@@ -147,7 +148,7 @@ def run_test(backend, std, test_pattern=None):
     if verbose:
         ctest_cmd += " -V"
     if test_pattern:
-        ctest_cmd += f" -R {test_pattern}"
+        ctest_cmd += f" -R {shlex.quote(test_pattern)}"
     run_cmd(ctest_cmd, cwd=cwd)
 
 
