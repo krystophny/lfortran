@@ -1299,6 +1299,23 @@ public:
         return is_allocatable_struct_type(ASRUtils::expr_type(expr));
     }
 
+    // A plain `type(t), pointer :: p` variable (scalar, non-array, non-
+    // allocatable struct pointer).  Its slot holds the target's address, so
+    // member access and value assignment must dereference it to alias the
+    // target.  Excludes pointer arrays (descriptor) and non-struct pointers
+    // so the array-slice / assumed-shape association paths are untouched.
+    bool is_scalar_struct_pointer_var(ASR::expr_t *expr) {
+        if (!ASR::is_a<ASR::Var_t>(*expr)) return false;
+        ASR::ttype_t *type = ASRUtils::expr_type(expr);
+        if (!ASRUtils::is_pointer(type) || ASRUtils::is_allocatable(type)) {
+            return false;
+        }
+        ASR::ttype_t *core =
+            ASRUtils::type_get_past_allocatable_pointer(type);
+        return !ASR::is_a<ASR::Array_t>(*core) &&
+            ASR::is_a<ASR::StructType_t>(*core);
+    }
+
     int64_t struct_symbol_tag(ASR::symbol_t *sym) {
         sym = ASRUtils::symbol_get_past_external(sym);
         return 700 + (int64_t)get_hash((ASR::asr_t *)sym);
@@ -3393,6 +3410,11 @@ public:
             visit_expr(*x.m_target);
             is_target = was_target;
             uint32_t dst = tmp;
+            // `p = src` where p is a scalar struct pointer: dereference so
+            // the copy writes through to the pointee, not into p's slot.
+            if (is_scalar_struct_pointer_var(x.m_target)) {
+                dst = lr_emit_load(s, ty_ptr, V(dst, ty_ptr));
+            }
 
             ASR::Struct_t *st = nullptr;
             ASR::symbol_t *sym =
@@ -5521,6 +5543,14 @@ public:
         lr_type_t *t = nullptr;
         if (value_is_descriptor_pointer) {
             rhs = desc_ptr_of(x.m_value);
+            t = ty_ptr;
+        } else if (is_scalar_struct_pointer_var(x.m_target)) {
+            // p => tgt: store the address of tgt so p aliases it; member
+            // access and value assignment dereference p's slot.
+            is_target = true;
+            visit_expr(*x.m_value);
+            is_target = false;
+            rhs = tmp;
             t = ty_ptr;
         } else {
             visit_expr(*x.m_value);
@@ -14195,6 +14225,11 @@ public:
         if (expr_is_allocatable_struct(x.m_v)) {
             uint32_t raw = lr_emit_load(s, ty_ptr, V(v_ptr, ty_ptr));
             v_ptr = class_data_ptr(raw);
+        } else if (is_scalar_struct_pointer_var(const_cast<ASR::expr_t *>(
+                x.m_v))) {
+            // p%c where p is a scalar struct pointer: load the target's
+            // address from p's slot so the member aliases the pointee.
+            v_ptr = lr_emit_load(s, ty_ptr, V(v_ptr, ty_ptr));
         }
 
         uint64_t byte_offset = 0;
