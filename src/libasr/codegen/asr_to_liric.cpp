@@ -5093,14 +5093,21 @@ public:
         visit_expr(*arg);
         is_target = was_target;
         uint32_t storage = tmp;
-        if (!ASRUtils::is_allocatable(ASRUtils::expr_type(arg))) {
+        ASR::ttype_t *arg_type = ASRUtils::expr_type(arg);
+        // A disassociated pointer or unallocated allocatable actual passed
+        // to a (non-pointer, non-allocatable) optional dummy makes the
+        // dummy not present, so pass null in that case.  A plain actual is
+        // always present and passes its storage directly.
+        if (!ASRUtils::is_allocatable(arg_type) &&
+                !ASRUtils::is_pointer(arg_type)) {
             return storage;
         }
         ASR::ttype_t *core = ASRUtils::type_get_past_allocatable_pointer(
-            ASRUtils::expr_type(arg));
+            arg_type);
         core = ASRUtils::type_get_past_array(core);
         uint32_t allocated = emit_allocatable_is_allocated(arg, storage);
-        if (ASR::is_a<ASR::StructType_t>(*core)) {
+        if (ASRUtils::is_allocatable(arg_type) &&
+                ASR::is_a<ASR::StructType_t>(*core)) {
             uint32_t raw = lr_emit_load(s, ty_ptr, V(storage, ty_ptr));
             uint32_t data = class_data_ptr(raw);
             return lr_emit_select(s, ty_ptr, V(allocated, ty_i1),
@@ -9178,9 +9185,14 @@ public:
                             {actual_ptr, data_ptr, data_bytes});
                     }
                 } else if (formal_is_optional(fn, i) &&
-                        ASRUtils::is_allocatable(ASRUtils::expr_type(arg)) &&
-                        !(formal_v && ASRUtils::is_allocatable(
-                            formal_v->m_type))) {
+                        (ASRUtils::is_allocatable(ASRUtils::expr_type(arg)) ||
+                         ASRUtils::is_pointer(ASRUtils::expr_type(arg))) &&
+                        !(formal_v && (ASRUtils::is_allocatable(
+                                formal_v->m_type) ||
+                            ASRUtils::is_pointer(formal_v->m_type)))) {
+                    // Optional non-pointer/non-allocatable dummy: a
+                    // disassociated pointer or unallocated allocatable
+                    // actual must make present() false (pass null).
                     args.push_back(V(emit_optional_actual_pointer(arg),
                         ty_ptr));
                 } else if (expr_is_storage_reference(arg)) {
@@ -9446,9 +9458,14 @@ public:
                     args.push_back(V(
                         emit_class_wrapper_for_concrete(arg, fn, i), ty_ptr));
                 } else if (formal_is_optional(fn, i) &&
-                        ASRUtils::is_allocatable(ASRUtils::expr_type(arg)) &&
-                        !(formal_v && ASRUtils::is_allocatable(
-                            formal_v->m_type))) {
+                        (ASRUtils::is_allocatable(ASRUtils::expr_type(arg)) ||
+                         ASRUtils::is_pointer(ASRUtils::expr_type(arg))) &&
+                        !(formal_v && (ASRUtils::is_allocatable(
+                                formal_v->m_type) ||
+                            ASRUtils::is_pointer(formal_v->m_type)))) {
+                    // Optional non-pointer/non-allocatable dummy: a
+                    // disassociated pointer or unallocated allocatable
+                    // actual must make present() false (pass null).
                     args.push_back(V(emit_optional_actual_pointer(arg),
                         ty_ptr));
                 } else if (expr_is_storage_reference(arg)) {
