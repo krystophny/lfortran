@@ -7410,9 +7410,21 @@ public:
         // level too far and copy garbage.
         uint32_t mold_data;
         uint32_t mold_tag;
-        if (expr_is_allocatable_struct(mold)
+        ASR::ttype_t *mold_type = ASRUtils::expr_type(mold);
+        bool mold_is_indirect = ASRUtils::is_allocatable(mold_type) ||
+            ASRUtils::is_pointer(mold_type);
+        if (ASRUtils::is_class_type(ASRUtils::extract_type(mold_type)) &&
+                !mold_is_indirect) {
+            // A by-reference class dummy: visit_expr already yields the
+            // data pointer (past the class header), exactly as member
+            // access uses it; the runtime type tag sits in the header just
+            // before the data.  Loading mold_ptr here would read the first
+            // data word as a pointer and crash.
+            mold_data = mold_ptr;
+            mold_tag = load_object_type_tag(mold_ptr);
+        } else if (expr_is_allocatable_struct(mold)
                 || ASRUtils::is_class_type(
-                    ASRUtils::extract_type(ASRUtils::expr_type(mold)))) {
+                    ASRUtils::extract_type(mold_type))) {
             uint32_t mold_raw = lr_emit_load(s, ty_ptr, V(mold_ptr, ty_ptr));
             mold_data = class_data_ptr(mold_raw);
             mold_tag = load_raw_object_type_tag(mold_raw);
