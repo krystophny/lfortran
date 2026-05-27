@@ -6544,6 +6544,29 @@ public:
             ASR::symbol_t *tsym = ASRUtils::symbol_get_past_external(
                 ASR::down_cast<ASR::Var_t>(x.m_target)->m_v);
             class_alias_data_ptr.insert(get_hash((ASR::asr_t *)tsym));
+        } else if (ASR::is_a<ASR::Var_t>(*x.m_target) &&
+                ASR::is_a<ASR::Var_t>(*x.m_value) &&
+                ASRUtils::is_pointer(ASRUtils::expr_type(x.m_target)) &&
+                !ASRUtils::is_allocatable(ASRUtils::expr_type(x.m_target)) &&
+                ASRUtils::is_class_type(ASRUtils::extract_type(
+                    ASRUtils::expr_type(x.m_target))) &&
+                expr_is_allocatable_struct(x.m_value) &&
+                ASRUtils::is_class_type(ASRUtils::extract_type(
+                    ASRUtils::expr_type(x.m_value)))) {
+            // y => x where y is a class pointer and x is an allocatable class
+            // scalar (select type(y => x)): y must alias x's allocated object.
+            // x's slot holds the allocation (header + data); store the data
+            // pointer (past the header) and record y so member access /
+            // dispatch dereference the slot at the object's header.
+            is_target = true;
+            visit_expr(*x.m_value);
+            is_target = false;
+            uint32_t raw = lr_emit_load(s, ty_ptr, V(tmp, ty_ptr));
+            rhs = class_data_ptr(raw);
+            t = ty_ptr;
+            class_alias_data_ptr.insert(get_hash((ASR::asr_t *)
+                ASRUtils::symbol_get_past_external(
+                    ASR::down_cast<ASR::Var_t>(x.m_target)->m_v)));
         } else if (is_scalar_intrinsic_pointer_var(x.m_target) &&
                 expr_is_storage_reference(x.m_value) &&
                 !ASRUtils::is_pointer(ASRUtils::expr_type(x.m_value))) {
