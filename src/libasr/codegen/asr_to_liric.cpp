@@ -2761,6 +2761,20 @@ public:
             uint32_t dst_desc, uint32_t src_desc, ASR::Array_t *array_t) {
         uint32_t src_base = desc_base_addr(src_desc);
         uint32_t old_base = desc_base_addr(dst_desc);
+        uint32_t allocator = emit_call(
+            "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+        // An unallocated source (null base) must leave the destination
+        // unallocated; the old code unconditionally malloc'd and stored a
+        // non-null base, so `dst = src` made allocated(dst) wrongly true.
+        uint32_t is_alloc = lr_emit_icmp(s, LR_CMP_NE,
+            V(src_base, ty_ptr), LR_NULL(ty_ptr));
+        lr_error_t err;
+        uint32_t alloc_bb = lr_session_block(s);
+        uint32_t null_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(is_alloc, ty_i1), alloc_bb, null_bb);
+
+        lr_session_set_block(s, alloc_bb, &err);
         uint32_t total = descriptor_array_element_count(
             src_desc, (int)array_t->n_dims);
         uint32_t elem_len = desc_load_i64(src_desc, 8);
@@ -2772,9 +2786,6 @@ public:
             V(alloc_elems, ty_i64), V(elem_len, ty_i64));
         uint32_t copy_bytes = lr_emit_mul(s, ty_i64,
             V(total, ty_i64), V(elem_len, ty_i64));
-
-        uint32_t allocator = emit_call(
-            "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
         lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
         declare_func("_lfortran_malloc_alloc", ty_ptr,
             malloc_params, 2, false);
@@ -2783,17 +2794,23 @@ public:
         };
         uint32_t new_base = emit_call("_lfortran_malloc_alloc",
             ty_ptr, malloc_args, 2);
-
         lr_type_t *memcpy_params[] = {ty_ptr, ty_ptr, ty_i64};
         declare_func("memcpy", ty_ptr, memcpy_params, 3, false);
         lr_operand_desc_t memcpy_args[] = {
             V(new_base, ty_ptr), V(src_base, ty_ptr), V(copy_bytes, ty_i64)
         };
         emit_call("memcpy", ty_ptr, memcpy_args, 3);
-
         store_descriptor_shape_with_base(dst_desc, new_base, elem_len,
             src_desc, array_t);
         emit_free_if_nonnull(allocator, old_base);
+        lr_emit_br(s, done_bb);
+
+        lr_session_set_block(s, null_bb, &err);
+        emit_free_if_nonnull(allocator, old_base);
+        desc_store_null_base(dst_desc);
+        lr_emit_br(s, done_bb);
+
+        lr_session_set_block(s, done_bb, &err);
     }
 
     void emit_memcpy_bytes(uint32_t dst, uint32_t src, uint64_t nbytes) {
