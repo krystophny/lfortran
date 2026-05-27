@@ -15197,8 +15197,17 @@ public:
                 return total > 0 ? total : -1;
             }
             if (ASR::is_a<ASR::Integer_t>(*type) ||
-                    ASR::is_a<ASR::Real_t>(*type) ||
-                    ASR::is_a<ASR::Complex_t>(*type)) {
+                    ASR::is_a<ASR::Real_t>(*type)) {
+                // A fixed-size integer/real array is unrolled into one scalar
+                // arg per element (matching the LLVM backend), so the runtime
+                // applies format reversion / record advancement between
+                // elements.  A deferred-shape (descriptor) array stays a single
+                // descriptor-array arg whose continuation does the same.
+                int64_t total = ASRUtils::get_fixed_size_of_array(
+                    array_t->m_dims, array_t->n_dims);
+                return total > 0 ? total : 1;
+            }
+            if (ASR::is_a<ASR::Complex_t>(*type)) {
                 return 1;
             }
             return -1;
@@ -15273,6 +15282,23 @@ public:
                 return false;
             }
             ArrayLinearView view = emit_array_linear_view(target, array_t);
+            // Fixed-size integer/real array: unroll into per-element scalar
+            // args so the runtime reverts the format (advances records) between
+            // elements, as the LLVM backend does.  The single descriptor-array
+            // arg form is kept for deferred-shape (descriptor) arrays.
+            int64_t total = ASRUtils::get_fixed_size_of_array(
+                array_t->m_dims, array_t->n_dims);
+            if (total > 0 && (ASR::is_a<ASR::Integer_t>(*elem_type) ||
+                    ASR::is_a<ASR::Real_t>(*elem_type))) {
+                for (int64_t i = 0; i < total; i++) {
+                    uint32_t ep = emit_linear_elem_ptr(
+                        view.base, emit_i64_const(i), view.elem_len);
+                    call_args.push_back(I(0, ty_i32));
+                    call_args.push_back(I(type_code, ty_i32));
+                    call_args.push_back(V(ep, ty_ptr));
+                }
+                return true;
+            }
             uint32_t count = cast_int_value(view.total, ty_i64, ty_i32);
             call_args.push_back(I(1, ty_i32));
             call_args.push_back(I(type_code, ty_i32));
