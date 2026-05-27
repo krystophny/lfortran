@@ -14848,6 +14848,33 @@ public:
                     : (k == 4) ? "_lfortran_string_read_c32_array" : nullptr;
             } else if (ASR::is_a<ASR::Logical_t>(*et)) {
                 name = "_lfortran_string_read_bool_array";
+            } else if (ASR::is_a<ASR::String_t>(*et)) {
+                // Each element is a {data, len} str_desc; the dedicated runtime
+                // reads one token per element, threading the source position.
+                // Pass the declared element length (the element str_desc holds
+                // 0 for a fixed-length array); 0 signals assumed-length, where
+                // the runtime falls back to the descriptor's length.
+                ASR::String_t *st = ASR::down_cast<ASR::String_t>(et);
+                int64_t slen = 0;
+                uint32_t elem_len_v;
+                if (st->m_len && ASRUtils::extract_value(st->m_len, slen)) {
+                    elem_len_v = emit_i64_const(slen);
+                } else if (st->m_len) {
+                    elem_len_v = emit_i64_expr(st->m_len);
+                } else {
+                    elem_len_v = emit_i64_const(0);
+                }
+                ArrayLinearView sv = emit_array_linear_view(target, arr_t);
+                lr_type_t *sp[] = {ty_ptr, ty_i64, ty_ptr, ty_i64, ty_i64};
+                declare_func("_lfortran_string_read_strdesc_array", ty_void,
+                    sp, 5, false);
+                lr_operand_desc_t sargs[] = {
+                    V(data, ty_ptr), V(len, ty_i64),
+                    V(sv.base, ty_ptr), V(sv.total, ty_i64),
+                    V(elem_len_v, ty_i64)
+                };
+                emit_call_void("_lfortran_string_read_strdesc_array", sargs, 5);
+                return true;
             }
             if (!name) return false;
             ArrayLinearView v = emit_array_linear_view(target, arr_t);
