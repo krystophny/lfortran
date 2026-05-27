@@ -10454,6 +10454,20 @@ public:
                 args.data(), args.size());
             return;
         }
+        // TBP function on a POLYMORPHIC object whose binding resolved to a
+        // concrete (declared-type) implementation: dispatch through the
+        // object's vtable so a dynamic-type override is reached.
+        if (fn && x.m_dt && is_tbp_call_symbol(x.m_name) &&
+                ASRUtils::is_class_type(
+                    ASRUtils::type_get_past_allocatable_pointer(
+                        ASRUtils::expr_type(x.m_dt)))) {
+            uint32_t data_ptr = dispatch_data_ptr_from_dt(x.m_dt);
+            uint32_t fptr = load_object_method_ptr(data_ptr,
+                dynamic_method_name(x.m_name, fn));
+            tmp = lr_emit_call(s, ret, V(fptr, ty_ptr),
+                args.data(), args.size());
+            return;
+        }
         uint32_t sym = lr_session_intern(s, callable_name(fn).c_str());
         if (return_type_uses_sret(ret)) {
             uint32_t ret_slot = emit_temp_slot(ret);
