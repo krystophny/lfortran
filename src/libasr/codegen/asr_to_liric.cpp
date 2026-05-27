@@ -1642,6 +1642,25 @@ public:
             bytes[0] = lv ? 1 : 0;
             return true;
         }
+        if (ASR::is_a<ASR::Complex_t>(*tt)) {
+            if (!ASR::is_a<ASR::ComplexConstant_t>(*expr)) return false;
+            ASR::ComplexConstant_t *cc =
+                ASR::down_cast<ASR::ComplexConstant_t>(expr);
+            int kind = ASRUtils::extract_kind_from_ttype_t(tt);
+            bytes.assign(2 * kind, 0);
+            if (kind == 4) {
+                float re = (float)cc->m_re, im = (float)cc->m_im;
+                std::memcpy(bytes.data(), &re, 4);
+                std::memcpy(bytes.data() + 4, &im, 4);
+            } else if (kind == 8) {
+                double re = cc->m_re, im = cc->m_im;
+                std::memcpy(bytes.data(), &re, 8);
+                std::memcpy(bytes.data() + 8, &im, 8);
+            } else {
+                return false;
+            }
+            return true;
+        }
         return false;
     }
 
