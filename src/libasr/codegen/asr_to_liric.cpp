@@ -4641,6 +4641,38 @@ public:
                 return;
             }
         }
+        // Same lowered-element transfer, but with a STRING source
+        // (`bytes = transfer(str, bytes)`): the string's data buffer is the
+        // contiguous source blob, so element idx takes its idx-th dst-sized
+        // chunk.
+        if (!ASR::is_a<ASR::Array_t>(*dst_type) &&
+                !ASR::is_a<ASR::String_t>(*dst_type) &&
+                ASR::is_a<ASR::String_t>(*src_type) &&
+                x.m_mold && ASR::is_a<ASR::ArrayItem_t>(*x.m_mold)) {
+            ASR::ArrayItem_t *mold_item =
+                ASR::down_cast<ASR::ArrayItem_t>(x.m_mold);
+            ASR::ttype_t *mold_array_type =
+                ASRUtils::type_get_past_allocatable_pointer(
+                    ASRUtils::expr_type(mold_item->m_v));
+            int64_t dst_eb = element_byte_size(dst_type);
+            if (ASR::is_a<ASR::Array_t>(*mold_array_type) && dst_eb > 0) {
+                ASR::Array_t *mold_array =
+                    ASR::down_cast<ASR::Array_t>(mold_array_type);
+                uint32_t idx = array_item_linear_index(*mold_item, mold_array);
+                visit_expr(*x.m_source);
+                uint32_t fld0 = 0;
+                uint32_t data = lr_emit_extractvalue(s, ty_ptr,
+                    V(tmp, ty_str_desc), &fld0, 1);
+                uint32_t byte_off = lr_emit_mul(s, ty_i64,
+                    V(idx, ty_i64), I(dst_eb, ty_i64));
+                lr_operand_desc_t off[1] = {V(byte_off, ty_i64)};
+                uint32_t chunk = lr_emit_gep(s, ty_i8,
+                    V(data, ty_ptr), off, 1);
+                lr_type_t *dst_lr = get_type(dst_type);
+                tmp = lr_emit_load(s, dst_lr, V(chunk, ty_ptr));
+                return;
+            }
+        }
         // Array source bit-cast to a scalar destination
         // (`transfer(byte_array, scalar)`): read the destination
         // type's bytes from the array's base pointer.  Without this,
