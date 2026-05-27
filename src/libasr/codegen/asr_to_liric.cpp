@@ -1139,13 +1139,13 @@ public:
     // (large enough for a string descriptor) if the type's exact size
     // can't be determined.
     uint64_t lr_type_size_or_default(lr_type_t *t) {
-        unsigned w = lr_type_width(s, t);
-        if (w >= 8) return (w + 7) / 8;
-        if (t == ty_f32) return 4;
-        if (t == ty_f64) return 8;
-        // For struct types lr_type_width returns 0; we estimate from
-        // the descriptor and pointer constants in scope.
-        if (t == ty_str_desc) return 16;
+        // liric computes the true byte size (with field alignment) for every
+        // materialized type, and that is exactly the layout alloca/GEP use.
+        // Trust it so struct sizes match the array element stride liric emits
+        // and gfortran's packing; only fall back for void/function types it
+        // sizes as 0.
+        size_t sz = lr_type_size(t);
+        if (sz > 0) return (uint64_t)sz;
         return 32;
     }
 
@@ -8080,7 +8080,16 @@ public:
         if (n_dims == 0 && arg.n_dims > 0) {
             n_dims = (int)arg.n_dims;
         }
-        int64_t elem_bytes = element_byte_size(array_t->m_type);
+        // A polymorphic array (class(*) / class(T)) declares a small static
+        // element type; the real element size comes from the allocate type
+        // spec (`allocate(MyType :: a(:))` / `allocate(integer :: a(:))`),
+        // carried in arg.m_type.  Size by that dynamic type so the data block
+        // and descriptor elem_len hold the allocated type, not the abstract
+        // base.  Falls back to the static element type for an untyped
+        // allocate.
+        int64_t elem_bytes = arg.m_type
+            ? element_byte_size(arg.m_type)
+            : element_byte_size(array_t->m_type);
 
         bool was_target = is_target;
         is_target = true;
@@ -11383,6 +11392,23 @@ public:
         }
         visit_expr(*val);
         lr_type_t *lr_t = value_type_for_expr(val);
+        if (lr_t == ty_i1) {
+            // Logical values are materialized as i1, but on disk a scalar
+            // logical occupies its full kind width (the runtime reads
+            // sizeof(int32_t) for a default logical).  Zero-extend into a
+            // fully-initialized slot of that width so the record holds the
+            // right byte count and no stack bytes leak past the value.
+            int64_t nbytes = (int64_t)element_byte_size(vt);
+            lr_type_t *store_t = (nbytes >= 8) ? ty_i64
+                : (nbytes >= 4) ? ty_i32
+                : (nbytes >= 2) ? ty_i16 : ty_i8;
+            uint32_t wide = lr_emit_zext(s, store_t, V(tmp, ty_i1));
+            uint32_t slot = emit_temp_slot(store_t);
+            lr_emit_store(s, V(wide, store_t), V(slot, ty_ptr));
+            uint32_t len = lr_emit_add(s, ty_i32,
+                I(nbytes, ty_i32), I(0, ty_i32));
+            return {len, slot};
+        }
         uint32_t slot = emit_temp_slot(lr_t);
         lr_emit_store(s, V(tmp, lr_t), V(slot, ty_ptr));
         return {
