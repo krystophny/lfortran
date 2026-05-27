@@ -7311,9 +7311,18 @@ public:
                 initialize_local_array_descriptor(field_ptr, member_type);
             } else {
                 core = ASRUtils::type_get_past_array(core);
+                bool has_scalar_default = member->m_value &&
+                    !ASRUtils::is_allocatable(member_type) &&
+                    !ASRUtils::is_pointer(member_type);
                 if (ASR::is_a<ASR::String_t>(*core)) {
-                    initialize_heap_string_descriptor(field_ptr,
-                        ASR::down_cast<ASR::String_t>(core));
+                    // A string member with a constant default (e.g.
+                    // character(1) :: f = achar(70)) already had its
+                    // {data,len} descriptor stored above; resetting it here
+                    // would overwrite the default with a blank buffer.
+                    if (!has_scalar_default) {
+                        initialize_heap_string_descriptor(field_ptr,
+                            ASR::down_cast<ASR::String_t>(core));
+                    }
                 } else if (ASR::is_a<ASR::StructType_t>(*core) &&
                         !ASRUtils::is_allocatable(member_type) &&
                         !ASRUtils::is_pointer(member_type)) {
