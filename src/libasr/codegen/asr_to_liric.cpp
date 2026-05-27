@@ -3484,6 +3484,32 @@ public:
             }
         }
 
+        // class(*) = class(*) scalar: copy the source {data, tag} poly_desc
+        // into the target.  Both sides are unlimited polymorphic, so the
+        // dynamic size is unknown at compile time; share the heap data, which
+        // is correct for read-after-assign and sets the target's dynamic tag
+        // (without this the target tag stayed uninitialised and select type
+        // missed).
+        if (!target_is_array && ASRUtils::is_unlimited_polymorphic_type(
+                ASRUtils::expr_type(x.m_target)) &&
+                ASRUtils::is_unlimited_polymorphic_type(
+                    ASRUtils::expr_type(x.m_value))) {
+            ASR::ttype_t *vvt = ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(x.m_value));
+            if (!ASR::is_a<ASR::Array_t>(*vvt)) {
+                bool wt = is_target;
+                is_target = true;
+                visit_expr(*x.m_value);
+                uint32_t src = tmp;
+                visit_expr(*x.m_target);
+                is_target = wt;
+                uint32_t dst = tmp;
+                uint32_t pd = lr_emit_load(s, ty_poly_desc, V(src, ty_ptr));
+                lr_emit_store(s, V(pd, ty_poly_desc), V(dst, ty_ptr));
+                return;
+            }
+        }
+
         ASR::ttype_t *target_struct_type = ASRUtils::expr_type(x.m_target);
         target_struct_type =
             ASRUtils::type_get_past_allocatable_pointer(target_struct_type);
@@ -7810,7 +7836,20 @@ public:
             return false;
         }
         ASR::ttype_t *src_type = ASRUtils::expr_type(source);
+        ASR::ttype_t *src_core = ASRUtils::type_get_past_array(
+            ASRUtils::type_get_past_allocatable_pointer(src_type));
         int64_t tag = polymorphic_type_tag(src_type);
+        // polymorphic_type_tag only tags intrinsics; a derived-type source
+        // (allocate(class(*) :: x, source=struct_val)) tags by struct symbol,
+        // matching select type's TypeStmtName.
+        ASR::Struct_t *src_st = nullptr;
+        if (tag == 0 && ASR::is_a<ASR::StructType_t>(*src_core)) {
+            src_st = struct_symbol_from_type_decl(
+                ASRUtils::get_struct_sym_from_struct_expr(source));
+            if (src_st) {
+                tag = struct_symbol_tag((ASR::symbol_t *)src_st);
+            }
+        }
         if (tag == 0) {
             return false;
         }
@@ -7835,9 +7874,32 @@ public:
         };
         emit_call("memset", ty_ptr, memset_args, 3);
 
-        visit_expr(*source);
-        lr_type_t *src_lr_type = value_type_for_expr(source);
-        lr_emit_store(s, V(tmp, src_lr_type), V(data, ty_ptr));
+        if (src_st && ASR::is_a<ASR::StructConstructor_t>(*source)) {
+            // rvalue constructor: write its fields straight into the storage.
+            emit_struct_constructor_to_storage(
+                *ASR::down_cast<ASR::StructConstructor_t>(source), data);
+        } else if (src_st && ASR::is_a<ASR::StructConstant_t>(*source)) {
+            emit_struct_constant_to_storage(
+                *ASR::down_cast<ASR::StructConstant_t>(source), data);
+        } else if (src_st) {
+            // lvalue struct (variable / component): copy from its address.
+            bool wt = is_target;
+            is_target = true;
+            visit_expr(*source);
+            is_target = wt;
+            uint32_t src_ptr = tmp;
+            if (expr_is_allocatable_struct(source) ||
+                    ASRUtils::is_class_type(
+                        ASRUtils::extract_type(src_type))) {
+                src_ptr = class_data_ptr(
+                    lr_emit_load(s, ty_ptr, V(src_ptr, ty_ptr)));
+            }
+            emit_struct_source_copy(data, src_ptr, src_st);
+        } else {
+            visit_expr(*source);
+            lr_type_t *src_lr_type = value_type_for_expr(source);
+            lr_emit_store(s, V(tmp, src_lr_type), V(data, ty_ptr));
+        }
 
         uint32_t fld0 = 0, fld1 = 1;
         uint32_t d0 = lr_emit_insertvalue(s, ty_poly_desc,
@@ -10086,9 +10148,23 @@ public:
             is_target = true;
             visit_expr(*x.m_arg);
             is_target = was_target;
+            ASR::ttype_t *arg_naked =
+                ASRUtils::type_get_past_allocatable_pointer(
+                    ASRUtils::expr_type(x.m_arg));
             if (expr_is_allocatable_struct(x.m_arg)) {
                 uint32_t raw = lr_emit_load(s, ty_ptr, V(tmp, ty_ptr));
                 tmp = class_data_ptr(raw);
+            } else if (ASRUtils::is_unlimited_polymorphic_type(
+                    ASRUtils::expr_type(x.m_arg)) &&
+                    !ASR::is_a<ASR::Array_t>(*arg_naked)) {
+                // A class(*) scalar slot holds a {data, tag} poly_desc; the
+                // concrete struct lives at field 0 (data).  Without this the
+                // cast handed back the descriptor slot and member access read
+                // the data pointer's bytes as the first component.
+                uint32_t pd = lr_emit_load(s, ty_poly_desc, V(tmp, ty_ptr));
+                uint32_t fld0 = 0;
+                tmp = lr_emit_extractvalue(s, ty_ptr,
+                    V(pd, ty_poly_desc), &fld0, 1);
             }
             return;
         }
