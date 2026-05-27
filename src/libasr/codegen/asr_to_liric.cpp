@@ -6182,6 +6182,43 @@ public:
         bool value_is_descriptor_pointer = value_is_descriptor_array ||
             type_is_unlimited_polymorphic_array(
                 ASRUtils::expr_type(x.m_value));
+        // Aliasing an inline descriptor-array target to a runtime_pointer_array
+        // source Var (e.g. the contiguous copy-in of a select-type class(*)
+        // array selector to an explicit-shape dummy): the source's slot holds
+        // a POINTER to the real descriptor, so copy the DEREFERENCED descriptor
+        // contents into the target's inline descriptor (base <- data base),
+        // rather than storing the descriptor pointer as the target's base
+        // (which left consumers one dereference short -> they read the
+        // descriptor address as data, garbling the call argument).
+        if (ASR::is_a<ASR::Var_t>(*x.m_value) &&
+                ASR::is_a<ASR::Var_t>(*x.m_target)) {
+            ASR::symbol_t *vs = ASRUtils::symbol_get_past_external(
+                ASR::down_cast<ASR::Var_t>(x.m_value)->m_v);
+            ASR::symbol_t *ts = ASRUtils::symbol_get_past_external(
+                ASR::down_cast<ASR::Var_t>(x.m_target)->m_v);
+            if (ASR::is_a<ASR::Variable_t>(*vs) &&
+                    ASR::is_a<ASR::Variable_t>(*ts)) {
+                uint64_t vh = get_hash((ASR::asr_t *)vs);
+                uint64_t th = get_hash((ASR::asr_t *)ts);
+                ASR::ttype_t *tt =
+                    ASRUtils::type_get_past_allocatable_pointer(
+                        ASR::down_cast<ASR::Variable_t>(ts)->m_type);
+                if (runtime_pointer_arrays.count(vh) &&
+                        !runtime_pointer_arrays.count(th) &&
+                        ASR::is_a<ASR::Array_t>(*tt)) {
+                    int ndims = (int)ASR::down_cast<ASR::Array_t>(tt)->n_dims;
+                    uint32_t src_desc = desc_ptr_of(x.m_value);
+                    is_target = true;
+                    visit_expr(*x.m_target);
+                    is_target = false;
+                    uint32_t dst = tmp;
+                    emit_memcpy_bytes(dst, src_desc,
+                        (uint64_t)(DESC_HEADER_BYTES + DESC_DIM_BYTES *
+                            (ndims > 0 ? ndims : 1)));
+                    return;
+                }
+            }
+        }
         bool mark_runtime_pointer_array = false;
         uint64_t runtime_pointer_array_hash = 0;
         if (ASR::is_a<ASR::Var_t>(*x.m_target)) {
