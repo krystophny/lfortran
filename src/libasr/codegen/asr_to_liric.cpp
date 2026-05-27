@@ -4735,8 +4735,48 @@ public:
 
     // real(z) / aimag(z): extract field 0/1 from the {f32,f32}/{f64,f64}
     // complex value built by ComplexConstant/ComplexConstructor.
+    // arr%re / arr%im on a complex ARRAY: a strided real array aliasing the
+    // real (offset 0) or imaginary (offset = real-part size) component of each
+    // element, spaced by the complex element stride.  Build a descriptor that
+    // views it (used by associate(p => c%re) and array reads).  Returns true
+    // and sets tmp to the descriptor pointer when arg is an array.
+    bool emit_complex_component_array(ASR::expr_t *arg, ASR::ttype_t *res_type,
+                                      bool imag) {
+        ASR::ttype_t *argt =
+            ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(arg));
+        if (!ASR::is_a<ASR::Array_t>(*argt)) {
+            return false;
+        }
+        ASR::Array_t *arr = ASR::down_cast<ASR::Array_t>(argt);
+        int nd = (int)arr->n_dims;
+        ASR::ttype_t *relem = ASRUtils::type_get_past_array(res_type);
+        int64_t real_bytes = element_byte_size(relem);
+        uint32_t cdesc = desc_ptr_of(arg);
+        uint32_t cbase = desc_base_addr(cdesc);
+        lr_operand_desc_t off[1] = {I(imag ? real_bytes : 0, ty_i64)};
+        uint32_t mbase = lr_emit_gep(s, ty_i8, V(cbase, ty_ptr), off, 1);
+        uint32_t ndesc = emit_desc_alloca(nd);
+        desc_store_base(ndesc, mbase);
+        desc_store_i64(ndesc, 8, emit_i64_const(real_bytes));
+        desc_store_rank(ndesc, nd);
+        desc_store_i64(ndesc, 24, emit_i64_const(0));
+        for (int d = 0; d < nd; d++) {
+            uint32_t lb = desc_dim_lbound(cdesc, d);
+            uint32_t ext = desc_dim_extent(cdesc, d);
+            uint32_t cstride = desc_load_i64(cdesc,
+                DESC_HEADER_BYTES + DESC_DIM_BYTES * d + 16);
+            int64_t bo = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
+            desc_store_i64(ndesc, bo + 0, lb);
+            desc_store_i64(ndesc, bo + 8, ext);
+            desc_store_i64(ndesc, bo + 16, cstride);
+        }
+        tmp = ndesc;
+        return true;
+    }
     void visit_ComplexRe(const ASR::ComplexRe_t &x) {
         if (x.m_value) { visit_expr(*x.m_value); return; }
+        if (emit_complex_component_array(x.m_arg, x.m_type, false)) return;
         visit_expr(*x.m_arg);
         uint32_t v = tmp;
         lr_type_t *ct = get_type(ASRUtils::expr_type(x.m_arg));
@@ -4746,6 +4786,7 @@ public:
     }
     void visit_ComplexIm(const ASR::ComplexIm_t &x) {
         if (x.m_value) { visit_expr(*x.m_value); return; }
+        if (emit_complex_component_array(x.m_arg, x.m_type, true)) return;
         visit_expr(*x.m_arg);
         uint32_t v = tmp;
         lr_type_t *ct = get_type(ASRUtils::expr_type(x.m_arg));
@@ -5758,7 +5799,9 @@ public:
         // the member access yields a strided descriptor (built in
         // visit_StructInstanceMember); alias it through a runtime pointer
         // array so name reads/writes the original strided storage.
-        if (ASR::is_a<ASR::StructInstanceMember_t>(*x.m_value)) {
+        if (ASR::is_a<ASR::StructInstanceMember_t>(*x.m_value) ||
+                ASR::is_a<ASR::ComplexRe_t>(*x.m_value) ||
+                ASR::is_a<ASR::ComplexIm_t>(*x.m_value)) {
             ASR::ttype_t *mt =
                 ASRUtils::type_get_past_allocatable_pointer(
                     ASRUtils::expr_type(x.m_value));
