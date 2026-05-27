@@ -66,7 +66,7 @@ static inline uint64_t get_hash(ASR::asr_t *node) {
     LIRIC_PASSTHROUGH(x) \
     visit_expr(*(x).m_left); uint32_t _l = tmp; \
     visit_expr(*(x).m_right); uint32_t _r = tmp; \
-    lr_type_t *_t = get_type((x).m_type); \
+    lr_type_t *_t = get_type(ASRUtils::type_get_past_allocatable_pointer((x).m_type)); \
     switch ((x).m_op) { \
         case ASR::binopType::Add: tmp = lr_emit_add(s, _t, V(_l,_t), V(_r,_t)); break; \
         case ASR::binopType::Sub: tmp = lr_emit_sub(s, _t, V(_l,_t), V(_r,_t)); break; \
@@ -88,7 +88,7 @@ static inline uint64_t get_hash(ASR::asr_t *node) {
     LIRIC_PASSTHROUGH(x) \
     visit_expr(*(x).m_left); uint32_t _l = tmp; \
     visit_expr(*(x).m_right); uint32_t _r = tmp; \
-    lr_type_t *_t = get_type((x).m_type); \
+    lr_type_t *_t = get_type(ASRUtils::type_get_past_allocatable_pointer((x).m_type)); \
     switch ((x).m_op) { \
         case ASR::binopType::Add: tmp = lr_emit_fadd(s, _t, V(_l,_t), V(_r,_t)); break; \
         case ASR::binopType::Sub: tmp = lr_emit_fsub(s, _t, V(_l,_t), V(_r,_t)); break; \
@@ -385,6 +385,15 @@ public:
             pointee = ASRUtils::type_get_past_allocatable(pointee);
             if (ASR::is_a<ASR::String_t>(*pointee)) {
                 return ty_str_desc;
+            }
+            // A value expression with a Pointer(scalar) type evaluates to the
+            // dereferenced scalar value (an indirect EQUIVALENCE/ASSOCIATE
+            // pointer read, or arithmetic whose result type kept an operand's
+            // pointer-ness).  Its value type is the pointee's, not ty_ptr;
+            // otherwise a real/complex value is mistyped as a pointer and
+            // arithmetic / stores use the wrong register class.
+            if (!ASR::is_a<ASR::Array_t>(*pointee)) {
+                return get_type(pointee);
             }
         }
         return get_type(t);
@@ -690,7 +699,7 @@ public:
         // Real ** {Integer, Real}.  Expand small integer constant
         // exponents to a chain of multiplies (matches LLVM backend's
         // fast path) and fall through to libm pow/powf otherwise.
-        lr_type_t *t = get_type(x.m_type);
+        lr_type_t *t = get_type(res_type);
         ASR::ttype_t *rt = ASRUtils::expr_type(x.m_right);
         int64_t exponent_const = INT64_MAX;
         bool exp_is_int = ASRUtils::is_integer(*rt);
@@ -1332,6 +1341,25 @@ public:
             ASRUtils::type_get_past_allocatable_pointer(type);
         return !ASR::is_a<ASR::Array_t>(*core) &&
             ASR::is_a<ASR::StructType_t>(*core);
+    }
+
+    // A scalar intrinsic pointer Var: integer/real/logical/complex pointer
+    // (not array, struct, class, or character).  Used for pointer-association
+    // and ASSOCIATE-name aliasing, where the slot holds the target address and
+    // reads/writes dereference it (the indirect_scalar_pointers convention).
+    bool is_scalar_intrinsic_pointer_var(ASR::expr_t *expr) {
+        if (!ASR::is_a<ASR::Var_t>(*expr)) return false;
+        ASR::ttype_t *type = ASRUtils::expr_type(expr);
+        if (!ASRUtils::is_pointer(type) || ASRUtils::is_allocatable(type)) {
+            return false;
+        }
+        ASR::ttype_t *core =
+            ASRUtils::type_get_past_allocatable_pointer(type);
+        if (ASR::is_a<ASR::Array_t>(*core)) return false;
+        return ASR::is_a<ASR::Integer_t>(*core) ||
+            ASR::is_a<ASR::Real_t>(*core) ||
+            ASR::is_a<ASR::Logical_t>(*core) ||
+            ASR::is_a<ASR::Complex_t>(*core);
     }
 
     // Accepts a struct-pointer Var OR component as a pointer-association
@@ -2250,6 +2278,15 @@ public:
         }
         ASR::ttype_t *pc = ASRUtils::type_get_past_pointer(v->m_type);
         return lr_emit_load(s, get_type(pc), V(addr, ty_ptr));
+    }
+
+    bool expr_is_indirect_scalar_pointer(ASR::expr_t *expr) {
+        if (!ASR::is_a<ASR::Var_t>(*expr)) return false;
+        ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
+            ASR::down_cast<ASR::Var_t>(expr)->m_v);
+        if (!ASR::is_a<ASR::Variable_t>(*sym)) return false;
+        return indirect_scalar_pointers.count(
+            get_hash((ASR::asr_t *)sym)) > 0;
     }
 
     void visit_Var(const ASR::Var_t &x) {
@@ -6411,6 +6448,8 @@ public:
         }
         bool mark_runtime_pointer_array = false;
         uint64_t runtime_pointer_array_hash = 0;
+        bool mark_indirect_scalar = false;
+        uint64_t indirect_scalar_hash = 0;
         if (ASR::is_a<ASR::Var_t>(*x.m_target)) {
             ASR::Var_t *target = ASR::down_cast<ASR::Var_t>(x.m_target);
             ASR::symbol_t *sym =
@@ -6471,6 +6510,40 @@ public:
             ASR::symbol_t *tsym = ASRUtils::symbol_get_past_external(
                 ASR::down_cast<ASR::Var_t>(x.m_target)->m_v);
             class_alias_data_ptr.insert(get_hash((ASR::asr_t *)tsym));
+        } else if (is_scalar_intrinsic_pointer_var(x.m_target) &&
+                expr_is_storage_reference(x.m_value) &&
+                !ASRUtils::is_pointer(ASRUtils::expr_type(x.m_value))) {
+            // p => tgt / ASSOCIATE(p => tgt) where p is a scalar intrinsic
+            // pointer and tgt is a concrete lvalue: store tgt's ADDRESS so p
+            // aliases it; mark p (deferred, after dst resolves) so reads/writes
+            // dereference the slot.  A plain value store would disconnect p.
+            is_target = true;
+            visit_expr(*x.m_value);
+            is_target = false;
+            rhs = tmp;
+            t = ty_ptr;
+            mark_indirect_scalar = true;
+            indirect_scalar_hash = get_hash((ASR::asr_t *)
+                ASRUtils::symbol_get_past_external(
+                    ASR::down_cast<ASR::Var_t>(x.m_target)->m_v));
+        } else if (is_scalar_intrinsic_pointer_var(x.m_target) &&
+                ASRUtils::is_pointer(ASRUtils::expr_type(x.m_value))) {
+            // p => q where both are scalar intrinsic pointers: p aliases the
+            // SAME target, so copy q's stored address (its raw slot pointer),
+            // not q's dereferenced value.
+            if (expr_is_indirect_scalar_pointer(x.m_value)) {
+                is_target = true;
+                visit_expr(*x.m_value);
+                is_target = false;
+            } else {
+                visit_expr(*x.m_value);
+            }
+            rhs = tmp;
+            t = ty_ptr;
+            mark_indirect_scalar = true;
+            indirect_scalar_hash = get_hash((ASR::asr_t *)
+                ASRUtils::symbol_get_past_external(
+                    ASR::down_cast<ASR::Var_t>(x.m_target)->m_v));
         } else {
             visit_expr(*x.m_value);
             rhs = tmp;
@@ -6527,6 +6600,11 @@ public:
         lr_emit_store(s, V(rhs, t), V(dst, ty_ptr));
         if (mark_runtime_pointer_array) {
             runtime_pointer_arrays.insert(runtime_pointer_array_hash);
+        }
+        // Mark only after dst (the slot itself) is resolved and the address is
+        // stored, so neither resolution dereferences the as-yet-unset slot.
+        if (mark_indirect_scalar) {
+            indirect_scalar_pointers.insert(indirect_scalar_hash);
         }
     }
 
@@ -14330,6 +14408,15 @@ public:
         uint32_t p;
         if (ptr_is_array) {
             p = desc_base_addr(desc_ptr_of(x.m_ptr));
+        } else if (expr_is_indirect_scalar_pointer(x.m_ptr)) {
+            // The slot holds the target address; is_target yields that pointer
+            // value (not the dereferenced pointee), which associated() tests
+            // against null / the target's address.
+            bool was_target = is_target;
+            is_target = true;
+            visit_expr(*x.m_ptr);
+            is_target = was_target;
+            p = tmp;
         } else {
             visit_expr(*x.m_ptr);
             p = tmp;
