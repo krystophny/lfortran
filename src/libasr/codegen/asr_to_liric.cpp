@@ -6041,6 +6041,15 @@ public:
                     ASR::DescriptorString) {
             visit_expr(*v->m_value);
             uint32_t init_desc = tmp;
+            // Assumed-length (e.g. `character*(*), parameter :: h = '...'`): the
+            // declared length comes from the initializer, so the slot's
+            // descriptor was set to {null,0} and copy-padding into it yields an
+            // empty string.  Store the initializer's {data,len} descriptor
+            // directly (the value is read-only for a parameter).
+            if (!ASR::down_cast<ASR::String_t>(vt)->m_len) {
+                lr_emit_store(s, V(init_desc, ty_str_desc), V(slot, ty_ptr));
+                return;
+            }
             uint32_t cur_desc = lr_emit_load(s, ty_str_desc, V(slot, ty_ptr));
             emit_string_copy_padded(cur_desc, init_desc);
             return;
