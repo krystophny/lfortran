@@ -10146,6 +10146,21 @@ public:
             emit_class_writebacks();
             return;
         }
+        // TBP call on a POLYMORPHIC object whose binding resolved to a concrete
+        // (declared-type) implementation: still dispatch through the object's
+        // vtable, since the dynamic type may override the method.
+        if (fn && x.m_dt && is_tbp_call_symbol(x.m_name) &&
+                ASRUtils::is_class_type(
+                    ASRUtils::type_get_past_allocatable_pointer(
+                        ASRUtils::expr_type(x.m_dt)))) {
+            uint32_t data_ptr = dispatch_data_ptr_from_dt(x.m_dt);
+            uint32_t fptr = load_object_method_ptr(data_ptr,
+                dynamic_method_name(x.m_name, fn));
+            lr_emit_call_void(s, V(fptr, ty_ptr),
+                args.data(), args.size());
+            emit_class_writebacks();
+            return;
+        }
 
         uint32_t sym = lr_session_intern(s, callable_name(fn).c_str());
         lr_emit_call_void(s, LR_GLOBAL(sym, ty_ptr),
