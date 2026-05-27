@@ -13719,6 +13719,13 @@ public:
             }
         }
 
+        // Internal (string-unit) writes truncate rather than error here, so
+        // they always succeed; set iostat=0 (the variable is otherwise left at
+        // its prior value, e.g. a nonzero initializer).
+        if (internal_string_write && x.m_iostat && external_iostat) {
+            lr_emit_store(s, I(0, ty_i32), V(external_iostat, ty_ptr));
+        }
+
         // When the frontend wraps the value list in a StringFormat (e.g.
         // `write(*, '(A)') str` becomes FileWrite([StringFormat('(A)',
         // [str])])), unpack it so we see the real args.  Matches the
