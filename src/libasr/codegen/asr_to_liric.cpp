@@ -169,6 +169,14 @@ public:
     std::unordered_map<uint64_t, uint32_t> lr_globals;   // variable hash -> intern symbol id
     std::unordered_map<uint64_t, uint32_t> class_tag_slots;
     std::unordered_set<uint64_t> class_desc_aliases;
+    // Scalar class-typed pointer Vars whose slot holds a plain (headerless)
+    // data pointer rather than a class-headered object pointer.  Produced by
+    // a pointer-associate `p => src` where the source is concrete or a class
+    // dummy already stored as a data pointer (e.g. the nested-vars host-
+    // context pointer, or `class(t),pointer::p => type(t),target::obj`).
+    // Member access on these dereferences the slot like a struct pointer and
+    // applies NO class_data_ptr header offset.
+    std::unordered_set<uint64_t> class_alias_data_ptr;
     std::unordered_set<uint64_t> runtime_pointer_arrays;
     // For each runtime-dim PointerArray local, the per-dim extent values
     // are snapshotted at the allocation site (function entry) into i64
@@ -1339,6 +1347,51 @@ public:
             ASRUtils::type_get_past_allocatable_pointer(type);
         return !ASR::is_a<ASR::Array_t>(*pcore) &&
             ASR::is_a<ASR::StructType_t>(*pcore);
+    }
+
+    // A scalar class-typed pointer Var that, by the rules above, would be
+    // skipped by is_scalar_struct_pointer_* (class exclusion) but actually
+    // holds a headerless data pointer recorded at its pointer-associate.
+    bool is_class_data_ptr_alias(ASR::expr_t *expr) {
+        if (!ASR::is_a<ASR::Var_t>(*expr)) return false;
+        ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
+            ASR::down_cast<ASR::Var_t>(expr)->m_v);
+        if (!ASR::is_a<ASR::Variable_t>(*sym)) return false;
+        return class_alias_data_ptr.count(
+            get_hash((ASR::asr_t *)sym)) > 0;
+    }
+
+    // The pointer-associate target `p => src` where `p` is a scalar class
+    // pointer and `src` is accessed as plain (headerless) data: the address
+    // of src must be stored into p's slot (not src's value), and p's member
+    // accesses dereference without a class header.  Excludes a headered
+    // (allocatable class) source, which needs class_data_ptr handling.
+    bool is_scalar_class_data_ptr_target(ASR::expr_t *target,
+            ASR::expr_t *value) {
+        if (!ASR::is_a<ASR::Var_t>(*target)) return false;
+        // Only a plain Var source aliases headerless storage here.  A Cast
+        // source (e.g. a select-type selector `sel => (ClassToClass x)`) has
+        // its own descriptor/class handling and must not be rerouted.
+        if (!ASR::is_a<ASR::Var_t>(*value)) return false;
+        ASR::ttype_t *tt = ASRUtils::expr_type(target);
+        if (!ASRUtils::is_pointer(tt) || ASRUtils::is_allocatable(tt)) {
+            return false;
+        }
+        if (!ASRUtils::is_class_type(ASRUtils::extract_type(tt))) {
+            return false;
+        }
+        ASR::ttype_t *core =
+            ASRUtils::type_get_past_allocatable_pointer(tt);
+        if (ASR::is_a<ASR::Array_t>(*core) ||
+                !ASR::is_a<ASR::StructType_t>(*core)) {
+            return false;
+        }
+        ASR::ttype_t *st = ASRUtils::expr_type(value);
+        if (ASRUtils::is_allocatable(st) &&
+                ASRUtils::is_class_type(ASRUtils::extract_type(st))) {
+            return false;
+        }
+        return true;
     }
 
     int64_t struct_symbol_tag(ASR::symbol_t *sym) {
@@ -6132,6 +6185,23 @@ public:
             }
             rhs = tmp;
             t = ty_ptr;
+        } else if (is_scalar_class_data_ptr_target(x.m_target, x.m_value)) {
+            // p => src where p is a scalar class pointer holding a headerless
+            // data pointer (concrete source, or a class dummy already stored
+            // as a data pointer).  Store the source ADDRESS, not its value,
+            // and record p so member access dereferences without a header.
+            if (ASRUtils::is_pointer(ASRUtils::expr_type(x.m_value))) {
+                visit_expr(*x.m_value);
+            } else {
+                is_target = true;
+                visit_expr(*x.m_value);
+                is_target = false;
+            }
+            rhs = tmp;
+            t = ty_ptr;
+            ASR::symbol_t *tsym = ASRUtils::symbol_get_past_external(
+                ASR::down_cast<ASR::Var_t>(x.m_target)->m_v);
+            class_alias_data_ptr.insert(get_hash((ASR::asr_t *)tsym));
         } else {
             visit_expr(*x.m_value);
             rhs = tmp;
@@ -15587,6 +15657,10 @@ public:
             // p%c where p is a scalar struct pointer (var or component): load
             // the target's address from p's slot so the member aliases the
             // pointee.
+            v_ptr = lr_emit_load(s, ty_ptr, V(v_ptr, ty_ptr));
+        } else if (is_class_data_ptr_alias(const_cast<ASR::expr_t *>(x.m_v))) {
+            // p%c where p is a scalar class pointer recorded as holding a
+            // headerless data pointer: dereference the slot, no header skip.
             v_ptr = lr_emit_load(s, ty_ptr, V(v_ptr, ty_ptr));
         }
 
