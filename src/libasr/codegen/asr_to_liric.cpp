@@ -15291,7 +15291,19 @@ public:
         uint32_t decimal = emit_optional_string_ptr(x.m_decimal, decimal_len);
         uint32_t round = emit_optional_string_ptr(x.m_round, round_len);
         uint32_t pad = emit_optional_string_ptr(x.m_pad, pad_len);
-        uint32_t recl = x.m_recl ? emit_target_ptr(x.m_recl) : 0;
+        // recl is passed by pointer (int32_t*).  Materialize its VALUE into a
+        // temp slot rather than taking its address: m_recl is usually a literal
+        // (recl=4) with no storage, so emit_target_ptr would yield a bad
+        // pointer the runtime then dereferences (segfault).  Mirrors the LLVM
+        // backend, which stores the converted value into an alloca.
+        uint32_t recl = 0;
+        if (x.m_recl) {
+            visit_expr(*x.m_recl);
+            uint32_t recl_val = cast_int_value(tmp,
+                value_type_for_expr(x.m_recl), ty_i32);
+            recl = lr_emit_alloca(s, ty_i32);
+            lr_emit_store(s, V(recl_val, ty_i32), V(recl, ty_ptr));
+        }
         uint32_t iostat = emit_iostat_ptr(x.m_iostat);
 
         lr_type_t *p[] = {
