@@ -4616,9 +4616,13 @@ public:
             ASR::Variable_t *v = down_cast<ASR::Variable_t>(item.second);
             uint64_t h = get_hash((ASR::asr_t *)v);
             if (lr_symtab.count(h)) continue;
-            lr_type_t *vt = get_type(v->m_type);
-            uint32_t slot = lr_emit_alloca(s, vt);
-            lr_symtab[h] = slot;
+            // Use the shared local-variable path (as visit_BlockCall does) so
+            // descriptor arrays get a zeroed (base=null) descriptor.  A bare
+            // alloca leaves the descriptor base as stack garbage, so an
+            // implicit deallocate of an unused compiler temp
+            // (__libasr_created__assignment_value_ for `x = x OP y` inside the
+            // block) frees a garbage pointer.
+            emit_local_variable(v);
         }
         for (size_t i = 0; i < blk->n_body; i++) {
             visit_stmt(*blk->m_body[i]);
