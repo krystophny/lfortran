@@ -7689,6 +7689,17 @@ public:
                     lr_emit_store(s, V(tmp, value_type), V(field_ptr, ty_ptr));
                 }
             }
+            // Procedure-pointer component with a `=> target` default: the
+            // target procedure is held in m_symbolic_value (not m_value).
+            // Store its address so `call obj%pp(...)` dispatches to it without
+            // an explicit assignment.
+            ASR::ttype_t *member_fn =
+                ASRUtils::type_get_past_allocatable_pointer(member_type);
+            if (ASR::is_a<ASR::FunctionType_t>(*member_fn) &&
+                    member->m_symbolic_value) {
+                visit_expr(*member->m_symbolic_value);
+                lr_emit_store(s, V(tmp, ty_ptr), V(field_ptr, ty_ptr));
+            }
             ASR::ttype_t *core =
                 ASRUtils::type_get_past_allocatable_pointer(member_type);
             if (ASR::is_a<ASR::Array_t>(*core)) {
@@ -7727,6 +7738,12 @@ public:
         collect_struct_members_parent_first(st, members);
         for (ASR::Variable_t *member : members) {
             if (member->m_value) {
+                return true;
+            }
+            ASR::ttype_t *member_fn =
+                ASRUtils::type_get_past_allocatable_pointer(member->m_type);
+            if (ASR::is_a<ASR::FunctionType_t>(*member_fn) &&
+                    member->m_symbolic_value) {
                 return true;
             }
             ASR::ttype_t *member_type = member->m_type;
