@@ -15374,7 +15374,27 @@ public:
             V(unit, ty_i32), iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr),
             I(x.n_values == 0 ? 1 : 0, ty_i32)
         };
-        emit_call_void("_lfortran_empty_read", args, 3);
+        // For formatted reads the per-value runtime readers validate input and
+        // own iostat, so the trailing record-finishing empty_read would
+        // overwrite a reported error with 0 (breaking err=/iostat); skip it
+        // when the reads already failed.  Unformatted reads rely on empty_read
+        // to finalize iostat (the value readers leave it unset on success), so
+        // always call it there.
+        if (iostat && x.n_values > 0 && x.m_is_formatted) {
+            uint32_t stat = lr_emit_load(s, ty_i32, V(iostat, ty_ptr));
+            uint32_t ok = lr_emit_icmp(s, LR_CMP_EQ,
+                V(stat, ty_i32), I(0, ty_i32));
+            lr_error_t err;
+            uint32_t fin_bb = lr_session_block(s);
+            uint32_t done_bb = lr_session_block(s);
+            lr_emit_condbr(s, V(ok, ty_i1), fin_bb, done_bb);
+            lr_session_set_block(s, fin_bb, &err);
+            emit_call_void("_lfortran_empty_read", args, 3);
+            lr_emit_br(s, done_bb);
+            lr_session_set_block(s, done_bb, &err);
+        } else {
+            emit_call_void("_lfortran_empty_read", args, 3);
+        }
         return true;
     }
 
