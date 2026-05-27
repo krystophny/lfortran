@@ -2987,6 +2987,35 @@ public:
             ASRUtils::type_get_past_allocatable_pointer(array_t->m_type);
         elem_type = ASRUtils::type_get_past_array(elem_type);
         if (target_allocatable && !ASR::is_a<ASR::String_t>(*elem_type)) {
+            // A non-descriptor array value (reshape, array constructor, ...)
+            // has no descriptor to desc_ptr_of; build a temporary descriptor
+            // from its linear view and per-dim extents, then realloc-assign.
+            ASR::Array_t *va = nullptr;
+            if (expr_is_array(value, &va) && va->m_physical_type !=
+                    ASR::array_physical_typeType::DescriptorArray) {
+                ArrayLinearView vw = emit_array_linear_view(value, va);
+                int nd = (int)va->n_dims;
+                int64_t eb = element_byte_size(va->m_type);
+                uint32_t tmpdesc = emit_desc_alloca(nd);
+                desc_store_base(tmpdesc, vw.base);
+                desc_store_i64(tmpdesc, 8, emit_i64_const(eb));
+                desc_store_rank(tmpdesc, nd);
+                desc_store_i64(tmpdesc, 24, emit_i64_const(0));
+                uint32_t stride = emit_i64_const(eb);
+                for (int d = 0; d < nd; d++) {
+                    uint32_t lb = emit_array_dim_lbound(va, (size_t)d);
+                    uint32_t ext = emit_array_dim_extent(va, (size_t)d);
+                    int64_t bo = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
+                    desc_store_i64(tmpdesc, bo + 0, lb);
+                    desc_store_i64(tmpdesc, bo + 8, ext);
+                    desc_store_i64(tmpdesc, bo + 16, stride);
+                    stride = lr_emit_mul(s, ty_i64,
+                        V(stride, ty_i64), V(ext, ty_i64));
+                }
+                emit_allocatable_descriptor_array_assignment_from_desc(
+                    desc_ptr_of(target), tmpdesc, array_t);
+                return;
+            }
             emit_allocatable_descriptor_array_assignment(
                 target, value, array_t);
             return;
