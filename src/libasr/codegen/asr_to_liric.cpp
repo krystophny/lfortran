@@ -5640,6 +5640,42 @@ public:
             ASR::array_physical_typeType::DescriptorArray;
     }
 
+    // Passing a concrete-type array actual to a class(T) array dummy: the
+    // dummy descriptor must carry the actual element type's dynamic tag at
+    // offset 24, where select type / same_type_as read it (an allocate of a
+    // polymorphic array sets it there, but a concrete array's offset-24 holds
+    // its descriptor `offset` field = 0).  Build a descriptor copy sharing the
+    // data base (so writes through the dummy still alias the actual) with the
+    // tag written.  Returns the (possibly new) descriptor pointer.
+    uint32_t tag_concrete_array_for_class_dummy(uint32_t arg_ptr,
+            ASR::Function_t *fn, size_t i, ASR::expr_t *arg) {
+        ASR::Variable_t *formal = formal_arg_var(fn, i);
+        if (!formal) return arg_ptr;
+        ASR::ttype_t *ft = ASRUtils::type_get_past_allocatable_pointer(
+            formal->m_type);
+        if (!ASR::is_a<ASR::Array_t>(*ft) ||
+                !ASRUtils::is_class_type(
+                    ASRUtils::extract_type(formal->m_type))) {
+            return arg_ptr;
+        }
+        ASR::ttype_t *atype = ASRUtils::expr_type(arg);
+        if (ASRUtils::is_class_type(ASRUtils::extract_type(atype))) {
+            return arg_ptr;
+        }
+        ASR::ttype_t *acore =
+            ASRUtils::type_get_past_allocatable_pointer(atype);
+        if (!ASR::is_a<ASR::Array_t>(*acore)) return arg_ptr;
+        ASR::Struct_t *st = struct_symbol_for_concrete_expr(arg);
+        if (!st) return arg_ptr;
+        int ndims = (int)ASR::down_cast<ASR::Array_t>(acore)->n_dims;
+        uint32_t ndesc = emit_desc_alloca(ndims);
+        emit_memcpy_bytes(ndesc, arg_ptr, (uint64_t)(DESC_HEADER_BYTES +
+            DESC_DIM_BYTES * (ndims > 0 ? ndims : 1)));
+        desc_store_i64(ndesc, 24, emit_i64_const(
+            struct_symbol_tag((ASR::symbol_t *)st)));
+        return ndesc;
+    }
+
     uint32_t emit_allocatable_is_allocated(ASR::expr_t *arg,
                                            uint32_t storage) {
         ASR::ttype_t *at = ASRUtils::expr_type(arg);
@@ -6341,7 +6377,8 @@ public:
 
             uint32_t byte_off = lr_emit_mul(s, ty_i64,
                 V(lin, ty_i64),
-                I(element_byte_size(array_t->m_type), ty_i64));
+                I(array_element_stride_bytes(x.m_v, array_t->m_type),
+                    ty_i64));
             lr_operand_desc_t gep_idx[1] = {V(byte_off, ty_i64)};
             uint32_t elem_ptr = lr_emit_gep(s, ty_i8,
                 V(base, ty_ptr), gep_idx, 1);
@@ -7510,6 +7547,20 @@ public:
     }
 
     // Byte size of a scalar element for descriptor.elem_len.
+    // Element stride for indexing an array whose elements are derived-type
+    // structs.  element_byte_size sizes a StructType from its signature, which
+    // omits INHERITED parent members (an extended type's signature lists only
+    // its own members), so it undercounts an extended-type array element and
+    // ArrayItem strides past the wrong bytes.  The array storage is sized with
+    // struct_storage_size (parent chain included), so match that here by
+    // resolving the element struct symbol from the array expression.
+    int64_t array_element_stride_bytes(ASR::expr_t *array_expr,
+            ASR::ttype_t *elem_type) {
+        ASR::Struct_t *st = struct_symbol_for_concrete_expr(array_expr);
+        if (st) return (int64_t)struct_storage_size(st);
+        return element_byte_size(elem_type);
+    }
+
     int64_t element_byte_size(ASR::ttype_t *t) {
         t = ASRUtils::type_get_past_allocatable_pointer(t);
         t = ASRUtils::type_get_past_array(t);
@@ -8566,9 +8617,19 @@ public:
         // and descriptor elem_len hold the allocated type, not the abstract
         // base.  Falls back to the static element type for an untyped
         // allocate.
-        int64_t elem_bytes = arg.m_type
-            ? element_byte_size(arg.m_type)
-            : element_byte_size(array_t->m_type);
+        // element_byte_size sizes a StructType from its signature, which omits
+        // inherited parent members; size an extended-type element from its
+        // struct symbol (parent chain included) so the data block, descriptor
+        // elem_len and element stride all match the storage layout.
+        int64_t elem_bytes;
+        if (arg.m_type) {
+            ASR::Struct_t *tst = arg.m_sym_subclass
+                ? struct_symbol_from_type_decl(arg.m_sym_subclass) : nullptr;
+            elem_bytes = tst ? (int64_t)struct_storage_size(tst)
+                : element_byte_size(arg.m_type);
+        } else {
+            elem_bytes = array_element_stride_bytes(arg.m_a, array_t->m_type);
+        }
 
         bool was_target = is_target;
         is_target = true;
@@ -10213,6 +10274,9 @@ public:
                     }
                     if (formal_expects_raw_array_data(fn, i, arg)) {
                         arg_ptr = desc_base_addr(arg_ptr);
+                    } else {
+                        arg_ptr = tag_concrete_array_for_class_dummy(
+                            arg_ptr, fn, i, arg);
                     }
                     args.push_back(V(arg_ptr, ty_ptr));
                 } else if (expr_is_cchar_string_cast(arg)) {
@@ -10512,6 +10576,9 @@ public:
                     }
                     if (formal_expects_raw_array_data(fn, i, arg)) {
                         arg_ptr = desc_base_addr(arg_ptr);
+                    } else {
+                        arg_ptr = tag_concrete_array_for_class_dummy(
+                            arg_ptr, fn, i, arg);
                     }
                     args.push_back(V(arg_ptr, ty_ptr));
                 } else {
