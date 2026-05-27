@@ -14059,6 +14059,13 @@ public:
     }
 
     void visit_FileRead(const ASR::FileRead_t &x) {
+        if (x.m_overloaded) {
+            // Derived-type formatted input: the frontend lowered
+            // `read(unit,'(DT)') obj` into a SubroutineCall to the user's
+            // read(formatted) proc, stored in m_overloaded.
+            this->visit_stmt(*x.m_overloaded);
+            return;
+        }
         if (x.m_nml && namelist_external_unit(x.m_unit) &&
                 namelist_supported(x.m_nml)) {
             uint32_t unit;
