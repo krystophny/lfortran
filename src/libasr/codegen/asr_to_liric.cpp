@@ -3177,6 +3177,13 @@ public:
     }
 
     void visit_Assignment(const ASR::Assignment_t &x) {
+        // A user-defined assignment (generic assignment(=)) is resolved by the
+        // frontend into a SubroutineCall stored in m_overloaded; emit that
+        // call instead of a default component copy.
+        if (x.m_overloaded) {
+            this->visit_stmt(*x.m_overloaded);
+            return;
+        }
         ASR::ttype_t *target_expr_type = expr_storage_type(x.m_target);
         ASR::ttype_t *target_naked =
             ASRUtils::type_get_past_allocatable_pointer(target_expr_type);
