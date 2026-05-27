@@ -3384,6 +3384,53 @@ public:
             return;
         }
 
+        // class(*) = <concrete scalar value>: store a {data, tag} poly_desc
+        // with heap-persistent data so the dynamic type tag is set (read by
+        // same_type_as / select type).  Without this the assignment fell
+        // through and left the tag field uninitialised.
+        if (!target_is_array && ASRUtils::is_unlimited_polymorphic_type(
+                ASRUtils::expr_type(x.m_target)) &&
+                !ASRUtils::is_unlimited_polymorphic_type(
+                    ASRUtils::expr_type(x.m_value))) {
+            ASR::ttype_t *vt = ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(x.m_value));
+            if (!ASR::is_a<ASR::Array_t>(*vt)) {
+                int64_t tag = polymorphic_actual_tag(x.m_value);
+                uint64_t nbytes = storage_size_or_default(vt, get_type(vt));
+                uint32_t data = emit_malloc_bytes(
+                    emit_i64_const((int64_t)nbytes));
+                if (expr_is_storage_reference(x.m_value)) {
+                    bool wt = is_target;
+                    is_target = true;
+                    visit_expr(*x.m_value);
+                    is_target = wt;
+                    uint32_t src = tmp;
+                    if (expr_is_allocatable_struct(x.m_value)) {
+                        uint32_t raw = lr_emit_load(s, ty_ptr,
+                            V(src, ty_ptr));
+                        src = class_data_ptr(raw);
+                    }
+                    emit_memcpy_bytes(data, src, nbytes);
+                } else {
+                    visit_expr(*x.m_value);
+                    lr_type_t *vlt = value_type_for_expr(x.m_value);
+                    lr_emit_store(s, V(tmp, vlt), V(data, ty_ptr));
+                }
+                uint32_t fld0 = 0, fld1 = 1;
+                uint32_t d0 = lr_emit_insertvalue(s, ty_poly_desc,
+                    LR_UNDEF(ty_poly_desc), V(data, ty_ptr), &fld0, 1);
+                uint32_t d1 = lr_emit_insertvalue(s, ty_poly_desc,
+                    V(d0, ty_poly_desc), I(tag, ty_i64), &fld1, 1);
+                bool wt = is_target;
+                is_target = true;
+                visit_expr(*x.m_target);
+                is_target = wt;
+                uint32_t dst = tmp;
+                lr_emit_store(s, V(d1, ty_poly_desc), V(dst, ty_ptr));
+                return;
+            }
+        }
+
         ASR::ttype_t *target_struct_type = ASRUtils::expr_type(x.m_target);
         target_struct_type =
             ASRUtils::type_get_past_allocatable_pointer(target_struct_type);
