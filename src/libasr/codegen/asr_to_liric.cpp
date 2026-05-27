@@ -5729,6 +5729,18 @@ public:
                 }
             }
         }
+        // associate(name => arr%comp) where arr is an array of structs:
+        // the member access yields a strided descriptor (built in
+        // visit_StructInstanceMember); alias it through a runtime pointer
+        // array so name reads/writes the original strided storage.
+        if (ASR::is_a<ASR::StructInstanceMember_t>(*x.m_value)) {
+            ASR::ttype_t *mt =
+                ASRUtils::type_get_past_allocatable_pointer(
+                    ASRUtils::expr_type(x.m_value));
+            if (ASR::is_a<ASR::Array_t>(*mt)) {
+                value_is_descriptor_array = true;
+            }
+        }
         bool value_is_descriptor_pointer = value_is_descriptor_array ||
             type_is_unlimited_polymorphic_array(
                 ASRUtils::expr_type(x.m_value));
@@ -15029,6 +15041,46 @@ public:
             }
         }
 found_offset:
+        // Whole-array member access: `arr%comp` where arr is an array of
+        // structs is a strided array of the component.  Build a descriptor
+        // that aliases comp in every element: base = arr_base + comp_offset,
+        // per-dim stride = arr's element stride (so consecutive comps are one
+        // array element apart), extents/lbounds from arr's descriptor.
+        {
+            ASR::ttype_t *owner_t =
+                ASRUtils::type_get_past_allocatable_pointer(
+                    ASRUtils::expr_type(x.m_v));
+            if (ASR::is_a<ASR::Array_t>(*owner_t)) {
+                ASR::Array_t *owner_arr =
+                    ASR::down_cast<ASR::Array_t>(owner_t);
+                int nd = (int)owner_arr->n_dims;
+                uint32_t owner_desc = v_ptr;
+                uint32_t owner_base = desc_base_addr(owner_desc);
+                lr_operand_desc_t moff[1] = {I((int64_t)byte_offset, ty_i64)};
+                uint32_t mbase = lr_emit_gep(s, ty_i8,
+                    V(owner_base, ty_ptr), moff, 1);
+                ASR::ttype_t *melem =
+                    ASRUtils::type_get_past_array(x.m_type);
+                uint32_t ndesc = emit_desc_alloca(nd);
+                desc_store_base(ndesc, mbase);
+                desc_store_i64(ndesc, 8,
+                    emit_i64_const(element_byte_size(melem)));
+                desc_store_rank(ndesc, nd);
+                desc_store_i64(ndesc, 24, emit_i64_const(0));
+                for (int d = 0; d < nd; d++) {
+                    uint32_t lb = desc_dim_lbound(owner_desc, d);
+                    uint32_t ext = desc_dim_extent(owner_desc, d);
+                    uint32_t ostride = desc_load_i64(owner_desc,
+                        DESC_HEADER_BYTES + DESC_DIM_BYTES * d + 16);
+                    int64_t bo = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
+                    desc_store_i64(ndesc, bo + 0, lb);
+                    desc_store_i64(ndesc, bo + 8, ext);
+                    desc_store_i64(ndesc, bo + 16, ostride);
+                }
+                tmp = ndesc;
+                return;
+            }
+        }
         lr_operand_desc_t offset[1] = {I((int64_t)byte_offset, ty_i64)};
         uint32_t mem_ptr = lr_emit_gep(s, ty_i8,
             V(v_ptr, ty_ptr), offset, 1);
