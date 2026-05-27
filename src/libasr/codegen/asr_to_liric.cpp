@@ -16817,15 +16817,21 @@ found_offset:
                 return lr_emit_load(s, ty_i64, V(p, ty_ptr));
             };
             uint32_t lbound = load_field(DESC_DIM_LBOUND);
+            uint32_t extent = load_field(DESC_DIM_EXTENT);
+            // Zero-extent dim: LBOUND -> 1, UBOUND -> 0 (Fortran 2018).
+            uint32_t is_zero = lr_emit_icmp(s, LR_CMP_EQ,
+                V(extent, ty_i64), I(0, ty_i64));
             uint32_t res64;
             if (x.m_bound == ASR::arrayboundType::LBound) {
-                res64 = lbound;
+                res64 = lr_emit_select(s, ty_i64, V(is_zero, ty_i1),
+                    I(1, ty_i64), V(lbound, ty_i64));
             } else {
-                uint32_t extent = load_field(DESC_DIM_EXTENT);
                 uint32_t sum = lr_emit_add(s, ty_i64,
                     V(lbound, ty_i64), V(extent, ty_i64));
-                res64 = lr_emit_sub(s, ty_i64,
+                uint32_t ub = lr_emit_sub(s, ty_i64,
                     V(sum, ty_i64), I(1, ty_i64));
+                res64 = lr_emit_select(s, ty_i64, V(is_zero, ty_i1),
+                    I(0, ty_i64), V(ub, ty_i64));
             }
             tmp = (rt == ty_i64)
                 ? res64
@@ -16882,15 +16888,22 @@ found_offset:
         if (!used_declared_start) {
             lbound = desc_dim_lbound(desc, req_dim);
         }
+        // Fortran 2018 16.9.109/16.9.197: a zero-extent dim makes LBOUND return
+        // 1 and UBOUND return 0, regardless of the declared/stored bounds.
+        uint32_t extent = desc_dim_extent(desc, req_dim);
+        uint32_t is_zero = lr_emit_icmp(s, LR_CMP_EQ,
+            V(extent, ty_i64), I(0, ty_i64));
         uint32_t result;
         if (x.m_bound == ASR::arrayboundType::LBound) {
-            result = lbound;
+            result = lr_emit_select(s, ty_i64, V(is_zero, ty_i1),
+                I(1, ty_i64), V(lbound, ty_i64));
         } else {
-            uint32_t extent = desc_dim_extent(desc, req_dim);
             uint32_t sum = lr_emit_add(s, ty_i64,
                 V(lbound, ty_i64), V(extent, ty_i64));
-            result = lr_emit_sub(s, ty_i64,
+            uint32_t ub = lr_emit_sub(s, ty_i64,
                 V(sum, ty_i64), I(1, ty_i64));
+            result = lr_emit_select(s, ty_i64, V(is_zero, ty_i1),
+                I(0, ty_i64), V(ub, ty_i64));
         }
         if (rt == ty_i64) {
             tmp = result;
