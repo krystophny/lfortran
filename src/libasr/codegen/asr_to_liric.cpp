@@ -6187,6 +6187,26 @@ public:
         visit_expr(*actual);
         is_target = was_target;
         uint32_t actual_ptr = tmp;
+        if (ASRUtils::is_pointer(ASRUtils::expr_type(actual))
+                && ASR::is_a<ASR::Var_t>(*actual)) {
+            // A plain Fortran pointer actual (e.g. a host-associated local
+            // captured into a nested-vars context as a Pointer global): its
+            // slot holds the pointee address, so load it to reach the object;
+            // the loaded pointee is also the correct inout write-back target.
+            // Aliased pointers (select-type selectors, class-data-ptr aliases,
+            // runtime pointer arrays) already resolve is_target to the object
+            // itself, so they must NOT be loaded.
+            uint64_t ah = get_hash((ASR::asr_t *)
+                ASRUtils::symbol_get_past_external(
+                    ASR::down_cast<ASR::Var_t>(actual)->m_v));
+            bool aliased = class_alias_data_ptr.count(ah)
+                || class_desc_aliases.count(ah)
+                || runtime_pointer_arrays.count(ah)
+                || indirect_scalar_pointers.count(ah);
+            if (!aliased) {
+                actual_ptr = lr_emit_load(s, ty_ptr, V(actual_ptr, ty_ptr));
+            }
+        }
         emit_memcpy_bytes(data_ptr, actual_ptr, data_bytes);
         if (actual_ptr_out) {
             *actual_ptr_out = actual_ptr;
