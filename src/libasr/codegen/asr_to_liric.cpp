@@ -146,7 +146,7 @@ static inline uint64_t get_hash(ASR::asr_t *node) {
     int _p = LR_FCMP_OEQ; \
     switch ((x).m_op) { \
         case ASR::cmpopType::Eq:   _p = LR_FCMP_OEQ; break; \
-        case ASR::cmpopType::NotEq:_p = LR_FCMP_ONE; break; \
+        case ASR::cmpopType::NotEq:_p = LR_FCMP_UNE; break; \
         case ASR::cmpopType::Lt:   _p = LR_FCMP_OLT; break; \
         case ASR::cmpopType::LtE:  _p = LR_FCMP_OLE; break; \
         case ASR::cmpopType::Gt:   _p = LR_FCMP_OGT; break; \
