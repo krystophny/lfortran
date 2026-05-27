@@ -13160,11 +13160,23 @@ public:
             p = tmp;
         }
         if (x.m_tgt) {
-            bool was_target = is_target;
-            is_target = true;
-            visit_expr(*x.m_tgt);
-            is_target = was_target;
-            uint32_t t = tmp;
+            // Compare the targets' base addresses.  When the target is
+            // itself an array (a pointer or a target array), use its
+            // descriptor base address so associated(p, q) compares p's and
+            // q's targets, not p's base against q's descriptor slot.
+            ASR::ttype_t *tgt_core =
+                ASRUtils::type_get_past_allocatable_pointer(
+                    ASRUtils::expr_type(x.m_tgt));
+            uint32_t t;
+            if (ASR::is_a<ASR::Array_t>(*tgt_core)) {
+                t = desc_base_addr(desc_ptr_of(x.m_tgt));
+            } else {
+                bool was_target = is_target;
+                is_target = true;
+                visit_expr(*x.m_tgt);
+                is_target = was_target;
+                t = tmp;
+            }
             tmp = lr_emit_icmp(s, LR_CMP_EQ,
                 V(p, ty_ptr), V(t, ty_ptr));
         } else {
