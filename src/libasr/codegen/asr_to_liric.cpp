@@ -4540,6 +4540,105 @@ public:
                     tmp = out;
                     return;
                 }
+                // Runtime destination extent: the result element count is a
+                // runtime expression (transfer without a constant SIZE, e.g.
+                // ceil(bit_size(source)/bit_size(mold_elem))), so the static
+                // count is unknown.  Evaluate the dst dims and the source
+                // byte count at runtime and copy min(dst,src) bytes.
+                bool dst_dims_ok = dst_eb > 0 && dst_arr->n_dims > 0;
+                for (size_t d = 0; dst_dims_ok && d < dst_arr->n_dims; d++) {
+                    if (!dst_arr->m_dims[d].m_length) dst_dims_ok = false;
+                }
+                if (dst_dims_ok) {
+                    uint32_t dst_count_rt = emit_i64_const(1);
+                    for (size_t d = 0; d < dst_arr->n_dims; d++) {
+                        visit_expr(*dst_arr->m_dims[d].m_length);
+                        lr_type_t *lt = get_type(ASRUtils::expr_type(
+                            dst_arr->m_dims[d].m_length));
+                        uint32_t ext = (lt == ty_i64) ? tmp
+                            : lr_emit_sext(s, ty_i64, V(tmp, lt));
+                        dst_count_rt = lr_emit_mul(s, ty_i64,
+                            V(dst_count_rt, ty_i64), V(ext, ty_i64));
+                    }
+                    uint32_t dst_bytes = lr_emit_mul(s, ty_i64,
+                        V(dst_count_rt, ty_i64), I(dst_eb, ty_i64));
+                    bool was_target = is_target;
+                    is_target = true;
+                    visit_expr(*x.m_source);
+                    is_target = was_target;
+                    uint32_t src_ptr = tmp;
+                    uint32_t src_bytes;
+                    if (src_arr->m_physical_type ==
+                            ASR::array_physical_typeType::DescriptorArray) {
+                        uint32_t src_count_rt =
+                            descriptor_array_element_count(
+                                src_ptr, (int)src_arr->n_dims);
+                        src_ptr = desc_base_addr(src_ptr);
+                        src_bytes = src_eb > 0
+                            ? lr_emit_mul(s, ty_i64,
+                                V(src_count_rt, ty_i64), I(src_eb, ty_i64))
+                            : dst_bytes;
+                    } else if (src_count > 0 && src_eb > 0) {
+                        src_bytes = emit_i64_const(src_count * src_eb);
+                    } else {
+                        src_bytes = dst_bytes;
+                    }
+                    uint32_t dst_lt = lr_emit_icmp(s, LR_CMP_SLT,
+                        V(dst_bytes, ty_i64), V(src_bytes, ty_i64));
+                    uint32_t copy_bytes = lr_emit_select(s, ty_i64,
+                        V(dst_lt, ty_i1), V(dst_bytes, ty_i64),
+                        V(src_bytes, ty_i64));
+                    uint32_t out = emit_malloc_bytes(dst_bytes);
+                    emit_memcpy_dynamic(out, src_ptr, copy_bytes);
+                    tmp = out;
+                    return;
+                }
+            }
+        }
+        // Element of a lowered array transfer: the array_op pass rewrites
+        // `arr = transfer(src, mold)` into a per-element loop where each
+        // element is `BitCast(src, ArrayItem(arr, i), elem_type)` with the
+        // mold carrying the element's ArrayItem.  The mold's linear index
+        // selects which element-sized chunk of the source's bytes this
+        // element receives.  Materialize the source bytes and load the chunk
+        // at idx * elem_bytes.
+        if (!ASR::is_a<ASR::Array_t>(*dst_type) &&
+                !ASR::is_a<ASR::String_t>(*dst_type) &&
+                !ASR::is_a<ASR::Array_t>(*src_type) &&
+                !ASR::is_a<ASR::String_t>(*src_type) &&
+                x.m_mold && ASR::is_a<ASR::ArrayItem_t>(*x.m_mold)) {
+            ASR::ArrayItem_t *mold_item =
+                ASR::down_cast<ASR::ArrayItem_t>(x.m_mold);
+            ASR::ttype_t *mold_array_type =
+                ASRUtils::type_get_past_allocatable_pointer(
+                    ASRUtils::expr_type(mold_item->m_v));
+            int64_t dst_eb = element_byte_size(dst_type);
+            int64_t src_eb = element_byte_size(src_type);
+            if (ASR::is_a<ASR::Array_t>(*mold_array_type) &&
+                    dst_eb > 0 && src_eb > 0) {
+                ASR::Array_t *mold_array =
+                    ASR::down_cast<ASR::Array_t>(mold_array_type);
+                uint32_t idx = array_item_linear_index(*mold_item, mold_array);
+                visit_expr(*x.m_source);
+                lr_type_t *src_lr = value_type_for_expr(x.m_source);
+                uint32_t slot = emit_temp_slot(src_lr);
+                lr_emit_store(s, V(tmp, src_lr), V(slot, ty_ptr));
+                // A per-element source (ArrayItem indexed by the loop
+                // variable) maps 1:1 to this result element: reinterpret the
+                // whole source element (offset 0).  A whole/scalar source is a
+                // contiguous blob distributed across the result, so this
+                // element takes the idx-th dst-sized chunk.
+                uint32_t byte_off =
+                    ASR::is_a<ASR::ArrayItem_t>(*x.m_source)
+                    ? emit_i64_const(0)
+                    : lr_emit_mul(s, ty_i64, V(idx, ty_i64),
+                        I(dst_eb, ty_i64));
+                lr_operand_desc_t off[1] = {V(byte_off, ty_i64)};
+                uint32_t chunk = lr_emit_gep(s, ty_i8,
+                    V(slot, ty_ptr), off, 1);
+                lr_type_t *dst_lr = get_type(dst_type);
+                tmp = lr_emit_load(s, dst_lr, V(chunk, ty_ptr));
+                return;
             }
         }
         // Array source bit-cast to a scalar destination
