@@ -13690,7 +13690,14 @@ public:
                 internal_string_write = true;
                 if (ASR::is_a<ASR::StringSection_t>(*x.m_unit) ||
                         ASR::is_a<ASR::StringItem_t>(*x.m_unit)) {
+                    // Visit as an lvalue so the substring is a VIEW into the
+                    // actual variable's storage; visiting as a value folds to
+                    // the read-only constant (m_value), making the write land
+                    // in a literal instead of modifying the variable.
+                    bool was_target = is_target;
+                    is_target = true;
                     visit_expr(*x.m_unit);
+                    is_target = was_target;
                     internal_unit_desc = tmp;
                     internal_unit_is_value = true;
                 } else {
