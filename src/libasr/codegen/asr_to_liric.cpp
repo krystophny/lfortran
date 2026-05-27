@@ -2934,6 +2934,25 @@ public:
         uint32_t bytes = lr_emit_mul(s, ty_i64,
             V(alloc_elems, ty_i64), V(elem_len, ty_i64));
 
+        // If the LHS is already allocated with the same element count, keep
+        // its storage: reallocating to a fresh (zeroed) buffer would discard
+        // the LHS data, which is wrong when the RHS reads the LHS (a = a + 1,
+        // the array_op scalar loop reads a(i) in place).  Only allocate/resize
+        // when unallocated or the element count actually changed.
+        uint32_t cur_total = descriptor_array_element_count(
+            dst_desc, (int)array_t->n_dims);
+        uint32_t allocated = lr_emit_icmp(s, LR_CMP_NE,
+            V(old_base, ty_ptr), LR_NULL(ty_ptr));
+        uint32_t same_size = lr_emit_icmp(s, LR_CMP_EQ,
+            V(cur_total, ty_i64), V(total, ty_i64));
+        uint32_t keep = lr_emit_and(s, ty_i1,
+            V(allocated, ty_i1), V(same_size, ty_i1));
+        lr_error_t rerr;
+        uint32_t resize_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(keep, ty_i1), done_bb, resize_bb);
+        lr_session_set_block(s, resize_bb, &rerr);
+
         uint32_t allocator = emit_call(
             "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
         lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
@@ -2960,6 +2979,8 @@ public:
         store_descriptor_shape_with_base(dst_desc, new_base, elem_len,
             src_desc, array_t);
         emit_free_if_nonnull(allocator, old_base);
+        lr_emit_br(s, done_bb);
+        lr_session_set_block(s, done_bb, &rerr);
     }
 
     void emit_descriptor_array_assignment(ASR::expr_t *target,
