@@ -14364,6 +14364,44 @@ public:
 
     bool emit_internal_integer_read_value(ASR::expr_t *target,
             uint32_t data, uint32_t len, uint32_t pos_ptr) {
+        // Whole-array list-directed read from an internal string unit:
+        // `read(str, *) arr`.  Read every element in one runtime call (the
+        // scalar path below only fills element 0).  pos_ptr is not threaded
+        // (the _array runtime reads from the buffer start), which is correct
+        // for a single array value; mixed scalar+array internal reads are
+        // uncommon and unchanged.
+        ASR::ttype_t *full_type =
+            ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(target));
+        if (ASR::is_a<ASR::Array_t>(*full_type)) {
+            ASR::Array_t *arr_t = ASR::down_cast<ASR::Array_t>(full_type);
+            ASR::ttype_t *et = ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::type_get_past_array(arr_t->m_type));
+            const char *name = nullptr;
+            if (ASR::is_a<ASR::Integer_t>(*et)) {
+                int k = ASRUtils::extract_kind_from_ttype_t(et);
+                name = (k == 8) ? "_lfortran_string_read_i64_array"
+                    : (k == 4) ? "_lfortran_string_read_i32_array" : nullptr;
+            } else if (ASR::is_a<ASR::Real_t>(*et)) {
+                int k = normalized_real_kind(et);
+                name = (k == 8) ? "_lfortran_string_read_f64_array"
+                    : (k == 4) ? "_lfortran_string_read_f32_array" : nullptr;
+            } else if (ASR::is_a<ASR::Complex_t>(*et)) {
+                int k = normalized_real_kind(et);
+                name = (k == 8) ? "_lfortran_string_read_c64_array"
+                    : (k == 4) ? "_lfortran_string_read_c32_array" : nullptr;
+            }
+            if (!name) return false;
+            ArrayLinearView v = emit_array_linear_view(target, arr_t);
+            lr_type_t *p[] = {ty_ptr, ty_i64, ty_ptr, ty_ptr, ty_i64, ty_ptr};
+            declare_func(name, ty_void, p, 6, false);
+            lr_operand_desc_t args[] = {
+                V(data, ty_ptr), V(len, ty_i64), LR_NULL(ty_ptr),
+                V(v.base, ty_ptr), V(v.total, ty_i64), LR_NULL(ty_ptr)
+            };
+            emit_call_void(name, args, 6);
+            return true;
+        }
         ASR::ttype_t *target_type = ASRUtils::expr_type(target);
         target_type = ASRUtils::type_get_past_allocatable_pointer(target_type);
         target_type = ASRUtils::type_get_past_array(target_type);
