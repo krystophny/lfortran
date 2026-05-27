@@ -5017,7 +5017,13 @@ public:
             ct = ASRUtils::type_get_past_array(ct);
             if (ASR::is_a<ASR::String_t>(*ct)) {
                 initialize_local_array_descriptor(slot, v->m_type);
-                initialize_local_string_descriptor(slot, v->m_type);
+                // The data buffer must be a persistent global, not a stack
+                // alloca: a SAVE string can be a pointer/associate target whose
+                // address must outlive the procedure (e.g. a function returning
+                // character(:),pointer => save_target).
+                if (!init_save_string_global_buffer(slot, v)) {
+                    initialize_local_string_descriptor(slot, v->m_type);
+                }
                 initialize_local_value(v, slot);
             }
         }
@@ -8186,6 +8192,46 @@ public:
         lr_emit_store(s, V(inext, ty_i64), V(idx_ptr, ty_ptr));
         lr_emit_br(s, shead);
         lr_session_set_block(s, sdone, &serr);
+    }
+
+    // For a SAVE fixed-length character variable, back its descriptor with a
+    // persistent global byte buffer (initialised to spaces) instead of a stack
+    // alloca, and store {&buffer, len} into the descriptor.  Returns false for
+    // non-fixed-length (deferred/allocatable/runtime-length) strings, which
+    // keep the existing handling.
+    bool init_save_string_global_buffer(uint32_t desc_ptr,
+            ASR::Variable_t *v) {
+        ASR::ttype_t *ct = ASRUtils::type_get_past_allocatable_pointer(
+            v->m_type);
+        ct = ASRUtils::type_get_past_array(ct);
+        if (ASRUtils::is_allocatable(v->m_type) ||
+                !ASR::is_a<ASR::String_t>(*ct)) {
+            return false;
+        }
+        ASR::String_t *st = ASR::down_cast<ASR::String_t>(ct);
+        int64_t len = 0;
+        if (st->m_physical_type != ASR::DescriptorString || !st->m_len ||
+                !ASRUtils::extract_value(st->m_len, len) || len <= 0) {
+            return false;
+        }
+        uint64_t h = get_hash((ASR::asr_t *)v);
+        std::vector<uint8_t> spaces((size_t)len, (uint8_t)' ');
+        std::string gname = std::string("_lr_savestr_")
+            + std::to_string(h) + "_" + v->m_name;
+        lr_session_global(s, gname.c_str(),
+            lr_type_array_s(s, ty_i8, (uint64_t)len),
+            false, spaces.data(), (uint64_t)len);
+        uint32_t bufsym = lr_session_intern(s, gname.c_str());
+        lr_operand_desc_t no_off[1] = {I(0, ty_i64)};
+        uint32_t buf_addr = lr_emit_gep(s, ty_i8,
+            LR_GLOBAL(bufsym, ty_ptr), no_off, 1);
+        uint32_t fld0 = 0, fld1 = 1;
+        uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
+            LR_UNDEF(ty_str_desc), V(buf_addr, ty_ptr), &fld0, 1);
+        uint32_t d1 = lr_emit_insertvalue(s, ty_str_desc,
+            V(d0, ty_str_desc), I(len, ty_i64), &fld1, 1);
+        lr_emit_store(s, V(d1, ty_str_desc), V(desc_ptr, ty_ptr));
+        return true;
     }
 
     void initialize_local_string_descriptor(uint32_t desc_ptr,
