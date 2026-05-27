@@ -13391,6 +13391,55 @@ public:
             emit_call_void("_lfortran_namelist_read_str", args, 4);
             return;
         }
+        if (x.m_nml && x.m_unit && namelist_supported(x.m_nml)) {
+            ASR::ttype_t *ut = ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(x.m_unit));
+            ASR::ttype_t *uelem = ASRUtils::type_get_past_array(ut);
+            int64_t elem_len_c = 0, n_elems = 0;
+            if (ASR::is_a<ASR::Array_t>(*ut) &&
+                    ASR::is_a<ASR::String_t>(*uelem) &&
+                    ASRUtils::extract_value(
+                        ASR::down_cast<ASR::String_t>(uelem)->m_len,
+                        elem_len_c) &&
+                    (n_elems = ASRUtils::get_fixed_size_of_array(
+                        ASR::down_cast<ASR::Array_t>(ut)->m_dims,
+                        ASR::down_cast<ASR::Array_t>(ut)->n_dims)) > 0) {
+                // Internal namelist read from a character array: gather the
+                // per-element {ptr,len} descriptors into one contiguous
+                // buffer (the runtime _str_array expects char* with stride
+                // elem_len), then parse it into the namelist variables.
+                bool wt = is_target;
+                is_target = true;
+                visit_expr(*x.m_unit);
+                is_target = wt;
+                uint32_t ubase = tmp;
+                uint32_t buf = emit_storage_alloca_nbytes(
+                    (uint64_t)n_elems * elem_len_c);
+                for (int64_t i = 0; i < n_elems; i++) {
+                    lr_operand_desc_t doff[1] = {I(i * 16, ty_i64)};
+                    uint32_t dptr = lr_emit_gep(s, ty_i8,
+                        V(ubase, ty_ptr), doff, 1);
+                    uint32_t edata = lr_emit_load(s, ty_ptr, V(dptr, ty_ptr));
+                    lr_operand_desc_t boff[1] = {I(i * elem_len_c, ty_i64)};
+                    uint32_t bdst = lr_emit_gep(s, ty_i8,
+                        V(buf, ty_ptr), boff, 1);
+                    emit_memcpy_bytes(bdst, edata, (uint64_t)elem_len_c);
+                }
+                uint32_t iostat = emit_iostat_ptr(x.m_iostat);
+                uint32_t group = build_namelist_group(x.m_nml);
+                lr_type_t *params[] = {ty_ptr, ty_i64, ty_i64, ty_ptr, ty_ptr};
+                declare_func("_lfortran_namelist_read_str_array", ty_void,
+                    params, 5, false);
+                lr_operand_desc_t args[5] = {
+                    V(buf, ty_ptr), I(elem_len_c, ty_i64),
+                    I(n_elems, ty_i64),
+                    iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr),
+                    V(group, ty_ptr)
+                };
+                emit_call_void("_lfortran_namelist_read_str_array", args, 5);
+                return;
+            }
+        }
         if (emit_internal_formatted_read(x)) {
             return;
         }
