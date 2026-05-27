@@ -8654,6 +8654,21 @@ public:
             return;
         }
         at = ASRUtils::type_get_past_array(at);
+        if (ASR::is_a<ASR::StructType_t>(*at) &&
+                ASRUtils::is_allocatable(expr_t) &&
+                !ASRUtils::is_class_type(at)) {
+            // Concrete allocatable derived-type scalar (variable or
+            // component): null the pointer slot so allocated() reports false.
+            // Previously a no-op, leaving the slot non-null.  Do not free the
+            // block (liric does not free allocatables elsewhere).  class(*)
+            // scalars are a 16-byte poly_desc and are left alone here.
+            bool wt = is_target;
+            is_target = true;
+            visit_expr(*v);
+            is_target = wt;
+            lr_emit_store(s, LR_NULL(ty_ptr), V(tmp, ty_ptr));
+            return;
+        }
         if (!ASR::is_a<ASR::String_t>(*at)) {
             // Non-string deallocate is a no-op until we have array
             // descriptor support.
