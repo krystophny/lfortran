@@ -2158,7 +2158,10 @@ public:
             lr_type_t *rt = get_type(v->m_type);
             uint32_t val = lr_emit_load(s, rt, V(slot, ty_ptr));
             if (rt == ty_f32 || rt == ty_f64) {
-                val = lr_emit_fadd(s, rt, V(val, rt), F(0.0, rt));
+                // Materialize into a concrete vreg with fsub(val, 0.0), which
+                // preserves a -0.0 result; fadd(-0.0, 0.0) collapses to +0.0
+                // per IEEE 754 and breaks ieee_copy_sign / sign(x, -0.0).
+                val = lr_emit_fsub(s, rt, V(val, rt), F(0.0, rt));
             }
             if (uses_sret) {
                 uint32_t out = lr_session_param(s, 0);
