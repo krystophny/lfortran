@@ -5151,7 +5151,11 @@ public:
         if (emit_complex_component_array(x.m_arg, x.m_type, false)) return;
         visit_expr(*x.m_arg);
         uint32_t v = tmp;
-        lr_type_t *ct = get_type(ASRUtils::expr_type(x.m_arg));
+        // A pointer-to-complex (e.g. an EQUIVALENCE scalar pointer) reads as a
+        // dereferenced complex value, so the aggregate type is the pointee
+        // complex, not ty_ptr.
+        lr_type_t *ct = get_type(ASRUtils::type_get_past_allocatable_pointer(
+            ASRUtils::expr_type(x.m_arg)));
         lr_type_t *ft = get_type(x.m_type);
         uint32_t fld0 = 0;
         tmp = lr_emit_extractvalue(s, ft, V(v, ct), &fld0, 1);
@@ -5161,7 +5165,8 @@ public:
         if (emit_complex_component_array(x.m_arg, x.m_type, true)) return;
         visit_expr(*x.m_arg);
         uint32_t v = tmp;
-        lr_type_t *ct = get_type(ASRUtils::expr_type(x.m_arg));
+        lr_type_t *ct = get_type(ASRUtils::type_get_past_allocatable_pointer(
+            ASRUtils::expr_type(x.m_arg)));
         lr_type_t *ft = get_type(x.m_type);
         uint32_t fld1 = 1;
         tmp = lr_emit_extractvalue(s, ft, V(v, ct), &fld1, 1);
