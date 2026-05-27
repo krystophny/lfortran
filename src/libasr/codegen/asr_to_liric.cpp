@@ -2392,6 +2392,13 @@ public:
             }
             if (is_target || is_array) {
                 tmp = slot;
+            } else if (is_procedure_dummy_arg(v)) {
+                // A procedure dummy is passed by value: its param vreg holds
+                // the function address directly, not a stack-slot address.
+                // Use it as-is (matching proc_pointer_callee's dummy path); a
+                // load would dereference the fptr and read the callee's code
+                // bytes -> garbage when the alias is later called.
+                tmp = slot;
             } else {
                 lr_type_t *t = load_type_for_var(v);
                 tmp = lr_emit_load(s, t, V(slot, ty_ptr));
@@ -9695,7 +9702,17 @@ public:
     uint32_t proc_pointer_callee(ASR::Variable_t *v) {
         uint64_t h = get_hash((ASR::asr_t *)v);
         if (is_procedure_dummy_arg(v)) {
-            return lr_symtab[h];
+            // A real dummy of the current scope: its param vreg already holds
+            // the fptr (passed by value).  But a host-associated procedure
+            // dummy captured into a nested-vars context global is NOT in
+            // lr_symtab here; operator[] would insert 0 and the call would
+            // jump to a bogus vreg.  Only take the fast path when the symbol
+            // genuinely lives in lr_symtab; else fall through to load it from
+            // the context/module global below.
+            auto dummy_it = lr_symtab.find(h);
+            if (dummy_it != lr_symtab.end()) {
+                return dummy_it->second;
+            }
         }
         auto local_it = lr_symtab.find(h);
         if (local_it != lr_symtab.end()) {
