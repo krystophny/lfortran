@@ -14603,6 +14603,22 @@ public:
     // associated(p, tgt)   -> p == &tgt (approximation; rarely hit in fpm)
     // For our untyped pointer representation both reduce to icmp.
 
+    // Base data address of an array operand for associated() comparison.  A
+    // descriptor array keeps its data base in the descriptor's offset-0 field;
+    // a fixed-size array has no descriptor, so desc_ptr_of already yields the
+    // data address and loading offset 0 would read the first element instead.
+    uint32_t array_assoc_base(ASR::expr_t *e) {
+        ASR::ttype_t *core = ASRUtils::type_get_past_allocatable_pointer(
+            ASRUtils::expr_type(e));
+        uint32_t dptr = desc_ptr_of(e);
+        if (ASR::is_a<ASR::Array_t>(*core) &&
+                ASR::down_cast<ASR::Array_t>(core)->m_physical_type ==
+                    ASR::array_physical_typeType::FixedSizeArray) {
+            return dptr;
+        }
+        return desc_base_addr(dptr);
+    }
+
     void visit_PointerAssociated(const ASR::PointerAssociated_t &x) {
         LIRIC_PASSTHROUGH(x)
         ASR::ttype_t *ptr_type = ASRUtils::expr_type(x.m_ptr);
@@ -14611,7 +14627,7 @@ public:
         bool ptr_is_array = ASR::is_a<ASR::Array_t>(*ptr_core);
         uint32_t p;
         if (ptr_is_array) {
-            p = desc_base_addr(desc_ptr_of(x.m_ptr));
+            p = array_assoc_base(x.m_ptr);
         } else if (expr_is_indirect_scalar_pointer(x.m_ptr)) {
             // The slot holds the target address; is_target yields that pointer
             // value (not the dereferenced pointee), which associated() tests
@@ -14635,7 +14651,7 @@ public:
                     ASRUtils::expr_type(x.m_tgt));
             uint32_t t;
             if (ASR::is_a<ASR::Array_t>(*tgt_core)) {
-                t = desc_base_addr(desc_ptr_of(x.m_tgt));
+                t = array_assoc_base(x.m_tgt);
             } else {
                 bool was_target = is_target;
                 is_target = true;
