@@ -6601,6 +6601,25 @@ public:
             indirect_scalar_hash = get_hash((ASR::asr_t *)
                 ASRUtils::symbol_get_past_external(
                     ASR::down_cast<ASR::Var_t>(x.m_target)->m_v));
+        } else if (ASRUtils::is_unlimited_polymorphic_type(
+                    ASRUtils::expr_type(x.m_target)) &&
+                !ASR::is_a<ASR::Array_t>(
+                    *ASRUtils::type_get_past_allocatable_pointer(
+                        ASRUtils::expr_type(x.m_target))) &&
+                ASRUtils::is_unlimited_polymorphic_type(
+                    ASRUtils::expr_type(x.m_value)) &&
+                !ASR::is_a<ASR::Array_t>(
+                    *ASRUtils::type_get_past_allocatable_pointer(
+                        ASRUtils::expr_type(x.m_value)))) {
+            // p => x where both are class(*) scalars: alias by copying x's
+            // {data, tag} poly_desc (data pointer + dynamic type tag), so a
+            // later select type / same_type_as on p sees the dynamic type.
+            // A plain value store would mistype the 16-byte poly_desc.
+            is_target = true;
+            visit_expr(*x.m_value);
+            is_target = false;
+            rhs = lr_emit_load(s, ty_poly_desc, V(tmp, ty_ptr));
+            t = ty_poly_desc;
         } else {
             visit_expr(*x.m_value);
             rhs = tmp;
