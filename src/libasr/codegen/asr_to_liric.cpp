@@ -14815,6 +14815,24 @@ public:
             emit_call_void(name, args, 3);
             return true;
         }
+        if (ASR::is_a<ASR::Complex_t>(*type)) {
+            // No scalar complex read runtime; reuse the array reader with
+            // count 1 (a scalar is a 1-element contiguous complex buffer).
+            int kind = ASRUtils::extract_kind_from_ttype_t(type);
+            const char *name = (kind == 4)
+                ? "_lfortran_read_array_complex_float"
+                : (kind == 8) ? "_lfortran_read_array_complex_double" : nullptr;
+            if (!name) return false;
+            uint32_t ptr = emit_target_ptr(target);
+            lr_type_t *p[] = {ty_ptr, ty_i32, ty_i32, ty_i32, ty_ptr};
+            declare_func(name, ty_void, p, 5, false);
+            lr_operand_desc_t args[] = {
+                V(ptr, ty_ptr), I(1, ty_i32), I(1, ty_i32),
+                V(unit, ty_i32), iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr)
+            };
+            emit_call_void(name, args, 5);
+            return true;
+        }
         if (ASR::is_a<ASR::Logical_t>(*type)) {
             uint32_t ptr = emit_target_ptr(target);
             lr_type_t *p[] = {ty_ptr, ty_i32, ty_ptr};
