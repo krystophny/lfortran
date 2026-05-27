@@ -7709,6 +7709,44 @@ public:
                 }
                 ASR::Variable_t *target_var = var_from_expr(arg.m_a);
                 if (st && ASRUtils::is_pointer(at)
+                        && !ASRUtils::is_allocatable(at)
+                        && ASRUtils::is_class_type(
+                            ASRUtils::extract_type(at))) {
+                    // Polymorphic (class) pointer: allocate header+data, set
+                    // the type tag, and store the DATA pointer (past the
+                    // header) into the pointer.  select type reads the tag at
+                    // data-header (load_polymorphic_tag) and member access on
+                    // a pointer base uses the data pointer directly, so both
+                    // line up without a header strip.
+                    uint64_t nbytes = struct_storage_size(st);
+                    uint64_t raw_bytes = (uint64_t)class_header_bytes()
+                        + nbytes;
+                    uint32_t allocator = emit_call(
+                        "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+                    lr_type_t *mp[] = {ty_ptr, ty_i64};
+                    declare_func("_lfortran_malloc_alloc", ty_ptr, mp, 2,
+                        false);
+                    lr_operand_desc_t ma[] = {
+                        V(allocator, ty_ptr), I((int64_t)raw_bytes, ty_i64)
+                    };
+                    uint32_t raw = emit_call("_lfortran_malloc_alloc",
+                        ty_ptr, ma, 2);
+                    lr_type_t *msp[] = {ty_ptr, ty_i32, ty_i64};
+                    declare_func("memset", ty_ptr, msp, 3, false);
+                    lr_operand_desc_t msa[] = {
+                        V(raw, ty_ptr), I(0, ty_i32),
+                        I((int64_t)raw_bytes, ty_i64)
+                    };
+                    emit_call("memset", ty_ptr, msa, 3);
+                    lr_emit_store(s, I(struct_symbol_tag(
+                        (ASR::symbol_t *)st), ty_i64), V(raw, ty_ptr));
+                    emit_struct_vtable(raw, st);
+                    uint32_t data = class_data_ptr(raw);
+                    initialize_struct_storage(st, data);
+                    lr_emit_store(s, V(data, ty_ptr), V(slot, ty_ptr));
+                    continue;
+                }
+                if (st && ASRUtils::is_pointer(at)
                         && !ASRUtils::is_allocatable(at)) {
                     // Non-polymorphic pointer-to-struct: allocate WITHOUT a
                     // class header (tag+vtable).  Member access for a pointer
@@ -10447,6 +10485,13 @@ public:
             return load_raw_object_type_tag(raw);
         }
         if (ASRUtils::is_class_type(at)) {
+            // A class pointer variable's slot holds the data pointer; load
+            // it so the tag is read from the pointee's header.  A by-value
+            // class dummy already arrives as the data pointer.
+            if (ASRUtils::is_pointer(ASRUtils::expr_type(arg)) &&
+                    ASR::is_a<ASR::Var_t>(*arg)) {
+                addr = lr_emit_load(s, ty_ptr, V(addr, ty_ptr));
+            }
             return load_object_type_tag(addr);
         }
         // Concrete type(U): no class header — use the static struct tag.
