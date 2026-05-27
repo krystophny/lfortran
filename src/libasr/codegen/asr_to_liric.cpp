@@ -1709,13 +1709,13 @@ public:
         } else if (v->m_value) {
             std::vector<uint8_t> scalar_bytes;
             if (encode_scalar_constant_bytes(v->m_value, v->m_type,
-                    scalar_bytes) && scalar_bytes.size() <= nbytes) {
-                // The scalar value lives at the low-address bytes of
-                // the global's storage; the rest stays zero.  Storage
-                // can be larger than the value width (e.g. logical(4)
-                // is stored in a 32-byte slot but the runtime treats
-                // byte 0 as the boolean).
-                for (size_t i = 0; i < scalar_bytes.size(); i++) {
+                    scalar_bytes)) {
+                // The scalar value's low-address bytes go into the global's
+                // storage; the rest stays zero.  The encoded width may exceed
+                // the storage (e.g. logical encodes `kind` bytes but liric
+                // stores it in 1 byte, with byte 0 the boolean), so copy only
+                // the low min(size, nbytes) bytes rather than skipping.
+                for (size_t i = 0; i < scalar_bytes.size() && i < nbytes; i++) {
                     init_bytes[i] = scalar_bytes[i];
                 }
             }
