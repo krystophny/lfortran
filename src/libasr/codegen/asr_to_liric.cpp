@@ -2296,7 +2296,19 @@ public:
     // the tag/vtable at the wrong offset (select type falls to class default).
     bool arg_forwards_class_data_ptr(ASR::Function_t *fn, size_t i,
             ASR::expr_t *arg) {
-        if (!is_class_data_ptr_alias(arg)) return false;
+        // Peel a select-type ClassToClass/ClassToStruct narrowing to reach the
+        // underlying class-pointer alias var.
+        ASR::expr_t *base = arg;
+        while (ASR::is_a<ASR::Cast_t>(*base)) {
+            ASR::Cast_t *c = ASR::down_cast<ASR::Cast_t>(base);
+            if (c->m_kind == ASR::cast_kindType::ClassToClass ||
+                    c->m_kind == ASR::cast_kindType::ClassToStruct) {
+                base = c->m_arg;
+            } else {
+                break;
+            }
+        }
+        if (!is_class_data_ptr_alias(base)) return false;
         ASR::Variable_t *formal = formal_arg_var(fn, i);
         if (!formal) return false;
         // Only a plain (non-pointer, non-allocatable) class dummy takes the
@@ -9802,6 +9814,23 @@ public:
         if (expr_is_allocatable_struct(dt_expr)) {
             uint32_t raw = lr_emit_load(s, ty_ptr, V(addr, ty_ptr));
             return class_data_ptr(raw);
+        }
+        // A class-pointer alias (p => obj, possibly narrowed by a select-type
+        // ClassToClass cast) holds the object's data pointer in its slot; load
+        // it so the vtable is read at the object's header, not at the pointer
+        // variable's own address.
+        ASR::expr_t *base = dt_expr;
+        while (ASR::is_a<ASR::Cast_t>(*base)) {
+            ASR::Cast_t *c = ASR::down_cast<ASR::Cast_t>(base);
+            if (c->m_kind == ASR::cast_kindType::ClassToClass ||
+                    c->m_kind == ASR::cast_kindType::ClassToStruct) {
+                base = c->m_arg;
+            } else {
+                break;
+            }
+        }
+        if (is_class_data_ptr_alias(base)) {
+            return lr_emit_load(s, ty_ptr, V(addr, ty_ptr));
         }
         return addr;
     }
