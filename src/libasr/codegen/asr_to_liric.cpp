@@ -14508,6 +14508,26 @@ public:
             emit_call_void(name, args, 6);
             return true;
         }
+        if (ASR::is_a<ASR::Logical_t>(*target_type)) {
+            // List-directed logical read.  The runtime writes an int32, but a
+            // liric logical scalar is 1 byte (i1); read into a temp i32 and
+            // store the truncated value so adjacent storage is not clobbered.
+            uint32_t tmp_i32 = lr_emit_alloca(s, ty_i32);
+            lr_type_t *p[] = {ty_ptr, ty_i64, ty_ptr, ty_ptr, ty_ptr, ty_ptr};
+            declare_func("_lfortran_string_read_bool", ty_void, p, 6, false);
+            lr_operand_desc_t args[] = {
+                V(data, ty_ptr), V(len, ty_i64), LR_NULL(ty_ptr),
+                V(tmp_i32, ty_ptr),
+                stat_ptr ? V(stat_ptr, ty_ptr) : LR_NULL(ty_ptr),
+                V(pos_ptr, ty_ptr)
+            };
+            emit_call_void("_lfortran_string_read_bool", args, 6);
+            uint32_t v32 = lr_emit_load(s, ty_i32, V(tmp_i32, ty_ptr));
+            uint32_t v1 = lr_emit_trunc(s, ty_i1, V(v32, ty_i32));
+            uint32_t target_ptr = emit_target_ptr(target);
+            lr_emit_store(s, V(v1, ty_i1), V(target_ptr, ty_ptr));
+            return true;
+        }
         if (ASR::is_a<ASR::String_t>(*target_type)) {
             // List-directed read of a CHARACTER from an internal string unit:
             // copy the next token into the destination, advancing pos_ptr.
