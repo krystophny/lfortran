@@ -5672,6 +5672,15 @@ public:
             tmp = desc;
             return;
         }
+        // -> UnboundedPointerArray: an assumed-size dummy `arr(*)` receives a
+        // bare contiguous data base pointer (sequence association).  From a
+        // descriptor source (e.g. a section actual w(i:)), extract base_addr;
+        // FixedSize/Pointer sources already evaluate to the base.
+        if (x.m_new == ASR::array_physical_typeType::UnboundedPointerArray &&
+                x.m_old == ASR::array_physical_typeType::DescriptorArray) {
+            tmp = desc_base_addr(desc_ptr_of(x.m_arg));
+            return;
+        }
         visit_expr(*x.m_arg);
     }
 
@@ -5817,7 +5826,13 @@ public:
                 array_t->m_physical_type
                 == ASR::array_physical_typeType::SIMDArray ||
                 array_t->m_physical_type
-                == ASR::array_physical_typeType::PointerArray) {
+                == ASR::array_physical_typeType::PointerArray ||
+                array_t->m_physical_type
+                == ASR::array_physical_typeType::UnboundedPointerArray) {
+            // UnboundedPointerArray is an assumed-size dummy `arr(*)`: the
+            // parameter is the contiguous data base, addressed like a
+            // PointerArray (no descriptor, last dim extent unknown but not
+            // needed for column-major linear indexing).
             bool was_target = is_target;
             is_target = true;
             visit_expr(*x.m_v);
