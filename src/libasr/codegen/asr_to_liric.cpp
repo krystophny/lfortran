@@ -5509,7 +5509,13 @@ public:
         if (ASR::is_a<ASR::Cast_t>(*expr)) {
             ASR::Cast_t *cast = ASR::down_cast<ASR::Cast_t>(expr);
             if (cast->m_kind == ASR::cast_kindType::ClassToStruct ||
-                    cast->m_kind == ASR::cast_kindType::ClassToClass) {
+                    cast->m_kind == ASR::cast_kindType::ClassToClass ||
+                    cast->m_kind == ASR::cast_kindType::ClassToIntrinsic) {
+                // ClassToIntrinsic unwraps a class(*) scalar to its stored
+                // value; in is_target context visit_Cast yields the data
+                // pointer, so it is a true storage reference (a select-type
+                // narrowed class(*) passed to an intent(out)/inout dummy must
+                // write back through that pointer, not a copy).
                 return expr_is_storage_reference(cast->m_arg);
             }
         }
