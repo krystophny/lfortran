@@ -5196,6 +5196,19 @@ public:
         return ASR::is_a<ASR::Array_t>(*type);
     }
 
+    // A limited polymorphic array: class(T) :: a(:) with T a derived type
+    // (not class(*)).  Its dynamic type tag lives in the descriptor at
+    // offset 24, written at allocate time, like the unlimited-array case.
+    bool type_is_limited_polymorphic_array(ASR::ttype_t *type) {
+        type = ASRUtils::type_get_past_allocatable_pointer(type);
+        if (!ASR::is_a<ASR::Array_t>(*type)) {
+            return false;
+        }
+        ASR::ttype_t *elem = ASRUtils::type_get_past_array(type);
+        return ASRUtils::is_class_type(elem) &&
+            !ASRUtils::is_unlimited_polymorphic_type(elem);
+    }
+
     bool formal_is_unlimited_polymorphic_array(
             ASR::Function_t *fn, size_t i) {
         ASR::Variable_t *formal = formal_arg_var(fn, i);
@@ -8045,10 +8058,20 @@ public:
         desc_store_i64(desc_ptr, 8,
             lr_emit_add(s, ty_i64, I(elem_bytes, ty_i64), I(0, ty_i64)));
         desc_store_rank(desc_ptr, n_dims);
-        // For class(*) array descriptors this slot carries the dynamic tag.
+        // For polymorphic array descriptors (class(*) and limited class(T))
+        // this slot carries the allocated type's dynamic tag, read back by
+        // select type / same_type_as.  A named type spec (arg.m_sym_subclass,
+        // e.g. allocate(MyType :: a(:))) tags by struct symbol, matching
+        // select type's TypeStmtName; an intrinsic spec tags by
+        // polymorphic_type_tag.
         int64_t offset_or_tag = 0;
-        if (ASRUtils::is_unlimited_polymorphic_type(at) && arg.m_type) {
-            offset_or_tag = polymorphic_type_tag(arg.m_type);
+        if (ASRUtils::is_unlimited_polymorphic_type(at) ||
+                type_is_limited_polymorphic_array(at)) {
+            if (arg.m_sym_subclass) {
+                offset_or_tag = struct_symbol_tag(arg.m_sym_subclass);
+            } else if (arg.m_type) {
+                offset_or_tag = polymorphic_type_tag(arg.m_type);
+            }
         }
         desc_store_i64(desc_ptr, 24, emit_i64_const(offset_or_tag));
 
@@ -10538,6 +10561,12 @@ public:
             uint32_t fld1 = 1;
             return lr_emit_extractvalue(s, ty_i64,
                 V(desc, ty_poly_desc), &fld1, 1);
+        }
+        // Limited polymorphic array class(T) :: a(:): the dynamic tag lives
+        // in the descriptor at offset 24 (set at allocate), not a per-object
+        // class header.
+        if (type_is_limited_polymorphic_array(at)) {
+            return desc_load_i64(desc_ptr_of(arg), 24);
         }
         // class(T) or concrete: look up tag in the class header.
         bool was_target = is_target;
@@ -13122,7 +13151,8 @@ public:
             ASR::ttype_t *selector_type =
                 ASRUtils::type_get_past_allocatable_pointer(
                     ASRUtils::expr_type(x.m_selector));
-            if (ASRUtils::is_class_type(selector_type)) {
+            if (ASRUtils::is_class_type(selector_type) ||
+                    type_is_limited_polymorphic_array(selector_type)) {
                 uint32_t selector_tag =
                     load_polymorphic_tag_from_expr(x.m_selector);
                 lr_error_t err;
