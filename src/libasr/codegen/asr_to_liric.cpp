@@ -5712,6 +5712,23 @@ public:
             value_is_descriptor_array = cast->m_new ==
                 ASR::array_physical_typeType::DescriptorArray;
         }
+        // select type on a polymorphic array lowers to
+        //   selector => (Cast ClassToStruct/ClassToClass orig_array)
+        // whose result is a descriptor array.  desc_ptr_of(value) yields the
+        // original array's descriptor pointer, so the selector must alias it
+        // through a runtime pointer array (else its inline descriptor base
+        // ends up holding the descriptor's address instead of the data base).
+        if (ASR::is_a<ASR::Cast_t>(*x.m_value)) {
+            ASR::Cast_t *c = ASR::down_cast<ASR::Cast_t>(x.m_value);
+            if (c->m_kind == ASR::cast_kindType::ClassToStruct ||
+                    c->m_kind == ASR::cast_kindType::ClassToClass) {
+                ASR::ttype_t *ct =
+                    ASRUtils::type_get_past_allocatable_pointer(c->m_type);
+                if (ASR::is_a<ASR::Array_t>(*ct)) {
+                    value_is_descriptor_array = true;
+                }
+            }
+        }
         bool value_is_descriptor_pointer = value_is_descriptor_array ||
             type_is_unlimited_polymorphic_array(
                 ASRUtils::expr_type(x.m_value));
