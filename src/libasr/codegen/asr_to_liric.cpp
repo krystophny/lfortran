@@ -8508,6 +8508,21 @@ public:
         return addr;
     }
 
+    // True if `scope` directly contains a Function definition (a body, i.e.
+    // a contained procedure) named `name` -- as opposed to merely an
+    // interface-block declaration of an external procedure.
+    bool scope_defines_function(SymbolTable *scope, const std::string &name) {
+        if (!scope) return false;
+        ASR::symbol_t *sym = scope->get_symbol(name);
+        if (!sym) return false;
+        sym = ASRUtils::symbol_get_past_external(sym);
+        if (!ASR::is_a<ASR::Function_t>(*sym)) return false;
+        ASR::Function_t *f = ASR::down_cast<ASR::Function_t>(sym);
+        ASR::FunctionType_t *ft = ASR::down_cast<ASR::FunctionType_t>(
+            f->m_function_signature);
+        return ft->m_deftype == ASR::deftypeType::Implementation;
+    }
+
     std::string callable_name(ASR::Function_t *fn) {
         if (!fn) return std::string("<null>");
         uint64_t h = get_hash((ASR::asr_t *)fn);
@@ -8533,6 +8548,7 @@ public:
         }
         std::string base = fn->m_name;
         SymbolTable *st = fn->m_symtab ? fn->m_symtab->parent : nullptr;
+        bool first_parent = true;
         while (st) {
             ASR::asr_t *owner = (ASR::asr_t *)st->asr_owner;
             if (!owner) break;
@@ -8541,6 +8557,16 @@ public:
                 if (ASR::is_a<ASR::Function_t>(*osym)) {
                     ASR::Function_t *parent =
                         down_cast<ASR::Function_t>(osym);
+                    // A function declared in an interface block sits in the
+                    // enclosing scope but is defined elsewhere (an external
+                    // top-level procedure links to its bare name).  Only
+                    // scope-prefix when the enclosing function actually
+                    // contains the definition in its own scope.
+                    if (first_parent && !scope_defines_function(
+                            parent->m_symtab, fn->m_name)) {
+                        break;
+                    }
+                    first_parent = false;
                     base = std::string(parent->m_name) + "__" + base;
                     st = parent->m_symtab
                         ? parent->m_symtab->parent : nullptr;
