@@ -1091,7 +1091,24 @@ public:
         if (v->m_value) return true;
         ASR::ttype_t *t =
             ASRUtils::type_get_past_allocatable_pointer(v->m_type);
-        return ASR::is_a<ASR::FunctionType_t>(*t) && v->m_symbolic_value;
+        if (ASR::is_a<ASR::FunctionType_t>(*t) && v->m_symbolic_value) {
+            return true;
+        }
+        // A derived-type variable's component defaults live on the type's
+        // members, not on m_value; a module global needs a runtime
+        // initializer to apply them (program-level vars already get one).
+        if (!ASRUtils::is_pointer(v->m_type) &&
+                !ASRUtils::is_allocatable(v->m_type)) {
+            ASR::ttype_t *core = ASRUtils::type_get_past_array(t);
+            if (ASR::is_a<ASR::StructType_t>(*core)) {
+                ASR::Struct_t *st = struct_symbol_from_type_decl(
+                    v->m_type_declaration);
+                if (st && struct_storage_needs_initialization(st)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     void register_module_globals(const ASR::Module_t &x,
