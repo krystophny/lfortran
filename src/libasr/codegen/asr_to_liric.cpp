@@ -8603,6 +8603,25 @@ public:
     // path again.  Implemented as a thin wrapper so we can extend it
     // for source/mold once needed.
 
+    // The realloc-lhs expansion of `poly_array = src` lowers to
+    // ReAlloc(target, bounds derived from src) + an element copy loop; the
+    // bound expressions (ArraySize/ArrayBound) reference the source array.
+    // Recover that source so a polymorphic ReAlloc can use its runtime
+    // descriptor (elem_len + dynamic tag) rather than the abstract class(*)
+    // static element size.
+    ASR::expr_t *realloc_source_from_dims(ASR::dimension_t *dims, size_t n) {
+        for (size_t d = 0; d < n; d++) {
+            ASR::expr_t *e = dims[d].m_length ? dims[d].m_length
+                                              : dims[d].m_start;
+            if (!e) continue;
+            if (ASR::is_a<ASR::ArraySize_t>(*e))
+                return ASR::down_cast<ASR::ArraySize_t>(e)->m_v;
+            if (ASR::is_a<ASR::ArrayBound_t>(*e))
+                return ASR::down_cast<ASR::ArrayBound_t>(e)->m_v;
+        }
+        return nullptr;
+    }
+
     void visit_ReAlloc(const ASR::ReAlloc_t &x) {
         for (size_t i = 0; i < x.n_args; i++) {
             const ASR::alloc_arg_t &arg = x.m_args[i];
@@ -8610,6 +8629,27 @@ public:
             ASR::ttype_t *at = ASRUtils::expr_type(arg.m_a);
             ASR::ttype_t *naked =
                 ASRUtils::type_get_past_allocatable_pointer(at);
+            // A class(*) array realloc-lhs (e.g. an intent(out) component
+            // `this%value = value`) must take the source's RUNTIME element
+            // size and dynamic tag, not the abstract class(*) static size.
+            // Route it through the descriptor-copy assignment (which the local
+            // `class(*),allocatable = class(*) array` case uses correctly):
+            // it mallocs by the source elem_len, copies, and propagates the
+            // offset-24 tag.  The trailing array_op copy loop then re-copies
+            // harmlessly against the now-correct descriptor.
+            if (!arg.m_type && ASR::is_a<ASR::Array_t>(*naked) &&
+                    ASRUtils::is_unlimited_polymorphic_type(
+                        ASR::down_cast<ASR::Array_t>(naked)->m_type)) {
+                ASR::expr_t *src = realloc_source_from_dims(
+                    arg.m_dims, arg.n_dims);
+                if (src && type_is_unlimited_polymorphic_array(
+                        ASRUtils::expr_type(src))) {
+                    emit_allocatable_descriptor_array_assignment_from_desc(
+                        desc_ptr_of(arg.m_a), desc_ptr_of(src),
+                        ASR::down_cast<ASR::Array_t>(naked));
+                    continue;
+                }
+            }
             if (arg.n_dims > 0 || ASR::is_a<ASR::Array_t>(*naked)) {
                 allocate_array(arg);
             } else if (ASR::is_a<ASR::String_t>(
