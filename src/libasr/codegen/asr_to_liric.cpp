@@ -4909,6 +4909,20 @@ public:
             initialize_local_string_descriptor(slot, v->m_type);
             initialize_struct_variable_storage(slot, v);
             initialize_local_value(v, slot);
+        } else if (needs_static_storage) {
+            // SAVE character variable: its storage is a descriptor whose data
+            // pointer is a runtime address, which the static .data init (used
+            // for numeric SAVE) cannot set, leaving it {null,0} -> reads empty.
+            // Run the descriptor + value init at the declaration.  Numeric SAVE
+            // is untouched (it keeps its .data and persists across calls).
+            ASR::ttype_t *ct = ASRUtils::type_get_past_allocatable_pointer(
+                v->m_type);
+            ct = ASRUtils::type_get_past_array(ct);
+            if (ASR::is_a<ASR::String_t>(*ct)) {
+                initialize_local_array_descriptor(slot, v->m_type);
+                initialize_local_string_descriptor(slot, v->m_type);
+                initialize_local_value(v, slot);
+            }
         }
         if (is_allocatable_struct_type(v->m_type)) {
             uint32_t tag_slot = lr_emit_alloca(s, ty_i64);
