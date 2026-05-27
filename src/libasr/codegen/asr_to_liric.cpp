@@ -3449,10 +3449,22 @@ public:
                 dst = lr_emit_load(s, ty_ptr, V(dst, ty_ptr));
             }
 
+            // For a polymorphic (class) target the value carries the full
+            // dynamic type; the target's declared type may be a parent, so
+            // copying by the declared type would drop the extension's
+            // members.  Prefer the value's struct type in that case.
+            bool target_poly = ASRUtils::is_class_type(
+                ASRUtils::extract_type(ASRUtils::expr_type(x.m_target)));
             ASR::Struct_t *st = nullptr;
-            ASR::symbol_t *sym =
-                ASRUtils::get_struct_sym_from_struct_expr(x.m_target);
-            st = struct_symbol_from_type_decl(sym);
+            ASR::symbol_t *sym = nullptr;
+            if (target_poly) {
+                sym = ASRUtils::get_struct_sym_from_struct_expr(x.m_value);
+                st = struct_symbol_from_type_decl(sym);
+            }
+            if (!st) {
+                sym = ASRUtils::get_struct_sym_from_struct_expr(x.m_target);
+                st = struct_symbol_from_type_decl(sym);
+            }
             if (!st) {
                 sym = ASRUtils::get_struct_sym_from_struct_expr(x.m_value);
                 st = struct_symbol_from_type_decl(sym);
