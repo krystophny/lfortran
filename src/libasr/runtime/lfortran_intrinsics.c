@@ -12247,7 +12247,9 @@ LFORTRAN_API void _lfortran_string_read_str(char *src_data, int64_t src_len, cha
             *offset = pos;
             return;
         }
-        pos++;  // consume comma and continue
+        // consume comma and the spaces after it so the next token read starts
+        // at the value, not the separating blank (which would read empty).
+        pos = look;
     }
     if (pos < src_len && (src_data[pos] == '\'' || src_data[pos] == '"')) {
         char delim = src_data[pos];
@@ -12288,6 +12290,29 @@ LFORTRAN_API void _lfortran_string_read_str(char *src_data, int64_t src_len, cha
             src_data + pos, remaining);
     }
     if (offset) *offset = pos;
+}
+
+// Whole-array list-directed character read from an internal string unit
+// (`read(str, *) char_arr`).  Each array element is a {char* data, int64 len}
+// descriptor (16 bytes); read one token per element, threading the source
+// position across elements.
+LFORTRAN_API void _lfortran_string_read_strdesc_array(char *src_data,
+        int64_t src_len, char *desc_base, int64_t n, int64_t elem_len) {
+    int64_t offset = 0;
+    for (int64_t i = 0; i < n; i++) {
+        char *elem = desc_base + i * 16;
+        char *dest_data = *(char **)elem;
+        // A fixed-length char array element's str_desc carries len 0 (the
+        // declared length is static), so the caller passes elem_len; fall back
+        // to the descriptor length only for an assumed-length (runtime) array.
+        int64_t dest_len = elem_len > 0 ? elem_len : *(int64_t *)(elem + 8);
+        _lfortran_string_read_str(src_data, src_len, dest_data, dest_len,
+            &offset);
+        // The element's str_desc length stays 0 for a fixed-length array
+        // (the declared length is static); set it so later reads of the
+        // element (trim, comparison, print) see the populated string.
+        *(int64_t *)(elem + 8) = dest_len;
+    }
 }
 
 LFORTRAN_API void _lfortran_string_read_bool(char *str, int64_t len, char *format, int32_t *i, int32_t *iostat, int64_t *offset) {
