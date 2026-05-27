@@ -1586,7 +1586,35 @@ public:
         }
         uint64_t nbytes = storage_size_for_variable(v);
         std::vector<uint8_t> init_bytes(nbytes, 0);
-        if (v->m_value) {
+        ASR::ttype_t *vcore =
+            ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+        if (v->m_value && ASR::is_a<ASR::Array_t>(*vcore) &&
+                ASR::is_a<ASR::ArrayConstant_t>(*v->m_value)) {
+            // SAVE array with a constant initializer ([1,1], etc): encode
+            // each element into the global's .data, since the SAVE path
+            // skips the runtime initialize_local_array_constant.
+            ASR::Array_t *arr = ASR::down_cast<ASR::Array_t>(vcore);
+            ASR::ArrayConstant_t *ac =
+                ASR::down_cast<ASR::ArrayConstant_t>(v->m_value);
+            int64_t elem_bytes = element_byte_size(arr->m_type);
+            int64_t total = ASRUtils::get_fixed_size_of_array(
+                arr->m_dims, arr->n_dims);
+            ASR::ttype_t *et = ASRUtils::type_get_past_array(
+                ASRUtils::type_get_past_allocatable_pointer(arr->m_type));
+            for (int64_t i = 0; i < total &&
+                    (uint64_t)((i + 1) * elem_bytes) <= nbytes; i++) {
+                ASR::expr_t *el = ASRUtils::fetch_ArrayConstant_value(
+                    al, *ac, i);
+                std::vector<uint8_t> eb;
+                if (encode_scalar_constant_bytes(el, et, eb)) {
+                    for (size_t b = 0; b < eb.size() &&
+                            (uint64_t)(i * elem_bytes + (int64_t)b) < nbytes;
+                            b++) {
+                        init_bytes[i * elem_bytes + b] = eb[b];
+                    }
+                }
+            }
+        } else if (v->m_value) {
             std::vector<uint8_t> scalar_bytes;
             if (encode_scalar_constant_bytes(v->m_value, v->m_type,
                     scalar_bytes) && scalar_bytes.size() <= nbytes) {
