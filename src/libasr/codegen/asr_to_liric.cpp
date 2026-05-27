@@ -5720,6 +5720,24 @@ public:
             is_target = false;
             dst = tmp;
         }
+        // A pointer-array Var slot holds a pointer to the descriptor
+        // (runtime_pointer_arrays convention); but a struct-member or
+        // array-element pointer-array target is an *inline* descriptor, so
+        // copy the descriptor contents (`rhs` points to the source
+        // descriptor) rather than storing the pointer into its first field.
+        if (value_is_descriptor_pointer &&
+                !ASR::is_a<ASR::Var_t>(*x.m_target)) {
+            ASR::ttype_t *tt = ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(x.m_target));
+            int ndims = 1;
+            if (ASR::is_a<ASR::Array_t>(*tt)) {
+                ndims = (int)ASR::down_cast<ASR::Array_t>(tt)->n_dims;
+            }
+            emit_memcpy_bytes(dst, rhs,
+                (uint64_t)(DESC_HEADER_BYTES + DESC_DIM_BYTES *
+                    (ndims > 0 ? ndims : 1)));
+            return;
+        }
         lr_emit_store(s, V(rhs, t), V(dst, ty_ptr));
         if (mark_runtime_pointer_array) {
             runtime_pointer_arrays.insert(runtime_pointer_array_hash);
