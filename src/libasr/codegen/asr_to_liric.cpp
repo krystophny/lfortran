@@ -8906,6 +8906,30 @@ public:
         return lr_emit_load(s, ty_ptr, V(storage, ty_ptr));
     }
 
+    // Function-pointer value for a procedure-pointer COMPONENT call
+    // (`call obj%pp(args)`): load the pointer from obj's data block at the
+    // component's byte offset, rather than from a standalone global.
+    uint32_t proc_pointer_component_callee(ASR::expr_t *dt,
+            ASR::Variable_t *comp) {
+        uint32_t data = dispatch_data_ptr_from_dt(dt);
+        ASR::symbol_t *st_sym =
+            ASRUtils::get_struct_sym_from_struct_expr(dt);
+        ASR::Struct_t *st = struct_symbol_from_type_decl(st_sym);
+        uint64_t offset = 0;
+        if (st) {
+            std::vector<ASR::Variable_t *> members;
+            collect_struct_members_parent_first(st, members);
+            for (ASR::Variable_t *m : members) {
+                if (std::strcmp(m->m_name, comp->m_name) == 0) break;
+                offset += storage_size_for_variable(m);
+            }
+        }
+        lr_operand_desc_t off[1] = {I((int64_t)offset, ty_i64)};
+        uint32_t member_ptr = lr_emit_gep(s, ty_i8,
+            V(data, ty_ptr), off, 1);
+        return lr_emit_load(s, ty_ptr, V(member_ptr, ty_ptr));
+    }
+
     int64_t class_vtable_slots() const {
         return 128;
     }
@@ -9934,7 +9958,9 @@ public:
             // Procedure dummy args already hold the callee address.
             ASR::Variable_t *v = down_cast<ASR::Variable_t>(raw);
             pad_proc_pointer_args(v, args);
-            uint32_t fptr = proc_pointer_callee(v);
+            uint32_t fptr = x.m_dt
+                ? proc_pointer_component_callee(x.m_dt, v)
+                : proc_pointer_callee(v);
             lr_emit_call_void(s, V(fptr, ty_ptr),
                               args.data(), args.size());
             emit_class_writebacks();
@@ -10220,7 +10246,9 @@ public:
         if (is_proc_ptr) {
             ASR::Variable_t *v = down_cast<ASR::Variable_t>(raw);
             pad_proc_pointer_args(v, args);
-            uint32_t fptr = proc_pointer_callee(v);
+            uint32_t fptr = x.m_dt
+                ? proc_pointer_component_callee(x.m_dt, v)
+                : proc_pointer_callee(v);
             tmp = lr_emit_call(s, ret, V(fptr, ty_ptr),
                                args.data(), args.size());
             return;
