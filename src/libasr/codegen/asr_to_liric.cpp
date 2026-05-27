@@ -14380,6 +14380,20 @@ public:
             emit_call_void(name, args, 6);
             return true;
         }
+        if (ASR::is_a<ASR::String_t>(*target_type)) {
+            // List-directed read of a CHARACTER from an internal string unit:
+            // copy the next token into the destination, advancing pos_ptr.
+            uint32_t dest_len;
+            uint32_t dest_data = emit_optional_string_ptr(target, dest_len);
+            lr_type_t *p[] = {ty_ptr, ty_i64, ty_ptr, ty_i64, ty_ptr};
+            declare_func("_lfortran_string_read_str", ty_void, p, 5, false);
+            lr_operand_desc_t args[] = {
+                V(data, ty_ptr), V(len, ty_i64),
+                V(dest_data, ty_ptr), V(dest_len, ty_i64), V(pos_ptr, ty_ptr)
+            };
+            emit_call_void("_lfortran_string_read_str", args, 5);
+            return true;
+        }
         if (!ASR::is_a<ASR::Integer_t>(*target_type)) {
             return false;
         }
