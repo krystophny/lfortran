@@ -9764,7 +9764,8 @@ public:
     bool emit_dynamic_subroutine_dispatch(ASR::Function_t *fn,
             ASR::symbol_t *call_sym,
             const std::string &method_name,
-            const std::vector<lr_operand_desc_t> &args) {
+            const std::vector<lr_operand_desc_t> &args,
+            ASR::expr_t *dt) {
         if (!function_is_interface(fn) || args.empty() ||
                 method_name.empty()) {
             return false;
@@ -9777,7 +9778,12 @@ public:
         if (!is_tbp_call_symbol(call_sym)) {
             return false;
         }
-        uint32_t fptr = load_object_method_ptr(args[0].vreg, method_name);
+        // Dispatch through the actual object (x.m_dt), not args[0]: args[0] is
+        // the passed-object self only for a pass scalar TBP.  An array-returning
+        // TBP function lowered to a subroutine prepends the result
+        // out-argument, so args[0] is the result, not the dispatch object.
+        uint32_t base = dt ? dispatch_data_ptr_from_dt(dt) : args[0].vreg;
+        uint32_t fptr = load_object_method_ptr(base, method_name);
         lr_emit_call_void(s, V(fptr, ty_ptr),
             const_cast<lr_operand_desc_t *>(args.data()), args.size());
         return true;
@@ -10689,7 +10695,7 @@ public:
         }
 
         if (fn && emit_dynamic_subroutine_dispatch(fn, x.m_name,
-                dynamic_method_name(x.m_name, fn), args)) {
+                dynamic_method_name(x.m_name, fn), args, x.m_dt)) {
             emit_class_writebacks();
             return;
         }
