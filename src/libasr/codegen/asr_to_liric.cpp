@@ -2019,6 +2019,7 @@ public:
                 LR_GLOBAL(it->second, ty_ptr), no_off, 1);
             initialize_local_array_descriptor(slot, v->m_type);
             initialize_local_string_descriptor(slot, v->m_type);
+            initialize_inline_string_array(slot, v);
             initialize_struct_variable_storage(slot, v);
             initialize_local_value(v, slot);
         }
@@ -2038,6 +2039,7 @@ public:
                 LR_GLOBAL(sym, ty_ptr), no_off, 1);
             initialize_local_array_descriptor(slot, v->m_type);
             initialize_local_string_descriptor(slot, v->m_type);
+            initialize_inline_string_array(slot, v);
             initialize_struct_variable_storage(slot, v);
             initialize_local_value(v, slot);
             if (is_allocatable_struct_type(v->m_type)) {
@@ -5028,6 +5030,7 @@ public:
         if (!runtime_array && !needs_static_storage) {
             initialize_local_array_descriptor(slot, v->m_type);
             initialize_local_string_descriptor(slot, v->m_type);
+            initialize_inline_string_array(slot, v);
             initialize_struct_variable_storage(slot, v);
             initialize_local_value(v, slot);
         } else if (needs_static_storage) {
@@ -8189,22 +8192,35 @@ public:
                 V(cur_stride, ty_i64), V(ext_rt[d], ty_i64));
         }
 
-        ASR::ttype_t *elem_type =
-            ASRUtils::type_get_past_allocatable_pointer(array->m_type);
-        elem_type = ASRUtils::type_get_past_array(elem_type);
+        emit_string_array_element_buffers(data, total_rt, array->m_type);
+    }
+
+    // Give each element of a CHARACTER array its own malloc'd buffer and store
+    // {buffer, len} into its str_desc, in an emitted loop over the element
+    // count.  Shared by descriptor-array init, runtime-pointer-array slots, and
+    // plain local/program/module char arrays -- all otherwise leave the
+    // str_descs {null,0}, so a read/assign into an un-assigned element writes
+    // to a null buffer ("Copying into unallocated LHS string").
+    void emit_string_array_element_buffers(uint32_t data, uint32_t total_rt,
+            ASR::ttype_t *array_type) {
+        ASR::ttype_t *elem_type = ASRUtils::type_get_past_array(
+            ASRUtils::type_get_past_allocatable_pointer(array_type));
         if (!ASR::is_a<ASR::String_t>(*elem_type)) {
             return;
         }
         ASR::String_t *string_t = ASR::down_cast<ASR::String_t>(elem_type);
+        if (string_t->m_physical_type != ASR::DescriptorString) {
+            return;
+        }
         int64_t len = 0;
         if (string_t->m_len) {
             ASRUtils::extract_value(string_t->m_len, len);
         }
+        uint32_t allocator = emit_call(
+            "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
         lr_type_t *string_malloc_params[] = {ty_ptr, ty_i64};
         declare_func("_lfortran_string_malloc_alloc", ty_ptr,
             string_malloc_params, 2, false);
-        // Give each element string its own buffer, counting to the runtime
-        // total in an emitted loop.
         lr_error_t serr;
         uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
         lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
@@ -8236,6 +8252,50 @@ public:
         lr_emit_store(s, V(inext, ty_i64), V(idx_ptr, ty_ptr));
         lr_emit_br(s, shead);
         lr_session_set_block(s, sdone, &serr);
+    }
+
+    // Initialize element buffers for a plain (non-pointer, non-allocatable)
+    // local/program/module CHARACTER array whose `slot` is an inline run of
+    // str_descs.  Only static-shape arrays (compile-time element count) are
+    // handled; descriptor/allocatable/runtime-pointer arrays are initialized on
+    // their own paths.
+    void initialize_inline_string_array(uint32_t slot, ASR::Variable_t *v) {
+        if (ASRUtils::is_pointer(v->m_type) ||
+                ASRUtils::is_allocatable(v->m_type)) {
+            return;
+        }
+        ASR::ttype_t *t =
+            ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+        if (!ASR::is_a<ASR::Array_t>(*t)) return;
+        ASR::Array_t *arr = ASR::down_cast<ASR::Array_t>(t);
+        if (arr->m_physical_type ==
+                ASR::array_physical_typeType::DescriptorArray) {
+            return;
+        }
+        ASR::ttype_t *et = ASRUtils::type_get_past_array(
+            ASRUtils::type_get_past_allocatable_pointer(arr->m_type));
+        if (!ASR::is_a<ASR::String_t>(*et)) return;
+        // Only a static (compile-time) element length is handled here: a
+        // runtime length (character(len=len(w))) would malloc zero-byte
+        // element buffers and must keep its existing (non-inline) handling.
+        ASR::String_t *st = ASR::down_cast<ASR::String_t>(et);
+        int64_t slen = 0;
+        if (!st->m_len || !ASRUtils::extract_value(st->m_len, slen) ||
+                slen <= 0) {
+            return;
+        }
+        for (size_t d = 0; d < arr->n_dims; d++) {
+            int64_t ext = 0;
+            if (!arr->m_dims[d].m_length ||
+                    !ASRUtils::extract_value(arr->m_dims[d].m_length, ext)) {
+                return;
+            }
+        }
+        int64_t total = ASRUtils::get_fixed_size_of_array(
+            arr->m_dims, arr->n_dims);
+        if (total <= 0) return;
+        emit_string_array_element_buffers(slot, emit_i64_const(total),
+            v->m_type);
     }
 
     // For a SAVE fixed-length character variable, back its descriptor with a
