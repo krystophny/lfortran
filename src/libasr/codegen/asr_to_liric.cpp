@@ -14254,7 +14254,7 @@ public:
     }
 
     uint32_t emit_internal_read_int_token(uint32_t data, uint32_t len,
-            uint32_t pos_ptr) {
+            uint32_t pos_ptr, uint32_t ndigits_ptr = 0) {
         uint32_t acc_ptr = lr_emit_alloca(s, ty_i64);
         uint32_t sign_ptr = lr_emit_alloca(s, ty_i64);
         lr_emit_store(s, I(0, ty_i64), V(acc_ptr, ty_ptr));
@@ -14352,6 +14352,11 @@ public:
         uint32_t next_acc = lr_emit_add(s, ty_i64,
             V(acc10, ty_i64), V(digit, ty_i64));
         lr_emit_store(s, V(next_acc, ty_i64), V(acc_ptr, ty_ptr));
+        if (ndigits_ptr) {
+            uint32_t nd = lr_emit_load(s, ty_i64, V(ndigits_ptr, ty_ptr));
+            uint32_t nd1 = lr_emit_add(s, ty_i64, V(nd, ty_i64), I(1, ty_i64));
+            lr_emit_store(s, V(nd1, ty_i64), V(ndigits_ptr, ty_ptr));
+        }
         next_pos = lr_emit_add(s, ty_i64, V(pos, ty_i64), I(1, ty_i64));
         lr_emit_store(s, V(next_pos, ty_i64), V(pos_ptr, ty_ptr));
         lr_emit_br(s, digit_head);
@@ -14363,7 +14368,8 @@ public:
     }
 
     bool emit_internal_integer_read_value(ASR::expr_t *target,
-            uint32_t data, uint32_t len, uint32_t pos_ptr) {
+            uint32_t data, uint32_t len, uint32_t pos_ptr,
+            uint32_t stat_ptr = 0) {
         // Whole-array list-directed read from an internal string unit:
         // `read(str, *) arr`.  Read every element in one runtime call (the
         // scalar path below only fills element 0).  pos_ptr is not threaded
@@ -14397,7 +14403,8 @@ public:
             declare_func(name, ty_void, p, 6, false);
             lr_operand_desc_t args[] = {
                 V(data, ty_ptr), V(len, ty_i64), LR_NULL(ty_ptr),
-                V(v.base, ty_ptr), V(v.total, ty_i64), LR_NULL(ty_ptr)
+                V(v.base, ty_ptr), V(v.total, ty_i64),
+                stat_ptr ? V(stat_ptr, ty_ptr) : LR_NULL(ty_ptr)
             };
             emit_call_void(name, args, 6);
             return true;
@@ -14420,7 +14427,9 @@ public:
             declare_func(name, ty_void, p, 6, false);
             lr_operand_desc_t args[] = {
                 V(data, ty_ptr), V(len, ty_i64), LR_NULL(ty_ptr),
-                V(target_ptr, ty_ptr), LR_NULL(ty_ptr), V(pos_ptr, ty_ptr)
+                V(target_ptr, ty_ptr),
+                stat_ptr ? V(stat_ptr, ty_ptr) : LR_NULL(ty_ptr),
+                V(pos_ptr, ty_ptr)
             };
             emit_call_void(name, args, 6);
             return true;
@@ -14435,7 +14444,9 @@ public:
             declare_func(name, ty_void, p, 6, false);
             lr_operand_desc_t args[] = {
                 V(data, ty_ptr), V(len, ty_i64), LR_NULL(ty_ptr),
-                V(target_ptr, ty_ptr), LR_NULL(ty_ptr), V(pos_ptr, ty_ptr)
+                V(target_ptr, ty_ptr),
+                stat_ptr ? V(stat_ptr, ty_ptr) : LR_NULL(ty_ptr),
+                V(pos_ptr, ty_ptr)
             };
             emit_call_void(name, args, 6);
             return true;
@@ -14457,16 +14468,34 @@ public:
         if (!ASR::is_a<ASR::Integer_t>(*target_type)) {
             return false;
         }
-        uint32_t value = emit_internal_read_int_token(data, len, pos_ptr);
+        uint32_t ndigits_ptr = 0;
+        if (stat_ptr) {
+            ndigits_ptr = lr_emit_alloca(s, ty_i64);
+            lr_emit_store(s, I(0, ty_i64), V(ndigits_ptr, ty_ptr));
+        }
+        uint32_t value = emit_internal_read_int_token(data, len, pos_ptr,
+            ndigits_ptr);
         lr_type_t *target_lr = get_type(target_type);
         uint32_t target_value = cast_int_value(value, ty_i64, target_lr);
         uint32_t target_ptr = emit_target_ptr(target);
         lr_emit_store(s, V(target_value, target_lr), V(target_ptr, ty_ptr));
+        if (stat_ptr) {
+            // No digits consumed => conversion error (e.g. integer read of
+            // non-numeric input); set a positive iostat.
+            uint32_t nd = lr_emit_load(s, ty_i64, V(ndigits_ptr, ty_ptr));
+            uint32_t failed = lr_emit_icmp(s, LR_CMP_EQ,
+                V(nd, ty_i64), I(0, ty_i64));
+            uint32_t prev = lr_emit_load(s, ty_i32, V(stat_ptr, ty_ptr));
+            uint32_t newstat = lr_emit_select(s, ty_i32,
+                V(failed, ty_i1), I(1, ty_i32), V(prev, ty_i32));
+            lr_emit_store(s, V(newstat, ty_i32), V(stat_ptr, ty_ptr));
+        }
         return true;
     }
 
     bool emit_internal_integer_read_idl(ASR::ImpliedDoLoop_t *idl,
-            uint32_t data, uint32_t len, uint32_t pos_ptr) {
+            uint32_t data, uint32_t len, uint32_t pos_ptr,
+            uint32_t stat_ptr = 0) {
         if (!ASR::is_a<ASR::Var_t>(*idl->m_var)) {
             return false;
         }
@@ -14507,8 +14536,9 @@ public:
             bool ok = ASR::is_a<ASR::ImpliedDoLoop_t>(*value)
                 ? emit_internal_integer_read_idl(
                     ASR::down_cast<ASR::ImpliedDoLoop_t>(value),
-                    data, len, pos_ptr)
-                : emit_internal_integer_read_value(value, data, len, pos_ptr);
+                    data, len, pos_ptr, stat_ptr)
+                : emit_internal_integer_read_value(value, data, len, pos_ptr,
+                    stat_ptr);
             if (!ok) return false;
         }
         uint32_t next = lr_emit_add(s, ty_i64,
@@ -14524,13 +14554,15 @@ public:
     }
 
     bool emit_internal_integer_read_expr(ASR::expr_t *target,
-            uint32_t data, uint32_t len, uint32_t pos_ptr) {
+            uint32_t data, uint32_t len, uint32_t pos_ptr,
+            uint32_t stat_ptr = 0) {
         if (ASR::is_a<ASR::ImpliedDoLoop_t>(*target)) {
             return emit_internal_integer_read_idl(
                 ASR::down_cast<ASR::ImpliedDoLoop_t>(target),
-                data, len, pos_ptr);
+                data, len, pos_ptr, stat_ptr);
         }
-        return emit_internal_integer_read_value(target, data, len, pos_ptr);
+        return emit_internal_integer_read_value(target, data, len, pos_ptr,
+            stat_ptr);
     }
 
     bool emit_integer_read_values(const ASR::FileRead_t &x, uint32_t data,
@@ -14540,9 +14572,12 @@ public:
         lr_emit_store(s, I(0, ty_i64), V(pos_ptr, ty_ptr));
         lr_emit_store(s, I(0, ty_i32), V(stat_ptr, ty_ptr));
 
+        // Thread stat_ptr only when the statement requested iostat, so the
+        // non-iostat path keeps its existing (NULL-iostat) codegen.
+        uint32_t value_stat = x.m_iostat ? stat_ptr : 0;
         for (size_t i = 0; i < x.n_values; i++) {
             if (!emit_internal_integer_read_expr(x.m_values[i],
-                    data, len, pos_ptr)) {
+                    data, len, pos_ptr, value_stat)) {
                 return false;
             }
         }
