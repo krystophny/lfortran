@@ -7400,17 +7400,27 @@ public:
             return;
         }
 
-        std::vector<int64_t> extents(n_dims);
-        int64_t total = 1;
+        // Evaluate extents: static bounds fold to constants, runtime bounds
+        // (automatic arrays sized by a dummy, component, or function result)
+        // are emitted.  Bailing on a runtime extent (the old behaviour) left
+        // the descriptor with a null base and zero extents, so size() was 0
+        // and any access segfaulted.
+        // A null dim length means deferred shape (an unassociated pointer or
+        // an allocatable awaiting allocate): leave the base null and the
+        // extents zero so association / allocate fills them later.  Only an
+        // explicit length expression (constant or runtime) is an automatic
+        // array we must size here.
         for (int d = 0; d < n_dims; d++) {
-            int64_t extent = 0;
-            if (!array->m_dims[d].m_length ||
-                    !ASRUtils::extract_value(
-                        array->m_dims[d].m_length, extent)) {
+            if (!array->m_dims[d].m_length) {
                 return;
             }
-            extents[d] = extent;
-            total *= extent;
+        }
+        std::vector<uint32_t> ext_rt(n_dims);
+        uint32_t total_rt = emit_i64_const(1);
+        for (int d = 0; d < n_dims; d++) {
+            ext_rt[d] = emit_array_dim_extent(array, d);
+            total_rt = lr_emit_mul(s, ty_i64,
+                V(total_rt, ty_i64), V(ext_rt[d], ty_i64));
         }
 
         uint32_t allocator = emit_call(
@@ -7418,7 +7428,8 @@ public:
         lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
         declare_func("_lfortran_malloc_alloc", ty_ptr,
             malloc_params, 2, false);
-        uint32_t byte_total = emit_i64_const(total * elem_bytes);
+        uint32_t byte_total = lr_emit_mul(s, ty_i64,
+            V(total_rt, ty_i64), I(elem_bytes, ty_i64));
         lr_operand_desc_t malloc_args[] = {
             V(allocator, ty_ptr), V(byte_total, ty_i64)
         };
@@ -7430,11 +7441,10 @@ public:
         for (int d = 0; d < n_dims; d++) {
             int64_t base_off = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
             desc_store_i64(desc_ptr, base_off + 0, emit_i64_const(1));
-            desc_store_i64(desc_ptr, base_off + 8,
-                emit_i64_const(extents[d]));
+            desc_store_i64(desc_ptr, base_off + 8, ext_rt[d]);
             desc_store_i64(desc_ptr, base_off + 16, cur_stride);
             cur_stride = lr_emit_mul(s, ty_i64,
-                V(cur_stride, ty_i64), I(extents[d], ty_i64));
+                V(cur_stride, ty_i64), V(ext_rt[d], ty_i64));
         }
 
         ASR::ttype_t *elem_type =
@@ -7451,22 +7461,39 @@ public:
         lr_type_t *string_malloc_params[] = {ty_ptr, ty_i64};
         declare_func("_lfortran_string_malloc_alloc", ty_ptr,
             string_malloc_params, 2, false);
-        for (int64_t i = 0; i < total; i++) {
-            lr_operand_desc_t string_malloc_args[] = {
-                V(allocator, ty_ptr), I(len, ty_i64)
-            };
-            uint32_t elem_data = emit_call("_lfortran_string_malloc_alloc",
-                ty_ptr, string_malloc_args, 2);
-            uint32_t fld0 = 0, fld1 = 1;
-            uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
-                LR_UNDEF(ty_str_desc), V(elem_data, ty_ptr), &fld0, 1);
-            uint32_t d1 = lr_emit_insertvalue(s, ty_str_desc,
-                V(d0, ty_str_desc), I(len, ty_i64), &fld1, 1);
-            lr_operand_desc_t off[1] = {I(i * 16, ty_i64)};
-            uint32_t elem_ptr = lr_emit_gep(s, ty_i8,
-                V(data, ty_ptr), off, 1);
-            lr_emit_store(s, V(d1, ty_str_desc), V(elem_ptr, ty_ptr));
-        }
+        // Give each element string its own buffer, counting to the runtime
+        // total in an emitted loop.
+        lr_error_t serr;
+        uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+        lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+        uint32_t shead = lr_session_block(s);
+        uint32_t sbody = lr_session_block(s);
+        uint32_t sdone = lr_session_block(s);
+        lr_emit_br(s, shead);
+        lr_session_set_block(s, shead, &serr);
+        uint32_t i = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+        uint32_t more = lr_emit_icmp(s, LR_CMP_SLT,
+            V(i, ty_i64), V(total_rt, ty_i64));
+        lr_emit_condbr(s, V(more, ty_i1), sbody, sdone);
+        lr_session_set_block(s, sbody, &serr);
+        lr_operand_desc_t string_malloc_args[] = {
+            V(allocator, ty_ptr), I(len, ty_i64)
+        };
+        uint32_t elem_data = emit_call("_lfortran_string_malloc_alloc",
+            ty_ptr, string_malloc_args, 2);
+        uint32_t fld0 = 0, fld1 = 1;
+        uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
+            LR_UNDEF(ty_str_desc), V(elem_data, ty_ptr), &fld0, 1);
+        uint32_t d1 = lr_emit_insertvalue(s, ty_str_desc,
+            V(d0, ty_str_desc), I(len, ty_i64), &fld1, 1);
+        uint32_t eoff = lr_emit_mul(s, ty_i64, V(i, ty_i64), I(16, ty_i64));
+        lr_operand_desc_t off[1] = {V(eoff, ty_i64)};
+        uint32_t elem_ptr = lr_emit_gep(s, ty_i8, V(data, ty_ptr), off, 1);
+        lr_emit_store(s, V(d1, ty_str_desc), V(elem_ptr, ty_ptr));
+        uint32_t inext = lr_emit_add(s, ty_i64, V(i, ty_i64), I(1, ty_i64));
+        lr_emit_store(s, V(inext, ty_i64), V(idx_ptr, ty_ptr));
+        lr_emit_br(s, shead);
+        lr_session_set_block(s, sdone, &serr);
     }
 
     void initialize_local_string_descriptor(uint32_t desc_ptr,
