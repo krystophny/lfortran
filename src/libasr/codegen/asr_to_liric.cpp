@@ -5504,6 +5504,66 @@ public:
     // --- CPtrToPointer: store the c_ptr value into the Fortran ptr slot ---
 
     void visit_CPtrToPointer(const ASR::CPtrToPointer_t &x) {
+        // Array fptr (EQUIVALENCE, c_f_pointer with shape): populate the whole
+        // descriptor (data base + per-dim lbound/extent/stride), mirroring the
+        // LLVM backend.  Storing only the data pointer leaves the descriptor
+        // dims uninitialized, so later element indexing computes wrong
+        // addresses.
+        ASR::ttype_t *fptr_contained =
+            ASRUtils::type_get_past_pointer(ASRUtils::expr_type(x.m_ptr));
+        if (ASR::is_a<ASR::Array_t>(*fptr_contained)
+                && !ASRUtils::is_character(
+                    *ASRUtils::type_get_past_array(fptr_contained))) {
+            // String-element pointer arrays use a per-element str_desc model
+            // that does not match the byte-contiguous c data; the old
+            // data-pointer-only path handles c_f_pointer to character arrays.
+            ASR::Array_t *fptr_arr =
+                ASR::down_cast<ASR::Array_t>(fptr_contained);
+            int rank = (int)fptr_arr->n_dims;
+            visit_expr(*x.m_cptr);
+            uint32_t cptr = tmp;
+            bool was_target = is_target;
+            is_target = true;
+            visit_expr(*x.m_ptr);
+            is_target = was_target;
+            uint32_t desc = tmp;
+            int64_t elem_bytes = element_byte_size(fptr_arr->m_type);
+            desc_store_base(desc, cptr);
+            desc_store_i64(desc, 8, emit_i64_const(elem_bytes));
+            desc_store_rank(desc, rank);
+            desc_store_i64(desc, 24, emit_i64_const(0));
+            ArrayLinearView shape_view{}, lb_view{};
+            bool have_shape = false, have_lb = false;
+            ASR::Array_t *tmp_arr = nullptr;
+            if (x.m_shape && !ASR::is_a<ASR::ArrayConstructor_t>(*x.m_shape)
+                    && expr_is_array(x.m_shape, &tmp_arr)) {
+                shape_view = emit_array_linear_view(x.m_shape, tmp_arr);
+                have_shape = true;
+            }
+            if (x.m_lower_bounds
+                    && !ASR::is_a<ASR::ArrayConstructor_t>(*x.m_lower_bounds)
+                    && expr_is_array(x.m_lower_bounds, &tmp_arr)) {
+                lb_view = emit_array_linear_view(x.m_lower_bounds, tmp_arr);
+                have_lb = true;
+            }
+            uint32_t stride = emit_i64_const(elem_bytes);
+            for (int d = 0; d < rank; d++) {
+                uint32_t extent = x.m_shape
+                    ? cptr_shape_elem_i64(x.m_shape, shape_view, have_shape, d)
+                    : emit_i64_const(1);
+                uint32_t lbound = x.m_lower_bounds
+                    ? cptr_shape_elem_i64(
+                        x.m_lower_bounds, lb_view, have_lb, d)
+                    : emit_i64_const(1);
+                int64_t base_off = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
+                desc_store_i64(desc, base_off + DESC_DIM_LBOUND, lbound);
+                desc_store_i64(desc, base_off + DESC_DIM_EXTENT, extent);
+                desc_store_i64(desc, base_off + DESC_DIM_STRIDE, stride);
+                stride = lr_emit_mul(s, ty_i64,
+                    V(stride, ty_i64), V(extent, ty_i64));
+            }
+            return;
+        }
         visit_expr(*x.m_cptr);
         uint32_t cptr = tmp;
         bool was_target = is_target;
@@ -12795,6 +12855,32 @@ public:
         }
         return {base, total,
             emit_i64_const(element_byte_size(array_t->m_type))};
+    }
+
+    // Read dim d's value (extent or lower bound) from a CPtrToPointer shape /
+    // lower_bounds operand, as an i64.  Constant ArrayConstructors (the
+    // EQUIVALENCE lowering) are read element-wise; runtime arrays go through a
+    // linear view loaded once by the caller.
+    uint32_t cptr_shape_elem_i64(ASR::expr_t *arr_expr,
+            const ArrayLinearView &view, bool have_view, int d) {
+        if (ASR::is_a<ASR::ArrayConstructor_t>(*arr_expr)) {
+            ASR::ArrayConstructor_t *ac =
+                ASR::down_cast<ASR::ArrayConstructor_t>(arr_expr);
+            if (d < (int)ac->n_args) {
+                return emit_expr_i64(ac->m_args[d]);
+            }
+        }
+        if (have_view) {
+            uint32_t ep = emit_linear_elem_ptr(
+                view.base, emit_i64_const(d), view.elem_len);
+            ASR::Array_t *sa = nullptr;
+            expr_is_array(arr_expr, &sa);
+            int kind = sa ? ASRUtils::extract_kind_from_ttype_t(sa->m_type) : 4;
+            lr_type_t *et = (kind == 8) ? ty_i64 : ty_i32;
+            uint32_t v = lr_emit_load(s, et, V(ep, ty_ptr));
+            return cast_int_value(v, et, ty_i64);
+        }
+        return emit_i64_const(1);
     }
 
     bool expr_is_array(ASR::expr_t *expr, ASR::Array_t **array_t) {
