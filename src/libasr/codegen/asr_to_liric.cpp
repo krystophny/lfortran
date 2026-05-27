@@ -10083,6 +10083,15 @@ public:
                         uint32_t raw = lr_emit_load(s, ty_ptr,
                             V(arg_ptr, ty_ptr));
                         arg_ptr = class_data_ptr(raw);
+                    } else if (is_scalar_struct_pointer_target(arg) &&
+                            !(formal && ASRUtils::is_pointer(
+                                formal->m_type))) {
+                        // A struct-pointer actual (var or component) passed to
+                        // a non-pointer dummy must pass the POINTEE: the slot
+                        // holds the target address, so load it.  Without this
+                        // the callee got the pointer field's address and read
+                        // the pointer bytes as the struct.
+                        arg_ptr = lr_emit_load(s, ty_ptr, V(arg_ptr, ty_ptr));
                     }
                     if (formal_expects_raw_array_data(fn, i, arg)) {
                         arg_ptr = desc_base_addr(arg_ptr);
@@ -10358,6 +10367,15 @@ public:
                         uint32_t raw = lr_emit_load(s, ty_ptr,
                             V(arg_ptr, ty_ptr));
                         arg_ptr = class_data_ptr(raw);
+                    } else if (is_scalar_struct_pointer_target(arg) &&
+                            !(formal && ASRUtils::is_pointer(
+                                formal->m_type))) {
+                        // A struct-pointer actual (var or component) passed to
+                        // a non-pointer dummy must pass the POINTEE: the slot
+                        // holds the target address, so load it.  Without this
+                        // the callee got the pointer field's address and read
+                        // the pointer bytes as the struct.
+                        arg_ptr = lr_emit_load(s, ty_ptr, V(arg_ptr, ty_ptr));
                     }
                     if (formal_expects_raw_array_data(fn, i, arg)) {
                         arg_ptr = desc_base_addr(arg_ptr);
