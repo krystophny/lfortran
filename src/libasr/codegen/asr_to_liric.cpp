@@ -6654,6 +6654,34 @@ public:
                     (ndims > 0 ? ndims : 1)));
             return;
         }
+        // A class(*)/class array pointer aliasing a CONCRETE array
+        // (generic => l) shares the concrete descriptor, whose offset-24 holds
+        // the descriptor offset field (0), not a dynamic type tag.  Give the
+        // alias its own descriptor copy with offset 24 stamped to the value's
+        // type tag, so select type / same_type_as see the right dynamic type.
+        // (Array indexing uses lbound/stride, not offset 24, so the stamp is
+        // safe.)
+        if (value_is_descriptor_pointer && ASR::is_a<ASR::Var_t>(*x.m_target) &&
+                type_is_unlimited_polymorphic_array(
+                    ASRUtils::expr_type(x.m_target)) &&
+                !type_is_unlimited_polymorphic_array(
+                    ASRUtils::expr_type(x.m_value))) {
+            ASR::ttype_t *vt = ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(x.m_value));
+            if (ASR::is_a<ASR::Array_t>(*vt)) {
+                int64_t tag = polymorphic_type_tag(
+                    ASRUtils::type_get_past_array(vt));
+                if (tag != 0) {
+                    int nd = (int)ASR::down_cast<ASR::Array_t>(vt)->n_dims;
+                    uint32_t copy = emit_desc_alloca(nd);
+                    emit_memcpy_bytes(copy, rhs,
+                        (uint64_t)(DESC_HEADER_BYTES + DESC_DIM_BYTES *
+                            (nd > 0 ? nd : 1)));
+                    desc_store_i64(copy, 24, emit_i64_const(tag));
+                    rhs = copy;
+                }
+            }
+        }
         lr_emit_store(s, V(rhs, t), V(dst, ty_ptr));
         if (mark_runtime_pointer_array) {
             runtime_pointer_arrays.insert(runtime_pointer_array_hash);
