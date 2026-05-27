@@ -178,6 +178,11 @@ public:
     // applies NO class_data_ptr header offset.
     std::unordered_set<uint64_t> class_alias_data_ptr;
     std::unordered_set<uint64_t> runtime_pointer_arrays;
+    // Scalar intrinsic pointers whose slot holds an indirection address (set
+    // by an EQUIVALENCE / c_f_pointer CPtrToPointer rather than carrying the
+    // value transparently).  Reading such a var loads the slot pointer and
+    // dereferences it; an lvalue use yields the dereferenced address.
+    std::unordered_set<uint64_t> indirect_scalar_pointers;
     // For each runtime-dim PointerArray local, the per-dim extent values
     // are snapshotted at the allocation site (function entry) into i64
     // slots so later size() / ArrayItem / print queries return the
@@ -2236,6 +2241,17 @@ public:
 
     // --- Var ---
 
+    // Given the indirection address loaded from a scalar intrinsic pointer's
+    // slot, produce the value (rvalue context) or the address itself (lvalue
+    // context, is_target).
+    uint32_t load_indirect_scalar_pointer(uint32_t addr, ASR::Variable_t *v) {
+        if (is_target) {
+            return addr;
+        }
+        ASR::ttype_t *pc = ASRUtils::type_get_past_pointer(v->m_type);
+        return lr_emit_load(s, get_type(pc), V(addr, ty_ptr));
+    }
+
     void visit_Var(const ASR::Var_t &x) {
         ASR::symbol_t *sym_before_external = x.m_v;
         ASR::symbol_t *raw_sym =
@@ -2298,6 +2314,11 @@ public:
                 tmp = lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
                 return;
             }
+            if (!is_array && indirect_scalar_pointers.count(h)) {
+                tmp = load_indirect_scalar_pointer(
+                    lr_emit_load(s, ty_ptr, V(slot, ty_ptr)), v);
+                return;
+            }
             if (is_target || is_array) {
                 tmp = slot;
             } else {
@@ -2311,6 +2332,11 @@ public:
             uint32_t sym = global_it->second;
             if (is_array && runtime_pointer_arrays.count(h)) {
                 tmp = lr_emit_load(s, ty_ptr, LR_GLOBAL(sym, ty_ptr));
+                return;
+            }
+            if (!is_array && indirect_scalar_pointers.count(h)) {
+                tmp = load_indirect_scalar_pointer(
+                    lr_emit_load(s, ty_ptr, LR_GLOBAL(sym, ty_ptr)), v);
                 return;
             }
             if (is_target || is_array) {
@@ -5572,6 +5598,52 @@ public:
         is_target = was_target;
         uint32_t slot = tmp;
         lr_emit_store(s, V(cptr, ty_ptr), V(slot, ty_ptr));
+        // A scalar intrinsic pointer (EQUIVALENCE / c_f_pointer): the slot now
+        // holds an indirection address, so later reads/writes through the var
+        // must dereference it.  Record it for visit_Var.  Inserted only after
+        // the store above, so the slot itself was resolved without the deref.
+        if (ASR::is_a<ASR::Var_t>(*x.m_ptr)
+                && !cptr_anchor_is_save(x.m_cptr)) {
+            ASR::symbol_t *psym = ASRUtils::symbol_get_past_external(
+                ASR::down_cast<ASR::Var_t>(x.m_ptr)->m_v);
+            if (ASR::is_a<ASR::Variable_t>(*psym)) {
+                ASR::ttype_t *pc = ASRUtils::type_get_past_pointer(
+                    ASRUtils::expr_type(x.m_ptr));
+                if (!ASR::is_a<ASR::Array_t>(*pc)
+                        && !ASR::is_a<ASR::StructType_t>(*pc)
+                        && !ASRUtils::is_character(*pc)) {
+                    indirect_scalar_pointers.insert(
+                        get_hash((ASR::asr_t *)psym));
+                }
+            }
+        }
+    }
+
+    // The CPtrToPointer cptr is PointerToCPtr(GetPointer(base)).  When the
+    // base storage is a COMMON/SAVE variable (common-block EQUIVALENCE), the
+    // frontend aliases the pointer var to the common-block member directly and
+    // its slot stays transparent, so it must not be treated as an indirection.
+    bool cptr_anchor_is_save(ASR::expr_t *cptr) {
+        ASR::expr_t *e = cptr;
+        if (ASR::is_a<ASR::PointerToCPtr_t>(*e)) {
+            e = ASR::down_cast<ASR::PointerToCPtr_t>(e)->m_arg;
+        }
+        if (ASR::is_a<ASR::GetPointer_t>(*e)) {
+            e = ASR::down_cast<ASR::GetPointer_t>(e)->m_arg;
+        }
+        // Common-block EQUIVALENCE anchors the pointer at a common-block
+        // struct member; the frontend keeps that var transparent.
+        if (ASR::is_a<ASR::StructInstanceMember_t>(*e)) return true;
+        if (ASR::is_a<ASR::ArrayItem_t>(*e)) {
+            e = ASR::down_cast<ASR::ArrayItem_t>(e)->m_v;
+        }
+        if (ASR::is_a<ASR::StructInstanceMember_t>(*e)) return true;
+        if (!ASR::is_a<ASR::Var_t>(*e)) return false;
+        ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
+            ASR::down_cast<ASR::Var_t>(e)->m_v);
+        if (!ASR::is_a<ASR::Variable_t>(*sym)) return false;
+        return ASR::down_cast<ASR::Variable_t>(sym)->m_storage
+            == ASR::storage_typeType::Save;
     }
 
     // --- StringPhysicalCast ---
