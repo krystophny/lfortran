@@ -2781,7 +2781,8 @@ public:
     }
 
     void emit_allocatable_descriptor_array_assignment_from_desc(
-            uint32_t dst_desc, uint32_t src_desc, ASR::Array_t *array_t) {
+            uint32_t dst_desc, uint32_t src_desc, ASR::Array_t *array_t,
+            ASR::Struct_t *elem_st = nullptr) {
         uint32_t src_base = desc_base_addr(src_desc);
         uint32_t old_base = desc_base_addr(dst_desc);
         uint32_t allocator = emit_call(
@@ -2817,14 +2818,58 @@ public:
         };
         uint32_t new_base = emit_call("_lfortran_malloc_alloc",
             ty_ptr, malloc_args, 2);
-        lr_type_t *memcpy_params[] = {ty_ptr, ty_ptr, ty_i64};
-        declare_func("memcpy", ty_ptr, memcpy_params, 3, false);
-        lr_operand_desc_t memcpy_args[] = {
-            V(new_base, ty_ptr), V(src_base, ty_ptr), V(copy_bytes, ty_i64)
-        };
-        emit_call("memcpy", ty_ptr, memcpy_args, 3);
+        bool deep_elems = elem_st &&
+            struct_storage_needs_initialization(elem_st);
+        if (deep_elems) {
+            // Elements have allocatable/string components: a flat memcpy would
+            // leave the destination elements sharing the source's component
+            // buffers (a shallow copy).  Zero the destination first so the
+            // per-element deep copy below sees null old descriptors (no
+            // free of the shared source), then deep-copy each element.
+            lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
+            declare_func("memset", ty_ptr, memset_params, 3, false);
+            lr_operand_desc_t memset_args[] = {
+                V(new_base, ty_ptr), I(0, ty_i32), V(bytes, ty_i64)
+            };
+            emit_call("memset", ty_ptr, memset_args, 3);
+        } else {
+            lr_type_t *memcpy_params[] = {ty_ptr, ty_ptr, ty_i64};
+            declare_func("memcpy", ty_ptr, memcpy_params, 3, false);
+            lr_operand_desc_t memcpy_args[] = {
+                V(new_base, ty_ptr), V(src_base, ty_ptr), V(copy_bytes, ty_i64)
+            };
+            emit_call("memcpy", ty_ptr, memcpy_args, 3);
+        }
         store_descriptor_shape_with_base(dst_desc, new_base, elem_len,
             src_desc, array_t);
+        if (deep_elems) {
+            lr_error_t lerr;
+            uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+            lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+            uint32_t lhead = lr_session_block(s);
+            uint32_t lbody = lr_session_block(s);
+            uint32_t ldone = lr_session_block(s);
+            lr_emit_br(s, lhead);
+            lr_session_set_block(s, lhead, &lerr);
+            uint32_t li = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+            uint32_t lmore = lr_emit_icmp(s, LR_CMP_SLT,
+                V(li, ty_i64), V(total, ty_i64));
+            lr_emit_condbr(s, V(lmore, ty_i1), lbody, ldone);
+            lr_session_set_block(s, lbody, &lerr);
+            uint32_t eoff = lr_emit_mul(s, ty_i64,
+                V(li, ty_i64), V(elem_len, ty_i64));
+            lr_operand_desc_t doff[1] = {V(eoff, ty_i64)};
+            uint32_t delem = lr_emit_gep(s, ty_i8,
+                V(new_base, ty_ptr), doff, 1);
+            uint32_t selem = lr_emit_gep(s, ty_i8,
+                V(src_base, ty_ptr), doff, 1);
+            emit_struct_storage_assignment(delem, selem, elem_st);
+            uint32_t lnext = lr_emit_add(s, ty_i64,
+                V(li, ty_i64), I(1, ty_i64));
+            lr_emit_store(s, V(lnext, ty_i64), V(idx_ptr, ty_ptr));
+            lr_emit_br(s, lhead);
+            lr_session_set_block(s, ldone, &lerr);
+        }
         emit_free_if_nonnull(allocator, old_base);
         lr_emit_br(s, done_bb);
 
@@ -2913,8 +2958,16 @@ public:
             ASR::Array_t *array_t = nullptr;
             if (is_descriptor_array_type(member_type, &array_t)) {
                 if (ASRUtils::is_allocatable(member_type)) {
+                    ASR::ttype_t *elem = ASRUtils::type_get_past_array(
+                        ASRUtils::type_get_past_allocatable_pointer(
+                            array_t->m_type));
+                    ASR::Struct_t *elem_st =
+                        ASR::is_a<ASR::StructType_t>(*elem)
+                        ? struct_symbol_from_type_decl(
+                            member->m_type_declaration)
+                        : nullptr;
                     emit_allocatable_descriptor_array_assignment_from_desc(
-                        dst_field, src_field, array_t);
+                        dst_field, src_field, array_t, elem_st);
                 } else {
                     emit_memcpy_bytes(dst_field, src_field,
                         storage_size_for_variable(member));
