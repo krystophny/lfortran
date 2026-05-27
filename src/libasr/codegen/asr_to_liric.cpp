@@ -14453,6 +14453,8 @@ public:
                 int k = normalized_real_kind(et);
                 name = (k == 8) ? "_lfortran_string_read_c64_array"
                     : (k == 4) ? "_lfortran_string_read_c32_array" : nullptr;
+            } else if (ASR::is_a<ASR::Logical_t>(*et)) {
+                name = "_lfortran_string_read_bool_array";
             }
             if (!name) return false;
             ArrayLinearView v = emit_array_linear_view(target, arr_t);
