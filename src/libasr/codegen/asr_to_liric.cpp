@@ -2073,8 +2073,11 @@ public:
             }
         }
 
-        // Return block
+        // Return block.  Finalize non-saved local derived-type variables that
+        // have FINAL bindings before returning (a no-op for types without a
+        // finalizer).  All returns branch here, so every exit path finalizes.
         lr_session_set_block(s, proc_return, &err);
+        emit_scope_finalizers(x.m_symtab);
         if (x.m_return_var) {
             ASR::Var_t *rv = down_cast<ASR::Var_t>(x.m_return_var);
             ASR::Variable_t *v = down_cast<ASR::Variable_t>(rv->m_v);
