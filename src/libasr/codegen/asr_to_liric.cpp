@@ -8074,11 +8074,53 @@ public:
         uint32_t raw0 = lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
         uint32_t is_null = lr_emit_icmp(s, LR_CMP_EQ,
             V(raw0, ty_ptr), LR_NULL(ty_ptr));
+        lr_error_t err;
+        bool poly = target_var && st &&
+            ASRUtils::is_class_type(
+                ASRUtils::extract_type(target_var->m_type));
+        if (poly) {
+            // Intrinsic assignment to a polymorphic allocatable takes the
+            // RHS dynamic type: reallocate when unallocated OR when the
+            // current dynamic tag (class header, offset 0) differs from the
+            // RHS type's tag, so the new tag/vtable/size all match.  Without
+            // this a reassignment to a different type kept the old tag and
+            // select type matched the wrong arm.
+            int64_t st_tag = struct_symbol_tag((ASR::symbol_t *)st);
+            uint32_t check_bb = lr_session_block(s);
+            uint32_t alloc_bb = lr_session_block(s);
+            uint32_t done_bb = lr_session_block(s);
+            lr_emit_condbr(s, V(is_null, ty_i1), alloc_bb, check_bb);
+
+            // Non-null: free the stale allocation when its tag mismatches.
+            lr_session_set_block(s, check_bb, &err);
+            uint32_t cur_tag = lr_emit_load(s, ty_i64, V(raw0, ty_ptr));
+            uint32_t tag_diff = lr_emit_icmp(s, LR_CMP_NE,
+                V(cur_tag, ty_i64), I(st_tag, ty_i64));
+            uint32_t free_bb = lr_session_block(s);
+            lr_emit_condbr(s, V(tag_diff, ty_i1), free_bb, done_bb);
+
+            lr_session_set_block(s, free_bb, &err);
+            uint32_t allocator = emit_call(
+                "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+            lr_operand_desc_t free_args[] = {
+                V(allocator, ty_ptr), V(raw0, ty_ptr)
+            };
+            emit_call_void("_lfortran_free_alloc", free_args, 2);
+            emit_allocatable_struct_allocation(slot, st, target_var);
+            lr_emit_br(s, done_bb);
+
+            lr_session_set_block(s, alloc_bb, &err);
+            emit_allocatable_struct_allocation(slot, st, target_var);
+            lr_emit_br(s, done_bb);
+
+            lr_session_set_block(s, done_bb, &err);
+            uint32_t raw = lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
+            return class_data_ptr(raw);
+        }
         uint32_t alloc_bb = lr_session_block(s);
         uint32_t done_bb = lr_session_block(s);
         lr_emit_condbr(s, V(is_null, ty_i1), alloc_bb, done_bb);
 
-        lr_error_t err;
         lr_session_set_block(s, alloc_bb, &err);
         emit_allocatable_struct_allocation(slot, st, target_var);
         lr_emit_br(s, done_bb);
