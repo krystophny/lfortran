@@ -5112,11 +5112,19 @@ public:
 
     void visit_ComplexConstructor(const ASR::ComplexConstructor_t &x) {
         LIRIC_PASSTHROUGH(x)
-        visit_expr(*x.m_re); uint32_t re = tmp;
-        visit_expr(*x.m_im); uint32_t im = tmp;
         lr_type_t *ct = get_type(x.m_type);
         int kind = ASRUtils::extract_kind_from_ttype_t(x.m_type);
         lr_type_t *ft = (kind == 4) ? ty_f32 : ty_f64;
+        // Coerce each part to the result element kind: the parts may be a
+        // different real kind or an integer (e.g. the generated cmplx_f32
+        // helper builds a complex(8) from real(4)/integer args).  Inserting
+        // them without conversion reinterprets the bits.
+        visit_expr(*x.m_re);
+        uint32_t re = coerce_real_like_to_kind(tmp,
+            ASRUtils::expr_type(x.m_re), ft);
+        visit_expr(*x.m_im);
+        uint32_t im = coerce_real_like_to_kind(tmp,
+            ASRUtils::expr_type(x.m_im), ft);
         uint32_t fld0 = 0, fld1 = 1;
         uint32_t c0 = lr_emit_insertvalue(s, ct,
             LR_UNDEF(ct), V(re, ft), &fld0, 1);
