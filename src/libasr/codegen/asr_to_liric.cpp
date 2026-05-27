@@ -14544,9 +14544,9 @@ public:
         lr_emit_store(s, I(0, ty_i64), V(pos_ptr, ty_ptr));
         lr_emit_store(s, I(0, ty_i32), V(stat_ptr, ty_ptr));
 
-        // Thread stat_ptr only when the statement requested iostat, so the
+        // Thread stat_ptr when the statement requested iostat OR iomsg, so the
         // non-iostat path keeps its existing (NULL-iostat) codegen.
-        uint32_t value_stat = x.m_iostat ? stat_ptr : 0;
+        uint32_t value_stat = (x.m_iostat || x.m_iomsg) ? stat_ptr : 0;
         for (size_t i = 0; i < x.n_values; i++) {
             if (!emit_internal_integer_read_expr(x.m_values[i],
                     data, len, pos_ptr, value_stat)) {
@@ -14557,6 +14557,29 @@ public:
             uint32_t iostat_ptr = emit_target_ptr(x.m_iostat);
             uint32_t stat = lr_emit_load(s, ty_i32, V(stat_ptr, ty_ptr));
             lr_emit_store(s, V(stat, ty_i32), V(iostat_ptr, ty_ptr));
+        }
+        if (x.m_iomsg) {
+            // On a read error (iostat != 0) fill iomsg with an error
+            // description; leave it unchanged on success.
+            uint32_t stat = lr_emit_load(s, ty_i32, V(stat_ptr, ty_ptr));
+            uint32_t err = lr_emit_icmp(s, LR_CMP_NE,
+                V(stat, ty_i32), I(0, ty_i32));
+            lr_error_t err2;
+            uint32_t set_bb = lr_session_block(s);
+            uint32_t done_bb = lr_session_block(s);
+            lr_emit_condbr(s, V(err, ty_i1), set_bb, done_bb);
+            lr_session_set_block(s, set_bb, &err2);
+            const char *m = "Bad value during list-directed read";
+            uint32_t msg_src = emit_global_string_desc(
+                "_lr_iomsg_listread", m, std::strlen(m));
+            bool wt = is_target;
+            is_target = true;
+            visit_expr(*x.m_iomsg);
+            is_target = wt;
+            uint32_t dst_desc = lr_emit_load(s, ty_str_desc, V(tmp, ty_ptr));
+            emit_string_copy_padded(dst_desc, msg_src);
+            lr_emit_br(s, done_bb);
+            lr_session_set_block(s, done_bb, &err2);
         }
         return true;
     }
