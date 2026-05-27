@@ -5853,6 +5853,24 @@ public:
             emit_string_copy_padded(cur_desc, init_desc);
             return;
         }
+        // A derived-type variable initialized by a struct constructor/constant
+        // must write each member into storage (emit_struct_constructor_to_
+        // storage handles array members); a plain value store would only set
+        // scalar fields and leave array components uninitialised.
+        if (ASR::is_a<ASR::StructType_t>(*vt)) {
+            if (ASR::is_a<ASR::StructConstructor_t>(*v->m_value)) {
+                emit_struct_constructor_to_storage(
+                    *ASR::down_cast<ASR::StructConstructor_t>(v->m_value),
+                    slot);
+                return;
+            }
+            if (ASR::is_a<ASR::StructConstant_t>(*v->m_value)) {
+                emit_struct_constant_to_storage(
+                    *ASR::down_cast<ASR::StructConstant_t>(v->m_value),
+                    slot);
+                return;
+            }
+        }
         visit_expr(*v->m_value);
         lr_type_t *t = value_type_for_expr(v->m_value);
         lr_emit_store(s, V(tmp, t), V(slot, ty_ptr));
