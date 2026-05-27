@@ -3389,7 +3389,10 @@ public:
             if (is_string_section_target(x.m_target)) {
                 visit_expr(*x.m_value);
                 uint32_t rhs = tmp;
+                bool was_target = is_target;
+                is_target = true;
                 visit_expr(*x.m_target);
+                is_target = was_target;
                 emit_string_copy_padded(tmp, rhs);
                 return;
             }
@@ -5550,6 +5553,21 @@ public:
                     ASR::down_cast<ASR::ArrayConstant_t>(v->m_value),
                     slot);
             }
+            return;
+        }
+        // Fixed-length string: initialize_local_string_descriptor already
+        // set up {buffer, declared_len}.  The initializer constant may be
+        // shorter (character(8) :: s = 'abcd'); copy its content padded into
+        // the existing buffer rather than overwriting the descriptor with the
+        // initializer's own {literal_ptr, init_len}, which would leave the
+        // variable pointing at the literal and reporting the wrong length.
+        if (ASR::is_a<ASR::String_t>(*vt) &&
+                ASR::down_cast<ASR::String_t>(vt)->m_physical_type ==
+                    ASR::DescriptorString) {
+            visit_expr(*v->m_value);
+            uint32_t init_desc = tmp;
+            uint32_t cur_desc = lr_emit_load(s, ty_str_desc, V(slot, ty_ptr));
+            emit_string_copy_padded(cur_desc, init_desc);
             return;
         }
         visit_expr(*v->m_value);
@@ -14073,6 +14091,30 @@ public:
         ASR::ttype_t *type = ASRUtils::expr_type(target);
         type = ASRUtils::type_get_past_allocatable_pointer(type);
         type = ASRUtils::type_get_past_array(type);
+        // A string section/item (e.g. string(5:8)) is a computed view that
+        // yields a str_desc *value*, not an addressable descriptor. The
+        // runtime wants a char** (a slot holding the data pointer), so spill
+        // the view's data pointer into a stack slot and pass that.
+        if (ASR::is_a<ASR::StringSection_t>(*target) ||
+                ASR::is_a<ASR::StringItem_t>(*target)) {
+            bool was_target = is_target;
+            is_target = true;
+            visit_expr(*target);
+            is_target = was_target;
+            uint32_t desc = tmp;
+            uint32_t fld0 = 0, fld1 = 1;
+            uint32_t data = lr_emit_extractvalue(s, ty_ptr,
+                V(desc, ty_str_desc), &fld0, 1);
+            uint32_t len = lr_emit_extractvalue(s, ty_i64,
+                V(desc, ty_str_desc), &fld1, 1);
+            uint32_t slot = lr_emit_alloca(s, ty_ptr);
+            lr_emit_store(s, V(data, ty_ptr), V(slot, ty_ptr));
+            call_args.push_back(I(0, ty_i32));
+            call_args.push_back(I(0, ty_i32));
+            call_args.push_back(V(slot, ty_ptr));
+            call_args.push_back(V(len, ty_i64));
+            return true;
+        }
         if (ASR::is_a<ASR::String_t>(*type)) {
             uint32_t desc_ptr = emit_target_ptr(target);
             ASR::String_t *st = ASR::down_cast<ASR::String_t>(type);
@@ -15974,16 +16016,23 @@ found_offset:
     // view into the source string; no allocation.
 
     void visit_StringSection(const ASR::StringSection_t &x) {
-        LIRIC_PASSTHROUGH(x)
+        // In lvalue context (assignment/read target) we must build a view
+        // into the actual variable. Folding to the read-only constant value
+        // (m_value) would make stores land in the literal, not the variable.
+        bool lvalue = is_target;
+        if (!lvalue) { LIRIC_PASSTHROUGH(x) }
         if (!x.m_start || !x.m_end) {
             throw CodeGenError(
                 "liric: StringSection requires both start and end "
                 "(open-ended slices not yet supported)");
         }
 
+        bool was_target = is_target;
+        is_target = false;
         visit_expr(*x.m_arg);  uint32_t desc  = tmp;
         visit_expr(*x.m_start); uint32_t start = tmp;
         visit_expr(*x.m_end);   uint32_t end   = tmp;
+        is_target = was_target;
 
         lr_type_t *start_t = get_type(ASRUtils::expr_type(x.m_start));
         lr_type_t *end_t   = get_type(ASRUtils::expr_type(x.m_end));
@@ -16029,10 +16078,16 @@ found_offset:
     // this is a view into the source string.
 
     void visit_StringItem(const ASR::StringItem_t &x) {
-        LIRIC_PASSTHROUGH(x)
+        // See visit_StringSection: do not fold to the constant in lvalue
+        // context, or stores land in the read-only literal.
+        bool lvalue = is_target;
+        if (!lvalue) { LIRIC_PASSTHROUGH(x) }
 
+        bool was_target = is_target;
+        is_target = false;
         visit_expr(*x.m_arg); uint32_t desc = tmp;
         visit_expr(*x.m_idx); uint32_t idx = tmp;
+        is_target = was_target;
 
         uint32_t fld0 = 0;
         uint32_t data = lr_emit_extractvalue(s, ty_ptr,
