@@ -14387,6 +14387,21 @@ public:
             emit_call_void(name, args, 6);
             return true;
         }
+        if (ASR::is_a<ASR::Complex_t>(*target_type)) {
+            int kind = normalized_real_kind(target_type);
+            const char *name = (kind == 4) ? "_lfortran_string_read_c32"
+                : (kind == 8) ? "_lfortran_string_read_c64" : nullptr;
+            if (!name) return false;
+            uint32_t target_ptr = emit_target_ptr(target);
+            lr_type_t *p[] = {ty_ptr, ty_i64, ty_ptr, ty_ptr, ty_ptr, ty_ptr};
+            declare_func(name, ty_void, p, 6, false);
+            lr_operand_desc_t args[] = {
+                V(data, ty_ptr), V(len, ty_i64), LR_NULL(ty_ptr),
+                V(target_ptr, ty_ptr), LR_NULL(ty_ptr), V(pos_ptr, ty_ptr)
+            };
+            emit_call_void(name, args, 6);
+            return true;
+        }
         if (ASR::is_a<ASR::String_t>(*target_type)) {
             // List-directed read of a CHARACTER from an internal string unit:
             // copy the next token into the destination, advancing pos_ptr.
