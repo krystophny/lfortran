@@ -7055,8 +7055,11 @@ public:
                     : ASRUtils::extract_kind_from_ttype_t(t);
                 return kind > 0 ? (int64_t)kind : 8;
             }
-            case ASR::ttypeType::Logical:
-                return 4;
+            case ASR::ttypeType::Logical: {
+                // Default logical is kind 4; logical(int8) is 1 byte, etc.
+                int kind = ASRUtils::extract_kind_from_ttype_t(t);
+                return kind > 0 ? (int64_t)kind : 4;
+            }
             case ASR::ttypeType::Complex: {
                 int kind = normalized_real_kind(t);
                 return 2 * (kind > 0 ? (int64_t)kind : 8);
