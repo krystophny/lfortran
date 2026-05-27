@@ -14310,120 +14310,6 @@ public:
         return data;
     }
 
-    uint32_t emit_internal_read_int_token(uint32_t data, uint32_t len,
-            uint32_t pos_ptr, uint32_t ndigits_ptr = 0) {
-        uint32_t acc_ptr = lr_emit_alloca(s, ty_i64);
-        uint32_t sign_ptr = lr_emit_alloca(s, ty_i64);
-        lr_emit_store(s, I(0, ty_i64), V(acc_ptr, ty_ptr));
-        lr_emit_store(s, I(1, ty_i64), V(sign_ptr, ty_ptr));
-
-        lr_error_t err;
-        uint32_t skip_head = lr_session_block(s);
-        uint32_t skip_body = lr_session_block(s);
-        uint32_t sign_check = lr_session_block(s);
-        lr_emit_br(s, skip_head);
-
-        lr_session_set_block(s, skip_head, &err);
-        uint32_t pos = lr_emit_load(s, ty_i64, V(pos_ptr, ty_ptr));
-        uint32_t has_char = lr_emit_icmp(s, LR_CMP_SLT,
-            V(pos, ty_i64), V(len, ty_i64));
-        uint32_t char_check = lr_session_block(s);
-        lr_emit_condbr(s, V(has_char, ty_i1), char_check, sign_check);
-
-        lr_session_set_block(s, char_check, &err);
-        lr_operand_desc_t pos_off[1] = {V(pos, ty_i64)};
-        uint32_t ch_ptr = lr_emit_gep(s, ty_i8, V(data, ty_ptr),
-            pos_off, 1);
-        uint32_t ch = lr_emit_load(s, ty_i8, V(ch_ptr, ty_ptr));
-        uint32_t is_space = lr_emit_icmp(s, LR_CMP_SLE,
-            V(ch, ty_i8), I(' ', ty_i8));
-        uint32_t is_comma = lr_emit_icmp(s, LR_CMP_EQ,
-            V(ch, ty_i8), I(',', ty_i8));
-        uint32_t is_sep = lr_emit_or(s, ty_i1,
-            V(is_space, ty_i1), V(is_comma, ty_i1));
-        lr_emit_condbr(s, V(is_sep, ty_i1), skip_body, sign_check);
-
-        lr_session_set_block(s, skip_body, &err);
-        uint32_t next_pos = lr_emit_add(s, ty_i64,
-            V(pos, ty_i64), I(1, ty_i64));
-        lr_emit_store(s, V(next_pos, ty_i64), V(pos_ptr, ty_ptr));
-        lr_emit_br(s, skip_head);
-
-        uint32_t sign_body = lr_session_block(s);
-        uint32_t digit_head = lr_session_block(s);
-        lr_session_set_block(s, sign_check, &err);
-        pos = lr_emit_load(s, ty_i64, V(pos_ptr, ty_ptr));
-        has_char = lr_emit_icmp(s, LR_CMP_SLT,
-            V(pos, ty_i64), V(len, ty_i64));
-        uint32_t sign_char = lr_session_block(s);
-        lr_emit_condbr(s, V(has_char, ty_i1), sign_char, digit_head);
-
-        lr_session_set_block(s, sign_char, &err);
-        lr_operand_desc_t sign_off[1] = {V(pos, ty_i64)};
-        ch_ptr = lr_emit_gep(s, ty_i8, V(data, ty_ptr), sign_off, 1);
-        ch = lr_emit_load(s, ty_i8, V(ch_ptr, ty_ptr));
-        uint32_t is_minus = lr_emit_icmp(s, LR_CMP_EQ,
-            V(ch, ty_i8), I('-', ty_i8));
-        uint32_t is_plus = lr_emit_icmp(s, LR_CMP_EQ,
-            V(ch, ty_i8), I('+', ty_i8));
-        uint32_t has_sign = lr_emit_or(s, ty_i1,
-            V(is_minus, ty_i1), V(is_plus, ty_i1));
-        lr_emit_condbr(s, V(has_sign, ty_i1), sign_body, digit_head);
-
-        lr_session_set_block(s, sign_body, &err);
-        uint32_t sign_val = lr_emit_select(s, ty_i64,
-            V(is_minus, ty_i1), I(-1, ty_i64), I(1, ty_i64));
-        lr_emit_store(s, V(sign_val, ty_i64), V(sign_ptr, ty_ptr));
-        next_pos = lr_emit_add(s, ty_i64, V(pos, ty_i64), I(1, ty_i64));
-        lr_emit_store(s, V(next_pos, ty_i64), V(pos_ptr, ty_ptr));
-        lr_emit_br(s, digit_head);
-
-        uint32_t digit_body = lr_session_block(s);
-        uint32_t done = lr_session_block(s);
-        lr_session_set_block(s, digit_head, &err);
-        pos = lr_emit_load(s, ty_i64, V(pos_ptr, ty_ptr));
-        has_char = lr_emit_icmp(s, LR_CMP_SLT,
-            V(pos, ty_i64), V(len, ty_i64));
-        uint32_t digit_char = lr_session_block(s);
-        lr_emit_condbr(s, V(has_char, ty_i1), digit_char, done);
-
-        lr_session_set_block(s, digit_char, &err);
-        lr_operand_desc_t digit_off[1] = {V(pos, ty_i64)};
-        ch_ptr = lr_emit_gep(s, ty_i8, V(data, ty_ptr), digit_off, 1);
-        ch = lr_emit_load(s, ty_i8, V(ch_ptr, ty_ptr));
-        uint32_t ge_zero = lr_emit_icmp(s, LR_CMP_SGE,
-            V(ch, ty_i8), I('0', ty_i8));
-        uint32_t le_nine = lr_emit_icmp(s, LR_CMP_SLE,
-            V(ch, ty_i8), I('9', ty_i8));
-        uint32_t is_digit = lr_emit_and(s, ty_i1,
-            V(ge_zero, ty_i1), V(le_nine, ty_i1));
-        lr_emit_condbr(s, V(is_digit, ty_i1), digit_body, done);
-
-        lr_session_set_block(s, digit_body, &err);
-        uint32_t acc = lr_emit_load(s, ty_i64, V(acc_ptr, ty_ptr));
-        uint32_t ch64 = lr_emit_sext(s, ty_i64, V(ch, ty_i8));
-        uint32_t digit = lr_emit_sub(s, ty_i64,
-            V(ch64, ty_i64), I('0', ty_i64));
-        uint32_t acc10 = lr_emit_mul(s, ty_i64, V(acc, ty_i64),
-            I(10, ty_i64));
-        uint32_t next_acc = lr_emit_add(s, ty_i64,
-            V(acc10, ty_i64), V(digit, ty_i64));
-        lr_emit_store(s, V(next_acc, ty_i64), V(acc_ptr, ty_ptr));
-        if (ndigits_ptr) {
-            uint32_t nd = lr_emit_load(s, ty_i64, V(ndigits_ptr, ty_ptr));
-            uint32_t nd1 = lr_emit_add(s, ty_i64, V(nd, ty_i64), I(1, ty_i64));
-            lr_emit_store(s, V(nd1, ty_i64), V(ndigits_ptr, ty_ptr));
-        }
-        next_pos = lr_emit_add(s, ty_i64, V(pos, ty_i64), I(1, ty_i64));
-        lr_emit_store(s, V(next_pos, ty_i64), V(pos_ptr, ty_ptr));
-        lr_emit_br(s, digit_head);
-
-        lr_session_set_block(s, done, &err);
-        acc = lr_emit_load(s, ty_i64, V(acc_ptr, ty_ptr));
-        uint32_t sign = lr_emit_load(s, ty_i64, V(sign_ptr, ty_ptr));
-        return lr_emit_mul(s, ty_i64, V(acc, ty_i64), V(sign, ty_i64));
-    }
-
     bool emit_internal_integer_read_value(ASR::expr_t *target,
             uint32_t data, uint32_t len, uint32_t pos_ptr,
             uint32_t stat_ptr = 0) {
@@ -14547,28 +14433,35 @@ public:
         if (!ASR::is_a<ASR::Integer_t>(*target_type)) {
             return false;
         }
-        uint32_t ndigits_ptr = 0;
-        if (stat_ptr) {
-            ndigits_ptr = lr_emit_alloca(s, ty_i64);
-            lr_emit_store(s, I(0, ty_i64), V(ndigits_ptr, ty_ptr));
-        }
-        uint32_t value = emit_internal_read_int_token(data, len, pos_ptr,
-            ndigits_ptr);
+        // Use the runtime integer reader: it validates the trailing delimiter,
+        // leaves the value unchanged on a conversion error, handles empty
+        // (`,,`) null fields, advances the offset, and sets iostat -- none of
+        // which the hand-rolled token parser did.  Read into a temp seeded
+        // with the current target value so unchanged-on-error holds, then store
+        // (kind-cast) back.
+        int int_kind = ASRUtils::extract_kind_from_ttype_t(target_type);
         lr_type_t *target_lr = get_type(target_type);
-        uint32_t target_value = cast_int_value(value, ty_i64, target_lr);
         uint32_t target_ptr = emit_target_ptr(target);
-        lr_emit_store(s, V(target_value, target_lr), V(target_ptr, ty_ptr));
-        if (stat_ptr) {
-            // No digits consumed => conversion error (e.g. integer read of
-            // non-numeric input); set a positive iostat.
-            uint32_t nd = lr_emit_load(s, ty_i64, V(ndigits_ptr, ty_ptr));
-            uint32_t failed = lr_emit_icmp(s, LR_CMP_EQ,
-                V(nd, ty_i64), I(0, ty_i64));
-            uint32_t prev = lr_emit_load(s, ty_i32, V(stat_ptr, ty_ptr));
-            uint32_t newstat = lr_emit_select(s, ty_i32,
-                V(failed, ty_i1), I(1, ty_i32), V(prev, ty_i32));
-            lr_emit_store(s, V(newstat, ty_i32), V(stat_ptr, ty_ptr));
-        }
+        bool use64 = (int_kind == 8);
+        lr_type_t *rt = use64 ? ty_i64 : ty_i32;
+        const char *name = use64 ? "_lfortran_string_read_i64"
+                                 : "_lfortran_string_read_i32";
+        uint32_t tmp_slot = lr_emit_alloca(s, rt);
+        uint32_t cur = lr_emit_load(s, target_lr, V(target_ptr, ty_ptr));
+        lr_emit_store(s, V(cast_int_value(cur, target_lr, rt), rt),
+            V(tmp_slot, ty_ptr));
+        lr_type_t *p[] = {ty_ptr, ty_i64, ty_ptr, ty_ptr, ty_ptr, ty_ptr};
+        declare_func(name, ty_void, p, 6, false);
+        lr_operand_desc_t args[] = {
+            V(data, ty_ptr), V(len, ty_i64), LR_NULL(ty_ptr),
+            V(tmp_slot, ty_ptr),
+            stat_ptr ? V(stat_ptr, ty_ptr) : LR_NULL(ty_ptr),
+            V(pos_ptr, ty_ptr)
+        };
+        emit_call_void(name, args, 6);
+        uint32_t newval = lr_emit_load(s, rt, V(tmp_slot, ty_ptr));
+        lr_emit_store(s, V(cast_int_value(newval, rt, target_lr), target_lr),
+            V(target_ptr, ty_ptr));
         return true;
     }
 
