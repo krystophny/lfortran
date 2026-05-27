@@ -2289,6 +2289,28 @@ public:
             get_hash((ASR::asr_t *)sym)) > 0;
     }
 
+    // A class-pointer actual whose slot holds a class object's data pointer
+    // (recorded at its pointer-associate, e.g. a nested-vars-captured class
+    // dummy `p => o`), being passed to a class formal: forward the stored data
+    // pointer.  Without this the slot ADDRESS is passed and the callee reads
+    // the tag/vtable at the wrong offset (select type falls to class default).
+    bool arg_forwards_class_data_ptr(ASR::Function_t *fn, size_t i,
+            ASR::expr_t *arg) {
+        if (!is_class_data_ptr_alias(arg)) return false;
+        ASR::Variable_t *formal = formal_arg_var(fn, i);
+        if (!formal) return false;
+        // Only a plain (non-pointer, non-allocatable) class dummy takes the
+        // data pointer by value.  A pointer/allocatable class dummy is passed
+        // by reference (the slot address) so the callee sees/updates the
+        // association, so leave those to the normal path.
+        if (ASRUtils::is_pointer(formal->m_type) ||
+                ASRUtils::is_allocatable(formal->m_type)) {
+            return false;
+        }
+        return ASRUtils::is_class_type(
+            ASRUtils::extract_type(formal->m_type));
+    }
+
     void visit_Var(const ASR::Var_t &x) {
         ASR::symbol_t *sym_before_external = x.m_v;
         ASR::symbol_t *raw_sym =
@@ -10572,6 +10594,13 @@ public:
                         ty_ptr));
                 } else if (formal_is_unlimited_polymorphic(fn, i)) {
                     args.push_back(V(emit_polymorphic_actual(arg), ty_ptr));
+                } else if (arg_forwards_class_data_ptr(fn, i, arg)) {
+                    is_target = true;
+                    visit_expr(*arg);
+                    is_target = false;
+                    uint32_t data_ptr = lr_emit_load(s, ty_ptr,
+                        V(tmp, ty_ptr));
+                    args.push_back(V(data_ptr, ty_ptr));
                 } else if (needs_concrete_to_class_wrap(fn, i, arg)) {
                     uint32_t actual_ptr = 0;
                     uint64_t data_bytes = 0;
@@ -10882,6 +10911,13 @@ public:
                         ty_ptr));
                 } else if (formal_is_unlimited_polymorphic(fn, i)) {
                     args.push_back(V(emit_polymorphic_actual(arg), ty_ptr));
+                } else if (arg_forwards_class_data_ptr(fn, i, arg)) {
+                    is_target = true;
+                    visit_expr(*arg);
+                    is_target = false;
+                    uint32_t data_ptr = lr_emit_load(s, ty_ptr,
+                        V(tmp, ty_ptr));
+                    args.push_back(V(data_ptr, ty_ptr));
                 } else if (needs_concrete_to_class_wrap(fn, i, arg)) {
                     args.push_back(V(
                         emit_class_wrapper_for_concrete(arg, fn, i), ty_ptr));
