@@ -6847,7 +6847,8 @@ public:
         return lr_emit_load(s, ty_ptr, V(out, ty_ptr));
     }
 
-    uint32_t emit_optional_actual_pointer(ASR::expr_t *arg) {
+    uint32_t emit_optional_actual_pointer(ASR::Function_t *fn,
+            size_t formal_idx, ASR::expr_t *arg) {
         bool was_target = is_target;
         is_target = true;
         visit_expr(*arg);
@@ -6862,9 +6863,21 @@ public:
                 !ASRUtils::is_pointer(arg_type)) {
             return storage;
         }
-        ASR::ttype_t *core = ASRUtils::type_get_past_allocatable_pointer(
+        ASR::ttype_t *naked = ASRUtils::type_get_past_allocatable_pointer(
             arg_type);
-        core = ASRUtils::type_get_past_array(core);
+        if (ASR::is_a<ASR::Array_t>(*naked)) {
+            uint32_t allocated = emit_allocatable_is_allocated(arg, storage);
+            uint32_t actual = storage;
+            if (formal_expects_raw_array_data(fn, formal_idx, arg)) {
+                actual = desc_base_addr(actual);
+            } else {
+                actual = tag_concrete_array_for_class_dummy(actual, fn,
+                    formal_idx, arg);
+            }
+            return lr_emit_select(s, ty_ptr, V(allocated, ty_i1),
+                V(actual, ty_ptr), LR_NULL(ty_ptr));
+        }
+        ASR::ttype_t *core = ASRUtils::type_get_past_array(naked);
         if (!ASR::is_a<ASR::String_t>(*core) &&
                 !(ASRUtils::is_allocatable(arg_type) &&
                     ASR::is_a<ASR::StructType_t>(*core)) &&
@@ -12361,8 +12374,8 @@ public:
                     // Optional non-pointer/non-allocatable dummy: a
                     // disassociated pointer or unallocated allocatable
                     // actual must make present() false (pass null).
-                    args.push_back(V(emit_optional_actual_pointer(arg),
-                        ty_ptr));
+                    args.push_back(V(emit_optional_actual_pointer(fn, i,
+                        arg), ty_ptr));
                 } else if (expr_is_storage_reference(arg)) {
                     bool was_target = is_target;
                     is_target = true;
@@ -12678,8 +12691,8 @@ public:
                     // Optional non-pointer/non-allocatable dummy: a
                     // disassociated pointer or unallocated allocatable
                     // actual must make present() false (pass null).
-                    args.push_back(V(emit_optional_actual_pointer(arg),
-                        ty_ptr));
+                    args.push_back(V(emit_optional_actual_pointer(fn, i,
+                        arg), ty_ptr));
                 } else if (expr_is_storage_reference(arg)) {
                     bool was_target = is_target;
                     is_target = true;
