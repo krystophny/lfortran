@@ -6810,6 +6810,8 @@ public:
                 ASR::Struct_t *st = struct_symbol_from_type_decl(
                     v->m_type_declaration);
                 if (st) return st;
+            } else if (sym && ASR::is_a<ASR::Struct_t>(*sym)) {
+                return ASR::down_cast<ASR::Struct_t>(sym);
             }
         } else if (ASR::is_a<ASR::ArrayItem_t>(*expr)) {
             ASR::ArrayItem_t *item = ASR::down_cast<ASR::ArrayItem_t>(expr);
@@ -6833,6 +6835,17 @@ public:
         } else if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*expr)) {
             ASR::ArrayPhysicalCast_t *cast =
                 ASR::down_cast<ASR::ArrayPhysicalCast_t>(expr);
+            return struct_symbol_for_concrete_expr(cast->m_arg);
+        } else if (ASR::is_a<ASR::Cast_t>(*expr)) {
+            ASR::Cast_t *cast = ASR::down_cast<ASR::Cast_t>(expr);
+            if (cast->m_kind == ASR::cast_kindType::ClassToStruct ||
+                    cast->m_kind == ASR::cast_kindType::ClassToClass) {
+                if (cast->m_dest) {
+                    ASR::Struct_t *st =
+                        struct_symbol_for_concrete_expr(cast->m_dest);
+                    if (st) return st;
+                }
+            }
             return struct_symbol_for_concrete_expr(cast->m_arg);
         }
         return nullptr;
