@@ -185,6 +185,7 @@ public:
     // length across calls even when the length expression's variables drift.
     std::unordered_map<uint64_t, uint32_t> allocatable_string_entry_len_slot;
     std::unordered_set<uint64_t> runtime_pointer_arrays;
+    std::unordered_set<uint64_t> array_section_call_temps;
     // Scalar intrinsic pointers whose slot holds an indirection address (set
     // by an EQUIVALENCE / c_f_pointer CPtrToPointer rather than carrying the
     // value transparently).  Reading such a var loads the slot pointer and
@@ -7079,6 +7080,42 @@ public:
         emit_memcpy_dynamic(dst, src.base, bytes);
     }
 
+    bool var_is_subroutine_call_array_temp(ASR::Variable_t *v) {
+        std::string name = v->m_name;
+        if (name.rfind("__libasr_created__subroutine_call_", 0) != 0) {
+            return false;
+        }
+        ASR::ttype_t *type = ASRUtils::type_get_past_allocatable(
+            ASRUtils::type_get_past_pointer(v->m_type));
+        if (!ASR::is_a<ASR::Array_t>(*type)) return false;
+        ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(type);
+        if (array_t->m_physical_type !=
+                ASR::array_physical_typeType::DescriptorArray) {
+            return false;
+        }
+        ASR::ttype_t *elem = ASRUtils::type_get_past_array(type);
+        elem = ASRUtils::type_get_past_allocatable_pointer(elem);
+        return ASR::is_a<ASR::Real_t>(*elem);
+    }
+
+    bool expr_is_array_section_call_temp(ASR::expr_t *expr) {
+        if (!ASR::is_a<ASR::Var_t>(*expr)) return false;
+        ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
+            ASR::down_cast<ASR::Var_t>(expr)->m_v);
+        if (!ASR::is_a<ASR::Variable_t>(*sym)) return false;
+        ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(sym);
+        return array_section_call_temps.count(get_hash((ASR::asr_t *)v));
+    }
+
+    bool array_section_uses_runtime_source(ASR::ArraySection_t *sec) {
+        ASR::ttype_t *type = ASRUtils::type_get_past_allocatable_pointer(
+            ASRUtils::expr_type(sec->m_v));
+        if (!ASR::is_a<ASR::Array_t>(*type)) return false;
+        ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(type);
+        return array_t->m_physical_type !=
+            ASR::array_physical_typeType::FixedSizeArray;
+    }
+
     // --- ArrayPhysicalCast ---
     //
     // Switches the physical representation of an array between fixed-size,
@@ -7131,6 +7168,12 @@ public:
         // bare contiguous data base pointer (sequence association).  From a
         // descriptor source (e.g. a section actual w(i:)), extract base_addr;
         // FixedSize/Pointer sources already evaluate to the base.
+        if (x.m_new == ASR::array_physical_typeType::PointerArray &&
+                x.m_old == ASR::array_physical_typeType::DescriptorArray &&
+                expr_is_array_section_call_temp(x.m_arg)) {
+            tmp = desc_base_addr(desc_ptr_of(x.m_arg));
+            return;
+        }
         if (x.m_new == ASR::array_physical_typeType::UnboundedPointerArray &&
                 x.m_old == ASR::array_physical_typeType::DescriptorArray) {
             tmp = desc_base_addr(desc_ptr_of(x.m_arg));
@@ -7188,6 +7231,21 @@ public:
                 desc_store_i64(pdesc, DESC_HEADER_BYTES + DESC_DIM_STRIDE,
                     stride);
                 return;
+            }
+        }
+        if (ASR::is_a<ASR::Var_t>(*x.m_target)) {
+            ASR::Variable_t *target_var = var_from_expr(x.m_target);
+            if (target_var && var_is_subroutine_call_array_temp(target_var)) {
+                bool mark_array_section_temp =
+                    expr_is_array_section_call_temp(x.m_value);
+                if (ASR::is_a<ASR::ArraySection_t>(*x.m_value)) {
+                    mark_array_section_temp = array_section_uses_runtime_source(
+                        ASR::down_cast<ASR::ArraySection_t>(x.m_value));
+                }
+                if (mark_array_section_temp) {
+                    array_section_call_temps.insert(
+                        get_hash((ASR::asr_t *)target_var));
+                }
             }
         }
         bool value_is_descriptor_array = false;
