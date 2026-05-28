@@ -12205,10 +12205,15 @@ public:
                     allocator, formal->m_intent != ASR::intentType::In});
             } else {
                 uint32_t base = desc_base_addr(desc);
-                uint32_t offset = desc_load_i64(desc, 24);
-                lr_operand_desc_t off[1] = {V(offset, ty_i64)};
-                cfi_base = lr_emit_gep(s, ty_i8,
-                    V(base, ty_ptr), off, 1);
+                if (type_is_unlimited_polymorphic_array(actual_type) ||
+                        type_is_limited_polymorphic_array(actual_type)) {
+                    cfi_base = base;
+                } else {
+                    uint32_t offset = desc_load_i64(desc, 24);
+                    lr_operand_desc_t off[1] = {V(offset, ty_i64)};
+                    cfi_base = lr_emit_gep(s, ty_i8,
+                        V(base, ty_ptr), off, 1);
+                }
                 cfi_elem_len = desc_load_i64(desc, 8);
             }
             desc_store_base(cfi, cfi_base);
