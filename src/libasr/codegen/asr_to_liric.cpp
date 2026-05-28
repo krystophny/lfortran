@@ -5983,6 +5983,15 @@ public:
                 ASR::down_cast<ASR::ArrayPhysicalCast_t>(expr);
             return expr_is_storage_reference(cast->m_arg);
         }
+        if (ASR::is_a<ASR::GetPointer_t>(*expr)) {
+            // GetPointer(x) yields the address of x, so it is a storage
+            // reference whenever x is (e.g. an array element passed by
+            // sequence association to an assumed-size dummy: arr(i,j) ->
+            // ArrayPhysicalCast(GetPointer(ArrayItem))).  Treating it as a
+            // value would box the address in a temp and disconnect writes.
+            return expr_is_storage_reference(
+                ASR::down_cast<ASR::GetPointer_t>(expr)->m_arg);
+        }
         return false;
     }
 
