@@ -1498,6 +1498,11 @@ public:
         // its own descriptor/class handling and must not be rerouted.
         if (!ASR::is_a<ASR::Var_t>(*value)) return false;
         ASR::ttype_t *tt = ASRUtils::expr_type(target);
+        if (ASRUtils::is_unlimited_polymorphic_type(tt) ||
+                ASRUtils::is_unlimited_polymorphic_type(
+                    ASRUtils::expr_type(value))) {
+            return false;
+        }
         if (!ASRUtils::is_pointer(tt) || ASRUtils::is_allocatable(tt)) {
             return false;
         }
