@@ -7941,6 +7941,12 @@ public:
                     ? tmp
                     : lr_emit_sext(s, ty_i64, V(tmp, it));
                 uint32_t lbound = emit_array_dim_lbound(array_t, r);
+                uint32_t length = emit_array_dim_extent_for_expr(
+                    x.m_v, array_t, r);
+                if (array_t->m_dims[r].m_length) {
+                    emit_array_index_bounds_check(idx, lbound, length,
+                        get_hash((ASR::asr_t *)&x), r);
+                }
                 uint32_t off = lr_emit_sub(s, ty_i64,
                     V(idx, ty_i64), V(lbound, ty_i64));
                 if (first) {
@@ -7954,8 +7960,6 @@ public:
                     lin = lr_emit_add(s, ty_i64,
                         V(lin, ty_i64), V(contrib, ty_i64));
                 }
-                uint32_t length = emit_array_dim_extent_for_expr(
-                    x.m_v, array_t, r);
                 length_prod = lr_emit_mul(s, ty_i64,
                     V(length_prod, ty_i64), V(length, ty_i64));
             }
@@ -8038,6 +8042,9 @@ public:
             } else {
                 lb = desc_dim_lbound(desc, r);
             }
+            uint32_t extent = desc_dim_extent(desc, r);
+            emit_array_index_bounds_check(idx64, lb, extent,
+                get_hash((ASR::asr_t *)&x), r);
             uint32_t delta = lr_emit_sub(s, ty_i64,
                 V(idx64, ty_i64), V(lb, ty_i64));
             // dim[r].stride is in bytes (CFI "sm" / lfortran's stride).
@@ -11023,6 +11030,50 @@ public:
         lr_emit_unreachable(s);
 
         lr_session_set_block(s, cont_bb, &err);
+    }
+
+    void emit_runtime_failure_if(uint32_t fail_cond,
+            const char *message, const std::string &global_name) {
+        lr_error_t err;
+        uint32_t fail_bb = lr_session_block(s);
+        uint32_t cont_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(fail_cond, ty_i1), fail_bb, cont_bb);
+
+        lr_session_set_block(s, fail_bb, &err);
+        size_t message_len = std::strlen(message) + 1;
+        lr_session_global(s, global_name.c_str(),
+            lr_type_array_s(s, ty_i8, message_len),
+            true, message, message_len);
+        uint32_t message_sym = lr_session_intern(s, global_name.c_str());
+        lr_type_t *print_err_params[] = {ty_ptr};
+        declare_func("_lcompilers_print_error", ty_void,
+            print_err_params, 1, true);
+        lr_operand_desc_t print_args[] = {LR_GLOBAL(message_sym, ty_ptr)};
+        emit_call_void("_lcompilers_print_error", print_args, 1);
+        lr_operand_desc_t exit_args[] = {I(1, ty_i32)};
+        emit_call_void("exit", exit_args, 1);
+        lr_emit_unreachable(s);
+
+        lr_session_set_block(s, cont_bb, &err);
+    }
+
+    void emit_array_index_bounds_check(uint32_t idx64, uint32_t lbound,
+            uint32_t extent, uint64_t site_id, size_t dim) {
+        if (!co.po.bounds_checking) {
+            return;
+        }
+        uint32_t ub_exclusive = lr_emit_add(s, ty_i64,
+            V(lbound, ty_i64), V(extent, ty_i64));
+        uint32_t below = lr_emit_icmp(s, LR_CMP_SLT,
+            V(idx64, ty_i64), V(lbound, ty_i64));
+        uint32_t above = lr_emit_icmp(s, LR_CMP_SGE,
+            V(idx64, ty_i64), V(ub_exclusive, ty_i64));
+        uint32_t fail = lr_emit_or(s, ty_i1,
+            V(below, ty_i1), V(above, ty_i1));
+        emit_runtime_failure_if(fail,
+            "runtime error: array index out of bounds\n",
+            "_lr_bounds_error_" + std::to_string(site_id) + "_" +
+                std::to_string(dim));
     }
 
     void visit_Exit(const ASR::Exit_t &x) {
@@ -18329,8 +18380,15 @@ public:
     void visit_StringLen(const ASR::StringLen_t &x) {
         LIRIC_PASSTHROUGH(x)
         ASR::Array_t *array_type = nullptr;
+        ASR::ArrayItem_t *array_item_arg =
+            ASR::is_a<ASR::ArrayItem_t>(*x.m_arg)
+                ? ASR::down_cast<ASR::ArrayItem_t>(x.m_arg) : nullptr;
         uint32_t len64;
-        if (is_string_array_type(expr_storage_type(x.m_arg), &array_type)) {
+        if (array_item_arg && is_string_array_type(
+                expr_storage_type(array_item_arg->m_v), &array_type)) {
+            len64 = emit_string_array_len(array_item_arg->m_v, array_type);
+        } else if (is_string_array_type(
+                    expr_storage_type(x.m_arg), &array_type)) {
             len64 = emit_string_array_len(x.m_arg, array_type);
         } else {
             visit_expr(*x.m_arg);
