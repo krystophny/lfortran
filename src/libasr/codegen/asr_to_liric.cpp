@@ -2285,19 +2285,68 @@ public:
             }
         }
 
-        // Allocate local variables
+        // Runtime bounds can depend on compiler-created temporaries.
+        // Fill those before allocating runtime-sized PointerArrays.
+        std::vector<ASR::Variable_t *> delayed_runtime_arrays;
         for (auto &item : x.m_symtab->get_scope()) {
             if (is_a<ASR::Variable_t>(*item.second)) {
                 ASR::Variable_t *v = down_cast<ASR::Variable_t>(item.second);
                 if (v->m_intent == ASR::intentType::Local
                     || v->m_intent == ASR::intentType::ReturnVar) {
-                    emit_local_variable(v);
+                    if (pointer_array_has_runtime_dims(v)) {
+                        delayed_runtime_arrays.push_back(v);
+                    } else {
+                        emit_local_variable(v);
+                    }
                 }
+            }
+        }
+
+        std::vector<bool> body_emitted(x.n_body, false);
+        if (!delayed_runtime_arrays.empty()) {
+            std::unordered_set<std::string> runtime_deps;
+            for (ASR::Variable_t *v : delayed_runtime_arrays) {
+                for (size_t i = 0; i < v->n_dependencies; i++) {
+                    runtime_deps.insert(std::string(v->m_dependencies[i]));
+                }
+            }
+            auto var_name = [](ASR::expr_t *expr) -> std::string {
+                if (!expr || !ASR::is_a<ASR::Var_t>(*expr)) return "";
+                ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
+                    ASR::down_cast<ASR::Var_t>(expr)->m_v);
+                if (!sym || !ASR::is_a<ASR::Variable_t>(*sym)) return "";
+                return ASR::down_cast<ASR::Variable_t>(sym)->m_name;
+            };
+            auto initializes_runtime_dep = [&](ASR::stmt_t *stmt) {
+                if (ASR::is_a<ASR::SubroutineCall_t>(*stmt)) {
+                    ASR::SubroutineCall_t *call =
+                        ASR::down_cast<ASR::SubroutineCall_t>(stmt);
+                    for (size_t i = 0; i < call->n_args; i++) {
+                        if (runtime_deps.count(var_name(
+                                call->m_args[i].m_value)) > 0) {
+                            return true;
+                        }
+                    }
+                } else if (ASR::is_a<ASR::Assignment_t>(*stmt)) {
+                    ASR::Assignment_t *assign =
+                        ASR::down_cast<ASR::Assignment_t>(stmt);
+                    return runtime_deps.count(var_name(assign->m_target)) > 0;
+                }
+                return false;
+            };
+            for (size_t i = 0; i < x.n_body; i++) {
+                if (!initializes_runtime_dep(x.m_body[i])) break;
+                visit_stmt(*x.m_body[i]);
+                body_emitted[i] = true;
+            }
+            for (ASR::Variable_t *v : delayed_runtime_arrays) {
+                emit_local_variable(v);
             }
         }
 
         // Visit body
         for (size_t i = 0; i < x.n_body; i++) {
+            if (body_emitted[i]) continue;
             visit_stmt(*x.m_body[i]);
         }
         for (CfiArrayWriteback &wb : cfi_array_writebacks) {
