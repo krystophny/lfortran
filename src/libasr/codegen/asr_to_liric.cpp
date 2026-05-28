@@ -1143,6 +1143,42 @@ public:
                     }
                 }
             }
+            // A fixed-length character module variable with a compile-time
+            // string value: emit writable backing bytes plus a {ptr,len}
+            // descriptor whose pointer is resolved by a reloc.  A separately
+            // compiled module has no program to run the runtime descriptor
+            // init, so without this a consumer reads a {null,0} descriptor
+            // (blank).  Fully resolving the descriptor in .data also makes
+            // the same-file case correct without the runtime init step.
+            if (v->m_value && ASR::is_a<ASR::String_t>(*t0) &&
+                    ASR::is_a<ASR::StringConstant_t>(*v->m_value)) {
+                ASR::String_t *str_t = ASR::down_cast<ASR::String_t>(t0);
+                int64_t slen = 0;
+                if (str_t->m_physical_type == ASR::DescriptorString &&
+                        str_t->m_len &&
+                        ASRUtils::extract_value(str_t->m_len, slen) &&
+                        slen > 0) {
+                    std::string gname = module_variable_global_name(
+                        item.second, v);
+                    std::string data_name = gname + "_strdata";
+                    const char *cs = ASR::down_cast<ASR::StringConstant_t>(
+                        v->m_value)->m_s;
+                    std::string data((size_t)slen, ' ');
+                    for (size_t i = 0; cs && cs[i] && i < (size_t)slen; i++) {
+                        data[i] = cs[i];
+                    }
+                    lr_session_global(s, data_name.c_str(),
+                        lr_type_array_s(s, ty_i8, (size_t)slen),
+                        false, data.data(), (size_t)slen);
+                    struct desc_blob_t { void *p; int64_t l; };
+                    desc_blob_t desc_init = { nullptr, slen };
+                    uint32_t desc_id = lr_session_global(s, gname.c_str(),
+                        ty_str_desc, false, &desc_init, sizeof(desc_init));
+                    lr_session_global_reloc(s, desc_id, 0, data_name.c_str());
+                    lr_globals[h] = lr_session_intern(s, gname.c_str());
+                    continue;
+                }
+            }
             std::string gname = module_variable_global_name(
                 item.second, v);
             lr_session_global(s, gname.c_str(),
