@@ -11986,8 +11986,37 @@ public:
                     // stable cross-compile property so different .o
                     // files might disagree on whether to prefix the
                     // same module's functions.
-                    const char *module_name = mod->m_parent_module ?
-                        mod->m_parent_module : mod->m_name;
+                    // A module procedure belongs to the root ancestor
+                    // module, even when declared/defined several submodules
+                    // deep.  m_parent_module names only the immediate parent
+                    // (another submodule for a nested submodule), so walk the
+                    // chain to the root module: the definition and every
+                    // caller must mangle with the same root-module prefix.
+                    const char *module_name = mod->m_name;
+                    {
+                        ASR::Module_t *cur = mod;
+                        while (cur->m_parent_module) {
+                            SymbolTable *gscope = cur->m_symtab ?
+                                cur->m_symtab->parent : nullptr;
+                            if (!gscope) {
+                                module_name = cur->m_parent_module;
+                                break;
+                            }
+                            ASR::symbol_t *psym =
+                                gscope->resolve_symbol(cur->m_parent_module);
+                            if (!psym) {
+                                module_name = cur->m_parent_module;
+                                break;
+                            }
+                            psym = ASRUtils::symbol_get_past_external(psym);
+                            if (!ASR::is_a<ASR::Module_t>(*psym)) {
+                                module_name = cur->m_parent_module;
+                                break;
+                            }
+                            cur = ASR::down_cast<ASR::Module_t>(psym);
+                            module_name = cur->m_name;
+                        }
+                    }
                     base = std::string(module_name) + "__" + base;
                     break;
                 }
