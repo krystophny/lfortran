@@ -11242,7 +11242,11 @@ public:
                         is_target = true;
                         visit_expr(*actual);
                         is_target = was_target;
-                        cargs.push_back(V(tmp, ty_ptr));
+                        uint32_t arg_ptr = tmp;
+                        if (formal_expects_raw_array_data(fn, i, actual)) {
+                            arg_ptr = desc_base_addr(arg_ptr);
+                        }
+                        cargs.push_back(V(arg_ptr, ty_ptr));
                     } else if (expr_is_cchar_string_cast(actual)) {
                         visit_expr(*actual);
                         cargs.push_back(V(tmp, ty_ptr));
@@ -11525,7 +11529,11 @@ public:
                             is_target = true;
                             visit_expr(*actual);
                             is_target = was_target;
-                            cargs.push_back(V(tmp, ty_ptr));
+                            uint32_t arg_ptr = tmp;
+                            if (formal_expects_raw_array_data(fn, i, actual)) {
+                                arg_ptr = desc_base_addr(arg_ptr);
+                            }
+                            cargs.push_back(V(arg_ptr, ty_ptr));
                         } else {
                             visit_expr(*actual);
                             lr_type_t *at =
