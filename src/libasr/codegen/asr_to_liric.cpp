@@ -6377,6 +6377,17 @@ public:
                                       ASR::expr_t *actual) {
         ASR::Variable_t *formal = formal_arg_var(fn, i);
         if (!formal) return false;
+        if (ASR::is_a<ASR::Cast_t>(*actual)) {
+            ASR::Cast_t *cast = ASR::down_cast<ASR::Cast_t>(actual);
+            if (cast->m_kind == ASR::cast_kindType::ClassToStruct ||
+                    cast->m_kind == ASR::cast_kindType::ClassToClass) {
+                ASR::ttype_t *src_type = ASRUtils::expr_type(cast->m_arg);
+                if (ASRUtils::is_class_type(
+                        ASRUtils::extract_type(src_type))) {
+                    return false;
+                }
+            }
+        }
         ASR::ttype_t *ft = ASRUtils::type_get_past_allocatable_pointer(
             formal->m_type);
         if (ASRUtils::is_unlimited_polymorphic_type(ft)) return false;
@@ -6458,7 +6469,10 @@ public:
         visit_expr(*actual);
         is_target = was_target;
         uint32_t actual_ptr = tmp;
-        if (ASRUtils::is_pointer(ASRUtils::expr_type(actual))
+        if (expr_is_allocatable_struct(actual)) {
+            uint32_t raw = lr_emit_load(s, ty_ptr, V(actual_ptr, ty_ptr));
+            actual_ptr = class_data_ptr(raw);
+        } else if (ASRUtils::is_pointer(ASRUtils::expr_type(actual))
                 && ASR::is_a<ASR::Var_t>(*actual)) {
             // A plain Fortran pointer actual (e.g. a host-associated local
             // captured into a nested-vars context as a Pointer global): its
@@ -6923,6 +6937,30 @@ public:
             ASR::symbol_t *tsym = ASRUtils::symbol_get_past_external(
                 ASR::down_cast<ASR::Var_t>(x.m_target)->m_v);
             class_alias_data_ptr.insert(get_hash((ASR::asr_t *)tsym));
+        } else if (ASR::is_a<ASR::Var_t>(*x.m_target) &&
+                ASR::is_a<ASR::Cast_t>(*x.m_value) &&
+                ASRUtils::is_pointer(ASRUtils::expr_type(x.m_target)) &&
+                !ASRUtils::is_allocatable(ASRUtils::expr_type(x.m_target)) &&
+                ASRUtils::is_class_type(ASRUtils::extract_type(
+                    ASRUtils::expr_type(x.m_target)))) {
+            ASR::Cast_t *cast = ASR::down_cast<ASR::Cast_t>(x.m_value);
+            bool class_narrowing =
+                cast->m_kind == ASR::cast_kindType::ClassToStruct ||
+                cast->m_kind == ASR::cast_kindType::ClassToClass;
+            ASR::ttype_t *source_type = ASRUtils::expr_type(cast->m_arg);
+            if (!class_narrowing || !ASRUtils::is_class_type(
+                    ASRUtils::extract_type(source_type))) {
+                visit_expr(*x.m_value);
+                rhs = tmp;
+                t = value_type_for_expr(x.m_value);
+            } else {
+                visit_expr(*x.m_value);
+                rhs = tmp;
+                t = ty_ptr;
+                class_alias_data_ptr.insert(get_hash((ASR::asr_t *)
+                    ASRUtils::symbol_get_past_external(
+                        ASR::down_cast<ASR::Var_t>(x.m_target)->m_v)));
+            }
         } else if (ASR::is_a<ASR::Var_t>(*x.m_target) &&
                 ASR::is_a<ASR::Var_t>(*x.m_value) &&
                 ASRUtils::is_pointer(ASRUtils::expr_type(x.m_target)) &&
