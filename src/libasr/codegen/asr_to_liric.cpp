@@ -6766,6 +6766,12 @@ public:
                 ASR::down_cast<ASR::StringPhysicalCast_t>(expr);
             return cast->m_new == ASR::string_physical_typeType::CChar;
         }
+        if (ASR::is_a<ASR::Cast_t>(*expr)) {
+            ASR::Cast_t *cast = ASR::down_cast<ASR::Cast_t>(expr);
+            if (cast->m_kind == ASR::cast_kindType::StringToArray) {
+                return expr_is_cchar_string_cast(cast->m_arg);
+            }
+        }
         if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*expr)) {
             ASR::ArrayPhysicalCast_t *cast =
                 ASR::down_cast<ASR::ArrayPhysicalCast_t>(expr);
@@ -6818,6 +6824,18 @@ public:
             }
         }
         return expr;
+    }
+
+    bool is_string_to_cchar_array_cast(ASR::expr_t *expr) {
+        if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*expr)) {
+            ASR::ArrayPhysicalCast_t *cast =
+                ASR::down_cast<ASR::ArrayPhysicalCast_t>(expr);
+            return is_string_to_cchar_array_cast(cast->m_arg);
+        }
+        if (!ASR::is_a<ASR::Cast_t>(*expr)) return false;
+        ASR::Cast_t *cast = ASR::down_cast<ASR::Cast_t>(expr);
+        return cast->m_kind == ASR::cast_kindType::StringToArray &&
+            expr_is_cchar_string_cast(cast->m_arg);
     }
 
     bool expr_is_bindc_char_scalar(ASR::expr_t *expr) {
@@ -12045,13 +12063,20 @@ public:
         }
     }
 
+    bool is_raw_cchar_array_physical_type(
+            ASR::array_physical_typeType physical_type) {
+        return physical_type ==
+                ASR::array_physical_typeType::StringArraySinglePointer ||
+            physical_type ==
+                ASR::array_physical_typeType::UnboundedPointerArray;
+    }
+
     bool is_bindc_cchar_array_formal(ASR::Variable_t *formal) {
         ASR::ttype_t *type =
             ASRUtils::type_get_past_allocatable_pointer(formal->m_type);
         if (!ASR::is_a<ASR::Array_t>(*type)) return false;
         ASR::Array_t *array = ASR::down_cast<ASR::Array_t>(type);
-        if (array->m_physical_type !=
-                ASR::array_physical_typeType::StringArraySinglePointer) {
+        if (!is_raw_cchar_array_physical_type(array->m_physical_type)) {
             return false;
         }
         ASR::ttype_t *elem = ASRUtils::type_get_past_array(array->m_type);
@@ -12088,8 +12113,7 @@ public:
         ASR::ArrayPhysicalCast_t *cast =
             ASR::down_cast<ASR::ArrayPhysicalCast_t>(actual);
         if (cast->m_old != ASR::array_physical_typeType::DescriptorArray ||
-                cast->m_new !=
-                    ASR::array_physical_typeType::StringArraySinglePointer) {
+                !is_raw_cchar_array_physical_type(cast->m_new)) {
             return false;
         }
         ASR::ttype_t *type = ASRUtils::expr_type(cast->m_arg);
@@ -12546,6 +12570,12 @@ public:
             std::vector<BindCCharArrayArg> &scratch) {
         if (!is_bindc_cchar_array_formal(formal)) return false;
 
+        if (is_string_to_cchar_array_cast(actual)) {
+            args.push_back(V(emit_cchar_data_ptr(actual), ty_ptr));
+            params.push_back(ty_ptr);
+            return true;
+        }
+
         ASR::expr_t *source = nullptr;
         ASR::Array_t *array = nullptr;
         int64_t elem_chars_i64 = 0;
@@ -12757,7 +12787,8 @@ public:
                         down_cast<ASR::Var_t>(fn->m_args[i]);
                     ASR::Variable_t *formal =
                         down_cast<ASR::Variable_t>(formal_var->m_v);
-                    if (formal->m_value_attr) {
+                    if (formal->m_value_attr &&
+                            !is_bindc_cchar_array_formal(formal)) {
                         visit_expr(*actual);
                         lr_type_t *at = get_type(
                             ASRUtils::expr_type(actual));
@@ -13072,7 +13103,8 @@ public:
                         down_cast<ASR::Var_t>(fn->m_args[i]);
                     ASR::Variable_t *formal =
                         down_cast<ASR::Variable_t>(formal_var->m_v);
-                    if (formal->m_value_attr) {
+                    if (formal->m_value_attr &&
+                            !is_bindc_cchar_array_formal(formal)) {
                         visit_expr(*actual);
                         lr_type_t *at = get_type(ASRUtils::expr_type(actual));
                         cargs.push_back(V(tmp, at));
