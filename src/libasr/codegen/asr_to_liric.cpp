@@ -10482,6 +10482,25 @@ public:
                 if (ASR::is_a<ASR::Module_t>(*osym)) {
                     ASR::Module_t *mod =
                         down_cast<ASR::Module_t>(osym);
+                    // A non-`module` interface block inside a module
+                    // declares an EXTERNAL procedure whose body lives
+                    // at file scope and links by its bare name; the
+                    // module owns only the type signature.  Skip the
+                    // module prefix so callers match the bare external
+                    // definition.  Module-procedure interfaces (deftype
+                    // Interface + m_module true; body in a submodule)
+                    // keep the prefix so they match the submodule's
+                    // implementation, which mangles with the parent
+                    // module's name.
+                    if (fn->m_function_signature) {
+                        ASR::FunctionType_t *ft =
+                            ASR::down_cast<ASR::FunctionType_t>(
+                                fn->m_function_signature);
+                        if (ft->m_deftype == ASR::deftypeType::Interface
+                                && !ft->m_module) {
+                            break;
+                        }
+                    }
                     // Always module-prefix; m_intrinsic isn't a
                     // stable cross-compile property so different .o
                     // files might disagree on whether to prefix the
