@@ -14750,34 +14750,27 @@ public:
             return;
         }
         if (x.m_overloaded) {
-            // Derived-type formatted I/O: the frontend has already lowered
-            // `write(unit,'(DT)') obj` into a SubroutineCall to the user's
-            // `write(formatted)` proc, stored in m_overloaded.  Direct mode
-            // always writes to stdout via printf, so we don't need the
-            // _lfortran_set_child_io / _lfortran_file_write_newline runtime
-            // dance the LLVM backend performs.  Emit the user proc call,
-            // then append the record terminator ("\n") for the parent write
-            // — child writes inside the proc already terminate themselves
-            // through the normal FileWrite trailer path.
+            uint32_t unit;
+            if (x.m_unit) {
+                visit_expr(*x.m_unit);
+                unit = cast_int_value(tmp, value_type_for_expr(x.m_unit),
+                    ty_i32);
+            } else {
+                unit = emit_i32_const(6);
+            }
+            lr_type_t *child_params[] = {ty_i32, ty_i32};
+            declare_func("_lfortran_set_child_io", ty_void, child_params, 2,
+                false);
+            lr_operand_desc_t child_on[] = {V(unit, ty_i32), I(1, ty_i32)};
+            emit_call_void("_lfortran_set_child_io", child_on, 2);
             this->visit_stmt(*x.m_overloaded);
-            uint32_t nl_sym = declare_global_cstring("\n", "_lr_fwnl");
-            lr_type_t *printf_params[] = {ty_ptr};
-            declare_func("printf", ty_i32, printf_params, 1, true);
-            uint32_t printf_sym = lr_session_intern(s, "printf");
-            lr_inst_desc_t d;
-            memset(&d, 0, sizeof(d));
-            lr_operand_desc_t ops[2] = {
-                LR_GLOBAL(printf_sym, ty_ptr),
-                LR_GLOBAL(nl_sym, ty_ptr)
-            };
-            d.op = LR_OP_CALL;
-            d.type = ty_i32;
-            d.operands = ops;
-            d.num_operands = 2;
-            d.call_external_abi = true;
-            d.call_vararg = true;
-            d.call_fixed_args = 1;
-            lr_session_emit(s, &d, nullptr);
+            lr_operand_desc_t child_off[] = {V(unit, ty_i32), I(0, ty_i32)};
+            emit_call_void("_lfortran_set_child_io", child_off, 2);
+            lr_type_t *newline_params[] = {ty_i32};
+            declare_func("_lfortran_file_write_newline", ty_void,
+                newline_params, 1, false);
+            lr_operand_desc_t newline_args[] = {V(unit, ty_i32)};
+            emit_call_void("_lfortran_file_write_newline", newline_args, 1);
             return;
         }
         // id/rec/pos are silently ignored: liric direct writes to stdout
