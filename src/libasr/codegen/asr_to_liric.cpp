@@ -2628,8 +2628,27 @@ public:
             ASR::is_a<ASR::StringItem_t>(*target);
     }
 
+    // Compile-time declared length of an explicit-length allocatable string
+    // (character(n), allocatable with a constant n).  Returns -1 for a
+    // deferred-length (character(:)) target or a non-constant length, which
+    // keeps the source-length (deferred) assignment behaviour.
+    int64_t allocatable_string_fixed_len(ASR::ttype_t *target_type) {
+        ASR::ttype_t *c =
+            ASRUtils::type_get_past_allocatable_pointer(target_type);
+        if (!ASR::is_a<ASR::String_t>(*c)) return -1;
+        ASR::String_t *st = ASR::down_cast<ASR::String_t>(c);
+        int64_t len = 0;
+        if (st->m_len_kind == ASR::string_length_kindType::ExpressionLength &&
+                st->m_len && ASRUtils::extract_value(st->m_len, len) &&
+                len >= 0) {
+            return len;
+        }
+        return -1;
+    }
+
     void emit_allocatable_string_assignment(uint32_t dst_ptr,
-                                            uint32_t src_desc) {
+                                            uint32_t src_desc,
+                                            int64_t fixed_len = -1) {
         uint32_t fld0 = 0, fld1 = 1;
         uint32_t old_desc = lr_emit_load(s, ty_str_desc, V(dst_ptr, ty_ptr));
         uint32_t old_data = lr_emit_extractvalue(s, ty_ptr,
@@ -2670,6 +2689,46 @@ public:
         lr_emit_br(s, alloc_bb);
 
         lr_session_set_block(s, alloc_bb, &err);
+        if (fixed_len >= 0) {
+            // Explicit-length allocatable (character(n), allocatable): the
+            // target length is fixed by its declaration, so allocate exactly
+            // that many bytes, copy up to that many from the source, and
+            // space-pad the rest.  Using src_len here (deferred-length
+            // behaviour) leaves the descriptor length inconsistent with the
+            // declared length, so reads, comparisons and len() disagree.
+            int64_t alloc_bytes = fixed_len > 0 ? fixed_len : 1;
+            lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
+            declare_func("_lfortran_string_malloc_alloc", ty_ptr,
+                malloc_params, 2, false);
+            lr_operand_desc_t malloc_args[] = {
+                V(allocator, ty_ptr), I(alloc_bytes, ty_i64)
+            };
+            uint32_t new_data = emit_call("_lfortran_string_malloc_alloc",
+                ty_ptr, malloc_args, 2);
+            lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
+            declare_func("memset", ty_ptr, memset_params, 3, false);
+            lr_operand_desc_t memset_args[] = {
+                V(new_data, ty_ptr), I(' ', ty_i32), I(alloc_bytes, ty_i64)
+            };
+            emit_call("memset", ty_ptr, memset_args, 3);
+            uint32_t src_smaller = lr_emit_icmp(s, LR_CMP_SLT,
+                V(src_len, ty_i64), I(fixed_len, ty_i64));
+            uint32_t copy_len = lr_emit_select(s, ty_i64,
+                V(src_smaller, ty_i1),
+                V(src_len, ty_i64), I(fixed_len, ty_i64));
+            lr_type_t *memcpy_params[] = {ty_ptr, ty_ptr, ty_i64};
+            declare_func("memcpy", ty_ptr, memcpy_params, 3, false);
+            lr_operand_desc_t memcpy_args[] = {
+                V(new_data, ty_ptr), V(src_data, ty_ptr), V(copy_len, ty_i64)
+            };
+            emit_call("memcpy", ty_ptr, memcpy_args, 3);
+            uint32_t fd0 = lr_emit_insertvalue(s, ty_str_desc,
+                LR_UNDEF(ty_str_desc), V(new_data, ty_ptr), &fld0, 1);
+            uint32_t fd1 = lr_emit_insertvalue(s, ty_str_desc,
+                V(fd0, ty_str_desc), I(fixed_len, ty_i64), &fld1, 1);
+            lr_emit_store(s, V(fd1, ty_str_desc), V(dst_ptr, ty_ptr));
+            return;
+        }
         uint32_t src_is_empty = lr_emit_icmp(s, LR_CMP_EQ,
             V(src_len, ty_i64), I(0, ty_i64));
         uint32_t empty_bb = lr_session_block(s);
@@ -3820,7 +3879,8 @@ public:
             is_target = was_target;
             uint32_t dst = tmp;
             if (ASRUtils::is_allocatable(target_expr_type)) {
-                emit_allocatable_string_assignment(dst, rhs);
+                emit_allocatable_string_assignment(dst, rhs,
+                    allocatable_string_fixed_len(target_expr_type));
             } else if (ASR::is_a<ASR::ArrayItem_t>(*x.m_target)) {
                 emit_string_assignment_to_desc_slot(dst, rhs);
             } else {
