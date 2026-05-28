@@ -177,6 +177,13 @@ public:
     // Member access on these dereferences the slot like a struct pointer and
     // applies NO class_data_ptr header offset.
     std::unordered_set<uint64_t> class_alias_data_ptr;
+    // For `character(expr), allocatable :: v` where expr is a runtime
+    // (non-constant) ExpressionLength: maps v's hash to an i64 slot holding
+    // the length evaluated once at the variable's declaration (procedure
+    // entry).  Allocatable-string assignments to such targets allocate that
+    // many bytes, not the source length, so len(v) matches the declared
+    // length across calls even when the length expression's variables drift.
+    std::unordered_map<uint64_t, uint32_t> allocatable_string_entry_len_slot;
     std::unordered_set<uint64_t> runtime_pointer_arrays;
     // Scalar intrinsic pointers whose slot holds an indirection address (set
     // by an EQUIVALENCE / c_f_pointer CPtrToPointer rather than carrying the
@@ -2648,7 +2655,9 @@ public:
 
     void emit_allocatable_string_assignment(uint32_t dst_ptr,
                                             uint32_t src_desc,
-                                            int64_t fixed_len = -1) {
+                                            int64_t fixed_len = -1,
+                                            uint32_t fixed_len_vreg
+                                                = UINT32_MAX) {
         uint32_t fld0 = 0, fld1 = 1;
         uint32_t old_desc = lr_emit_load(s, ty_str_desc, V(dst_ptr, ty_ptr));
         uint32_t old_data = lr_emit_extractvalue(s, ty_ptr,
@@ -2689,33 +2698,52 @@ public:
         lr_emit_br(s, alloc_bb);
 
         lr_session_set_block(s, alloc_bb, &err);
-        if (fixed_len >= 0) {
+        if (fixed_len >= 0 || fixed_len_vreg != UINT32_MAX) {
             // Explicit-length allocatable (character(n), allocatable): the
             // target length is fixed by its declaration, so allocate exactly
             // that many bytes, copy up to that many from the source, and
             // space-pad the rest.  Using src_len here (deferred-length
             // behaviour) leaves the descriptor length inconsistent with the
             // declared length, so reads, comparisons and len() disagree.
-            int64_t alloc_bytes = fixed_len > 0 ? fixed_len : 1;
+            // The target length may be a compile-time constant (fixed_len)
+            // or a runtime vreg (fixed_len_vreg, captured at procedure entry
+            // for character(non_const_expr), allocatable).
+            uint32_t flen_v;
+            uint32_t alloc_bytes_v;
+            if (fixed_len_vreg != UINT32_MAX) {
+                flen_v = fixed_len_vreg;
+                // alloc max(flen, 1) bytes to ensure a valid pointer.
+                uint32_t lt1 = lr_emit_icmp(s, LR_CMP_SLT,
+                    V(flen_v, ty_i64), I(1, ty_i64));
+                alloc_bytes_v = lr_emit_select(s, ty_i64,
+                    V(lt1, ty_i1), I(1, ty_i64), V(flen_v, ty_i64));
+            } else {
+                int64_t alloc_bytes = fixed_len > 0 ? fixed_len : 1;
+                flen_v = lr_emit_add(s, ty_i64,
+                    I(fixed_len, ty_i64), I(0, ty_i64));
+                alloc_bytes_v = lr_emit_add(s, ty_i64,
+                    I(alloc_bytes, ty_i64), I(0, ty_i64));
+            }
             lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
             declare_func("_lfortran_string_malloc_alloc", ty_ptr,
                 malloc_params, 2, false);
             lr_operand_desc_t malloc_args[] = {
-                V(allocator, ty_ptr), I(alloc_bytes, ty_i64)
+                V(allocator, ty_ptr), V(alloc_bytes_v, ty_i64)
             };
             uint32_t new_data = emit_call("_lfortran_string_malloc_alloc",
                 ty_ptr, malloc_args, 2);
             lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
             declare_func("memset", ty_ptr, memset_params, 3, false);
             lr_operand_desc_t memset_args[] = {
-                V(new_data, ty_ptr), I(' ', ty_i32), I(alloc_bytes, ty_i64)
+                V(new_data, ty_ptr), I(' ', ty_i32),
+                V(alloc_bytes_v, ty_i64)
             };
             emit_call("memset", ty_ptr, memset_args, 3);
             uint32_t src_smaller = lr_emit_icmp(s, LR_CMP_SLT,
-                V(src_len, ty_i64), I(fixed_len, ty_i64));
+                V(src_len, ty_i64), V(flen_v, ty_i64));
             uint32_t copy_len = lr_emit_select(s, ty_i64,
                 V(src_smaller, ty_i1),
-                V(src_len, ty_i64), I(fixed_len, ty_i64));
+                V(src_len, ty_i64), V(flen_v, ty_i64));
             lr_type_t *memcpy_params[] = {ty_ptr, ty_ptr, ty_i64};
             declare_func("memcpy", ty_ptr, memcpy_params, 3, false);
             lr_operand_desc_t memcpy_args[] = {
@@ -2725,7 +2753,7 @@ public:
             uint32_t fd0 = lr_emit_insertvalue(s, ty_str_desc,
                 LR_UNDEF(ty_str_desc), V(new_data, ty_ptr), &fld0, 1);
             uint32_t fd1 = lr_emit_insertvalue(s, ty_str_desc,
-                V(fd0, ty_str_desc), I(fixed_len, ty_i64), &fld1, 1);
+                V(fd0, ty_str_desc), V(flen_v, ty_i64), &fld1, 1);
             lr_emit_store(s, V(fd1, ty_str_desc), V(dst_ptr, ty_ptr));
             return;
         }
@@ -3879,8 +3907,26 @@ public:
             is_target = was_target;
             uint32_t dst = tmp;
             if (ASRUtils::is_allocatable(target_expr_type)) {
+                // Prefer the entry-captured runtime length when the target
+                // is `character(non_const_expr), allocatable`; otherwise use
+                // the compile-time constant length (ExpressionLength of a
+                // constant) or fall through to deferred (src-length) copy.
+                uint32_t target_len_vreg = UINT32_MAX;
+                if (ASR::is_a<ASR::Var_t>(*x.m_target)) {
+                    ASR::symbol_t *tsym = ASRUtils::symbol_get_past_external(
+                        ASR::down_cast<ASR::Var_t>(x.m_target)->m_v);
+                    if (ASR::is_a<ASR::Variable_t>(*tsym)) {
+                        uint64_t th = get_hash((ASR::asr_t *)tsym);
+                        auto it = allocatable_string_entry_len_slot.find(th);
+                        if (it != allocatable_string_entry_len_slot.end()) {
+                            target_len_vreg = lr_emit_load(s, ty_i64,
+                                V(it->second, ty_ptr));
+                        }
+                    }
+                }
                 emit_allocatable_string_assignment(dst, rhs,
-                    allocatable_string_fixed_len(target_expr_type));
+                    allocatable_string_fixed_len(target_expr_type),
+                    target_len_vreg);
             } else if (ASR::is_a<ASR::ArrayItem_t>(*x.m_target)) {
                 emit_string_assignment_to_desc_slot(dst, rhs);
             } else {
@@ -5191,6 +5237,29 @@ public:
             slot = emit_storage_alloca_for_var(v);
         }
         lr_symtab[h] = slot;
+        // Capture the declared length of `character(expr), allocatable :: v`
+        // where expr is a runtime (non-constant) ExpressionLength.  The
+        // length is evaluated once on procedure entry; later assignments use
+        // it as the fixed target length so len(v) matches the declared
+        // length across calls even when expr's variables drift afterwards.
+        if (!needs_static_storage && ASRUtils::is_allocatable(v->m_type)) {
+            ASR::ttype_t *ct = ASRUtils::type_get_past_allocatable_pointer(
+                v->m_type);
+            if (ASR::is_a<ASR::String_t>(*ct)) {
+                ASR::String_t *st = ASR::down_cast<ASR::String_t>(ct);
+                int64_t const_len = 0;
+                if (st->m_len_kind ==
+                        ASR::string_length_kindType::ExpressionLength &&
+                        st->m_len && !ASRUtils::extract_value(
+                            st->m_len, const_len)) {
+                    uint32_t len_v = emit_expr_i64(st->m_len);
+                    uint32_t len_slot = lr_emit_alloca(s, ty_i64);
+                    lr_emit_store(s, V(len_v, ty_i64),
+                        V(len_slot, ty_ptr));
+                    allocatable_string_entry_len_slot[h] = len_slot;
+                }
+            }
+        }
         if (!runtime_array && !needs_static_storage) {
             initialize_local_array_descriptor(slot, v->m_type);
             initialize_local_string_descriptor(slot, v->m_type);
