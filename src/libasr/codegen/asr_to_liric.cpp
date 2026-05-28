@@ -6246,6 +6246,14 @@ public:
         // baseline behaviour.
         if (ASR::is_a<ASR::GetPointer_t>(*x.m_arg)) {
             ASR::GetPointer_t *gp = ASR::down_cast<ASR::GetPointer_t>(x.m_arg);
+            if (ASR::is_a<ASR::Var_t>(*gp->m_arg)) {
+                ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
+                    ASR::down_cast<ASR::Var_t>(gp->m_arg)->m_v);
+                if (ASR::is_a<ASR::Function_t>(*sym)) {
+                    visit_expr(*x.m_arg);
+                    return;
+                }
+            }
             ASR::ttype_t *at = ASRUtils::expr_type(gp->m_arg);
             ASR::expr_t *base = gp->m_arg;
             if (ASR::is_a<ASR::ArrayItem_t>(*base)) {
@@ -11248,7 +11256,7 @@ public:
             ASR::FunctionType_t *ft = down_cast<ASR::FunctionType_t>(
                 fn->m_function_signature);
             if (ft->m_abi == ASR::abiType::BindC) {
-                std::string r = ft->m_bindc_name
+                std::string r = ft->m_bindc_name && ft->m_bindc_name[0] != '\0'
                     ? ft->m_bindc_name : fn->m_name;
                 callable_name_cache[h] = r;
                 return r;
