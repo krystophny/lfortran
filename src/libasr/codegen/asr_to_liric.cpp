@@ -21,6 +21,7 @@
 
 #include <cctype>
 #include <cstring>
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -17809,7 +17810,70 @@ public:
     }
 
     void visit_FileInquire(const ASR::FileInquire_t &x) {
-        auto iolength_expr_size = [&](ASR::expr_t *expr) {
+        std::function<uint32_t(ASR::expr_t *)> iolength_expr_size;
+        auto iolength_idl_size = [&](ASR::ImpliedDoLoop_t *idl) {
+            if (!ASR::is_a<ASR::Var_t>(*idl->m_var)) {
+                throw CodeGenError(
+                    "liric: iolength implied-do loop variable must be a Var");
+            }
+            uint32_t start = emit_expr_i64(idl->m_start);
+            uint32_t end = emit_expr_i64(idl->m_end);
+            uint32_t step = idl->m_increment
+                ? emit_expr_i64(idl->m_increment)
+                : emit_i64_const(1);
+
+            uint32_t loop_ptr = emit_target_ptr(idl->m_var);
+            lr_type_t *loop_lr = value_type_for_expr(idl->m_var);
+            uint32_t cur_ptr = lr_emit_alloca(s, ty_i64);
+            uint32_t total_ptr = lr_emit_alloca(s, ty_i64);
+            lr_emit_store(s, V(start, ty_i64), V(cur_ptr, ty_ptr));
+            lr_emit_store(s, I(0, ty_i64), V(total_ptr, ty_ptr));
+
+            lr_error_t err;
+            uint32_t head = lr_session_block(s);
+            uint32_t body = lr_session_block(s);
+            uint32_t done = lr_session_block(s);
+            lr_emit_br(s, head);
+
+            lr_session_set_block(s, head, &err);
+            uint32_t cur = lr_emit_load(s, ty_i64, V(cur_ptr, ty_ptr));
+            uint32_t step_pos = lr_emit_icmp(s, LR_CMP_SGT,
+                V(step, ty_i64), I(0, ty_i64));
+            uint32_t asc = lr_emit_icmp(s, LR_CMP_SLE,
+                V(cur, ty_i64), V(end, ty_i64));
+            uint32_t desc = lr_emit_icmp(s, LR_CMP_SGE,
+                V(cur, ty_i64), V(end, ty_i64));
+            uint32_t more = lr_emit_select(s, ty_i1,
+                V(step_pos, ty_i1), V(asc, ty_i1), V(desc, ty_i1));
+            lr_emit_condbr(s, V(more, ty_i1), body, done);
+
+            lr_session_set_block(s, body, &err);
+            uint32_t loop_val = cast_int_value(cur, ty_i64, loop_lr);
+            lr_emit_store(s, V(loop_val, loop_lr), V(loop_ptr, ty_ptr));
+            for (size_t i = 0; i < idl->n_values; i++) {
+                uint32_t n = iolength_expr_size(idl->m_values[i]);
+                uint32_t total = lr_emit_load(s, ty_i64,
+                    V(total_ptr, ty_ptr));
+                total = lr_emit_add(s, ty_i64, V(total, ty_i64),
+                    V(n, ty_i64));
+                lr_emit_store(s, V(total, ty_i64), V(total_ptr, ty_ptr));
+            }
+            uint32_t next = lr_emit_add(s, ty_i64,
+                V(cur, ty_i64), V(step, ty_i64));
+            lr_emit_store(s, V(next, ty_i64), V(cur_ptr, ty_ptr));
+            lr_emit_br(s, head);
+
+            lr_session_set_block(s, done, &err);
+            uint32_t final_val = lr_emit_load(s, ty_i64, V(cur_ptr, ty_ptr));
+            final_val = cast_int_value(final_val, ty_i64, loop_lr);
+            lr_emit_store(s, V(final_val, loop_lr), V(loop_ptr, ty_ptr));
+            return lr_emit_load(s, ty_i64, V(total_ptr, ty_ptr));
+        };
+        iolength_expr_size = [&](ASR::expr_t *expr) {
+            if (ASR::is_a<ASR::ImpliedDoLoop_t>(*expr)) {
+                return iolength_idl_size(
+                    ASR::down_cast<ASR::ImpliedDoLoop_t>(expr));
+            }
             ASR::ttype_t *type = ASRUtils::expr_type(expr);
             type = ASRUtils::type_get_past_allocatable_pointer(type);
             ASR::Array_t *array_t = nullptr;
