@@ -9748,9 +9748,12 @@ public:
             ASR::String_t *string_t =
                 ASR::down_cast<ASR::String_t>(elem_type);
             int64_t fixed_len = 0;
-            if (string_t->m_len &&
-                    ASRUtils::extract_value(string_t->m_len, fixed_len)) {
-                len64 = emit_i64_const(fixed_len);
+            if (string_t->m_len) {
+                if (ASRUtils::extract_value(string_t->m_len, fixed_len)) {
+                    len64 = emit_i64_const(fixed_len);
+                } else {
+                    len64 = emit_expr_i64(string_t->m_len);
+                }
             }
         }
 
