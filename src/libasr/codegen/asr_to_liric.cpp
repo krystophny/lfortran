@@ -6703,6 +6703,7 @@ public:
         uint64_t runtime_pointer_array_hash = 0;
         bool mark_indirect_scalar = false;
         uint64_t indirect_scalar_hash = 0;
+        bool target_byref_ptr_dummy = false;
         if (ASR::is_a<ASR::Var_t>(*x.m_target)) {
             ASR::Var_t *target = ASR::down_cast<ASR::Var_t>(x.m_target);
             ASR::symbol_t *sym =
@@ -6722,8 +6723,22 @@ public:
                         target_var->m_type);
                 if (value_is_descriptor_pointer &&
                         ASR::is_a<ASR::Array_t>(*target_type)) {
-                    mark_runtime_pointer_array = true;
-                    runtime_pointer_array_hash = h;
+                    if (target_var->m_intent != ASR::intentType::Local &&
+                            target_var->m_intent !=
+                                ASR::intentType::ReturnVar) {
+                        // A pointer-array dummy shares its descriptor storage
+                        // with the actual argument (passed by reference).  The
+                        // runtime_pointer_arrays convention (slot holds a
+                        // descriptor pointer, reads dereference) is scope-local,
+                        // so the caller -- which reads the shared slot directly
+                        // -- would see the descriptor pointer in the base field
+                        // and a garbage extent.  Copy the descriptor contents
+                        // into the shared slot instead.
+                        target_byref_ptr_dummy = true;
+                    } else {
+                        mark_runtime_pointer_array = true;
+                        runtime_pointer_array_hash = h;
+                    }
                 }
             }
         }
@@ -6887,6 +6902,19 @@ public:
             if (ASR::is_a<ASR::Array_t>(*tt)) {
                 ndims = (int)ASR::down_cast<ASR::Array_t>(tt)->n_dims;
             }
+            emit_memcpy_bytes(dst, rhs,
+                (uint64_t)(DESC_HEADER_BYTES + DESC_DIM_BYTES *
+                    (ndims > 0 ? ndims : 1)));
+            return;
+        }
+        // p => target where p is a pointer-array dummy: copy the descriptor
+        // contents into the shared (by-reference) slot so the caller, which
+        // reads the slot as a plain descriptor, sees the new base and bounds.
+        if (value_is_descriptor_pointer && target_byref_ptr_dummy) {
+            ASR::ttype_t *tt = ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(x.m_target));
+            int ndims = ASR::is_a<ASR::Array_t>(*tt)
+                ? (int)ASR::down_cast<ASR::Array_t>(tt)->n_dims : 1;
             emit_memcpy_bytes(dst, rhs,
                 (uint64_t)(DESC_HEADER_BYTES + DESC_DIM_BYTES *
                     (ndims > 0 ? ndims : 1)));
