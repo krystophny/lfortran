@@ -4638,12 +4638,20 @@ public:
         int out_d = 0;
         for (int d = 0; d < n_src_dims; d++) {
             if (!is_range[d]) continue;
-            uint32_t span = lr_emit_sub(s, ty_i64,
-                V(sel_right[d], ty_i64), V(sel_left[d], ty_i64));
+            // extent = max(0, (right - left + step) / step).  This matches
+            // (right-left)/step + 1 for every non-empty section of either
+            // sign, but yields 0 for an empty one (e.g. 1:2:-4) where the
+            // naive +1 form gives a spurious positive count.
+            uint32_t span = lr_emit_add(s, ty_i64,
+                V(lr_emit_sub(s, ty_i64, V(sel_right[d], ty_i64),
+                    V(sel_left[d], ty_i64)), ty_i64),
+                V(sel_step[d], ty_i64));
             uint32_t span_div = lr_emit_sdiv(s, ty_i64,
                 V(span, ty_i64), V(sel_step[d], ty_i64));
-            uint32_t new_extent = lr_emit_add(s, ty_i64,
-                V(span_div, ty_i64), I(1, ty_i64));
+            uint32_t span_neg = lr_emit_icmp(s, LR_CMP_SLT,
+                V(span_div, ty_i64), I(0, ty_i64));
+            uint32_t new_extent = lr_emit_select(s, ty_i64,
+                V(span_neg, ty_i1), I(0, ty_i64), V(span_div, ty_i64));
             uint32_t new_stride = lr_emit_mul(s, ty_i64,
                 V(src_stride[d], ty_i64), V(sel_step[d], ty_i64));
             int64_t base_off = DESC_HEADER_BYTES + DESC_DIM_BYTES * out_d;
