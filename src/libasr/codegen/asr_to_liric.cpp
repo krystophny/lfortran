@@ -1122,12 +1122,32 @@ public:
             uint64_t h = get_hash((ASR::asr_t *)v);
             if (lr_globals.count(h)) continue;
             uint64_t nbytes = storage_size_for_variable(v);
-            std::vector<uint8_t> zeros(nbytes, 0);
+            std::vector<uint8_t> init_bytes(nbytes, 0);
+            // Encode a compile-time scalar initializer into .data.  The runtime
+            // module-var init only runs from a program entry; a separately
+            // compiled module (its globals live in its own object, with no main
+            // to run that init) would otherwise read 0 for `integer :: x = 89`.
+            ASR::ttype_t *t0 =
+                ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+            if (v->m_value && !ASRUtils::is_pointer(v->m_type) &&
+                    !ASRUtils::is_allocatable(v->m_type) &&
+                    !ASR::is_a<ASR::Array_t>(*t0) &&
+                    (ASR::is_a<ASR::Integer_t>(*t0) ||
+                     ASR::is_a<ASR::Real_t>(*t0) ||
+                     ASR::is_a<ASR::Logical_t>(*t0) ||
+                     ASR::is_a<ASR::Complex_t>(*t0))) {
+                std::vector<uint8_t> sb;
+                if (encode_scalar_constant_bytes(v->m_value, v->m_type, sb)) {
+                    for (size_t i = 0; i < sb.size() && i < nbytes; i++) {
+                        init_bytes[i] = sb[i];
+                    }
+                }
+            }
             std::string gname = module_variable_global_name(
                 item.second, v);
             lr_session_global(s, gname.c_str(),
                 lr_type_array_s(s, ty_i8, nbytes),
-                false, zeros.data(), nbytes);
+                false, init_bytes.data(), nbytes);
             lr_globals[h] = lr_session_intern(s, gname.c_str());
             if (var_needs_runtime_init(v)) {
                 module_init_vars.push_back(v);
