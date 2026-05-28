@@ -2493,10 +2493,20 @@ public:
                 + v->m_name;
         }
         uint64_t nbytes = storage_size_for_variable(v);
-        std::vector<uint8_t> zeros(nbytes, 0);
-        lr_session_global(s, gname.c_str(),
-            lr_type_array_s(s, ty_i8, nbytes),
-            false, zeros.data(), nbytes);
+        // A module variable whose module was loaded from a .mod is DEFINED in
+        // another (separately compiled) object; declare it extern here so this
+        // object references that definition instead of emitting a second,
+        // zero-initialised definition that can win the link and read 0.
+        if (!module_variable_global_name(sym_before_external, v).empty() &&
+                var_defined_in_loaded_module(v)) {
+            lr_session_global_extern(s, gname.c_str(),
+                lr_type_array_s(s, ty_i8, nbytes));
+        } else {
+            std::vector<uint8_t> zeros(nbytes, 0);
+            lr_session_global(s, gname.c_str(),
+                lr_type_array_s(s, ty_i8, nbytes),
+                false, zeros.data(), nbytes);
+        }
         uint32_t sym = lr_session_intern(s, gname.c_str());
         lr_globals[h] = sym;
         if (is_target || is_array) {
@@ -2507,6 +2517,14 @@ public:
             tmp = lr_emit_load(s, load_type_for_var(v),
                 LR_GLOBAL(sym, ty_ptr));
         }
+    }
+
+    // True if a variable is a module-level variable whose module was loaded
+    // from a .mod file (i.e. defined in a separately compiled object).
+    bool var_defined_in_loaded_module(ASR::Variable_t *v) {
+        ASR::symbol_t *owner = ASRUtils::get_asr_owner((ASR::symbol_t *)v);
+        return owner && ASR::is_a<ASR::Module_t>(*owner) &&
+            ASR::down_cast<ASR::Module_t>(owner)->m_loaded_from_mod;
     }
 
     // --- Assignment ---
