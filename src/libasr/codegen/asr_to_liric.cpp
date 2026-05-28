@@ -17698,11 +17698,23 @@ found_offset:
                         (size_t)req_dim);
                     if (snap) {
                         length_v = cast_int_value(snap, ty_i64, rt);
-                    } else {
+                    } else if (has_length) {
                         visit_expr(*array_t->m_dims[req_dim].m_length);
                         lr_type_t *lt = get_type(ASRUtils::expr_type(
                             array_t->m_dims[req_dim].m_length));
                         length_v = cast_int_value(tmp, lt, rt);
+                    } else {
+                        // Assumed-size dim (`*`): m_length is null and no
+                        // descriptor snapshot exists.  UBOUND on this dim
+                        // is not defined by the Fortran standard; emit a
+                        // 0 placeholder so the compile succeeds.  Callers
+                        // that consume this bound (e.g. legacy-array-
+                        // sections sequence association) don't actually
+                        // dereference the upper element.
+                        length_v = cast_int_value(
+                            lr_emit_add(s, ty_i64, I(0, ty_i64),
+                                I(0, ty_i64)),
+                            ty_i64, rt);
                     }
                 }
                 uint32_t lbound_v = 0;
