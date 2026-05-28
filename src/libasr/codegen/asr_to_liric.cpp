@@ -4463,6 +4463,10 @@ public:
                     dst, st, var_from_expr(x.m_target));
             }
             if (st) {
+                if (!expr_is_allocatable_struct(x.m_target)) {
+                    std::unordered_set<uint64_t> active;
+                    emit_struct_finalizers(dst, st, active);
+                }
                 uint32_t copy_src = expr_is_allocatable_struct(x.m_target)
                     ? emit_struct_deep_copy_temp(src, st) : src;
                 emit_struct_storage_assignment(dst, copy_src, st);
