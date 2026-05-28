@@ -1605,9 +1605,54 @@ public:
         return true;
     }
 
+    uint64_t stable_name_hash(const std::string &name) const {
+        uint64_t h = 1469598103934665603ULL;
+        for (unsigned char c : name) {
+            h ^= c;
+            h *= 1099511628211ULL;
+        }
+        return h & 0x3fffffffffffffffULL;
+    }
+
+    std::string struct_symbol_key(ASR::symbol_t *sym) {
+        if (!sym) return "<null>";
+        std::string module_name;
+        std::string name;
+        std::vector<std::string> scopes;
+        if (ASR::is_a<ASR::ExternalSymbol_t>(*sym)) {
+            ASR::ExternalSymbol_t *ext =
+                ASR::down_cast<ASR::ExternalSymbol_t>(sym);
+            if (ext->m_module_name) module_name = ext->m_module_name;
+            for (size_t i = 0; i < ext->n_scope_names; i++) {
+                scopes.push_back(ext->m_scope_names[i]);
+            }
+            name = ext->m_original_name ? ext->m_original_name : ext->m_name;
+        } else {
+            sym = ASRUtils::symbol_get_past_external(sym);
+            name = ASRUtils::symbol_name(sym);
+            SymbolTable *parent = ASRUtils::symbol_parent_symtab(sym);
+            if (parent && parent->asr_owner &&
+                    ASR::is_a<ASR::symbol_t>(*parent->asr_owner)) {
+                ASR::symbol_t *owner =
+                    ASR::down_cast<ASR::symbol_t>(parent->asr_owner);
+                if (ASR::is_a<ASR::Module_t>(*owner)) {
+                    ASR::Module_t *mod =
+                        ASR::down_cast<ASR::Module_t>(owner);
+                    module_name = mod->m_parent_module ?
+                        mod->m_parent_module : mod->m_name;
+                }
+            }
+        }
+        std::string key = module_name;
+        for (const std::string &scope : scopes) {
+            key += "::" + scope;
+        }
+        key += "::" + name;
+        return key;
+    }
+
     int64_t struct_symbol_tag(ASR::symbol_t *sym) {
-        sym = ASRUtils::symbol_get_past_external(sym);
-        return 700 + (int64_t)get_hash((ASR::asr_t *)sym);
+        return 700 + (int64_t)stable_name_hash(struct_symbol_key(sym));
     }
 
     void register_known_struct(ASR::Struct_t *st) {
@@ -7878,14 +7923,21 @@ public:
             // source is itself a pointer, p must alias the SAME pointee, so
             // take the source pointer's value; for a concrete target, take its
             // address.  Either way p's slot holds the pointee address.
-            if (ASRUtils::is_pointer(ASRUtils::expr_type(x.m_value))) {
+            if (expr_is_allocatable_struct(x.m_value)) {
+                is_target = true;
                 visit_expr(*x.m_value);
+                is_target = false;
+                uint32_t raw = lr_emit_load(s, ty_ptr, V(tmp, ty_ptr));
+                rhs = class_data_ptr(raw);
+            } else if (ASRUtils::is_pointer(ASRUtils::expr_type(x.m_value))) {
+                visit_expr(*x.m_value);
+                rhs = tmp;
             } else {
                 is_target = true;
                 visit_expr(*x.m_value);
                 is_target = false;
+                rhs = tmp;
             }
-            rhs = tmp;
             t = ty_ptr;
         } else if (is_scalar_class_data_ptr_target(x.m_target, x.m_value)) {
             // p => src where p is a scalar class pointer holding a headerless
@@ -7929,7 +7981,6 @@ public:
                         ASR::down_cast<ASR::Var_t>(x.m_target)->m_v)));
             }
         } else if (ASR::is_a<ASR::Var_t>(*x.m_target) &&
-                ASR::is_a<ASR::Var_t>(*x.m_value) &&
                 ASRUtils::is_pointer(ASRUtils::expr_type(x.m_target)) &&
                 !ASRUtils::is_allocatable(ASRUtils::expr_type(x.m_target)) &&
                 ASRUtils::is_class_type(ASRUtils::extract_type(
@@ -11587,8 +11638,8 @@ public:
         ASR::Struct_t *cur = st;
         while (cur) {
             if (cur == base ||
-                    get_hash((ASR::asr_t *)cur) ==
-                    get_hash((ASR::asr_t *)base)) {
+                    struct_symbol_tag((ASR::symbol_t *)cur) ==
+                    struct_symbol_tag((ASR::symbol_t *)base)) {
                 return true;
             }
             if (!cur->m_parent) return false;
