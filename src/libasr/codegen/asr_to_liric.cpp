@@ -1145,11 +1145,6 @@ public:
         return false;
     }
 
-    bool bindc_variable_has_no_initializer(ASR::Variable_t *v) {
-        return v->m_abi == ASR::abiType::BindC &&
-            v->m_value == nullptr && v->m_symbolic_value == nullptr;
-    }
-
     void register_module_globals(const ASR::Module_t &x,
             bool init_vars_only=false) {
         if (x.m_intrinsic) return;
@@ -1220,15 +1215,16 @@ public:
             }
             std::string gname = module_variable_global_name(
                 item.second, v);
-            if (bindc_variable_has_no_initializer(v)) {
-                lr_session_global_weak(s, gname.c_str(),
-                    lr_type_array_s(s, ty_i8, nbytes),
-                    false, init_bytes.data(), nbytes);
-            } else {
-                lr_session_global(s, gname.c_str(),
-                    lr_type_array_s(s, ty_i8, nbytes),
-                    false, init_bytes.data(), nbytes);
-            }
+            // Module-global storage (COMMON block, module SAVE/parameter,
+            // bindc constant) is emitted by every object that references it
+            // and is not owned by a single .mod object.  The definition is
+            // identical across objects (same initializer, or zero), so emit
+            // it weak and let the linker coalesce the copies.  GNU ld papered
+            // over the strong duplicates with --allow-multiple-definition;
+            // Mach-O has no such flag and rejects them, so weak is required.
+            lr_session_global_weak(s, gname.c_str(),
+                lr_type_array_s(s, ty_i8, nbytes),
+                false, init_bytes.data(), nbytes);
             lr_globals[h] = lr_session_intern(s, gname.c_str());
             if (var_needs_runtime_init(v)) {
                 module_init_vars.push_back(v);
@@ -2844,16 +2840,17 @@ public:
             lr_session_global_extern(s, gname.c_str(),
                 lr_type_array_s(s, ty_i8, nbytes));
         } else {
+            // Storage for a module global (COMMON block, module SAVE/bindc
+            // variable, ...) that is not owned by a loaded .mod object.  In
+            // separate compilation every referencing object emits the same
+            // zero-initialised definition, so emit it weak: the linker
+            // coalesces the identical definitions and keeps one.  (On GNU ld
+            // this matched --allow-multiple-definition; Mach-O has no such
+            // flag and rejects strong duplicates, so weak is required.)
             std::vector<uint8_t> zeros(nbytes, 0);
-            if (bindc_variable_has_no_initializer(v)) {
-                lr_session_global_weak(s, gname.c_str(),
-                    lr_type_array_s(s, ty_i8, nbytes),
-                    false, zeros.data(), nbytes);
-            } else {
-                lr_session_global(s, gname.c_str(),
-                    lr_type_array_s(s, ty_i8, nbytes),
-                    false, zeros.data(), nbytes);
-            }
+            lr_session_global_weak(s, gname.c_str(),
+                lr_type_array_s(s, ty_i8, nbytes),
+                false, zeros.data(), nbytes);
         }
         uint32_t sym = lr_session_intern(s, gname.c_str());
         lr_globals[h] = sym;
@@ -11653,7 +11650,10 @@ public:
             }
             uint64_t nbytes = storage_size_for_variable(v);
             std::vector<uint8_t> zeros(nbytes, 0);
-            lr_session_global(s, gname.c_str(),
+            // Weak: a module global may be defined identically by several
+            // separately-compiled objects; let the linker coalesce them
+            // (Mach-O has no --allow-multiple-definition).
+            lr_session_global_weak(s, gname.c_str(),
                 lr_type_array_s(s, ty_i8, nbytes), false,
                 zeros.data(), nbytes);
             sym = lr_session_intern(s, gname.c_str());
@@ -14883,7 +14883,9 @@ public:
         if (!scratch_io_data_sym) {
             std::vector<uint8_t> zeros(4096, 0);
             const char *name = "_lr_scratch_unit_data";
-            lr_session_global(s, name, lr_type_array_s(s, ty_i8, zeros.size()),
+            // Weak: emitted by every object that uses scratch I/O; coalesce.
+            lr_session_global_weak(s, name,
+                lr_type_array_s(s, ty_i8, zeros.size()),
                 false, zeros.data(), zeros.size());
             scratch_io_data_sym = lr_session_intern(s, name);
         }
@@ -14896,7 +14898,8 @@ public:
         if (!scratch_io_len_sym) {
             int64_t zero = 0;
             const char *name = "_lr_scratch_unit_len";
-            lr_session_global(s, name, ty_i64, false, &zero, sizeof(zero));
+            // Weak: emitted by every object that uses scratch I/O; coalesce.
+            lr_session_global_weak(s, name, ty_i64, false, &zero, sizeof(zero));
             scratch_io_len_sym = lr_session_intern(s, name);
         }
         lr_operand_desc_t off[1] = {I(0, ty_i64)};
@@ -14938,7 +14941,10 @@ public:
             else if (c == '%') c = 'P';
         }
         size_t len = std::strlen(data) + 1;
-        lr_session_global(s, name.c_str(),
+        // Content-named constant string: identical in every object that
+        // references it, so emit weak and let the linker coalesce the copies
+        // (Mach-O rejects strong duplicates).
+        lr_session_global_weak(s, name.c_str(),
             lr_type_array_s(s, ty_i8, len),
             true, data, len);
         return lr_session_intern(s, name.c_str());
@@ -16122,7 +16128,9 @@ public:
         }
         uint64_t nbytes = storage_size_for_variable(v);
         std::vector<uint8_t> zeros(nbytes, 0);
-        lr_session_global(s, gname.c_str(),
+        // Weak: identical module-global storage may be emitted by several
+        // separately-compiled objects; let the linker coalesce the copies.
+        lr_session_global_weak(s, gname.c_str(),
             lr_type_array_s(s, ty_i8, nbytes), false, zeros.data(), nbytes);
         uint32_t sym = lr_session_intern(s, gname.c_str());
         lr_globals[h] = sym;
