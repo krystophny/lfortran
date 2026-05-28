@@ -3214,7 +3214,8 @@ public:
 
     void emit_descriptor_array_move_assignment(ASR::expr_t *target,
                                                ASR::expr_t *value,
-                                               ASR::Array_t *array_t) {
+                                               ASR::Array_t *array_t,
+                                               bool reset_lower_bound) {
         uint32_t src_desc = desc_ptr_of(value);
         uint32_t dst_desc = desc_ptr_of(target);
         int n_dims = (int)array_t->n_dims;
@@ -3226,6 +3227,13 @@ public:
             V(dst_desc, ty_ptr), V(src_desc, ty_ptr), I(nbytes, ty_i64)
         };
         emit_call("memcpy", ty_ptr, memcpy_args, 3);
+        if (reset_lower_bound) {
+            for (int d = 0; d < n_dims; d++) {
+                int64_t base_off = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
+                desc_store_i64(dst_desc, base_off + DESC_DIM_LBOUND,
+                    emit_i64_const(1));
+            }
+        }
         reset_descriptor_array(src_desc, array_t);
     }
 
@@ -4082,7 +4090,7 @@ public:
                 }
                 if (x.m_move_allocation) {
                     emit_descriptor_array_move_assignment(
-                        x.m_target, x.m_value, array_t);
+                        x.m_target, x.m_value, array_t, x.m_realloc_lhs);
                 } else {
                     emit_descriptor_array_assignment(
                         x.m_target, x.m_value, array_t,
