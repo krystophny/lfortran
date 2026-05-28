@@ -4944,20 +4944,12 @@ public:
                     (ai.m_left == nullptr && ai.m_right == nullptr)) {
                 is_range[d] = true;
                 if (ai.m_left) {
-                    visit_expr(*ai.m_left);
-                    lr_type_t *lt = get_type(
-                        ASRUtils::expr_type(ai.m_left));
-                    sel_left[d] = (lt == ty_i64) ? tmp
-                        : lr_emit_sext(s, ty_i64, V(tmp, lt));
+                    sel_left[d] = emit_i64_expr(ai.m_left);
                 } else {
                     sel_left[d] = src_lbound[d];
                 }
                 if (ai.m_right) {
-                    visit_expr(*ai.m_right);
-                    lr_type_t *rt = get_type(
-                        ASRUtils::expr_type(ai.m_right));
-                    sel_right[d] = (rt == ty_i64) ? tmp
-                        : lr_emit_sext(s, ty_i64, V(tmp, rt));
+                    sel_right[d] = emit_i64_expr(ai.m_right);
                 } else {
                     // upper = lbound + extent - 1
                     uint32_t sum = lr_emit_add(s, ty_i64,
@@ -4966,22 +4958,14 @@ public:
                         V(sum, ty_i64), I(1, ty_i64));
                 }
                 if (ai.m_step) {
-                    visit_expr(*ai.m_step);
-                    lr_type_t *st = get_type(
-                        ASRUtils::expr_type(ai.m_step));
-                    sel_step[d] = (st == ty_i64) ? tmp
-                        : lr_emit_sext(s, ty_i64, V(tmp, st));
+                    sel_step[d] = emit_i64_expr(ai.m_step);
                 } else {
                     sel_step[d] = lr_emit_add(s, ty_i64,
                         I(1, ty_i64), I(0, ty_i64));
                 }
             } else {
                 // scalar index: ai.m_right is the index
-                visit_expr(*ai.m_right);
-                lr_type_t *rt = get_type(
-                    ASRUtils::expr_type(ai.m_right));
-                sel_right[d] = (rt == ty_i64) ? tmp
-                    : lr_emit_sext(s, ty_i64, V(tmp, rt));
+                sel_right[d] = emit_i64_expr(ai.m_right);
             }
         }
 
@@ -5067,7 +5051,7 @@ public:
 
     void visit_DebugCheckArrayBounds(
             const ASR::DebugCheckArrayBounds_t &x) {
-        if (x.n_components != 1 || x.m_move_allocation) {
+        if (x.n_components == 0 || x.m_move_allocation) {
             return;
         }
         ASR::ttype_t *target_type = expr_storage_type(x.m_target);
@@ -7093,9 +7077,7 @@ public:
                 ASR::array_physical_typeType::DescriptorArray) {
             return false;
         }
-        ASR::ttype_t *elem = ASRUtils::type_get_past_array(type);
-        elem = ASRUtils::type_get_past_allocatable_pointer(elem);
-        return ASR::is_a<ASR::Real_t>(*elem);
+        return true;
     }
 
     bool expr_is_array_section_call_temp(ASR::expr_t *expr) {
@@ -7233,9 +7215,12 @@ public:
                 return;
             }
         }
+        bool target_is_subroutine_call_array_temp = false;
         if (ASR::is_a<ASR::Var_t>(*x.m_target)) {
             ASR::Variable_t *target_var = var_from_expr(x.m_target);
-            if (target_var && var_is_subroutine_call_array_temp(target_var)) {
+            target_is_subroutine_call_array_temp =
+                target_var && var_is_subroutine_call_array_temp(target_var);
+            if (target_is_subroutine_call_array_temp) {
                 bool mark_array_section_temp =
                     expr_is_array_section_call_temp(x.m_value);
                 if (ASR::is_a<ASR::ArraySection_t>(*x.m_value)) {
@@ -7254,6 +7239,22 @@ public:
                 ASR::down_cast<ASR::ArrayPhysicalCast_t>(x.m_value);
             value_is_descriptor_array = cast->m_new ==
                 ASR::array_physical_typeType::DescriptorArray;
+        }
+        if (!target_is_subroutine_call_array_temp &&
+                ASR::is_a<ASR::ArraySection_t>(*x.m_value)) {
+            ASR::ArraySection_t *section =
+                ASR::down_cast<ASR::ArraySection_t>(x.m_value);
+            ASR::ttype_t *section_type =
+                ASRUtils::type_get_past_allocatable_pointer(
+                    ASRUtils::expr_type(x.m_value));
+            if (ASR::is_a<ASR::Array_t>(*section_type)) {
+                ASR::Array_t *section_array =
+                    ASR::down_cast<ASR::Array_t>(section_type);
+                value_is_descriptor_array =
+                    section_array->m_physical_type ==
+                        ASR::array_physical_typeType::DescriptorArray ||
+                    array_section_uses_runtime_source(section);
+            }
         }
         // select type on a polymorphic array lowers to
         //   selector => (Cast ClassToStruct/ClassToClass orig_array)
