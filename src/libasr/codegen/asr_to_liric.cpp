@@ -12587,8 +12587,20 @@ public:
                         V(first_ptr, ty_ptr), LR_NULL(ty_ptr));
                     break;
                 }
-                // For other allocatables, we model the storage as an
-                // inline alloca that is always "live".
+                if (ASRUtils::is_allocatable(at)) {
+                    // Allocatable intrinsic scalar: its storage is an 8-byte
+                    // data pointer (null => unallocated), so test it against
+                    // null rather than reporting always-allocated.
+                    bool was_target = is_target;
+                    is_target = true;
+                    visit_expr(*arg);
+                    is_target = was_target;
+                    uint32_t ptr = lr_emit_load(s, ty_ptr, V(tmp, ty_ptr));
+                    tmp = lr_emit_icmp(s, LR_CMP_NE,
+                        V(ptr, ty_ptr), LR_NULL(ty_ptr));
+                    break;
+                }
+                // Non-allocatable (pointer) fallback: model as always live.
                 tmp = lr_emit_icmp(s, LR_CMP_EQ,
                     I(1, ty_i1), I(1, ty_i1));
                 break;
