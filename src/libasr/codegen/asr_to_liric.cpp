@@ -1296,7 +1296,6 @@ public:
     }
 
     bool is_scalar_complex_type(ASR::ttype_t *t) {
-        t = ASRUtils::type_get_past_allocatable_pointer(t);
         return ASR::is_a<ASR::Complex_t>(*t);
     }
 
@@ -1327,6 +1326,17 @@ public:
         uint32_t v0 = lr_emit_insertvalue(s, vt,
             LR_UNDEF(vt), V(re, ft), &idx0, 1);
         return lr_emit_insertvalue(s, vt, V(v0, vt), V(im, ft), &idx1, 1);
+    }
+
+    lr_type_t *function_return_abi_type(ASR::ttype_t *t) {
+        return is_scalar_complex_type(t) ? complex_abi_vector_type(t)
+                                         : get_type(t);
+    }
+
+    uint32_t function_return_abi_to_internal(uint32_t value,
+            ASR::ttype_t *t) {
+        return is_scalar_complex_type(t) ? complex_vector_to_struct(value, t)
+                                         : value;
     }
 
     std::string construct_key(char *name) {
@@ -2298,15 +2308,12 @@ public:
 
         lr_type_t *ret_type = ty_void;
         bool uses_sret = false;
-        bool bindc_complex_return = false;
+        bool complex_abi_return = false;
         if (x.m_return_var) {
             ASR::ttype_t *return_asr_type = ASRUtils::expr_type(
                 x.m_return_var);
-            bindc_complex_return = ftype->m_abi == ASR::abiType::BindC &&
-                is_scalar_complex_type(return_asr_type);
-            ret_type = bindc_complex_return
-                ? complex_abi_vector_type(return_asr_type)
-                : get_type(return_asr_type);
+            complex_abi_return = is_scalar_complex_type(return_asr_type);
+            ret_type = function_return_abi_type(return_asr_type);
             uses_sret = return_type_uses_sret(ret_type);
         }
 
@@ -2352,7 +2359,7 @@ public:
         lr_session_func_begin(s, fn_name.c_str(),
             uses_sret ? ty_void : ret_type,
             param_types.data(), param_types.size(), false, &err);
-        if (ftype->m_abi == ASR::abiType::BindC) {
+        if (ftype->m_abi == ASR::abiType::BindC || complex_abi_return) {
             lr_session_func_set_llvm_abi(s, true, &err);
         }
 
@@ -2536,7 +2543,7 @@ public:
                 // per IEEE 754 and breaks ieee_copy_sign / sign(x, -0.0).
                 val = lr_emit_fsub(s, rt, V(val, rt), F(0.0, rt));
             }
-            if (bindc_complex_return) {
+            if (complex_abi_return) {
                 uint32_t abi_val = complex_struct_to_vector(val, v->m_type);
                 lr_emit_ret(s, V(abi_val, ret_type));
             } else if (uses_sret) {
@@ -13096,11 +13103,12 @@ public:
                         params.push_back(ty_ptr);
                     }
                 }
-                lr_type_t *ret = get_type(x.m_type);
+                lr_type_t *ret = function_return_abi_type(x.m_type);
                 declare_func(cname.c_str(), ret, params.data(),
                     params.size(), false);
-                tmp = emit_call(cname.c_str(), ret, cargs.data(),
-                    cargs.size());
+                uint32_t call_value = emit_call(cname.c_str(), ret,
+                    cargs.data(), cargs.size());
+                tmp = function_return_abi_to_internal(call_value, x.m_type);
                 finish_bindc_cchar_array_args(scratch);
                 finish_bindc_struct_cfi_args(struct_scratch);
                 return;
@@ -13247,7 +13255,7 @@ public:
             }
         }
 
-        lr_type_t *ret = get_type(x.m_type);
+        lr_type_t *ret = function_return_abi_type(x.m_type);
         if (interface_fptr != UINT32_MAX) {
             if (return_type_uses_sret(ret)) {
                 uint32_t ret_slot = emit_temp_slot(ret);
@@ -13260,8 +13268,9 @@ public:
                 tmp = lr_emit_load(s, ret, V(ret_slot, ty_ptr));
                 return;
             }
-            tmp = lr_emit_call(s, ret, V(interface_fptr, ty_ptr),
-                               args.data(), args.size());
+            uint32_t call_value = lr_emit_call(s, ret,
+                V(interface_fptr, ty_ptr), args.data(), args.size());
+            tmp = function_return_abi_to_internal(call_value, x.m_type);
             return;
         }
         if (is_proc_ptr) {
@@ -13270,16 +13279,18 @@ public:
             uint32_t fptr = x.m_dt
                 ? proc_pointer_component_callee(x.m_dt, v)
                 : proc_pointer_callee(v);
-            tmp = lr_emit_call(s, ret, V(fptr, ty_ptr),
-                               args.data(), args.size());
+            uint32_t call_value = lr_emit_call(s, ret, V(fptr, ty_ptr),
+                args.data(), args.size());
+            tmp = function_return_abi_to_internal(call_value, x.m_type);
             return;
         }
         if (fn && function_is_interface(fn) && !args.empty() &&
                 is_tbp_call_symbol(x.m_name)) {
             uint32_t fptr = load_object_method_ptr(args[0].vreg,
                 dynamic_method_name(x.m_name, fn));
-            tmp = lr_emit_call(s, ret, V(fptr, ty_ptr),
+            uint32_t call_value = lr_emit_call(s, ret, V(fptr, ty_ptr),
                 args.data(), args.size());
+            tmp = function_return_abi_to_internal(call_value, x.m_type);
             return;
         }
         if (fn && function_is_interface(fn) && x.m_dt &&
@@ -13290,8 +13301,9 @@ public:
             uint32_t data_ptr = dispatch_data_ptr_from_dt(x.m_dt);
             uint32_t fptr = load_object_method_ptr(data_ptr,
                 dynamic_method_name(x.m_name, fn));
-            tmp = lr_emit_call(s, ret, V(fptr, ty_ptr),
+            uint32_t call_value = lr_emit_call(s, ret, V(fptr, ty_ptr),
                 args.data(), args.size());
+            tmp = function_return_abi_to_internal(call_value, x.m_type);
             return;
         }
         // TBP function on a POLYMORPHIC object whose binding resolved to a
@@ -13304,8 +13316,9 @@ public:
             uint32_t data_ptr = dispatch_data_ptr_from_dt(x.m_dt);
             uint32_t fptr = load_object_method_ptr(data_ptr,
                 dynamic_method_name(x.m_name, fn));
-            tmp = lr_emit_call(s, ret, V(fptr, ty_ptr),
+            uint32_t call_value = lr_emit_call(s, ret, V(fptr, ty_ptr),
                 args.data(), args.size());
+            tmp = function_return_abi_to_internal(call_value, x.m_type);
             return;
         }
         uint32_t sym = lr_session_intern(s, callable_name(fn).c_str());
@@ -13320,8 +13333,9 @@ public:
             tmp = lr_emit_load(s, ret, V(ret_slot, ty_ptr));
             return;
         }
-        tmp = lr_emit_call(s, ret, LR_GLOBAL(sym, ty_ptr),
+        uint32_t call_value = lr_emit_call(s, ret, LR_GLOBAL(sym, ty_ptr),
                            args.data(), args.size());
+        tmp = function_return_abi_to_internal(call_value, x.m_type);
     }
 
     // --- Cast ---
