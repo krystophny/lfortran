@@ -17088,12 +17088,31 @@ public:
                 return;
             }
         }
+        // An array is contiguous iff every dim's stride equals the packed
+        // stride: stride[d] == elem_len * product(extent[0..d-1]).  Checking
+        // only dim 0 wrongly reports a strided higher-dim section (e.g.
+        // b(1:2,1:2) of a 5x3 array) as contiguous.
         uint32_t desc = desc_ptr_of(x.m_array);
         uint32_t elem_len = desc_load_i64(desc, 8);
-        uint32_t stride0 = desc_load_i64(desc,
-            DESC_HEADER_BYTES + 16);
-        tmp = lr_emit_icmp(s, LR_CMP_EQ,
-            V(stride0, ty_i64), V(elem_len, ty_i64));
+        int n_dims = 1;
+        if (ASR::is_a<ASR::Array_t>(*at)) {
+            n_dims = (int)ASR::down_cast<ASR::Array_t>(at)->n_dims;
+        }
+        uint32_t result = lr_emit_add(s, ty_i1, I(1, ty_i1), I(0, ty_i1));
+        uint32_t expected = elem_len;
+        for (int d = 0; d < n_dims; d++) {
+            int64_t base_off = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
+            uint32_t stride_d = desc_load_i64(desc,
+                base_off + DESC_DIM_STRIDE);
+            uint32_t cmp_d = lr_emit_icmp(s, LR_CMP_EQ,
+                V(stride_d, ty_i64), V(expected, ty_i64));
+            result = lr_emit_and(s, ty_i1, V(result, ty_i1), V(cmp_d, ty_i1));
+            uint32_t extent_d = desc_load_i64(desc,
+                base_off + DESC_DIM_EXTENT);
+            expected = lr_emit_mul(s, ty_i64,
+                V(expected, ty_i64), V(extent_d, ty_i64));
+        }
+        tmp = result;
     }
 
     // --- FileRead ---
