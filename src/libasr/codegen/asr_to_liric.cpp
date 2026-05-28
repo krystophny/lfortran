@@ -2284,7 +2284,17 @@ public:
                 lr_symtab[h] = p;
             }
         }
-
+        for (size_t i = 0; i < x.n_args; i++) {
+            ASR::Var_t *arg_var = down_cast<ASR::Var_t>(x.m_args[i]);
+            ASR::symbol_t *arg_sym =
+                ASRUtils::symbol_get_past_external(arg_var->m_v);
+            if (!ASR::is_a<ASR::Variable_t>(*arg_sym)) continue;
+            ASR::Variable_t *v = down_cast<ASR::Variable_t>(arg_sym);
+            if (v->m_intent == ASR::intentType::Out &&
+                    is_allocatable_struct_type(v->m_type)) {
+                deallocate_string_var(x.m_args[i]);
+            }
+        }
         // Runtime bounds can depend on compiler-created temporaries.
         // Fill those before allocating runtime-sized PointerArrays.
         std::vector<ASR::Variable_t *> delayed_runtime_arrays;
@@ -10805,12 +10815,10 @@ public:
         }
         if (ASR::is_a<ASR::StructType_t>(*at) &&
                 ASRUtils::is_allocatable(expr_t) &&
-                !ASRUtils::is_class_type(at)) {
-            // Concrete allocatable derived-type scalar (variable or
-            // component): null the pointer slot so allocated() reports false.
-            // Previously a no-op, leaving the slot non-null.  Do not free the
-            // block (liric does not free allocatables elsewhere).  class(*)
-            // scalars are a 16-byte poly_desc and are left alone here.
+                !ASRUtils::is_unlimited_polymorphic_type(expr_t)) {
+            // Allocatable derived-type scalar (variable or component): null
+            // the pointer slot so allocated() reports false. Unlimited
+            // polymorphic scalars use a 16-byte poly_desc.
             bool wt = is_target;
             is_target = true;
             visit_expr(*v);
