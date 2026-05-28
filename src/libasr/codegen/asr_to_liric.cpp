@@ -11231,6 +11231,84 @@ public:
         bool writeback;
     };
 
+    struct BindCStructCfiArg {
+        uint32_t storage;
+        uint32_t raw;
+        ASR::Struct_t *st;
+        bool writeback;
+    };
+
+    bool fixed_string_scalar_member(ASR::Variable_t *member,
+                                    int64_t &len) {
+        if (ASRUtils::is_allocatable(member->m_type) ||
+                ASRUtils::is_pointer(member->m_type)) {
+            return false;
+        }
+        ASR::ttype_t *core =
+            ASRUtils::type_get_past_allocatable_pointer(member->m_type);
+        if (ASR::is_a<ASR::Array_t>(*core)) return false;
+        return get_fixed_string_len(member->m_type, len);
+    }
+
+    uint64_t bindc_raw_struct_size(ASR::Struct_t *st,
+                                   bool *uses_raw_chars = nullptr) {
+        if (uses_raw_chars) *uses_raw_chars = false;
+        uint64_t nbytes = 0;
+        std::vector<ASR::Variable_t *> members;
+        collect_struct_members_parent_first(st, members);
+        for (ASR::Variable_t *member : members) {
+            int64_t len = 0;
+            if (fixed_string_scalar_member(member, len)) {
+                nbytes += (uint64_t)(len > 0 ? len : 0);
+                if (uses_raw_chars) *uses_raw_chars = true;
+            } else {
+                nbytes += storage_size_for_variable(member);
+            }
+        }
+        return nbytes > 0 ? nbytes : 1;
+    }
+
+    void emit_bindc_raw_struct_copy(uint32_t storage, uint32_t raw,
+                                    ASR::Struct_t *st,
+                                    bool raw_to_storage) {
+        std::vector<ASR::Variable_t *> members;
+        collect_struct_members_parent_first(st, members);
+        uint64_t storage_off = 0;
+        uint64_t raw_off = 0;
+        for (ASR::Variable_t *member : members) {
+            lr_operand_desc_t storage_offset[1] = {
+                I((int64_t)storage_off, ty_i64)
+            };
+            lr_operand_desc_t raw_offset[1] = {
+                I((int64_t)raw_off, ty_i64)
+            };
+            uint32_t storage_field = lr_emit_gep(s, ty_i8,
+                V(storage, ty_ptr), storage_offset, 1);
+            uint32_t raw_field = lr_emit_gep(s, ty_i8,
+                V(raw, ty_ptr), raw_offset, 1);
+            int64_t len = 0;
+            if (fixed_string_scalar_member(member, len)) {
+                uint32_t desc = lr_emit_load(s, ty_str_desc,
+                    V(storage_field, ty_ptr));
+                uint32_t fld0 = 0;
+                uint32_t data = lr_emit_extractvalue(s, ty_ptr,
+                    V(desc, ty_str_desc), &fld0, 1);
+                if (raw_to_storage) {
+                    emit_memcpy_bytes(data, raw_field, (uint64_t)len);
+                } else {
+                    emit_memcpy_bytes(raw_field, data, (uint64_t)len);
+                }
+                raw_off += (uint64_t)len;
+            } else {
+                uint64_t nbytes = storage_size_for_variable(member);
+                emit_memcpy_bytes(raw_to_storage ? storage_field : raw_field,
+                    raw_to_storage ? raw_field : storage_field, nbytes);
+                raw_off += nbytes;
+            }
+            storage_off += storage_size_for_variable(member);
+        }
+    }
+
     bool is_bindc_cchar_array_formal(ASR::Variable_t *formal) {
         ASR::ttype_t *type =
             ASRUtils::type_get_past_allocatable_pointer(formal->m_type);
@@ -11347,7 +11425,8 @@ public:
     bool prepare_bindc_cfi_array_arg(ASR::expr_t *actual,
             ASR::Variable_t *formal, std::vector<lr_operand_desc_t> &args,
             std::vector<lr_type_t *> &params,
-            std::vector<BindCCharArrayArg> &scratch) {
+            std::vector<BindCCharArrayArg> &scratch,
+            std::vector<BindCStructCfiArg> &struct_scratch) {
         ASR::ttype_t *formal_type =
             ASRUtils::type_get_past_allocatable_pointer(formal->m_type);
         if (!ASR::is_a<ASR::Array_t>(*formal_type)) return false;
@@ -11363,7 +11442,40 @@ public:
         ASR::ttype_t *actual_type = ASRUtils::expr_type(actual);
         ASR::ttype_t *actual_naked =
             ASRUtils::type_get_past_allocatable_pointer(actual_type);
-        if (!ASR::is_a<ASR::Array_t>(*actual_naked)) return false;
+        if (!ASR::is_a<ASR::Array_t>(*actual_naked)) {
+            if (formal_array->m_physical_type !=
+                    ASR::array_physical_typeType::AssumedRankArray) {
+                return false;
+            }
+            bool was_target = is_target;
+            is_target = true;
+            visit_expr(*actual);
+            is_target = was_target;
+            uint32_t base = tmp;
+            ASR::Struct_t *st = struct_symbol_for_concrete_expr(actual);
+            bool uses_raw_chars = false;
+            uint64_t elem_bytes = st
+                ? bindc_raw_struct_size(st, &uses_raw_chars)
+                : (uint64_t)element_byte_size(actual_naked);
+            if (st && uses_raw_chars) {
+                uint32_t raw = emit_storage_alloca_nbytes(elem_bytes);
+                emit_bindc_raw_struct_copy(base, raw, st, false);
+                struct_scratch.push_back(
+                    {base, raw, st, formal->m_intent != ASR::intentType::In});
+                base = raw;
+            }
+            uint32_t cfi = emit_storage_alloca_nbytes(24);
+            desc_store_base(cfi, base);
+            desc_store_i64(cfi, 8, emit_i64_const((int64_t)elem_bytes));
+            store_i32_at(cfi, 16, 20260322);
+            store_i8_at(cfi, 20, 0);
+            store_i8_at(cfi, 21, cfi_type_code(actual_naked));
+            store_i8_at(cfi, 22, cfi_attribute_code(formal->m_type));
+            store_i8_at(cfi, 23, 0);
+            args.push_back(V(cfi, ty_ptr));
+            params.push_back(ty_ptr);
+            return true;
+        }
         ASR::Array_t *actual_array =
             ASR::down_cast<ASR::Array_t>(actual_naked);
         int n_dims = (int)actual_array->n_dims;
@@ -11693,6 +11805,15 @@ public:
         }
     }
 
+    void finish_bindc_struct_cfi_args(
+            std::vector<BindCStructCfiArg> &scratch) {
+        for (BindCStructCfiArg &arg : scratch) {
+            if (arg.writeback) {
+                emit_bindc_raw_struct_copy(arg.storage, arg.raw, arg.st, true);
+            }
+        }
+    }
+
     void visit_SubroutineCall(const ASR::SubroutineCall_t &x) {
         ASR::Function_t *fn = resolve_to_function(x.m_name);
         ASR::symbol_t *raw =
@@ -11843,6 +11964,7 @@ public:
                 std::vector<lr_operand_desc_t> cargs;
                 std::vector<lr_type_t *> params;
                 std::vector<BindCCharArrayArg> scratch;
+                std::vector<BindCStructCfiArg> struct_scratch;
                 for (size_t i = 0; i < x.n_args; i++) {
                     ASR::expr_t *actual = x.m_args[i].m_value;
                     if (!actual) {
@@ -11867,7 +11989,7 @@ public:
                         continue;
                     }
                     if (prepare_bindc_cfi_array_arg(actual, formal,
-                            cargs, params, scratch)) {
+                            cargs, params, scratch, struct_scratch)) {
                         continue;
                     }
                     if (prepare_bindc_cfi_scalar_arg(actual, formal,
@@ -11901,6 +12023,7 @@ public:
                     params.size(), false);
                 emit_call_void(cname.c_str(), cargs.data(), cargs.size());
                 finish_bindc_cchar_array_args(scratch);
+                finish_bindc_struct_cfi_args(struct_scratch);
                 return;
             }
         }
@@ -12134,6 +12257,7 @@ public:
                 std::vector<lr_operand_desc_t> cargs;
                 std::vector<lr_type_t *> params;
                 std::vector<BindCCharArrayArg> scratch;
+                std::vector<BindCStructCfiArg> struct_scratch;
                 for (size_t i = 0; i < x.n_args; i++) {
                     ASR::expr_t *actual = x.m_args[i].m_value;
                     if (!actual) {
@@ -12156,7 +12280,7 @@ public:
                             continue;
                         }
                         if (prepare_bindc_cfi_array_arg(actual, formal,
-                                cargs, params, scratch)) {
+                                cargs, params, scratch, struct_scratch)) {
                             continue;
                         }
                         if (prepare_bindc_cfi_scalar_arg(actual, formal,
@@ -12190,6 +12314,7 @@ public:
                 tmp = emit_call(cname.c_str(), ret, cargs.data(),
                     cargs.size());
                 finish_bindc_cchar_array_args(scratch);
+                finish_bindc_struct_cfi_args(struct_scratch);
                 return;
             }
             if (cname == "_lfortran_get_command_argument_length") {
