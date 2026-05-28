@@ -2481,6 +2481,28 @@ public:
             visit_expr(*v->m_value);
             return;
         }
+        // Derived-type parameter whose address is requested (e.g. a named
+        // constant of a derived type, use-associated from another module
+        // and passed by reference).  A parameter has no runtime storage,
+        // so materialize its compile-time value into a temp and hand back
+        // the address.  Falling through to the extern-global path would
+        // reference an undefined symbol and read zeros.
+        if (is_target && !is_array &&
+                ASR::is_a<ASR::StructType_t>(*vt) &&
+                v->m_storage == ASR::storage_typeType::Parameter &&
+                v->m_value) {
+            uint32_t slot = emit_storage_alloca_for_var(v);
+            if (ASR::is_a<ASR::StructConstant_t>(*v->m_value)) {
+                emit_struct_constant_to_storage(
+                    *ASR::down_cast<ASR::StructConstant_t>(v->m_value), slot);
+            } else if (ASR::is_a<ASR::StructConstructor_t>(*v->m_value)) {
+                emit_struct_constructor_to_storage(
+                    *ASR::down_cast<ASR::StructConstructor_t>(v->m_value),
+                    slot);
+            }
+            tmp = slot;
+            return;
+        }
         std::string gname = module_variable_global_name(
             sym_before_external, v);
         if (gname.empty()) {
