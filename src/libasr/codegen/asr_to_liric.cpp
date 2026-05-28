@@ -4555,7 +4555,9 @@ public:
             is_target = true;
             visit_expr(*x.m_value);
             uint32_t src = tmp;
-            if (expr_is_allocatable_struct(x.m_value)) {
+            if (is_scalar_struct_pointer_target(x.m_value)) {
+                src = lr_emit_load(s, ty_ptr, V(src, ty_ptr));
+            } else if (expr_is_allocatable_struct(x.m_value)) {
                 uint32_t src_raw = lr_emit_load(s, ty_ptr, V(src, ty_ptr));
                 src = class_data_ptr(src_raw);
             }
