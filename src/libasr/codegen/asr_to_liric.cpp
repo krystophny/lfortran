@@ -214,7 +214,7 @@ public:
     // Cached types
     lr_type_t *ty_void, *ty_i1, *ty_i8, *ty_i16, *ty_i32, *ty_i64;
     lr_type_t *ty_f32, *ty_f64, *ty_ptr;
-    lr_type_t *ty_c32, *ty_c64;
+    lr_type_t *ty_c32, *ty_c64, *ty_vc32, *ty_vc64;
     lr_type_t *ty_str_desc;     // Fortran string descriptor: {i8*, i64}
     lr_type_t *ty_list_desc;    // list descriptor: {data*, len, cap}
     lr_type_t *ty_dict_desc;    // dict descriptor: {keys*, values*, len, cap}
@@ -238,10 +238,12 @@ public:
         {
             lr_type_t *fields[2] = {ty_f32, ty_f32};
             ty_c32 = lr_type_struct_s(s, fields, 2, false);
+            ty_vc32 = lr_type_vector_s(s, ty_f32, 2);
         }
         {
             lr_type_t *fields[2] = {ty_f64, ty_f64};
             ty_c64 = lr_type_struct_s(s, fields, 2, false);
+            ty_vc64 = lr_type_vector_s(s, ty_f64, 2);
         }
         // String descriptor mirrors the LLVM backend's character_type:
         // a 16-byte struct {data_ptr, length} passed by pointer at the
@@ -273,6 +275,16 @@ public:
             return 4;
         }
         return kind;
+    }
+
+    bool is_cchar_string_type(ASR::ttype_t *t) {
+        t = ASRUtils::type_get_past_allocatable_pointer(t);
+        t = ASRUtils::type_get_past_array(t);
+        if (!ASR::is_a<ASR::String_t>(*t)) {
+            return false;
+        }
+        return ASR::down_cast<ASR::String_t>(t)->m_physical_type ==
+            ASR::string_physical_typeType::CChar;
     }
 
     // --- Type mapping: ASR type -> liric type ---
@@ -332,7 +344,7 @@ public:
                 return (kind == 4) ? ty_c32 : ty_c64;
             }
             case ASR::ttypeType::String:
-                return ty_str_desc;
+                return is_cchar_string_type(t) ? ty_i8 : ty_str_desc;
             case ASR::ttypeType::Set:
                 return ty_list_desc;
             case ASR::ttypeType::List:
@@ -406,6 +418,19 @@ public:
             }
         }
         return get_type(t);
+    }
+
+    bool is_bindc_char_scalar_variable(ASR::Variable_t *v) {
+        if (v->m_abi != ASR::abiType::BindC) {
+            return false;
+        }
+        ASR::ttype_t *t =
+            ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+        if (ASR::is_a<ASR::Array_t>(*t)) {
+            return false;
+        }
+        t = ASRUtils::type_get_past_array(t);
+        return ASR::is_a<ASR::String_t>(*t);
     }
 
     // --- Cached array descriptor type per rank ---
@@ -1196,8 +1221,9 @@ public:
             std::string gname = module_variable_global_name(
                 item.second, v);
             if (bindc_variable_has_no_initializer(v)) {
-                lr_session_global_extern(s, gname.c_str(),
-                    lr_type_array_s(s, ty_i8, nbytes));
+                lr_session_global_weak(s, gname.c_str(),
+                    lr_type_array_s(s, ty_i8, nbytes),
+                    false, init_bytes.data(), nbytes);
             } else {
                 lr_session_global(s, gname.c_str(),
                     lr_type_array_s(s, ty_i8, nbytes),
@@ -1264,8 +1290,43 @@ public:
     }
 
     bool return_type_uses_sret(lr_type_t *t) {
+        if (t && t->kind == LR_TYPE_VECTOR) return false;
         return t != ty_void && lr_type_width(s, t) == 0 &&
             t != ty_f32 && t != ty_f64;
+    }
+
+    bool is_scalar_complex_type(ASR::ttype_t *t) {
+        t = ASRUtils::type_get_past_allocatable_pointer(t);
+        return ASR::is_a<ASR::Complex_t>(*t);
+    }
+
+    lr_type_t *complex_abi_vector_type(ASR::ttype_t *t) {
+        int kind = normalized_real_kind(t);
+        return kind == 4 ? ty_vc32 : ty_vc64;
+    }
+
+    uint32_t complex_vector_to_struct(uint32_t value, ASR::ttype_t *type) {
+        lr_type_t *vt = complex_abi_vector_type(type);
+        lr_type_t *ct = get_type(type);
+        int kind = normalized_real_kind(type);
+        lr_type_t *ft = kind == 4 ? ty_f32 : ty_f64;
+        uint32_t idx0 = 0, idx1 = 1;
+        uint32_t re = lr_emit_extractvalue(s, ft, V(value, vt), &idx0, 1);
+        uint32_t im = lr_emit_extractvalue(s, ft, V(value, vt), &idx1, 1);
+        return emit_complex_value(ct, ft, re, im);
+    }
+
+    uint32_t complex_struct_to_vector(uint32_t value, ASR::ttype_t *type) {
+        lr_type_t *vt = complex_abi_vector_type(type);
+        lr_type_t *ct = get_type(type);
+        int kind = normalized_real_kind(type);
+        lr_type_t *ft = kind == 4 ? ty_f32 : ty_f64;
+        uint32_t idx0 = 0, idx1 = 1;
+        uint32_t re = lr_emit_extractvalue(s, ft, V(value, ct), &idx0, 1);
+        uint32_t im = lr_emit_extractvalue(s, ft, V(value, ct), &idx1, 1);
+        uint32_t v0 = lr_emit_insertvalue(s, vt,
+            LR_UNDEF(vt), V(re, ft), &idx0, 1);
+        return lr_emit_insertvalue(s, vt, V(v0, vt), V(im, ft), &idx1, 1);
     }
 
     std::string construct_key(char *name) {
@@ -1371,7 +1432,7 @@ public:
         }
         type = ASRUtils::type_get_past_array(type);
         if (ASR::is_a<ASR::String_t>(*type)) {
-            return 16;
+            return is_cchar_string_type(type) ? 1 : 16;
         }
         if (ASR::is_a<ASR::List_t>(*type)) {
             return 24;
@@ -1633,6 +1694,9 @@ public:
     }
 
     uint64_t storage_size_for_variable(ASR::Variable_t *v) {
+        if (is_bindc_char_scalar_variable(v)) {
+            return 1;
+        }
         ASR::ttype_t *upoly_core =
             ASRUtils::type_get_past_allocatable_pointer(v->m_type);
         if (ASRUtils::is_unlimited_polymorphic_type(v->m_type) &&
@@ -2189,8 +2253,15 @@ public:
 
         lr_type_t *ret_type = ty_void;
         bool uses_sret = false;
+        bool bindc_complex_return = false;
         if (x.m_return_var) {
-            ret_type = get_type(ASRUtils::expr_type(x.m_return_var));
+            ASR::ttype_t *return_asr_type = ASRUtils::expr_type(
+                x.m_return_var);
+            bindc_complex_return = ftype->m_abi == ASR::abiType::BindC &&
+                is_scalar_complex_type(return_asr_type);
+            ret_type = bindc_complex_return
+                ? complex_abi_vector_type(return_asr_type)
+                : get_type(return_asr_type);
             uses_sret = return_type_uses_sret(ret_type);
         }
 
@@ -2218,7 +2289,10 @@ public:
                     v->m_type);
                 bool is_array_ty = ASR::is_a<ASR::Array_t>(*vt);
                 if (bindc || !is_array_ty) {
-                    param_types.push_back(get_type(v->m_type));
+                    param_types.push_back(bindc &&
+                            is_scalar_complex_type(v->m_type)
+                        ? complex_abi_vector_type(v->m_type)
+                        : get_type(v->m_type));
                 } else {
                     param_types.push_back(ty_ptr);
                 }
@@ -2271,11 +2345,19 @@ public:
             if (v->m_value_attr && (bindc || !v_is_array_ty)) {
                 lr_type_t *pt = get_type(v->m_type);
                 uint32_t slot = emit_storage_alloca_for_var(v);
-                lr_emit_store(s, V(p, pt), V(slot, ty_ptr));
+                if (bindc && is_scalar_complex_type(v->m_type)) {
+                    uint32_t value = complex_vector_to_struct(p, v->m_type);
+                    lr_emit_store(s, V(value, pt), V(slot, ty_ptr));
+                } else {
+                    lr_emit_store(s, V(p, pt), V(slot, ty_ptr));
+                }
                 lr_symtab[h] = slot;
             } else if (ftype->m_abi == ASR::abiType::BindC &&
                     bindc_formal_is_cfi_array(v)) {
-                uint32_t internal = emit_internal_desc_from_cfi(p, v);
+                uint32_t internal = v->m_presence ==
+                    ASR::presenceType::Optional
+                    ? emit_optional_internal_desc_from_cfi(p, v)
+                    : emit_internal_desc_from_cfi(p, v);
                 lr_symtab[h] = internal;
                 if (v->m_intent != ASR::intentType::In) {
                     cfi_array_writebacks.push_back({p, internal, v});
@@ -2409,7 +2491,10 @@ public:
                 // per IEEE 754 and breaks ieee_copy_sign / sign(x, -0.0).
                 val = lr_emit_fsub(s, rt, V(val, rt), F(0.0, rt));
             }
-            if (uses_sret) {
+            if (bindc_complex_return) {
+                uint32_t abi_val = complex_struct_to_vector(val, v->m_type);
+                lr_emit_ret(s, V(abi_val, ret_type));
+            } else if (uses_sret) {
                 uint32_t out = lr_session_param(s, 0);
                 lr_emit_store(s, V(val, rt), V(out, ty_ptr));
                 lr_emit_ret_void(s);
@@ -2575,6 +2660,11 @@ public:
         auto local_it = lr_symtab.find(h);
         if (local_it != lr_symtab.end()) {
             uint32_t slot = local_it->second;
+            if (is_bindc_char_scalar_variable(v)) {
+                tmp = is_target ? slot :
+                    lr_emit_load(s, ty_i8, V(slot, ty_ptr));
+                return;
+            }
             if (is_array && runtime_pointer_arrays.count(h)) {
                 tmp = lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
                 return;
@@ -2602,6 +2692,14 @@ public:
         auto global_it = lr_globals.find(h);
         if (global_it != lr_globals.end()) {
             uint32_t sym = global_it->second;
+            if (is_bindc_char_scalar_variable(v)) {
+                lr_operand_desc_t no_off[1] = {I(0, ty_i64)};
+                uint32_t slot = lr_emit_gep(s, ty_i8,
+                    LR_GLOBAL(sym, ty_ptr), no_off, 1);
+                tmp = is_target ? slot :
+                    lr_emit_load(s, ty_i8, V(slot, ty_ptr));
+                return;
+            }
             if (is_array && runtime_pointer_arrays.count(h)) {
                 tmp = lr_emit_load(s, ty_ptr, LR_GLOBAL(sym, ty_ptr));
                 return;
@@ -2662,10 +2760,8 @@ public:
             sym_before_external, v);
         if (gname.empty()) {
             // Neither local nor module global - declare a placeholder
-            // with a per-Variable name.  We don't have weak linkage in
-            // the direct backend, so per-.o uniqueness is the simplest
-            // way to avoid multiple-definition link errors for pass
-            // generated helper globals.
+            // with a per-Variable name, so pass-generated helper globals do
+            // not collide across objects.
             gname = std::string("_lr_var_") + std::to_string(h) + "_"
                 + v->m_name;
         }
@@ -2675,15 +2771,20 @@ public:
         // object references that definition instead of emitting a second,
         // zero-initialised definition that can win the link and read 0.
         if (!module_variable_global_name(sym_before_external, v).empty() &&
-                (var_defined_in_loaded_module(v) ||
-                 bindc_variable_has_no_initializer(v))) {
+                var_defined_in_loaded_module(v)) {
             lr_session_global_extern(s, gname.c_str(),
                 lr_type_array_s(s, ty_i8, nbytes));
         } else {
             std::vector<uint8_t> zeros(nbytes, 0);
-            lr_session_global(s, gname.c_str(),
-                lr_type_array_s(s, ty_i8, nbytes),
-                false, zeros.data(), nbytes);
+            if (bindc_variable_has_no_initializer(v)) {
+                lr_session_global_weak(s, gname.c_str(),
+                    lr_type_array_s(s, ty_i8, nbytes),
+                    false, zeros.data(), nbytes);
+            } else {
+                lr_session_global(s, gname.c_str(),
+                    lr_type_array_s(s, ty_i8, nbytes),
+                    false, zeros.data(), nbytes);
+            }
         }
         uint32_t sym = lr_session_intern(s, gname.c_str());
         lr_globals[h] = sym;
@@ -4299,6 +4400,15 @@ public:
         ASR::ttype_t *target_type = ASRUtils::expr_type(x.m_target);
         target_type = ASRUtils::type_get_past_allocatable_pointer(target_type);
         target_type = ASRUtils::type_get_past_array(target_type);
+        if (!target_is_array && expr_is_bindc_char_scalar(x.m_target)) {
+            uint32_t rhs = emit_scalar_char_value(x.m_value);
+            bool was_target = is_target;
+            is_target = true;
+            visit_expr(*x.m_target);
+            is_target = was_target;
+            lr_emit_store(s, V(rhs, ty_i8), V(tmp, ty_ptr));
+            return;
+        }
         if (!target_is_array && ASR::is_a<ASR::String_t>(*target_type)) {
             if (x.m_move_allocation) {
                 bool was_target = is_target;
@@ -6517,11 +6627,22 @@ public:
         }
         visit_expr(*x.m_cptr);
         uint32_t cptr = tmp;
-        bool was_target = is_target;
-        is_target = true;
-        visit_expr(*x.m_ptr);
-        is_target = was_target;
-        uint32_t slot = tmp;
+        uint32_t slot = 0;
+        if (ASR::is_a<ASR::Var_t>(*x.m_ptr)) {
+            ASR::symbol_t *psym = ASRUtils::symbol_get_past_external(
+                ASR::down_cast<ASR::Var_t>(x.m_ptr)->m_v);
+            if (ASR::is_a<ASR::Variable_t>(*psym)) {
+                slot = emit_variable_address(ASR::down_cast<ASR::Variable_t>(
+                    psym));
+            }
+        }
+        if (!slot) {
+            bool was_target = is_target;
+            is_target = true;
+            visit_expr(*x.m_ptr);
+            is_target = was_target;
+            slot = tmp;
+        }
         lr_emit_store(s, V(cptr, ty_ptr), V(slot, ty_ptr));
         // A scalar intrinsic pointer (EQUIVALENCE / c_f_pointer): the slot now
         // holds an indirection address, so later reads/writes through the var
@@ -6581,8 +6702,9 @@ public:
         visit_expr(*x.m_arg);
         if (x.m_new == ASR::string_physical_typeType::CChar) {
             uint32_t fld0 = 0;
-            tmp = lr_emit_extractvalue(s, ty_ptr,
+            uint32_t data = lr_emit_extractvalue(s, ty_ptr,
                 V(tmp, ty_str_desc), &fld0, 1);
+            tmp = lr_emit_load(s, ty_i8, V(data, ty_ptr));
         }
     }
 
@@ -6598,6 +6720,82 @@ public:
             return expr_is_cchar_string_cast(cast->m_arg);
         }
         return false;
+    }
+
+    uint32_t emit_cchar_data_ptr(ASR::expr_t *expr) {
+        if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*expr)) {
+            return emit_cchar_data_ptr(
+                ASR::down_cast<ASR::ArrayPhysicalCast_t>(expr)->m_arg);
+        }
+        if (ASR::is_a<ASR::StringPhysicalCast_t>(*expr)) {
+            ASR::StringPhysicalCast_t *cast =
+                ASR::down_cast<ASR::StringPhysicalCast_t>(expr);
+            if (cast->m_new == ASR::string_physical_typeType::CChar) {
+                visit_expr(*cast->m_arg);
+                uint32_t fld0 = 0;
+                return lr_emit_extractvalue(s, ty_ptr,
+                    V(tmp, ty_str_desc), &fld0, 1);
+            }
+        }
+        visit_expr(*expr);
+        return tmp;
+    }
+
+    ASR::expr_t *cchar_cast_source(ASR::expr_t *expr) {
+        if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*expr)) {
+            return cchar_cast_source(
+                ASR::down_cast<ASR::ArrayPhysicalCast_t>(expr)->m_arg);
+        }
+        if (ASR::is_a<ASR::StringPhysicalCast_t>(*expr)) {
+            ASR::StringPhysicalCast_t *cast =
+                ASR::down_cast<ASR::StringPhysicalCast_t>(expr);
+            if (cast->m_new == ASR::string_physical_typeType::CChar) {
+                return cast->m_arg;
+            }
+        }
+        return expr;
+    }
+
+    bool expr_is_bindc_char_scalar(ASR::expr_t *expr) {
+        ASR::Variable_t *v = var_from_expr(expr);
+        return v && is_bindc_char_scalar_variable(v);
+    }
+
+    bool expr_is_scalar_cchar_value(ASR::expr_t *expr) {
+        if (expr_is_bindc_char_scalar(expr)) {
+            return true;
+        }
+        if (is_cchar_string_type(ASRUtils::expr_type(expr))) {
+            return true;
+        }
+        if (ASR::is_a<ASR::StringPhysicalCast_t>(*expr)) {
+            ASR::StringPhysicalCast_t *cast =
+                ASR::down_cast<ASR::StringPhysicalCast_t>(expr);
+            return cast->m_new == ASR::string_physical_typeType::CChar;
+        }
+        return false;
+    }
+
+    uint32_t emit_scalar_char_value(ASR::expr_t *expr) {
+        if (expr_is_bindc_char_scalar(expr)) {
+            bool was_target = is_target;
+            is_target = true;
+            visit_expr(*expr);
+            is_target = was_target;
+            return lr_emit_load(s, ty_i8, V(tmp, ty_ptr));
+        }
+        if (is_cchar_string_type(ASRUtils::expr_type(expr)) ||
+                (ASR::is_a<ASR::StringPhysicalCast_t>(*expr) &&
+                 ASR::down_cast<ASR::StringPhysicalCast_t>(expr)->m_new ==
+                    ASR::string_physical_typeType::CChar)) {
+            visit_expr(*expr);
+            return tmp;
+        }
+        visit_expr(*expr);
+        uint32_t fld0 = 0;
+        uint32_t data = lr_emit_extractvalue(s, ty_ptr,
+            V(tmp, ty_str_desc), &fld0, 1);
+        return lr_emit_load(s, ty_i8, V(data, ty_ptr));
     }
 
     bool expr_is_storage_reference(ASR::expr_t *expr) {
@@ -6694,6 +6892,15 @@ public:
             return nullptr;
         }
         return ASR::down_cast<ASR::Variable_t>(sym);
+    }
+
+    ASR::Function_t *procedure_pointer_interface(ASR::symbol_t *sym) {
+        sym = ASRUtils::symbol_get_past_external(sym);
+        if (!sym || !ASR::is_a<ASR::Variable_t>(*sym)) {
+            return nullptr;
+        }
+        ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(sym);
+        return resolve_to_function(v->m_type_declaration);
     }
 
     bool formal_is_unlimited_polymorphic(ASR::Function_t *fn, size_t i) {
@@ -9194,7 +9401,7 @@ public:
                 return 2 * (kind > 0 ? (int64_t)kind : 8);
             }
             case ASR::ttypeType::String:
-                return 16;            // descriptor
+                return is_cchar_string_type(t) ? 1 : 16;
             case ASR::ttypeType::Set:
                 return 24;            // descriptor
             case ASR::ttypeType::List:
@@ -12021,23 +12228,35 @@ public:
         }
         ASR::ttype_t *formal_core =
             ASRUtils::type_get_past_allocatable_pointer(formal->m_type);
-        if (ASR::is_a<ASR::String_t>(*formal_core)) return false;
+        bool formal_is_char = ASR::is_a<ASR::String_t>(*formal_core);
 
         ASR::ttype_t *actual_type = ASRUtils::expr_type(actual);
         ASR::ttype_t *actual_core =
             ASRUtils::type_get_past_allocatable_pointer(actual_type);
         if (ASR::is_a<ASR::Array_t>(*actual_core)) return false;
 
-        bool was_target = is_target;
-        is_target = true;
-        visit_expr(*actual);
-        is_target = was_target;
-        uint32_t base = tmp;
+        uint32_t base;
+        uint32_t elem_len;
+        if (formal_is_char) {
+            visit_expr(*cchar_cast_source(actual));
+            uint32_t desc = tmp;
+            uint32_t fld0 = 0, fld1 = 1;
+            base = lr_emit_extractvalue(s, ty_ptr,
+                V(desc, ty_str_desc), &fld0, 1);
+            elem_len = lr_emit_extractvalue(s, ty_i64,
+                V(desc, ty_str_desc), &fld1, 1);
+        } else {
+            bool was_target = is_target;
+            is_target = true;
+            visit_expr(*actual);
+            is_target = was_target;
+            base = tmp;
+            elem_len = emit_i64_const(element_byte_size(actual_core));
+        }
 
         uint32_t cfi = emit_storage_alloca_nbytes(24);
         desc_store_base(cfi, base);
-        desc_store_i64(cfi, 8,
-            emit_i64_const(element_byte_size(actual_core)));
+        desc_store_i64(cfi, 8, elem_len);
         store_i32_at(cfi, 16, 20260322);
         store_i8_at(cfi, 20, 0);
         store_i8_at(cfi, 21, cfi_type_code(actual_core));
@@ -12070,11 +12289,24 @@ public:
         if (!bindc_formal_is_cfi_array(formal, &array)) {
             return cfi;
         }
+        bool assumed_rank = array->m_physical_type ==
+            ASR::array_physical_typeType::AssumedRankArray;
         int n_dims = (int)array->n_dims;
         uint32_t internal = emit_desc_alloca(n_dims);
         desc_store_base(internal, desc_base_addr(cfi));
         desc_store_i64(internal, 8, desc_load_i64(cfi, 8));
-        desc_store_rank(internal, n_dims);
+        if (assumed_rank) {
+            lr_operand_desc_t rank_off[1] = {I(20, ty_i64)};
+            uint32_t cfi_rank_p = lr_emit_gep(s, ty_i8,
+                V(cfi, ty_ptr), rank_off, 1);
+            uint32_t rank_i8 = lr_emit_load(s, ty_i8,
+                V(cfi_rank_p, ty_ptr));
+            uint32_t internal_rank_p = lr_emit_gep(s, ty_i8,
+                V(internal, ty_ptr), rank_off, 1);
+            lr_emit_store(s, V(rank_i8, ty_i8), V(internal_rank_p, ty_ptr));
+        } else {
+            desc_store_rank(internal, n_dims);
+        }
         desc_store_i64(internal, 24, emit_i64_const(0));
         for (int d = 0; d < n_dims; d++) {
             int64_t cfi_off = 24 + DESC_DIM_BYTES * d;
@@ -12087,6 +12319,26 @@ public:
                 desc_load_i64(cfi, cfi_off + DESC_DIM_STRIDE));
         }
         return internal;
+    }
+
+    uint32_t emit_optional_internal_desc_from_cfi(uint32_t cfi,
+            ASR::Variable_t *formal) {
+        uint32_t out_slot = lr_emit_alloca(s, ty_ptr);
+        lr_emit_store(s, LR_NULL(ty_ptr), V(out_slot, ty_ptr));
+        uint32_t is_null = lr_emit_icmp(s, LR_CMP_EQ,
+            V(cfi, ty_ptr), LR_NULL(ty_ptr));
+        lr_error_t err;
+        uint32_t fill_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(is_null, ty_i1), done_bb, fill_bb);
+
+        lr_session_set_block(s, fill_bb, &err);
+        uint32_t internal = emit_internal_desc_from_cfi(cfi, formal);
+        lr_emit_store(s, V(internal, ty_ptr), V(out_slot, ty_ptr));
+        lr_emit_br(s, done_bb);
+
+        lr_session_set_block(s, done_bb, &err);
+        return lr_emit_load(s, ty_ptr, V(out_slot, ty_ptr));
     }
 
     void emit_cfi_writeback_from_internal(uint32_t cfi, uint32_t internal,
@@ -12422,8 +12674,8 @@ public:
                         }
                         cargs.push_back(V(arg_ptr, ty_ptr));
                     } else if (expr_is_cchar_string_cast(actual)) {
-                        visit_expr(*actual);
-                        cargs.push_back(V(tmp, ty_ptr));
+                        cargs.push_back(V(emit_cchar_data_ptr(actual),
+                            ty_ptr));
                     } else {
                         visit_expr(*actual);
                         lr_type_t *at = value_type_for_expr(actual);
@@ -12443,8 +12695,11 @@ public:
             }
         }
 
-        ASR::FunctionType_t *fn_ftype = fn ?
-            ASR::down_cast<ASR::FunctionType_t>(fn->m_function_signature)
+        ASR::Function_t *formal_fn = fn ? fn :
+            (is_proc_ptr ? procedure_pointer_interface(raw) : nullptr);
+        ASR::FunctionType_t *fn_ftype = formal_fn ?
+            ASR::down_cast<ASR::FunctionType_t>(
+                formal_fn->m_function_signature)
             : nullptr;
         bool fn_is_bindc = fn_ftype &&
             fn_ftype->m_abi == ASR::abiType::BindC;
@@ -12463,8 +12718,9 @@ public:
         for (size_t i = 0; i < x.n_args; i++) {
             if (x.m_args[i].m_value) {
                 ASR::expr_t *arg = x.m_args[i].m_value;
-                ASR::Variable_t *formal_v = formal_arg_var(fn, i);
-                if (formal_v && formal_v->m_value_attr && !fn_is_bindc) {
+                ASR::Variable_t *formal_v = formal_arg_var(formal_fn, i);
+                if (formal_v && formal_v->m_value_attr &&
+                        (!fn_is_bindc || is_proc_ptr)) {
                     visit_expr(*arg);
                     lr_type_t *vt = get_type(formal_v->m_type);
                     args.push_back(V(tmp, vt));
@@ -12547,8 +12803,7 @@ public:
                     }
                     args.push_back(V(arg_ptr, ty_ptr));
                 } else if (expr_is_cchar_string_cast(arg)) {
-                    visit_expr(*arg);
-                    args.push_back(V(tmp, ty_ptr));
+                    args.push_back(V(emit_cchar_data_ptr(arg), ty_ptr));
                 } else {
                     visit_expr(*arg);
                     lr_type_t *at = value_type_for_expr(arg);
@@ -12791,8 +13046,11 @@ public:
             }
         }
 
-        ASR::FunctionType_t *fn_ftype = fn ?
-            ASR::down_cast<ASR::FunctionType_t>(fn->m_function_signature)
+        ASR::Function_t *formal_fn = fn ? fn :
+            (is_proc_ptr ? procedure_pointer_interface(raw) : nullptr);
+        ASR::FunctionType_t *fn_ftype = formal_fn ?
+            ASR::down_cast<ASR::FunctionType_t>(
+                formal_fn->m_function_signature)
             : nullptr;
         bool fn_is_bindc = fn_ftype &&
             fn_ftype->m_abi == ASR::abiType::BindC;
@@ -12800,8 +13058,9 @@ public:
         for (size_t i = 0; i < x.n_args; i++) {
             if (x.m_args[i].m_value) {
                 ASR::expr_t *arg = x.m_args[i].m_value;
-                ASR::Variable_t *formal_v = formal_arg_var(fn, i);
-                if (formal_v && formal_v->m_value_attr && !fn_is_bindc) {
+                ASR::Variable_t *formal_v = formal_arg_var(formal_fn, i);
+                if (formal_v && formal_v->m_value_attr &&
+                        (!fn_is_bindc || is_proc_ptr)) {
                     visit_expr(*arg);
                     lr_type_t *vt = get_type(formal_v->m_type);
                     args.push_back(V(tmp, vt));
@@ -16475,7 +16734,11 @@ public:
                 ASRUtils::type_get_past_allocatable_pointer(
                     ASRUtils::expr_type(x.m_tgt));
             uint32_t t;
-            if (ASR::is_a<ASR::Array_t>(*tgt_core)) {
+            if (ASR::is_a<ASR::CPtr_t>(*ptr_core) &&
+                    ASR::is_a<ASR::CPtr_t>(*tgt_core)) {
+                visit_expr(*x.m_tgt);
+                t = tmp;
+            } else if (ASR::is_a<ASR::Array_t>(*tgt_core)) {
                 t = array_assoc_base(x.m_tgt);
             } else if (is_scalar_intrinsic_pointer_target(x.m_tgt)) {
                 t = emit_scalar_intrinsic_pointer_value(x.m_tgt);
@@ -19183,11 +19446,9 @@ found_offset:
 
     // --- ArrayRank ---
     //
-    // ASR records `n_dims` at the type level, including for descriptor
-    // arrays.  Lower as a compile-time integer constant of the requested
-    // kind.  This matches what asr_to_llvm does indirectly via
-    // `arr_descr->get_rank`, which for our descriptor layout would also
-    // return the static n_dims.
+    // ASR records ordinary descriptor ranks at the type level.  Assumed-rank
+    // descriptors carry the active rank in the CFI header and must be read
+    // at runtime.
 
     void visit_ArrayRank(const ASR::ArrayRank_t &x) {
         if (x.m_value) { visit_expr(*x.m_value); return; }
@@ -19195,7 +19456,21 @@ found_offset:
         vt = ASRUtils::type_get_past_allocatable_pointer(vt);
         int64_t rank = 0;
         if (ASR::is_a<ASR::Array_t>(*vt)) {
-            rank = (int64_t) ASR::down_cast<ASR::Array_t>(vt)->n_dims;
+            ASR::Array_t *arr = ASR::down_cast<ASR::Array_t>(vt);
+            lr_type_t *t = get_type(x.m_type);
+            if (arr->m_physical_type ==
+                    ASR::array_physical_typeType::AssumedRankArray) {
+                uint32_t desc = desc_ptr_of(x.m_v);
+                lr_operand_desc_t rank_off[1] = {I(20, ty_i64)};
+                uint32_t rank_p = lr_emit_gep(s, ty_i8,
+                    V(desc, ty_ptr), rank_off, 1);
+                uint32_t rank_i8 = lr_emit_load(s, ty_i8, V(rank_p, ty_ptr));
+                uint32_t rank_i64 = lr_emit_zext(s, ty_i64,
+                    V(rank_i8, ty_i8));
+                tmp = cast_int_value(rank_i64, ty_i64, t, true);
+                return;
+            }
+            rank = (int64_t) arr->n_dims;
         }
         lr_type_t *t = get_type(x.m_type);
         tmp = lr_emit_add(s, t, I(rank, t), I(0, t));
@@ -20232,6 +20507,18 @@ found_offset:
         }
 
         if (emit_array_string_compare(x, pred)) {
+            return;
+        }
+
+        if (expr_is_scalar_cchar_value(x.m_left) ||
+                expr_is_scalar_cchar_value(x.m_right)) {
+            uint32_t l_ch = emit_scalar_char_value(x.m_left);
+            uint32_t r_ch = emit_scalar_char_value(x.m_right);
+            uint32_t l_i32 = lr_emit_zext(s, ty_i32, V(l_ch, ty_i8));
+            uint32_t r_i32 = lr_emit_zext(s, ty_i32, V(r_ch, ty_i8));
+            uint32_t cmp = lr_emit_sub(s, ty_i32,
+                V(l_i32, ty_i32), V(r_i32, ty_i32));
+            tmp = lr_emit_icmp(s, pred, V(cmp, ty_i32), I(0, ty_i32));
             return;
         }
 
