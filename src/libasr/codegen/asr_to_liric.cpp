@@ -14714,6 +14714,9 @@ public:
             }
             if (x.m_rec) {
                 emit_seek_record(x.m_rec, external_unit, external_iostat);
+            } else if (x.m_pos) {
+                emit_seek_stream_pos(x.m_pos, external_unit,
+                    external_iostat);
             }
             file_write_runtime_raw(external_unit, external_iostat, chunks);
             return;
@@ -14738,6 +14741,9 @@ public:
                 std::tie(end_data, end_len) = file_write_end_data_len(x.m_end);
                 if (x.m_rec) {
                     emit_seek_record(x.m_rec, external_unit, external_iostat);
+                } else if (x.m_pos) {
+                    emit_seek_stream_pos(x.m_pos, external_unit,
+                        external_iostat);
                 }
                 file_write_runtime_record(external_unit, external_iostat,
                     scratch_io_data_ptr(),
@@ -14808,6 +14814,9 @@ public:
             std::tie(end_data, end_len) = file_write_end_data_len(x.m_end);
             if (x.m_rec) {
                 emit_seek_record(x.m_rec, external_unit, external_iostat);
+            } else if (x.m_pos) {
+                emit_seek_stream_pos(x.m_pos, external_unit,
+                    external_iostat);
             }
             file_write_runtime_record(external_unit, external_iostat,
                 scratch_io_data_ptr(),
@@ -15196,6 +15205,23 @@ public:
             iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr)
         };
         emit_call_void("_lfortran_seek_record", args, 3);
+    }
+
+    // Fortran `write(u, pos=N) ...` / `read(u, pos=N) ...` for stream-
+    // access files seeks to byte N (1-based) before the transfer.  The
+    // runtime helper handles the 1-based -> 0-based conversion.
+    void emit_seek_stream_pos(ASR::expr_t *pos_expr, uint32_t unit,
+            uint32_t iostat) {
+        visit_expr(*pos_expr);
+        lr_type_t *pt = value_type_for_expr(pos_expr);
+        uint32_t pos_v = cast_int_value(tmp, pt, ty_i64);
+        lr_type_t *p[] = {ty_i32, ty_i64, ty_ptr};
+        declare_func("_lfortran_file_seek", ty_void, p, 3, false);
+        lr_operand_desc_t args[] = {
+            V(unit, ty_i32), V(pos_v, ty_i64),
+            iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr)
+        };
+        emit_call_void("_lfortran_file_seek", args, 3);
     }
 
     uint32_t emit_target_ptr(ASR::expr_t *expr) {
@@ -15688,6 +15714,8 @@ public:
                 uint32_t iostat = emit_iostat_ptr(x.m_iostat);
                 if (x.m_rec) {
                     emit_seek_record(x.m_rec, unit, iostat);
+                } else if (x.m_pos) {
+                    emit_seek_stream_pos(x.m_pos, unit, iostat);
                 }
                 if (emit_external_file_read_values(x, unit, iostat)) {
                     return;
