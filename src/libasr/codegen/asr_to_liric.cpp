@@ -1434,13 +1434,9 @@ public:
             ASR::is_a<ASR::StructType_t>(*core);
     }
 
-    // A scalar intrinsic pointer Var: integer/real/logical/complex pointer
-    // (not array, struct, class, or character).  Used for pointer-association
-    // and ASSOCIATE-name aliasing, where the slot holds the target address and
-    // reads/writes dereference it (the indirect_scalar_pointers convention).
-    bool is_scalar_intrinsic_pointer_var(ASR::expr_t *expr) {
-        if (!ASR::is_a<ASR::Var_t>(*expr)) return false;
-        ASR::ttype_t *type = ASRUtils::expr_type(expr);
+    // Scalar integer/real/logical/complex pointer, excluding arrays, structs,
+    // classes, and characters.
+    bool is_scalar_intrinsic_pointer_type(ASR::ttype_t *type) {
         if (!ASRUtils::is_pointer(type) || ASRUtils::is_allocatable(type)) {
             return false;
         }
@@ -1451,6 +1447,30 @@ public:
             ASR::is_a<ASR::Real_t>(*core) ||
             ASR::is_a<ASR::Logical_t>(*core) ||
             ASR::is_a<ASR::Complex_t>(*core);
+    }
+
+    bool is_scalar_intrinsic_pointer_var(ASR::expr_t *expr) {
+        if (!ASR::is_a<ASR::Var_t>(*expr)) return false;
+        return is_scalar_intrinsic_pointer_type(ASRUtils::expr_type(expr));
+    }
+
+    bool is_scalar_intrinsic_pointer_target(ASR::expr_t *expr) {
+        if (!ASR::is_a<ASR::Var_t>(*expr) &&
+                !ASR::is_a<ASR::StructInstanceMember_t>(*expr)) {
+            return false;
+        }
+        return is_scalar_intrinsic_pointer_type(ASRUtils::expr_type(expr));
+    }
+
+    uint32_t emit_scalar_intrinsic_pointer_value(ASR::expr_t *expr) {
+        bool was_target = is_target;
+        is_target = true;
+        visit_expr(*expr);
+        is_target = was_target;
+        if (expr_is_indirect_scalar_pointer(expr)) {
+            return tmp;
+        }
+        return lr_emit_load(s, ty_ptr, V(tmp, ty_ptr));
     }
 
     // Accepts a struct-pointer Var OR component as a pointer-association
@@ -3495,6 +3515,39 @@ public:
         lr_session_set_block(s, done_bb, &err);
     }
 
+    ASR::Function_t *struct_assignment_proc(ASR::Struct_t *st) {
+        if (!st || !st->m_symtab) return nullptr;
+        ASR::symbol_t *sym = st->m_symtab->resolve_symbol("~assign");
+        if (!sym) return nullptr;
+        sym = ASRUtils::symbol_get_past_external(sym);
+        if (!ASR::is_a<ASR::CustomOperator_t>(*sym)) return nullptr;
+        ASR::CustomOperator_t *op = ASR::down_cast<ASR::CustomOperator_t>(sym);
+        for (size_t i = 0; i < op->n_procs; i++) {
+            ASR::symbol_t *proc = ASRUtils::symbol_get_past_external(
+                op->m_procs[i]);
+            if (ASR::is_a<ASR::StructMethodDeclaration_t>(*proc)) {
+                proc = ASRUtils::symbol_get_past_external(
+                    ASR::down_cast<ASR::StructMethodDeclaration_t>(
+                        proc)->m_proc);
+            }
+            if (ASR::is_a<ASR::Function_t>(*proc)) {
+                ASR::Function_t *fn = ASR::down_cast<ASR::Function_t>(proc);
+                if (fn->n_args == 2) return fn;
+            }
+        }
+        return nullptr;
+    }
+
+    bool emit_struct_defined_assignment(uint32_t dst, uint32_t src,
+                                        ASR::Struct_t *st) {
+        ASR::Function_t *fn = struct_assignment_proc(st);
+        if (!fn) return false;
+        uint32_t sym = lr_session_intern(s, callable_name(fn).c_str());
+        lr_operand_desc_t args[2] = {V(dst, ty_ptr), V(src, ty_ptr)};
+        lr_emit_call_void(s, LR_GLOBAL(sym, ty_ptr), args, 2);
+        return true;
+    }
+
     void emit_struct_storage_assignment(uint32_t dst, uint32_t src,
                                         ASR::Struct_t *st, int depth = 0) {
         if (!st) {
@@ -3555,8 +3608,11 @@ public:
                         !ASRUtils::is_pointer(member_type)) {
                     ASR::Struct_t *member_st = struct_symbol_from_type_decl(
                         member->m_type_declaration);
-                    emit_struct_storage_assignment(
-                        dst_field, src_field, member_st, depth + 1);
+                    if (!emit_struct_defined_assignment(
+                            dst_field, src_field, member_st)) {
+                        emit_struct_storage_assignment(
+                            dst_field, src_field, member_st, depth + 1);
+                    }
                 } else {
                     emit_memcpy_bytes(dst_field, src_field,
                         storage_size_for_variable(member));
@@ -4554,6 +4610,10 @@ public:
         visit_expr(*x.m_target);
         is_target = false;
         uint32_t dst = tmp;
+        if (is_scalar_intrinsic_pointer_target(x.m_target) &&
+                !expr_is_indirect_scalar_pointer(x.m_target)) {
+            dst = lr_emit_load(s, ty_ptr, V(dst, ty_ptr));
+        }
         if (target_is_dummy_argument(x.m_target)) {
             uint32_t store_bb = lr_session_block(s);
             uint32_t end_bb = lr_session_block(s);
@@ -7473,7 +7533,7 @@ public:
             class_alias_data_ptr.insert(get_hash((ASR::asr_t *)
                 ASRUtils::symbol_get_past_external(
                     ASR::down_cast<ASR::Var_t>(x.m_target)->m_v)));
-        } else if (is_scalar_intrinsic_pointer_var(x.m_target) &&
+        } else if (is_scalar_intrinsic_pointer_target(x.m_target) &&
                 expr_is_storage_reference(x.m_value) &&
                 !ASRUtils::is_pointer(ASRUtils::expr_type(x.m_value))) {
             // p => tgt / ASSOCIATE(p => tgt) where p is a scalar intrinsic
@@ -7485,28 +7545,30 @@ public:
             is_target = false;
             rhs = tmp;
             t = ty_ptr;
-            mark_indirect_scalar = true;
-            indirect_scalar_hash = get_hash((ASR::asr_t *)
-                ASRUtils::symbol_get_past_external(
-                    ASR::down_cast<ASR::Var_t>(x.m_target)->m_v));
-        } else if (is_scalar_intrinsic_pointer_var(x.m_target) &&
+            if (ASR::is_a<ASR::Var_t>(*x.m_target)) {
+                mark_indirect_scalar = true;
+                indirect_scalar_hash = get_hash((ASR::asr_t *)
+                    ASRUtils::symbol_get_past_external(
+                        ASR::down_cast<ASR::Var_t>(x.m_target)->m_v));
+            }
+        } else if (is_scalar_intrinsic_pointer_target(x.m_target) &&
                 ASRUtils::is_pointer(ASRUtils::expr_type(x.m_value))) {
             // p => q where both are scalar intrinsic pointers: p aliases the
             // SAME target, so copy q's stored address (its raw slot pointer),
             // not q's dereferenced value.
-            if (expr_is_indirect_scalar_pointer(x.m_value)) {
-                is_target = true;
-                visit_expr(*x.m_value);
-                is_target = false;
+            if (is_scalar_intrinsic_pointer_target(x.m_value)) {
+                rhs = emit_scalar_intrinsic_pointer_value(x.m_value);
             } else {
                 visit_expr(*x.m_value);
+                rhs = tmp;
             }
-            rhs = tmp;
             t = ty_ptr;
-            mark_indirect_scalar = true;
-            indirect_scalar_hash = get_hash((ASR::asr_t *)
-                ASRUtils::symbol_get_past_external(
-                    ASR::down_cast<ASR::Var_t>(x.m_target)->m_v));
+            if (ASR::is_a<ASR::Var_t>(*x.m_target)) {
+                mark_indirect_scalar = true;
+                indirect_scalar_hash = get_hash((ASR::asr_t *)
+                    ASRUtils::symbol_get_past_external(
+                        ASR::down_cast<ASR::Var_t>(x.m_target)->m_v));
+            }
         } else if (ASRUtils::is_unlimited_polymorphic_type(
                     ASRUtils::expr_type(x.m_target)) &&
                 !ASR::is_a<ASR::Array_t>(
@@ -10003,12 +10065,33 @@ public:
                 continue;
             }
             if (!ASR::is_a<ASR::String_t>(*core)) {
-                if (ASRUtils::is_allocatable(at)) {
+                if (ASRUtils::is_allocatable(at) ||
+                        ASRUtils::is_pointer(at)) {
                     bool was_target = is_target;
                     is_target = true;
                     visit_expr(*arg.m_a);
                     is_target = was_target;
-                    emit_allocatable_scalar_allocation(tmp, at);
+                    uint32_t slot = tmp;
+                    emit_allocatable_scalar_allocation(slot, at);
+                    if (x.m_source) {
+                        uint32_t data = lr_emit_load(s, ty_ptr,
+                            V(slot, ty_ptr));
+                        visit_expr(*x.m_source);
+                        lr_type_t *source_type =
+                            value_type_for_expr(x.m_source);
+                        lr_emit_store(s, V(tmp, source_type),
+                            V(data, ty_ptr));
+                    }
+                    if (ASRUtils::is_pointer(at) &&
+                            ASR::is_a<ASR::Var_t>(*arg.m_a)) {
+                        ASR::symbol_t *sym =
+                            ASRUtils::symbol_get_past_external(
+                                ASR::down_cast<ASR::Var_t>(arg.m_a)->m_v);
+                        if (ASR::is_a<ASR::Variable_t>(*sym)) {
+                            indirect_scalar_pointers.insert(
+                                get_hash((ASR::asr_t *)sym));
+                        }
+                    }
                 }
                 continue;
             }
@@ -16050,6 +16133,8 @@ public:
             visit_expr(*x.m_ptr);
             is_target = was_target;
             p = tmp;
+        } else if (is_scalar_intrinsic_pointer_target(x.m_ptr)) {
+            p = emit_scalar_intrinsic_pointer_value(x.m_ptr);
         } else {
             visit_expr(*x.m_ptr);
             p = tmp;
@@ -16065,6 +16150,8 @@ public:
             uint32_t t;
             if (ASR::is_a<ASR::Array_t>(*tgt_core)) {
                 t = array_assoc_base(x.m_tgt);
+            } else if (is_scalar_intrinsic_pointer_target(x.m_tgt)) {
+                t = emit_scalar_intrinsic_pointer_value(x.m_tgt);
             } else {
                 bool was_target = is_target;
                 is_target = true;
@@ -18176,6 +18263,10 @@ found_offset:
 
         if (is_target) {
             tmp = mem_ptr;
+        } else if (is_scalar_intrinsic_pointer_type(x.m_type)) {
+            uint32_t ptr = lr_emit_load(s, ty_ptr, V(mem_ptr, ty_ptr));
+            ASR::ttype_t *pointee = ASRUtils::type_get_past_pointer(x.m_type);
+            tmp = lr_emit_load(s, get_type(pointee), V(ptr, ty_ptr));
         } else {
             lr_type_t *mt = get_type(x.m_type);
             tmp = lr_emit_load(s, mt, V(mem_ptr, ty_ptr));
