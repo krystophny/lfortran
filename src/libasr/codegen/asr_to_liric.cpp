@@ -6255,7 +6255,31 @@ public:
             return lr_emit_icmp(s, LR_CMP_NE,
                 V(fptr, ty_ptr), LR_NULL(ty_ptr));
         }
+        if (ASRUtils::is_allocatable(at) || ASRUtils::is_pointer(at)) {
+            uint32_t data = emit_optional_data_from_pointer_slot(storage);
+            return lr_emit_icmp(s, LR_CMP_NE,
+                V(data, ty_ptr), LR_NULL(ty_ptr));
+        }
         return lr_emit_icmp(s, LR_CMP_EQ, I(1, ty_i1), I(1, ty_i1));
+    }
+
+    uint32_t emit_optional_data_from_pointer_slot(uint32_t storage) {
+        uint32_t out = lr_emit_alloca(s, ty_ptr);
+        lr_emit_store(s, LR_NULL(ty_ptr), V(out, ty_ptr));
+        uint32_t has_storage = lr_emit_icmp(s, LR_CMP_NE,
+            V(storage, ty_ptr), LR_NULL(ty_ptr));
+        lr_error_t err;
+        uint32_t load_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(has_storage, ty_i1), load_bb, done_bb);
+
+        lr_session_set_block(s, load_bb, &err);
+        uint32_t data = lr_emit_load(s, ty_ptr, V(storage, ty_ptr));
+        lr_emit_store(s, V(data, ty_ptr), V(out, ty_ptr));
+        lr_emit_br(s, done_bb);
+
+        lr_session_set_block(s, done_bb, &err);
+        return lr_emit_load(s, ty_ptr, V(out, ty_ptr));
     }
 
     uint32_t emit_optional_actual_pointer(ASR::expr_t *arg) {
@@ -6276,6 +6300,13 @@ public:
         ASR::ttype_t *core = ASRUtils::type_get_past_allocatable_pointer(
             arg_type);
         core = ASRUtils::type_get_past_array(core);
+        if (!ASR::is_a<ASR::String_t>(*core) &&
+                !(ASRUtils::is_allocatable(arg_type) &&
+                    ASR::is_a<ASR::StructType_t>(*core)) &&
+                (ASRUtils::is_allocatable(arg_type) ||
+                 ASRUtils::is_pointer(arg_type))) {
+            return emit_optional_data_from_pointer_slot(storage);
+        }
         uint32_t allocated = emit_allocatable_is_allocated(arg, storage);
         if (ASRUtils::is_allocatable(arg_type) &&
                 ASR::is_a<ASR::StructType_t>(*core)) {
@@ -9066,6 +9097,16 @@ public:
         }
     }
 
+    void emit_allocatable_scalar_allocation(uint32_t slot,
+                                            ASR::ttype_t *type) {
+        ASR::ttype_t *core =
+            ASRUtils::type_get_past_allocatable_pointer(type);
+        core = ASRUtils::type_get_past_array(core);
+        uint64_t nbytes = storage_size_or_default(core, get_type(core));
+        uint32_t data = emit_malloc_bytes(emit_i64_const((int64_t)nbytes));
+        lr_emit_store(s, V(data, ty_ptr), V(slot, ty_ptr));
+    }
+
     uint32_t ensure_allocatable_struct_data(uint32_t slot,
                                             ASR::Struct_t *st,
                                             ASR::Variable_t *target_var) {
@@ -9501,11 +9542,13 @@ public:
                 continue;
             }
             if (!ASR::is_a<ASR::String_t>(*core)) {
-                // Allocatable scalars (Integer/Real/Logical/Complex/
-                // Pointer/CPtr) are also legal allocate targets.  Our
-                // get_type already maps them to inline storage so the
-                // statement is a no-op for the storage side; only any
-                // expression evaluation in arg.m_len_expr matters.
+                if (ASRUtils::is_allocatable(at)) {
+                    bool was_target = is_target;
+                    is_target = true;
+                    visit_expr(*arg.m_a);
+                    is_target = was_target;
+                    emit_allocatable_scalar_allocation(tmp, at);
+                }
                 continue;
             }
             ASR::String_t *string_t = ASR::down_cast<ASR::String_t>(core);
