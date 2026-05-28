@@ -5087,6 +5087,22 @@ public:
         ASR::Array_t *src_array = ASR::down_cast<ASR::Array_t>(src_type);
         bool src_is_descriptor = src_array->m_physical_type ==
             ASR::array_physical_typeType::DescriptorArray;
+        ASR::Variable_t *holder_var_v = ASR::is_a<ASR::Var_t>(*x.m_v)
+            ? var_from_expr(x.m_v) : nullptr;
+        ASR::Array_t *formal_array_v = nullptr;
+        if (holder_var_v && holder_var_v->m_intent !=
+                ASR::intentType::Local &&
+                holder_var_v->m_intent != ASR::intentType::ReturnVar &&
+                !ASRUtils::is_allocatable(holder_var_v->m_type) &&
+                !ASRUtils::is_pointer(holder_var_v->m_type)) {
+            ASR::ttype_t *holder_naked =
+                ASRUtils::type_get_past_allocatable_pointer(
+                    holder_var_v->m_type);
+            if (ASR::is_a<ASR::Array_t>(*holder_naked)) {
+                formal_array_v = ASR::down_cast<ASR::Array_t>(
+                    holder_naked);
+            }
+        }
 
         uint32_t src_desc = 0;
         uint32_t src_base = 0;
@@ -5119,6 +5135,12 @@ public:
         if (src_is_descriptor) {
             for (int d = 0; d < n_src_dims; d++) {
                 src_lbound[d] = desc_dim_lbound(src_desc, d);
+                if (formal_array_v && d < (int)formal_array_v->n_dims &&
+                        !formal_array_v->m_dims[d].m_length) {
+                    src_lbound[d] = formal_array_v->m_dims[d].m_start
+                        ? emit_i64_expr(formal_array_v->m_dims[d].m_start)
+                        : emit_i64_const(1);
+                }
                 src_extent[d] = desc_dim_extent(src_desc, d);
                 src_stride[d] = desc_load_i64(src_desc,
                     DESC_HEADER_BYTES + DESC_DIM_BYTES * d + 16);
@@ -5600,11 +5622,8 @@ public:
                 if (dst_dims_ok) {
                     uint32_t dst_count_rt = emit_i64_const(1);
                     for (size_t d = 0; d < dst_arr->n_dims; d++) {
-                        visit_expr(*dst_arr->m_dims[d].m_length);
-                        lr_type_t *lt = get_type(ASRUtils::expr_type(
-                            dst_arr->m_dims[d].m_length));
-                        uint32_t ext = (lt == ty_i64) ? tmp
-                            : lr_emit_sext(s, ty_i64, V(tmp, lt));
+                        uint32_t ext = emit_i64_expr(
+                            dst_arr->m_dims[d].m_length);
                         dst_count_rt = lr_emit_mul(s, ty_i64,
                             V(dst_count_rt, ty_i64), V(ext, ty_i64));
                     }
