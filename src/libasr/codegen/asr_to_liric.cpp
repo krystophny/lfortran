@@ -7423,19 +7423,47 @@ public:
                 ArrayLinearView sv = emit_array_linear_view(x.m_value,
                     src_arr);
                 uint32_t lb = emit_i64_expr(sec->m_args[0].m_left);
-                uint32_t ub = emit_i64_expr(sec->m_args[0].m_right);
-                uint32_t span = lr_emit_sub(s, ty_i64,
-                    V(ub, ty_i64), V(lb, ty_i64));
+                auto bound_is_target_bound = [&]() {
+                    ASR::expr_t *right = sec->m_args[0].m_right;
+                    if (!ASR::is_a<ASR::ArrayBound_t>(*right) ||
+                            !ASR::is_a<ASR::Var_t>(*sec->m_v)) {
+                        return false;
+                    }
+                    ASR::ArrayBound_t *bound =
+                        ASR::down_cast<ASR::ArrayBound_t>(right);
+                    if (!ASR::is_a<ASR::Var_t>(*bound->m_v)) {
+                        return false;
+                    }
+                    ASR::symbol_t *bsym = ASRUtils::symbol_get_past_external(
+                        ASR::down_cast<ASR::Var_t>(bound->m_v)->m_v);
+                    ASR::symbol_t *tsym = ASRUtils::symbol_get_past_external(
+                        ASR::down_cast<ASR::Var_t>(sec->m_v)->m_v);
+                    return bsym && tsym &&
+                        get_hash((ASR::asr_t *)bsym) ==
+                        get_hash((ASR::asr_t *)tsym);
+                };
+                bool right_is_target_bound = bound_is_target_bound();
                 uint32_t stride = sv.elem_len;
+                uint32_t extent = sv.total;
+                uint32_t span = 0;
+                if (!right_is_target_bound) {
+                    uint32_t ub = emit_i64_expr(sec->m_args[0].m_right);
+                    span = lr_emit_sub(s, ty_i64,
+                        V(ub, ty_i64), V(lb, ty_i64));
+                }
                 if (sec->m_args[0].m_step) {
                     uint32_t step = emit_i64_expr(sec->m_args[0].m_step);
-                    span = lr_emit_sdiv(s, ty_i64,
-                        V(span, ty_i64), V(step, ty_i64));
+                    if (!right_is_target_bound) {
+                        span = lr_emit_sdiv(s, ty_i64,
+                            V(span, ty_i64), V(step, ty_i64));
+                    }
                     stride = lr_emit_mul(s, ty_i64,
                         V(sv.elem_len, ty_i64), V(step, ty_i64));
                 }
-                uint32_t extent = lr_emit_add(s, ty_i64,
-                    V(span, ty_i64), I(1, ty_i64));
+                if (!right_is_target_bound) {
+                    extent = lr_emit_add(s, ty_i64,
+                        V(span, ty_i64), I(1, ty_i64));
+                }
                 is_target = true;
                 visit_expr(*sec->m_v);
                 is_target = false;
@@ -7443,7 +7471,14 @@ public:
                 desc_store_base(pdesc, sv.base);
                 desc_store_i64(pdesc, 8, sv.elem_len);
                 desc_store_rank(pdesc, 1);
-                desc_store_i64(pdesc, 24, emit_i64_const(0));
+                int64_t tag = 0;
+                if (type_is_unlimited_polymorphic_array(
+                        ASRUtils::expr_type(sec->m_v)) &&
+                        !type_is_unlimited_polymorphic_array(
+                            ASRUtils::expr_type(x.m_value))) {
+                    tag = polymorphic_type_tag(src_arr->m_type);
+                }
+                desc_store_i64(pdesc, 24, emit_i64_const(tag));
                 desc_store_i64(pdesc, DESC_HEADER_BYTES + DESC_DIM_LBOUND, lb);
                 desc_store_i64(pdesc, DESC_HEADER_BYTES + DESC_DIM_EXTENT,
                     extent);
