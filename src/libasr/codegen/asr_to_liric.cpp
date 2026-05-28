@@ -6621,6 +6621,49 @@ public:
     // store the rvalue.
 
     void visit_Associate(const ASR::Associate_t &x) {
+        // Pointer bounds-remapping: ptr(lb:ub[:step]) => target.  The target
+        // is an ArraySection over the pointer itself; stamp the pointer's
+        // descriptor with the remapped lower bound and extent over the
+        // source's data, rather than aliasing the source descriptor wholesale.
+        if (ASR::is_a<ASR::ArraySection_t>(*x.m_target)) {
+            ASR::ArraySection_t *sec =
+                ASR::down_cast<ASR::ArraySection_t>(x.m_target);
+            ASR::Array_t *src_arr = nullptr;
+            if (sec->n_args == 1 && sec->m_args[0].m_left &&
+                    sec->m_args[0].m_right &&
+                    expr_is_array(x.m_value, &src_arr)) {
+                ArrayLinearView sv = emit_array_linear_view(x.m_value,
+                    src_arr);
+                uint32_t lb = emit_i64_expr(sec->m_args[0].m_left);
+                uint32_t ub = emit_i64_expr(sec->m_args[0].m_right);
+                uint32_t span = lr_emit_sub(s, ty_i64,
+                    V(ub, ty_i64), V(lb, ty_i64));
+                uint32_t stride = sv.elem_len;
+                if (sec->m_args[0].m_step) {
+                    uint32_t step = emit_i64_expr(sec->m_args[0].m_step);
+                    span = lr_emit_sdiv(s, ty_i64,
+                        V(span, ty_i64), V(step, ty_i64));
+                    stride = lr_emit_mul(s, ty_i64,
+                        V(sv.elem_len, ty_i64), V(step, ty_i64));
+                }
+                uint32_t extent = lr_emit_add(s, ty_i64,
+                    V(span, ty_i64), I(1, ty_i64));
+                is_target = true;
+                visit_expr(*sec->m_v);
+                is_target = false;
+                uint32_t pdesc = tmp;
+                desc_store_base(pdesc, sv.base);
+                desc_store_i64(pdesc, 8, sv.elem_len);
+                desc_store_rank(pdesc, 1);
+                desc_store_i64(pdesc, 24, emit_i64_const(0));
+                desc_store_i64(pdesc, DESC_HEADER_BYTES + DESC_DIM_LBOUND, lb);
+                desc_store_i64(pdesc, DESC_HEADER_BYTES + DESC_DIM_EXTENT,
+                    extent);
+                desc_store_i64(pdesc, DESC_HEADER_BYTES + DESC_DIM_STRIDE,
+                    stride);
+                return;
+            }
+        }
         bool value_is_descriptor_array = false;
         if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*x.m_value)) {
             ASR::ArrayPhysicalCast_t *cast =
