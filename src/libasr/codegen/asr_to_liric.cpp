@@ -7004,6 +7004,16 @@ public:
         return resolve_to_function(v->m_type_declaration);
     }
 
+    bool formal_is_assumed_rank_array(ASR::Function_t *fn, size_t i) {
+        ASR::Variable_t *formal = formal_arg_var(fn, i);
+        if (!formal) return false;
+        ASR::ttype_t *ft = ASRUtils::type_get_past_allocatable_pointer(
+            formal->m_type);
+        if (!ASR::is_a<ASR::Array_t>(*ft)) return false;
+        return ASR::down_cast<ASR::Array_t>(ft)->m_physical_type ==
+            ASR::array_physical_typeType::AssumedRankArray;
+    }
+
     bool formal_is_unlimited_polymorphic(ASR::Function_t *fn, size_t i) {
         ASR::Variable_t *formal = formal_arg_var(fn, i);
         return formal && ASRUtils::is_unlimited_polymorphic_type(formal->m_type);
@@ -12982,6 +12992,36 @@ public:
                     visit_expr(*arg);
                     is_target = was_target;
                     args.push_back(V(tmp, ty_ptr));
+                } else if (formal_is_assumed_rank_array(formal_fn, i) &&
+                        !ASR::is_a<ASR::Array_t>(
+                            *ASRUtils::type_get_past_allocatable_pointer(
+                                ASRUtils::expr_type(arg)))) {
+                    // Scalar actual passed to an assumed-rank dummy: wrap the
+                    // scalar's address in a rank-0 descriptor so the callee
+                    // (e.g. SELECT RANK) reads rank 0 from the descriptor.
+                    ASR::ttype_t *sty =
+                        ASRUtils::type_get_past_allocatable_pointer(
+                            ASRUtils::expr_type(arg));
+                    uint32_t base;
+                    if (expr_is_storage_reference(arg)) {
+                        bool was_target = is_target;
+                        is_target = true;
+                        visit_expr(*arg);
+                        is_target = was_target;
+                        base = tmp;
+                    } else {
+                        visit_expr(*arg);
+                        uint32_t slot = emit_temp_slot(get_type(sty));
+                        lr_emit_store(s, V(tmp, get_type(sty)),
+                            V(slot, ty_ptr));
+                        base = slot;
+                    }
+                    uint32_t desc = emit_desc_alloca(0);
+                    desc_store_base(desc, base);
+                    desc_store_i64(desc, 8,
+                        emit_i64_const(element_byte_size(sty)));
+                    desc_store_rank(desc, 0);
+                    args.push_back(V(desc, ty_ptr));
                 } else if (expr_is_storage_reference(arg)) {
                     bool was_target = is_target;
                     is_target = true;
@@ -13310,6 +13350,36 @@ public:
                     visit_expr(*arg);
                     is_target = was_target;
                     args.push_back(V(tmp, ty_ptr));
+                } else if (formal_is_assumed_rank_array(formal_fn, i) &&
+                        !ASR::is_a<ASR::Array_t>(
+                            *ASRUtils::type_get_past_allocatable_pointer(
+                                ASRUtils::expr_type(arg)))) {
+                    // Scalar actual passed to an assumed-rank dummy: wrap the
+                    // scalar's address in a rank-0 descriptor so the callee
+                    // (e.g. SELECT RANK) reads rank 0 from the descriptor.
+                    ASR::ttype_t *sty =
+                        ASRUtils::type_get_past_allocatable_pointer(
+                            ASRUtils::expr_type(arg));
+                    uint32_t base;
+                    if (expr_is_storage_reference(arg)) {
+                        bool was_target = is_target;
+                        is_target = true;
+                        visit_expr(*arg);
+                        is_target = was_target;
+                        base = tmp;
+                    } else {
+                        visit_expr(*arg);
+                        uint32_t slot = emit_temp_slot(get_type(sty));
+                        lr_emit_store(s, V(tmp, get_type(sty)),
+                            V(slot, ty_ptr));
+                        base = slot;
+                    }
+                    uint32_t desc = emit_desc_alloca(0);
+                    desc_store_base(desc, base);
+                    desc_store_i64(desc, 8,
+                        emit_i64_const(element_byte_size(sty)));
+                    desc_store_rank(desc, 0);
+                    args.push_back(V(desc, ty_ptr));
                 } else if (expr_is_storage_reference(arg)) {
                     bool was_target = is_target;
                     is_target = true;
