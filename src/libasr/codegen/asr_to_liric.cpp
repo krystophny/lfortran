@@ -10753,7 +10753,26 @@ public:
             is_target = true;
             visit_expr(*v);
             is_target = wt;
-            lr_emit_store(s, LR_NULL(ty_ptr), V(tmp, ty_ptr));
+            uint32_t slot = tmp;
+            ASR::Struct_t *st = struct_symbol_from_type_decl(
+                ASRUtils::get_struct_sym_from_struct_expr(v));
+            if (st) {
+                uint32_t raw = lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
+                uint32_t has_data = lr_emit_icmp(s, LR_CMP_NE,
+                    V(raw, ty_ptr), LR_NULL(ty_ptr));
+                lr_error_t err;
+                uint32_t finalize_bb = lr_session_block(s);
+                uint32_t done_bb = lr_session_block(s);
+                lr_emit_condbr(s, V(has_data, ty_i1), finalize_bb, done_bb);
+
+                lr_session_set_block(s, finalize_bb, &err);
+                std::unordered_set<uint64_t> active;
+                emit_struct_finalizers(class_data_ptr(raw), st, active);
+                lr_emit_br(s, done_bb);
+
+                lr_session_set_block(s, done_bb, &err);
+            }
+            lr_emit_store(s, LR_NULL(ty_ptr), V(slot, ty_ptr));
             return;
         }
         if (!ASR::is_a<ASR::String_t>(*at)) {
