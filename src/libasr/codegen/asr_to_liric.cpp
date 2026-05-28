@@ -4282,12 +4282,8 @@ public:
             }
         }
 
-        // class(*) = class(*) scalar: copy the source {data, tag} poly_desc
-        // into the target.  Both sides are unlimited polymorphic, so the
-        // dynamic size is unknown at compile time; share the heap data, which
-        // is correct for read-after-assign and sets the target's dynamic tag
-        // (without this the target tag stayed uninitialised and select type
-        // missed).
+        // class(*) = class(*) scalar: preserve the dynamic tag and copy
+        // intrinsic payloads out of call-temporary storage.
         if (!target_is_array && ASRUtils::is_unlimited_polymorphic_type(
                 ASRUtils::expr_type(x.m_target)) &&
                 ASRUtils::is_unlimited_polymorphic_type(
@@ -4303,7 +4299,59 @@ public:
                 is_target = wt;
                 uint32_t dst = tmp;
                 uint32_t pd = lr_emit_load(s, ty_poly_desc, V(src, ty_ptr));
-                lr_emit_store(s, V(pd, ty_poly_desc), V(dst, ty_ptr));
+                uint32_t fld0 = 0, fld1 = 1;
+                uint32_t src_data = lr_emit_extractvalue(s, ty_ptr,
+                    V(pd, ty_poly_desc), &fld0, 1);
+                uint32_t tag = lr_emit_extractvalue(s, ty_i64,
+                    V(pd, ty_poly_desc), &fld1, 1);
+                uint32_t data_slot = lr_emit_alloca(s, ty_ptr);
+                lr_emit_store(s, V(src_data, ty_ptr), V(data_slot, ty_ptr));
+
+                uint32_t positive = lr_emit_icmp(s, LR_CMP_SGT,
+                    V(tag, ty_i64), I(0, ty_i64));
+                uint32_t intrinsic = lr_emit_icmp(s, LR_CMP_SLT,
+                    V(tag, ty_i64), I(700, ty_i64));
+                uint32_t copy_intrinsic = lr_emit_and(s, ty_i1,
+                    V(positive, ty_i1), V(intrinsic, ty_i1));
+
+                lr_error_t err;
+                uint32_t copy_bb = lr_session_block(s);
+                uint32_t done_bb = lr_session_block(s);
+                lr_emit_condbr(s, V(copy_intrinsic, ty_i1), copy_bb, done_bb);
+
+                lr_session_set_block(s, copy_bb, &err);
+                uint32_t string_lo = lr_emit_icmp(s, LR_CMP_SGE,
+                    V(tag, ty_i64), I(600, ty_i64));
+                uint32_t string_hi = lr_emit_icmp(s, LR_CMP_SLT,
+                    V(tag, ty_i64), I(700, ty_i64));
+                uint32_t is_string = lr_emit_and(s, ty_i1,
+                    V(string_lo, ty_i1), V(string_hi, ty_i1));
+                uint32_t string_bb = lr_session_block(s);
+                uint32_t bytes_bb = lr_session_block(s);
+                lr_emit_condbr(s, V(is_string, ty_i1), string_bb, bytes_bb);
+
+                lr_session_set_block(s, string_bb, &err);
+                uint32_t string_slot = emit_malloc_bytes(emit_i64_const(16));
+                uint32_t src_string = lr_emit_load(s, ty_str_desc,
+                    V(src_data, ty_ptr));
+                emit_copy_string_to_uninit_desc(string_slot, src_string);
+                lr_emit_store(s, V(string_slot, ty_ptr), V(data_slot, ty_ptr));
+                lr_emit_br(s, done_bb);
+
+                lr_session_set_block(s, bytes_bb, &err);
+                uint32_t nbytes = polymorphic_intrinsic_tag_size(tag);
+                uint32_t data = emit_malloc_bytes(nbytes);
+                emit_memcpy_dynamic(data, src_data, nbytes);
+                lr_emit_store(s, V(data, ty_ptr), V(data_slot, ty_ptr));
+                lr_emit_br(s, done_bb);
+
+                lr_session_set_block(s, done_bb, &err);
+                data = lr_emit_load(s, ty_ptr, V(data_slot, ty_ptr));
+                uint32_t d0 = lr_emit_insertvalue(s, ty_poly_desc,
+                    LR_UNDEF(ty_poly_desc), V(data, ty_ptr), &fld0, 1);
+                uint32_t d1 = lr_emit_insertvalue(s, ty_poly_desc,
+                    V(d0, ty_poly_desc), V(tag, ty_i64), &fld1, 1);
+                lr_emit_store(s, V(d1, ty_poly_desc), V(dst, ty_ptr));
                 return;
             }
         }
@@ -6379,6 +6427,33 @@ public:
                 return 600 + ASRUtils::extract_kind_from_ttype_t(type);
             default: return 0;
         }
+    }
+
+    uint32_t polymorphic_intrinsic_tag_size(uint32_t tag) {
+        uint32_t nbytes = emit_i64_const(16);
+        auto set_size = [&](int64_t tag_value, int64_t size) {
+            uint32_t matches = lr_emit_icmp(s, LR_CMP_EQ,
+                V(tag, ty_i64), I(tag_value, ty_i64));
+            nbytes = lr_emit_select(s, ty_i64,
+                V(matches, ty_i1), I(size, ty_i64), V(nbytes, ty_i64));
+        };
+        set_size(101, 1);
+        set_size(102, 2);
+        set_size(104, 4);
+        set_size(108, 8);
+        set_size(201, 1);
+        set_size(202, 2);
+        set_size(204, 4);
+        set_size(208, 8);
+        set_size(304, 4);
+        set_size(308, 8);
+        set_size(401, 1);
+        set_size(402, 2);
+        set_size(404, 4);
+        set_size(408, 8);
+        set_size(504, 8);
+        set_size(508, 16);
+        return nbytes;
     }
 
     ASR::Variable_t *formal_arg_var(ASR::Function_t *fn, size_t i) {
