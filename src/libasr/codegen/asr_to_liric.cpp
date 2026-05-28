@@ -6239,6 +6239,16 @@ public:
             return lr_emit_icmp(s, LR_CMP_NE,
                 V(first_ptr, ty_ptr), LR_NULL(ty_ptr));
         }
+        // Procedure pointer (Pointer(FunctionType)): the slot holds the
+        // callee address.  A disassociated procedure pointer reads as null,
+        // and when passed to an optional non-pointer dummy this must make
+        // present() false.
+        if (ASRUtils::is_pointer(at) &&
+                ASR::is_a<ASR::FunctionType_t>(*naked)) {
+            uint32_t fptr = lr_emit_load(s, ty_ptr, V(storage, ty_ptr));
+            return lr_emit_icmp(s, LR_CMP_NE,
+                V(fptr, ty_ptr), LR_NULL(ty_ptr));
+        }
         return lr_emit_icmp(s, LR_CMP_EQ, I(1, ty_i1), I(1, ty_i1));
     }
 
