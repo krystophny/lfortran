@@ -6141,6 +6141,70 @@ public:
             type_is_unlimited_polymorphic_array(formal->m_type);
     }
 
+    // Non-polymorphic assumed-rank dummy:  integer/real/logical x(..)
+    // where the actual is forwarded by descriptor.  Distinct from the
+    // unlimited-polymorphic case (class(*) g(..)) which already has its
+    // own emit helper.
+    bool formal_is_nonpoly_assumed_rank_array(
+            ASR::Function_t *fn, size_t i) {
+        ASR::Variable_t *formal = formal_arg_var(fn, i);
+        if (!formal) return false;
+        if (ASRUtils::is_unlimited_polymorphic_type(formal->m_type)) {
+            return false;
+        }
+        ASR::ttype_t *ft =
+            ASRUtils::type_get_past_allocatable_pointer(formal->m_type);
+        if (!ASR::is_a<ASR::Array_t>(*ft)) return false;
+        ASR::Array_t *fa = ASR::down_cast<ASR::Array_t>(ft);
+        return fa->m_physical_type ==
+            ASR::array_physical_typeType::AssumedRankArray;
+    }
+
+    // Build a runtime descriptor for an actual being passed to a
+    // non-polymorphic assumed-rank dummy.  The scalar case (rank 0) is
+    // the common one for `select rank(x); rank(0); ...; end select`
+    // dispatch: without this wrap, the callee reads the descriptor
+    // rank from uninitialised stack memory.  Mirrors
+    // emit_polymorphic_assumed_rank_actual but omits the type tag,
+    // since the formal has a concrete element type.
+    uint32_t emit_nonpoly_assumed_rank_actual(ASR::expr_t *actual) {
+        ASR::ttype_t *expr_type = ASRUtils::expr_type(actual);
+        ASR::ttype_t *actual_type =
+            ASRUtils::type_get_past_allocatable_pointer(expr_type);
+        if (ASR::is_a<ASR::Array_t>(*actual_type)) {
+            // Array actual: forward its existing descriptor.
+            return desc_ptr_of(actual);
+        }
+        // Scalar actual: materialise a value into a temp slot and wrap
+        // it in a rank-0 descriptor.
+        uint32_t data_ptr = 0;
+        if (expr_is_storage_reference(actual)) {
+            bool was_target = is_target;
+            is_target = true;
+            visit_expr(*actual);
+            is_target = was_target;
+            data_ptr = tmp;
+        } else {
+            visit_expr(*actual);
+            lr_type_t *at = value_type_for_expr(actual);
+            uint32_t slot = emit_temp_slot(at);
+            lr_emit_store(s, V(tmp, at), V(slot, ty_ptr));
+            data_ptr = slot;
+        }
+        ASR::ttype_t *core = ASRUtils::type_get_past_array(actual_type);
+        int64_t elem_bytes = (int64_t)element_byte_size(core);
+        uint32_t desc = emit_desc_alloca(0);
+        desc_store_base(desc, data_ptr);
+        desc_store_i64(desc, 8, emit_i64_const(elem_bytes));
+        desc_store_rank(desc, 0);
+        desc_store_i64(desc, 24, emit_i64_const(0));
+        desc_store_i64(desc, DESC_HEADER_BYTES + 0, emit_i64_const(1));
+        desc_store_i64(desc, DESC_HEADER_BYTES + 8, emit_i64_const(1));
+        desc_store_i64(desc, DESC_HEADER_BYTES + 16,
+            emit_i64_const(elem_bytes));
+        return desc;
+    }
+
     bool formal_is_optional(ASR::Function_t *fn, size_t i) {
         ASR::Variable_t *formal = formal_arg_var(fn, i);
         return formal && formal->m_presence == ASR::presenceType::Optional;
@@ -11226,6 +11290,9 @@ public:
                 if (formal_is_unlimited_polymorphic_array(fn, i)) {
                     args.push_back(V(emit_polymorphic_assumed_rank_actual(arg),
                         ty_ptr));
+                } else if (formal_is_nonpoly_assumed_rank_array(fn, i)) {
+                    args.push_back(V(emit_nonpoly_assumed_rank_actual(arg),
+                        ty_ptr));
                 } else if (formal_is_unlimited_polymorphic(fn, i)) {
                     args.push_back(V(emit_polymorphic_actual(arg), ty_ptr));
                 } else if (arg_forwards_class_data_ptr(fn, i, arg)) {
@@ -11542,6 +11609,9 @@ public:
                 }
                 if (formal_is_unlimited_polymorphic_array(fn, i)) {
                     args.push_back(V(emit_polymorphic_assumed_rank_actual(arg),
+                        ty_ptr));
+                } else if (formal_is_nonpoly_assumed_rank_array(fn, i)) {
+                    args.push_back(V(emit_nonpoly_assumed_rank_actual(arg),
                         ty_ptr));
                 } else if (formal_is_unlimited_polymorphic(fn, i)) {
                     args.push_back(V(emit_polymorphic_actual(arg), ty_ptr));
