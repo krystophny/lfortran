@@ -1865,6 +1865,23 @@ public:
         return emit_storage_alloca_nbytes(storage_size_for_variable(v));
     }
 
+    lr_type_t *int_type_for_bytes(int64_t nbytes) {
+        if (nbytes >= 8) return ty_i64;
+        if (nbytes >= 4) return ty_i32;
+        if (nbytes >= 2) return ty_i16;
+        return ty_i8;
+    }
+
+    uint32_t emit_logical_value_byte_slot(uint32_t value,
+            ASR::ttype_t *logical_type) {
+        int64_t nbytes = element_byte_size(logical_type);
+        lr_type_t *store_t = int_type_for_bytes(nbytes);
+        uint32_t slot = emit_storage_alloca_nbytes((uint64_t)nbytes);
+        uint32_t wide = lr_emit_zext(s, store_t, V(value, ty_i1));
+        lr_emit_store(s, V(wide, store_t), V(slot, ty_ptr));
+        return slot;
+    }
+
     // Fill `bytes` with the compile-time value of `expr` (which must
     // be a scalar constant compatible with `target_type`).  Returns
     // true if a known constant was encoded, false if expr is not a
@@ -5850,8 +5867,13 @@ public:
                 uint32_t idx = array_item_linear_index(*mold_item, mold_array);
                 visit_expr(*x.m_source);
                 lr_type_t *src_lr = value_type_for_expr(x.m_source);
-                uint32_t slot = emit_temp_slot(src_lr);
-                lr_emit_store(s, V(tmp, src_lr), V(slot, ty_ptr));
+                uint32_t slot = 0;
+                if (src_lr == ty_i1) {
+                    slot = emit_logical_value_byte_slot(tmp, src_type);
+                } else {
+                    slot = emit_temp_slot(src_lr);
+                    lr_emit_store(s, V(tmp, src_lr), V(slot, ty_ptr));
+                }
                 // A per-element source (ArrayItem indexed by the loop
                 // variable) maps 1:1 to this result element: reinterpret the
                 // whole source element (offset 0).  A whole/scalar source is a
