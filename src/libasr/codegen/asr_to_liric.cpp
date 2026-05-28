@@ -16249,6 +16249,121 @@ public:
         return true;
     }
 
+    bool emit_external_formatted_read_one(ASR::expr_t *target, uint32_t unit,
+            uint32_t iostat, uint32_t fmt, uint32_t fmt_len,
+            uint32_t pad, uint32_t pad_len) {
+        int64_t no_args = formatted_read_arg_count(target);
+        if (no_args < 0) return false;
+
+        uint32_t no_advance = declare_global_cstring("NO", "_lr_read_noadv");
+        std::vector<lr_operand_desc_t> call_args;
+        call_args.push_back(V(unit, ty_i32));
+        call_args.push_back(iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr));
+        call_args.push_back(LR_NULL(ty_ptr));
+        call_args.push_back(LR_GLOBAL(no_advance, ty_ptr));
+        call_args.push_back(I(2, ty_i64));
+        call_args.push_back(V(fmt, ty_ptr));
+        call_args.push_back(V(fmt_len, ty_i64));
+        call_args.push_back(I(no_args, ty_i32));
+        call_args.push_back(pad ? V(pad, ty_ptr) : LR_NULL(ty_ptr));
+        call_args.push_back(pad ? V(pad_len, ty_i64) : I(0, ty_i64));
+
+        if (!append_formatted_read_arg(call_args, target)) return false;
+
+        lr_type_t *params[] = {
+            ty_i32, ty_ptr, ty_ptr, ty_ptr, ty_i64,
+            ty_ptr, ty_i64, ty_i32, ty_ptr, ty_i64
+        };
+        declare_func("_lfortran_formatted_read", ty_void,
+            params, 10, true);
+
+        uint32_t sym = lr_session_intern(s, "_lfortran_formatted_read");
+        lr_inst_desc_t d;
+        memset(&d, 0, sizeof(d));
+        std::vector<lr_operand_desc_t> ops(1 + call_args.size());
+        ops[0] = LR_GLOBAL(sym, ty_ptr);
+        for (size_t i = 0; i < call_args.size(); i++) {
+            ops[1 + i] = call_args[i];
+        }
+        d.op = LR_OP_CALL;
+        d.type = ty_void;
+        d.operands = ops.data();
+        d.num_operands = ops.size();
+        d.call_external_abi = true;
+        d.call_vararg = true;
+        d.call_fixed_args = 10;
+        lr_session_emit(s, &d, nullptr);
+        return true;
+    }
+
+    bool emit_external_formatted_read_idl(ASR::ImpliedDoLoop_t *idl,
+            uint32_t unit, uint32_t iostat, uint32_t fmt,
+            uint32_t fmt_len, uint32_t pad, uint32_t pad_len) {
+        if (!ASR::is_a<ASR::Var_t>(*idl->m_var)) {
+            return false;
+        }
+        uint32_t start = emit_expr_i64(idl->m_start);
+        uint32_t end = emit_expr_i64(idl->m_end);
+        uint32_t step = idl->m_increment
+            ? emit_expr_i64(idl->m_increment)
+            : emit_i64_const(1);
+
+        uint32_t loop_ptr = emit_target_ptr(idl->m_var);
+        lr_type_t *loop_lr = value_type_for_expr(idl->m_var);
+        uint32_t cur_ptr = lr_emit_alloca(s, ty_i64);
+        lr_emit_store(s, V(start, ty_i64), V(cur_ptr, ty_ptr));
+
+        lr_error_t err;
+        uint32_t head = lr_session_block(s);
+        uint32_t body = lr_session_block(s);
+        uint32_t done = lr_session_block(s);
+        lr_emit_br(s, head);
+
+        lr_session_set_block(s, head, &err);
+        uint32_t cur = lr_emit_load(s, ty_i64, V(cur_ptr, ty_ptr));
+        uint32_t step_pos = lr_emit_icmp(s, LR_CMP_SGT,
+            V(step, ty_i64), I(0, ty_i64));
+        uint32_t asc = lr_emit_icmp(s, LR_CMP_SLE,
+            V(cur, ty_i64), V(end, ty_i64));
+        uint32_t desc = lr_emit_icmp(s, LR_CMP_SGE,
+            V(cur, ty_i64), V(end, ty_i64));
+        uint32_t more = lr_emit_select(s, ty_i1,
+            V(step_pos, ty_i1), V(asc, ty_i1), V(desc, ty_i1));
+        lr_emit_condbr(s, V(more, ty_i1), body, done);
+
+        lr_session_set_block(s, body, &err);
+        uint32_t loop_val = cast_int_value(cur, ty_i64, loop_lr);
+        lr_emit_store(s, V(loop_val, loop_lr), V(loop_ptr, ty_ptr));
+        for (size_t i = 0; i < idl->n_values; i++) {
+            if (!emit_external_formatted_read_expr(idl->m_values[i],
+                    unit, iostat, fmt, fmt_len, pad, pad_len)) {
+                return false;
+            }
+        }
+        uint32_t next = lr_emit_add(s, ty_i64,
+            V(cur, ty_i64), V(step, ty_i64));
+        lr_emit_store(s, V(next, ty_i64), V(cur_ptr, ty_ptr));
+        lr_emit_br(s, head);
+
+        lr_session_set_block(s, done, &err);
+        uint32_t final_val = lr_emit_load(s, ty_i64, V(cur_ptr, ty_ptr));
+        final_val = cast_int_value(final_val, ty_i64, loop_lr);
+        lr_emit_store(s, V(final_val, loop_lr), V(loop_ptr, ty_ptr));
+        return true;
+    }
+
+    bool emit_external_formatted_read_expr(ASR::expr_t *target,
+            uint32_t unit, uint32_t iostat, uint32_t fmt,
+            uint32_t fmt_len, uint32_t pad, uint32_t pad_len) {
+        if (ASR::is_a<ASR::ImpliedDoLoop_t>(*target)) {
+            return emit_external_formatted_read_idl(
+                ASR::down_cast<ASR::ImpliedDoLoop_t>(target),
+                unit, iostat, fmt, fmt_len, pad, pad_len);
+        }
+        return emit_external_formatted_read_one(target, unit, iostat,
+            fmt, fmt_len, pad, pad_len);
+    }
+
     bool emit_internal_formatted_read(const ASR::FileRead_t &x) {
         if (!x.m_unit || !x.m_fmt || x.n_values == 0 ||
                 expr_is_array(x.m_unit, nullptr)) {
@@ -16353,6 +16468,23 @@ public:
         uint32_t pad_len = 0;
         uint32_t pad = emit_optional_string_ptr(x.m_pad, pad_len);
         uint32_t chunk = emit_iostat_ptr(x.m_size);
+
+        bool has_implied_do = false;
+        for (size_t i = 0; i < x.n_values; i++) {
+            if (ASR::is_a<ASR::ImpliedDoLoop_t>(*x.m_values[i])) {
+                has_implied_do = true;
+                break;
+            }
+        }
+        if (has_implied_do) {
+            for (size_t i = 0; i < x.n_values; i++) {
+                if (!emit_external_formatted_read_expr(x.m_values[i],
+                        unit, iostat, fmt, fmt_len, pad, pad_len)) {
+                    return false;
+                }
+            }
+            return true;
+        }
 
         std::vector<lr_operand_desc_t> call_args;
         call_args.push_back(V(unit, ty_i32));
