@@ -11618,15 +11618,22 @@ public:
     uint32_t proc_pointer_callee(ASR::Variable_t *v) {
         uint64_t h = get_hash((ASR::asr_t *)v);
         if (is_procedure_dummy_arg(v)) {
-            // A real dummy of the current scope: its param vreg already holds
-            // the fptr (passed by value).  But a host-associated procedure
-            // dummy captured into a nested-vars context global is NOT in
-            // lr_symtab here; operator[] would insert 0 and the call would
-            // jump to a bogus vreg.  Only take the fast path when the symbol
-            // genuinely lives in lr_symtab; else fall through to load it from
-            // the context/module global below.
+            // A real dummy of the current scope.  A plain `procedure(...)`
+            // dummy is passed by value: its param vreg already holds the
+            // fptr.  A `procedure(...), pointer` dummy (m_type is
+            // Pointer(FunctionType)) is passed by reference: the param holds
+            // the address of the caller's procedure-pointer storage, so load
+            // the fptr from it before calling (otherwise the call jumps to a
+            // data address and faults).  A host-associated procedure dummy
+            // captured into a nested-vars context global is NOT in lr_symtab
+            // here; only take this path when the symbol genuinely lives in
+            // lr_symtab; else fall through to the context/module global below.
             auto dummy_it = lr_symtab.find(h);
             if (dummy_it != lr_symtab.end()) {
+                if (ASRUtils::is_pointer(v->m_type)) {
+                    return lr_emit_load(s, ty_ptr,
+                        V(dummy_it->second, ty_ptr));
+                }
                 return dummy_it->second;
             }
         }
