@@ -3416,6 +3416,8 @@ public:
         lr_session_set_block(s, alloc_bb, &err);
         uint32_t total = descriptor_array_element_count(src_desc, n_dims);
         uint32_t elem_len = desc_load_i64(src_desc, 8);
+        uint32_t char_len = emit_descriptor_string_array_len(
+            src_desc, array_t);
         uint32_t has_elements = lr_emit_icmp(s, LR_CMP_SGT,
             V(total, ty_i64), I(0, ty_i64));
         uint32_t alloc_elems = lr_emit_select(s, ty_i64,
@@ -3425,7 +3427,25 @@ public:
         uint32_t new_base = emit_malloc_bytes(bytes);
         store_descriptor_shape_with_base(dst_desc, new_base, elem_len,
             src_desc, array_t);
+        desc_store_i64(dst_desc, 24, char_len);
 
+        uint32_t zero_total = lr_emit_icmp(s, LR_CMP_EQ,
+            V(total, ty_i64), I(0, ty_i64));
+        uint32_t dummy_bb = lr_session_block(s);
+        uint32_t init_loop_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(zero_total, ty_i1), dummy_bb, init_loop_bb);
+
+        lr_error_t init_err;
+        lr_session_set_block(s, dummy_bb, &init_err);
+        uint32_t fld0 = 0, fld1 = 1;
+        uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
+            LR_UNDEF(ty_str_desc), LR_NULL(ty_ptr), &fld0, 1);
+        uint32_t d1 = lr_emit_insertvalue(s, ty_str_desc,
+            V(d0, ty_str_desc), V(char_len, ty_i64), &fld1, 1);
+        lr_emit_store(s, V(d1, ty_str_desc), V(new_base, ty_ptr));
+        lr_emit_br(s, init_loop_bb);
+
+        lr_session_set_block(s, init_loop_bb, &init_err);
         uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
         lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
         uint32_t head_bb = lr_session_block(s);
@@ -3647,6 +3667,9 @@ public:
         uint32_t total = descriptor_array_element_count(
             src_desc, (int)array_t->n_dims);
         uint32_t elem_len = desc_load_i64(src_desc, 8);
+        uint32_t char_len = string_elems
+            ? emit_descriptor_string_array_len(src_desc, array_t)
+            : emit_i64_const(0);
         uint32_t has_elements = lr_emit_icmp(s, LR_CMP_SGT,
             V(total, ty_i64), I(0, ty_i64));
         uint32_t alloc_elems = lr_emit_select(s, ty_i64,
@@ -3702,6 +3725,26 @@ public:
         store_descriptor_shape_with_base(dst_desc, new_base, elem_len,
             src_desc, array_t);
         if (string_elems) {
+            desc_store_i64(dst_desc, 24, char_len);
+            uint32_t zero_total = lr_emit_icmp(s, LR_CMP_EQ,
+                V(total, ty_i64), I(0, ty_i64));
+            uint32_t dummy_bb = lr_session_block(s);
+            uint32_t free_old_bb = lr_session_block(s);
+            lr_emit_condbr(s, V(zero_total, ty_i1), dummy_bb, free_old_bb);
+
+            lr_error_t init_err;
+            lr_session_set_block(s, dummy_bb, &init_err);
+            uint32_t fld0 = 0, fld1 = 1;
+            uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
+                LR_UNDEF(ty_str_desc), LR_NULL(ty_ptr), &fld0, 1);
+            uint32_t d1 = lr_emit_insertvalue(s, ty_str_desc,
+                V(d0, ty_str_desc), V(char_len, ty_i64), &fld1, 1);
+            lr_emit_store(s, V(d1, ty_str_desc), V(new_base, ty_ptr));
+            lr_emit_br(s, free_old_bb);
+
+            lr_session_set_block(s, free_old_bb, &init_err);
+        }
+        if (string_elems) {
             emit_free_string_descriptor_array_storage(old_base, old_total,
                 old_elem_len, allocator);
         } else {
@@ -3732,7 +3775,8 @@ public:
                 desc_store_base(tmpdesc, vw.base);
                 desc_store_i64(tmpdesc, 8, emit_i64_const(eb));
                 desc_store_rank(tmpdesc, nd);
-                desc_store_i64(tmpdesc, 24, emit_i64_const(0));
+                desc_store_i64(tmpdesc, 24,
+                    emit_string_array_len_hint(va->m_type));
                 uint32_t stride = emit_i64_const(eb);
                 for (int d = 0; d < nd; d++) {
                     uint32_t lb = emit_array_dim_lbound(va, (size_t)d);
@@ -3856,6 +3900,50 @@ public:
         lr_session_set_block(s, done_bb, &err);
     }
 
+    uint32_t emit_descriptor_string_array_len(uint32_t desc,
+            ASR::Array_t *array_type) {
+        ASR::String_t *string_t =
+            ASRUtils::get_string_type(array_type->m_type);
+        int64_t fixed_len = 0;
+        bool has_fixed_len = string_t->m_len &&
+            ASRUtils::extract_value(string_t->m_len, fixed_len);
+        uint32_t fallback = emit_i64_const(has_fixed_len ? fixed_len : 0);
+        uint32_t base = desc_base_addr(desc);
+        uint32_t meta_len = desc_load_i64(desc, 24);
+        uint32_t has_meta = lr_emit_icmp(s, LR_CMP_SGT,
+            V(meta_len, ty_i64), I(0, ty_i64));
+        uint32_t len_slot = lr_emit_alloca(s, ty_i64);
+        lr_emit_store(s, V(fallback, ty_i64), V(len_slot, ty_ptr));
+
+        uint32_t meta_bb = lr_session_block(s);
+        uint32_t first_check_bb = lr_session_block(s);
+        uint32_t first_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(has_meta, ty_i1), meta_bb, first_check_bb);
+
+        lr_error_t err;
+        lr_session_set_block(s, meta_bb, &err);
+        lr_emit_store(s, V(meta_len, ty_i64), V(len_slot, ty_ptr));
+        lr_emit_br(s, done_bb);
+
+        lr_session_set_block(s, first_check_bb, &err);
+        uint32_t has_base = lr_emit_icmp(s, LR_CMP_NE,
+            V(base, ty_ptr), LR_NULL(ty_ptr));
+        lr_emit_condbr(s, V(has_base, ty_i1), first_bb, done_bb);
+
+        lr_session_set_block(s, first_bb, &err);
+        uint32_t first_desc = lr_emit_load(s, ty_str_desc,
+            V(base, ty_ptr));
+        uint32_t fld1 = 1;
+        uint32_t len64 = lr_emit_extractvalue(s, ty_i64,
+            V(first_desc, ty_str_desc), &fld1, 1);
+        lr_emit_store(s, V(len64, ty_i64), V(len_slot, ty_ptr));
+        lr_emit_br(s, done_bb);
+
+        lr_session_set_block(s, done_bb, &err);
+        return lr_emit_load(s, ty_i64, V(len_slot, ty_ptr));
+    }
+
     uint32_t emit_string_array_len(ASR::expr_t *arg,
                                    ASR::Array_t *array_type) {
         ASR::String_t *string_t =
@@ -3870,29 +3958,7 @@ public:
             return fallback;
         }
 
-        uint32_t desc = desc_ptr_of(arg);
-        uint32_t base = desc_base_addr(desc);
-        uint32_t has_base = lr_emit_icmp(s, LR_CMP_NE,
-            V(base, ty_ptr), LR_NULL(ty_ptr));
-        uint32_t len_slot = lr_emit_alloca(s, ty_i64);
-        lr_emit_store(s, V(fallback, ty_i64), V(len_slot, ty_ptr));
-
-        uint32_t load_bb = lr_session_block(s);
-        uint32_t done_bb = lr_session_block(s);
-        lr_emit_condbr(s, V(has_base, ty_i1), load_bb, done_bb);
-
-        lr_error_t err;
-        lr_session_set_block(s, load_bb, &err);
-        uint32_t first_desc = lr_emit_load(s, ty_str_desc,
-            V(base, ty_ptr));
-        uint32_t fld1 = 1;
-        uint32_t len64 = lr_emit_extractvalue(s, ty_i64,
-            V(first_desc, ty_str_desc), &fld1, 1);
-        lr_emit_store(s, V(len64, ty_i64), V(len_slot, ty_ptr));
-        lr_emit_br(s, done_bb);
-
-        lr_session_set_block(s, done_bb, &err);
-        return lr_emit_load(s, ty_i64, V(len_slot, ty_ptr));
+        return emit_descriptor_string_array_len(desc_ptr_of(arg), array_type);
     }
 
     bool target_is_dummy_argument(ASR::expr_t *target) {
@@ -9055,6 +9121,26 @@ public:
         return lr_emit_add(s, ty_i64, I(value, ty_i64), I(0, ty_i64));
     }
 
+    uint32_t emit_string_array_len_hint(ASR::ttype_t *type) {
+        type = ASRUtils::type_get_past_allocatable_pointer(type);
+        if (ASR::is_a<ASR::Array_t>(*type)) {
+            type = ASR::down_cast<ASR::Array_t>(type)->m_type;
+        }
+        type = ASRUtils::type_get_past_array(type);
+        if (!ASR::is_a<ASR::String_t>(*type)) {
+            return emit_i64_const(0);
+        }
+        ASR::String_t *string_t = ASR::down_cast<ASR::String_t>(type);
+        if (!string_t->m_len) {
+            return emit_i64_const(0);
+        }
+        int64_t len = 0;
+        if (ASRUtils::extract_value(string_t->m_len, len)) {
+            return emit_i64_const(len);
+        }
+        return emit_expr_i64(string_t->m_len);
+    }
+
     bool is_descriptor_array_type(ASR::ttype_t *type,
             ASR::Array_t **array_type = nullptr) {
         type = ASRUtils::type_get_past_allocatable_pointer(type);
@@ -9080,7 +9166,8 @@ public:
         desc_store_null_base(desc_ptr);
         desc_store_i64(desc_ptr, 8, emit_i64_const(elem_bytes));
         desc_store_rank(desc_ptr, n_dims);
-        desc_store_i64(desc_ptr, 24, emit_i64_const(0));
+        desc_store_i64(desc_ptr, 24,
+            emit_string_array_len_hint(array->m_type));
         uint32_t stride = emit_i64_const(elem_bytes);
         for (int d = 0; d < n_dims; d++) {
             int64_t base_off = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
@@ -10553,6 +10640,7 @@ public:
                 }
             }
         }
+        desc_store_i64(desc_ptr, 24, len64);
 
         uint32_t zero_total = lr_emit_icmp(s, LR_CMP_EQ,
             V(total, ty_i64), I(0, ty_i64));
@@ -11626,12 +11714,8 @@ public:
                 if (get_fixed_string_len(actual_array->m_type, fixed_len)) {
                     cfi_elem_len = emit_i64_const(fixed_len);
                 } else {
-                    uint32_t base = desc_base_addr(desc);
-                    uint32_t first = lr_emit_load(s, ty_str_desc,
-                        V(base, ty_ptr));
-                    uint32_t len_idx = 1;
-                    cfi_elem_len = lr_emit_extractvalue(s, ty_i64,
-                        V(first, ty_str_desc), &len_idx, 1);
+                    cfi_elem_len = emit_descriptor_string_array_len(
+                        desc, actual_array);
                 }
                 uint32_t raw_bytes = lr_emit_mul(s, ty_i64,
                     V(total, ty_i64), V(cfi_elem_len, ty_i64));
@@ -14668,6 +14752,9 @@ public:
         visit_expr(*expr);
         is_target = was_target;
         uint32_t base = tmp;
+        if (array_constructor_value(expr)) {
+            base = desc_base_addr(base);
+        }
         int64_t static_total = ASRUtils::get_fixed_size_of_array(
             array_t->m_dims, array_t->n_dims);
         uint32_t total = 0;
@@ -18450,7 +18537,8 @@ found_offset:
             desc_store_base(desc, data);
             desc_store_i64(desc, 8, emit_i64_const(elem_bytes));
             desc_store_rank(desc, (int)array_t->n_dims);
-            desc_store_i64(desc, 24, emit_i64_const(0));
+            desc_store_i64(desc, 24,
+                emit_string_array_len_hint(array_t->m_type));
             uint32_t stride = emit_i64_const(elem_bytes);
             for (size_t d = 0; d < array_t->n_dims; d++) {
                 int64_t extent = 0;
@@ -18492,6 +18580,7 @@ found_offset:
             ASRUtils::type_get_past_allocatable_pointer(array_t->m_type));
         lr_type_t *elem_lr = get_type(elem_t);
         uint32_t elem_len = emit_i64_const(element_byte_size(elem_t));
+        bool string_elems = ASR::is_a<ASR::String_t>(*elem_t);
 
         struct ConstructorPart {
             bool is_array;
@@ -18530,9 +18619,37 @@ found_offset:
             }
         }
 
+        uint32_t alloc_total = total;
+        if (string_elems) {
+            uint32_t has_elements = lr_emit_icmp(s, LR_CMP_SGT,
+                V(total, ty_i64), I(0, ty_i64));
+            alloc_total = lr_emit_select(s, ty_i64,
+                V(has_elements, ty_i1), V(total, ty_i64), I(1, ty_i64));
+        }
         uint32_t bytes = lr_emit_mul(s, ty_i64,
-            V(total, ty_i64), V(elem_len, ty_i64));
+            V(alloc_total, ty_i64), V(elem_len, ty_i64));
         uint32_t data = emit_malloc_bytes(bytes);
+
+        if (string_elems) {
+            uint32_t zero_total = lr_emit_icmp(s, LR_CMP_EQ,
+                V(total, ty_i64), I(0, ty_i64));
+            uint32_t dummy_bb = lr_session_block(s);
+            uint32_t copy_bb = lr_session_block(s);
+            lr_emit_condbr(s, V(zero_total, ty_i1), dummy_bb, copy_bb);
+
+            lr_error_t init_err;
+            lr_session_set_block(s, dummy_bb, &init_err);
+            uint32_t char_len = emit_string_array_len_hint(array_t->m_type);
+            uint32_t fld0 = 0, fld1 = 1;
+            uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
+                LR_UNDEF(ty_str_desc), LR_NULL(ty_ptr), &fld0, 1);
+            uint32_t d1 = lr_emit_insertvalue(s, ty_str_desc,
+                V(d0, ty_str_desc), V(char_len, ty_i64), &fld1, 1);
+            lr_emit_store(s, V(d1, ty_str_desc), V(data, ty_ptr));
+            lr_emit_br(s, copy_bb);
+
+            lr_session_set_block(s, copy_bb, &init_err);
+        }
 
         uint32_t cursor = emit_i64_const(0);
         for (ConstructorPart &part : parts) {
@@ -18570,7 +18687,8 @@ found_offset:
         desc_store_base(desc, data);
         desc_store_i64(desc, 8, elem_len);
         desc_store_rank(desc, 1);
-        desc_store_i64(desc, 24, emit_i64_const(0));
+        desc_store_i64(desc, 24,
+            emit_string_array_len_hint(array_t->m_type));
         desc_store_i64(desc, DESC_HEADER_BYTES + 0, emit_i64_const(1));
         desc_store_i64(desc, DESC_HEADER_BYTES + 8, total);
         desc_store_i64(desc, DESC_HEADER_BYTES + 16, elem_len);
