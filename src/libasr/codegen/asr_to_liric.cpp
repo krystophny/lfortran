@@ -7029,6 +7029,26 @@ public:
             ASR::array_physical_typeType::DescriptorArray;
     }
 
+    bool formal_expects_unbounded_array_data(ASR::Function_t *fn, size_t i,
+            ASR::expr_t *actual) {
+        if (!ASR::is_a<ASR::ArrayPhysicalCast_t>(*actual)) return false;
+        ASR::ArrayPhysicalCast_t *cast =
+            ASR::down_cast<ASR::ArrayPhysicalCast_t>(actual);
+        if (cast->m_new !=
+                ASR::array_physical_typeType::UnboundedPointerArray) {
+            return false;
+        }
+        ASR::Variable_t *formal = formal_arg_var(fn, i);
+        if (!formal) return false;
+        ASR::ttype_t *formal_type =
+            ASRUtils::type_get_past_allocatable_pointer(formal->m_type);
+        if (!ASR::is_a<ASR::Array_t>(*formal_type)) return false;
+        ASR::Array_t *formal_array =
+            ASR::down_cast<ASR::Array_t>(formal_type);
+        return formal_array->m_physical_type ==
+            ASR::array_physical_typeType::UnboundedPointerArray;
+    }
+
     // Passing a concrete-type array actual to a class(T) array dummy: the
     // dummy descriptor must carry the actual element type's dynamic tag at
     // offset 24, where select type / same_type_as read it (an allocate of a
@@ -7615,6 +7635,21 @@ public:
     // source value through unchanged.
 
     void visit_ArrayPhysicalCast(const ASR::ArrayPhysicalCast_t &x) {
+        // -> UnboundedPointerArray: an assumed-size dummy `arr(*)` receives a
+        // bare contiguous data base pointer (sequence association).  From a
+        // descriptor source (e.g. a section actual w(i:)), extract base_addr;
+        // FixedSize/Pointer sources already evaluate to the base.
+        if (x.m_new == ASR::array_physical_typeType::UnboundedPointerArray &&
+                x.m_old == ASR::array_physical_typeType::DescriptorArray &&
+                expr_is_array_section_call_temp(x.m_arg)) {
+            tmp = desc_base_addr(desc_base_addr(desc_ptr_of(x.m_arg)));
+            return;
+        }
+        if (x.m_new == ASR::array_physical_typeType::UnboundedPointerArray &&
+                x.m_old == ASR::array_physical_typeType::DescriptorArray) {
+            tmp = desc_base_addr(desc_ptr_of(x.m_arg));
+            return;
+        }
         LIRIC_PASSTHROUGH(x)
         if ((x.m_old == ASR::array_physical_typeType::PointerArray ||
                 x.m_old == ASR::array_physical_typeType::FixedSizeArray) &&
@@ -7654,18 +7689,9 @@ public:
             tmp = desc;
             return;
         }
-        // -> UnboundedPointerArray: an assumed-size dummy `arr(*)` receives a
-        // bare contiguous data base pointer (sequence association).  From a
-        // descriptor source (e.g. a section actual w(i:)), extract base_addr;
-        // FixedSize/Pointer sources already evaluate to the base.
         if (x.m_new == ASR::array_physical_typeType::PointerArray &&
                 x.m_old == ASR::array_physical_typeType::DescriptorArray &&
                 expr_is_array_section_call_temp(x.m_arg)) {
-            tmp = desc_base_addr(desc_ptr_of(x.m_arg));
-            return;
-        }
-        if (x.m_new == ASR::array_physical_typeType::UnboundedPointerArray &&
-                x.m_old == ASR::array_physical_typeType::DescriptorArray) {
             tmp = desc_base_addr(desc_ptr_of(x.m_arg));
             return;
         }
@@ -7775,6 +7801,23 @@ public:
                         get_hash((ASR::asr_t *)target_var));
                 }
             }
+        }
+        if (target_is_subroutine_call_array_temp &&
+                ASR::is_a<ASR::ArraySection_t>(*x.m_value)) {
+            uint32_t src_desc = desc_ptr_of(x.m_value);
+            bool was_target = is_target;
+            is_target = true;
+            visit_expr(*x.m_target);
+            is_target = was_target;
+            uint32_t dst = tmp;
+            ASR::ttype_t *tt = ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(x.m_target));
+            int ndims = ASR::is_a<ASR::Array_t>(*tt)
+                ? (int)ASR::down_cast<ASR::Array_t>(tt)->n_dims : 1;
+            emit_memcpy_bytes(dst, src_desc,
+                (uint64_t)(DESC_HEADER_BYTES + DESC_DIM_BYTES *
+                    (ndims > 0 ? ndims : 1)));
+            return;
         }
         bool value_is_descriptor_array = false;
         if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*x.m_value)) {
@@ -12828,6 +12871,13 @@ public:
                         visit_expr(*arg);
                         args.push_back(V(tmp, ty_ptr));
                     }
+                } else if (formal_expects_unbounded_array_data(
+                        formal_fn, i, arg)) {
+                    bool was_target = is_target;
+                    is_target = true;
+                    visit_expr(*arg);
+                    is_target = was_target;
+                    args.push_back(V(tmp, ty_ptr));
                 } else if (expr_is_storage_reference(arg)) {
                     bool was_target = is_target;
                     is_target = true;
@@ -13148,6 +13198,13 @@ public:
                     // actual must make present() false (pass null).
                     args.push_back(V(emit_optional_actual_pointer(fn, i,
                         arg), ty_ptr));
+                } else if (formal_expects_unbounded_array_data(
+                        formal_fn, i, arg)) {
+                    bool was_target = is_target;
+                    is_target = true;
+                    visit_expr(*arg);
+                    is_target = was_target;
+                    args.push_back(V(tmp, ty_ptr));
                 } else if (expr_is_storage_reference(arg)) {
                     bool was_target = is_target;
                     is_target = true;
