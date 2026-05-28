@@ -13061,6 +13061,32 @@ public:
         uint32_t ptr;
     };
 
+    bool raw_write_string_array_chunks(std::vector<RawWriteChunk> &chunks,
+            ASR::expr_t *val, ASR::Array_t *array_t) {
+        ASR::ttype_t *elem_type =
+            ASRUtils::type_get_past_allocatable_pointer(array_t->m_type);
+        elem_type = ASRUtils::type_get_past_array(elem_type);
+        if (!ASR::is_a<ASR::String_t>(*elem_type)) return false;
+        int64_t total = ASRUtils::get_fixed_size_of_array(
+            array_t->m_dims, array_t->n_dims);
+        if (total <= 0) return false;
+        ArrayLinearView view = emit_array_linear_view(val, array_t);
+        for (int64_t i = 0; i < total; i++) {
+            uint32_t elem_ptr = emit_linear_elem_ptr(
+                view.base, emit_i64_const(i), view.elem_len);
+            uint32_t desc = lr_emit_load(s, ty_str_desc,
+                V(elem_ptr, ty_ptr));
+            uint32_t fld0 = 0, fld1 = 1;
+            uint32_t data = lr_emit_extractvalue(s, ty_ptr,
+                V(desc, ty_str_desc), &fld0, 1);
+            uint32_t len = lr_emit_extractvalue(s, ty_i64,
+                V(desc, ty_str_desc), &fld1, 1);
+            chunks.push_back({lr_emit_trunc(s, ty_i32, V(len, ty_i64)),
+                data});
+        }
+        return true;
+    }
+
     RawWriteChunk raw_write_chunk_for_value(ASR::expr_t *val) {
         ASR::ttype_t *vt = ASRUtils::expr_type(val);
         vt = ASRUtils::type_get_past_allocatable_pointer(vt);
@@ -14725,6 +14751,13 @@ public:
             std::vector<RawWriteChunk> chunks;
             chunks.reserve(n_values);
             for (size_t i = 0; i < n_values; i++) {
+                ASR::ttype_t *vt = ASRUtils::expr_type(values[i]);
+                vt = ASRUtils::type_get_past_allocatable_pointer(vt);
+                if (ASR::is_a<ASR::Array_t>(*vt) &&
+                        raw_write_string_array_chunks(chunks, values[i],
+                            ASR::down_cast<ASR::Array_t>(vt))) {
+                    continue;
+                }
                 chunks.push_back(raw_write_chunk_for_value(values[i]));
             }
             if (x.m_rec) {
