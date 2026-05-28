@@ -5144,10 +5144,20 @@ public:
                 // alloca: a SAVE string can be a pointer/associate target whose
                 // address must outlive the procedure (e.g. a function returning
                 // character(:),pointer => save_target).
-                if (!init_save_string_global_buffer(slot, v)) {
+                if (init_save_string_global_buffer(slot, v)) {
+                    // The buffer global already holds the initial value in
+                    // .data and persists across calls; re-copying it per
+                    // entry would clobber updates from earlier calls.  Only
+                    // a non-constant initializer (rare for SAVE) still needs
+                    // the runtime copy.
+                    if (v->m_value &&
+                            !ASR::is_a<ASR::StringConstant_t>(*v->m_value)) {
+                        initialize_local_value(v, slot);
+                    }
+                } else {
                     initialize_local_string_descriptor(slot, v->m_type);
+                    initialize_local_value(v, slot);
                 }
-                initialize_local_value(v, slot);
             }
         }
         if (is_allocatable_struct_type(v->m_type)) {
@@ -8415,12 +8425,23 @@ public:
             return false;
         }
         uint64_t h = get_hash((ASR::asr_t *)v);
-        std::vector<uint8_t> spaces((size_t)len, (uint8_t)' ');
+        // Seed the persistent buffer with the compile-time initial value (or
+        // spaces if none) in .data.  A SAVE string keeps its value across
+        // calls, so the init must happen once at load -- re-copying it on
+        // every entry would clobber modifications made in earlier calls.
+        std::vector<uint8_t> bufinit((size_t)len, (uint8_t)' ');
+        if (v->m_value && ASR::is_a<ASR::StringConstant_t>(*v->m_value)) {
+            const char *cs = ASR::down_cast<ASR::StringConstant_t>(
+                v->m_value)->m_s;
+            for (size_t i = 0; cs && cs[i] && i < (size_t)len; i++) {
+                bufinit[i] = (uint8_t)cs[i];
+            }
+        }
         std::string gname = std::string("_lr_savestr_")
             + std::to_string(h) + "_" + v->m_name;
         lr_session_global(s, gname.c_str(),
             lr_type_array_s(s, ty_i8, (uint64_t)len),
-            false, spaces.data(), (uint64_t)len);
+            false, bufinit.data(), (uint64_t)len);
         uint32_t bufsym = lr_session_intern(s, gname.c_str());
         lr_operand_desc_t no_off[1] = {I(0, ty_i64)};
         uint32_t buf_addr = lr_emit_gep(s, ty_i8,
