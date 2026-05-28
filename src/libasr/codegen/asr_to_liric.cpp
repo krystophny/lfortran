@@ -15781,11 +15781,23 @@ public:
                 return true;
             }
             uint32_t count = cast_int_value(view.total, ty_i64, ty_i32);
+            // stride between consecutive elements, in elements: dim[0].stride /
+            // elem_len.  1 for a contiguous array, but the leading-dimension
+            // size for a non-contiguous section (e.g. a row a(i,:) aliased
+            // through a pointer), which the runtime must honour or it reads
+            // contiguously and corrupts the strided storage.
+            uint32_t sdesc = desc_ptr_of(target);
+            uint32_t stride_bytes = desc_load_i64(sdesc,
+                DESC_HEADER_BYTES + DESC_DIM_STRIDE);
+            uint32_t elem_len_b = desc_load_i64(sdesc, 8);
+            uint32_t stride_e = lr_emit_sdiv(s, ty_i64,
+                V(stride_bytes, ty_i64), V(elem_len_b, ty_i64));
+            uint32_t stride_i32 = cast_int_value(stride_e, ty_i64, ty_i32);
             call_args.push_back(I(1, ty_i32));
             call_args.push_back(I(type_code, ty_i32));
             call_args.push_back(V(view.base, ty_ptr));
             call_args.push_back(V(count, ty_i32));
-            call_args.push_back(I(1, ty_i32));
+            call_args.push_back(V(stride_i32, ty_i32));
             return true;
         }
         ASR::ttype_t *type = ASRUtils::expr_type(target);
