@@ -6775,6 +6775,12 @@ public:
     }
 
     uint32_t emit_cchar_data_ptr(ASR::expr_t *expr) {
+        if (ASR::is_a<ASR::Cast_t>(*expr)) {
+            ASR::Cast_t *cast = ASR::down_cast<ASR::Cast_t>(expr);
+            if (cast->m_kind == ASR::cast_kindType::StringToArray) {
+                return emit_cchar_data_ptr(cast->m_arg);
+            }
+        }
         if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*expr)) {
             return emit_cchar_data_ptr(
                 ASR::down_cast<ASR::ArrayPhysicalCast_t>(expr)->m_arg);
@@ -6794,6 +6800,12 @@ public:
     }
 
     ASR::expr_t *cchar_cast_source(ASR::expr_t *expr) {
+        if (ASR::is_a<ASR::Cast_t>(*expr)) {
+            ASR::Cast_t *cast = ASR::down_cast<ASR::Cast_t>(expr);
+            if (cast->m_kind == ASR::cast_kindType::StringToArray) {
+                return cchar_cast_source(cast->m_arg);
+            }
+        }
         if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*expr)) {
             return cchar_cast_source(
                 ASR::down_cast<ASR::ArrayPhysicalCast_t>(expr)->m_arg);
@@ -12670,26 +12682,22 @@ public:
                 throw CodeGenError(
                     "liric: get_environment_variable expects three args");
             }
-            visit_expr(*x.m_args[0].m_value);
-            uint32_t name = tmp;
+            uint32_t name = emit_cchar_data_ptr(x.m_args[0].m_value);
             uint32_t name_len = emit_i32_value(x.m_args[1].m_value);
             ASR::expr_t *receiver_arg = x.m_args[2].m_value;
             uint32_t receiver = 0;
             uint32_t receiver_len = 0;
             bool use_scratch = false;
-            if (ASR::is_a<ASR::StringPhysicalCast_t>(*receiver_arg)) {
-                ASR::StringPhysicalCast_t *cast =
-                    ASR::down_cast<ASR::StringPhysicalCast_t>(receiver_arg);
-                if (cast->m_new == ASR::string_physical_typeType::CChar) {
-                    visit_expr(*cast->m_arg);
-                    uint32_t desc = tmp;
-                    uint32_t fld0 = 0, fld1 = 1;
-                    receiver = lr_emit_extractvalue(s, ty_ptr,
-                        V(desc, ty_str_desc), &fld0, 1);
-                    receiver_len = lr_emit_extractvalue(s, ty_i64,
-                        V(desc, ty_str_desc), &fld1, 1);
-                    use_scratch = true;
-                }
+            ASR::expr_t *receiver_source = cchar_cast_source(receiver_arg);
+            if (receiver_source != receiver_arg) {
+                visit_expr(*receiver_source);
+                uint32_t desc = tmp;
+                uint32_t fld0 = 0, fld1 = 1;
+                receiver = lr_emit_extractvalue(s, ty_ptr,
+                    V(desc, ty_str_desc), &fld0, 1);
+                receiver_len = lr_emit_extractvalue(s, ty_i64,
+                    V(desc, ty_str_desc), &fld1, 1);
+                use_scratch = true;
             }
             if (!use_scratch) {
                 visit_expr(*receiver_arg);
@@ -13148,8 +13156,7 @@ public:
                     throw CodeGenError(
                         "liric: environment-variable helper expects two args");
                 }
-                visit_expr(*x.m_args[0].m_value);
-                uint32_t name = tmp;
+                uint32_t name = emit_cchar_data_ptr(x.m_args[0].m_value);
                 uint32_t name_len = emit_i32_value(x.m_args[1].m_value);
                 uint32_t sym = lr_session_intern(s, cname.c_str());
                 lr_operand_desc_t cargs[2] = {
