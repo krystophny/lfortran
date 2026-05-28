@@ -1119,6 +1119,11 @@ public:
         return false;
     }
 
+    bool bindc_variable_has_no_initializer(ASR::Variable_t *v) {
+        return v->m_abi == ASR::abiType::BindC &&
+            v->m_value == nullptr && v->m_symbolic_value == nullptr;
+    }
+
     void register_module_globals(const ASR::Module_t &x,
             bool init_vars_only=false) {
         if (x.m_intrinsic) return;
@@ -1189,9 +1194,14 @@ public:
             }
             std::string gname = module_variable_global_name(
                 item.second, v);
-            lr_session_global(s, gname.c_str(),
-                lr_type_array_s(s, ty_i8, nbytes),
-                false, init_bytes.data(), nbytes);
+            if (bindc_variable_has_no_initializer(v)) {
+                lr_session_global_extern(s, gname.c_str(),
+                    lr_type_array_s(s, ty_i8, nbytes));
+            } else {
+                lr_session_global(s, gname.c_str(),
+                    lr_type_array_s(s, ty_i8, nbytes),
+                    false, init_bytes.data(), nbytes);
+            }
             lr_globals[h] = lr_session_intern(s, gname.c_str());
             if (var_needs_runtime_init(v)) {
                 module_init_vars.push_back(v);
@@ -2580,7 +2590,8 @@ public:
         // object references that definition instead of emitting a second,
         // zero-initialised definition that can win the link and read 0.
         if (!module_variable_global_name(sym_before_external, v).empty() &&
-                var_defined_in_loaded_module(v)) {
+                (var_defined_in_loaded_module(v) ||
+                 bindc_variable_has_no_initializer(v))) {
             lr_session_global_extern(s, gname.c_str(),
                 lr_type_array_s(s, ty_i8, nbytes));
         } else {
