@@ -7183,7 +7183,10 @@ public:
     // types still throw a clear diagnostic.
 
     void visit_ArrayItem(const ASR::ArrayItem_t &x) {
-        LIRIC_PASSTHROUGH(x)
+        if (!is_target && x.m_value) {
+            visit_expr(*x.m_value);
+            return;
+        }
 
         ASR::ttype_t *vt = ASRUtils::expr_type(x.m_v);
         vt = ASRUtils::type_get_past_allocatable_pointer(vt);
