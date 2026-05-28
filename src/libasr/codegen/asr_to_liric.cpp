@@ -5847,8 +5847,14 @@ public:
             if (ASR::is_a<ASR::ArrayItem_t>(*base)) {
                 base = ASR::down_cast<ASR::ArrayItem_t>(base)->m_v;
             }
-            ASR::Variable_t *bv = ASR::is_a<ASR::Var_t>(*base)
-                ? ASRUtils::EXPR2VAR(base) : nullptr;
+            ASR::Variable_t *bv = nullptr;
+            if (ASR::is_a<ASR::Var_t>(*base)) {
+                ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
+                    ASR::down_cast<ASR::Var_t>(base)->m_v);
+                if (sym && ASR::is_a<ASR::Variable_t>(*sym)) {
+                    bv = ASR::down_cast<ASR::Variable_t>(sym);
+                }
+            }
             bool safe_local = bv
                 && bv->m_intent == ASR::intentType::Local
                 && bv->m_storage == ASR::storage_typeType::Default;
