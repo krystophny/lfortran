@@ -9835,6 +9835,21 @@ public:
             return;
         }
         at = ASRUtils::type_get_past_array(at);
+        if (ASR::is_a<ASR::Var_t>(*v) &&
+                ASRUtils::is_allocatable(expr_t) &&
+                ASRUtils::is_unlimited_polymorphic_type(expr_t)) {
+            bool wt = is_target;
+            is_target = true;
+            visit_expr(*v);
+            is_target = wt;
+            uint32_t fld0 = 0, fld1 = 1;
+            uint32_t d0 = lr_emit_insertvalue(s, ty_poly_desc,
+                LR_UNDEF(ty_poly_desc), LR_NULL(ty_ptr), &fld0, 1);
+            uint32_t d1 = lr_emit_insertvalue(s, ty_poly_desc,
+                V(d0, ty_poly_desc), I(0, ty_i64), &fld1, 1);
+            lr_emit_store(s, V(d1, ty_poly_desc), V(tmp, ty_ptr));
+            return;
+        }
         if (ASR::is_a<ASR::StructType_t>(*at) &&
                 ASRUtils::is_allocatable(expr_t) &&
                 !ASRUtils::is_class_type(at)) {
