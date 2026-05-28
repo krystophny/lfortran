@@ -3834,6 +3834,36 @@ public:
         return false;
     }
 
+    bool expr_is_unlimited_polymorphic_array_item(ASR::expr_t *expr,
+            ASR::ArrayItem_t **item_out = nullptr) {
+        if (!ASR::is_a<ASR::ArrayItem_t>(*expr)) {
+            return false;
+        }
+        ASR::ArrayItem_t *item = ASR::down_cast<ASR::ArrayItem_t>(expr);
+        if (!type_is_unlimited_polymorphic_array(
+                ASRUtils::expr_type(item->m_v))) {
+            return false;
+        }
+        if (item_out) {
+            *item_out = item;
+        }
+        return true;
+    }
+
+    void set_descriptor_array_element_layout(uint32_t desc,
+            ASR::Array_t *array_t, uint32_t elem_len, uint32_t tag) {
+        desc_store_i64(desc, 8, elem_len);
+        desc_store_i64(desc, 24, tag);
+        uint32_t stride = elem_len;
+        for (size_t d = 0; d < array_t->n_dims; d++) {
+            int64_t base_off = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
+            desc_store_i64(desc, base_off + 16, stride);
+            uint32_t extent = desc_dim_extent(desc, d);
+            stride = lr_emit_mul(s, ty_i64,
+                V(stride, ty_i64), V(extent, ty_i64));
+        }
+    }
+
     void visit_Assignment(const ASR::Assignment_t &x) {
         // A user-defined assignment (generic assignment(=)) is resolved by the
         // frontend into a SubroutineCall stored in m_overloaded; emit that
@@ -4129,6 +4159,79 @@ public:
                     V(dst, ty_ptr));
                 emit_string_copy_padded(dst_desc, rhs);
             }
+            return;
+        }
+
+        ASR::ArrayItem_t *target_poly_item = nullptr;
+        if (expr_is_unlimited_polymorphic_array_item(
+                x.m_target, &target_poly_item)) {
+            uint32_t dst_desc = desc_ptr_of(target_poly_item->m_v);
+            ASR::ttype_t *target_owner_type =
+                ASRUtils::type_get_past_allocatable_pointer(
+                    ASRUtils::expr_type(target_poly_item->m_v));
+            ASR::Array_t *target_array =
+                ASR::down_cast<ASR::Array_t>(target_owner_type);
+
+            ASR::ArrayItem_t *value_poly_item = nullptr;
+            if (expr_is_unlimited_polymorphic_array_item(
+                    x.m_value, &value_poly_item)) {
+                uint32_t src_desc = desc_ptr_of(value_poly_item->m_v);
+                uint32_t elem_len = desc_load_i64(src_desc, 8);
+                uint32_t tag = desc_load_i64(src_desc, 24);
+                set_descriptor_array_element_layout(
+                    dst_desc, target_array, elem_len, tag);
+                bool was_target = is_target;
+                is_target = true;
+                visit_expr(*x.m_target);
+                uint32_t dst = tmp;
+                visit_expr(*x.m_value);
+                uint32_t src = tmp;
+                is_target = was_target;
+                emit_memcpy_dynamic(dst, src, elem_len);
+                return;
+            }
+
+            if (!ASRUtils::is_unlimited_polymorphic_type(
+                    ASRUtils::expr_type(x.m_value))) {
+                ASR::ttype_t *value_type =
+                    ASRUtils::type_get_past_allocatable_pointer(
+                        ASRUtils::expr_type(x.m_value));
+                value_type = ASRUtils::type_get_past_array(value_type);
+                int64_t elem_bytes = element_byte_size(value_type);
+                int64_t tag = polymorphic_actual_tag(x.m_value);
+                set_descriptor_array_element_layout(dst_desc, target_array,
+                    emit_i64_const(elem_bytes), emit_i64_const(tag));
+                bool was_target = is_target;
+                is_target = true;
+                visit_expr(*x.m_target);
+                is_target = was_target;
+                uint32_t dst = tmp;
+                visit_expr(*x.m_value);
+                lr_type_t *value_lr_type = value_type_for_expr(x.m_value);
+                lr_emit_store(s, V(tmp, value_lr_type), V(dst, ty_ptr));
+                return;
+            }
+
+            bool was_target = is_target;
+            is_target = true;
+            visit_expr(*x.m_value);
+            is_target = was_target;
+            uint32_t src_desc = lr_emit_load(s, ty_poly_desc,
+                V(tmp, ty_ptr));
+            uint32_t fld0 = 0, fld1 = 1;
+            uint32_t src_data = lr_emit_extractvalue(s, ty_ptr,
+                V(src_desc, ty_poly_desc), &fld0, 1);
+            uint32_t tag = lr_emit_extractvalue(s, ty_i64,
+                V(src_desc, ty_poly_desc), &fld1, 1);
+            uint32_t elem_len = desc_load_i64(dst_desc, 8);
+            set_descriptor_array_element_layout(
+                dst_desc, target_array, elem_len, tag);
+            was_target = is_target;
+            is_target = true;
+            visit_expr(*x.m_target);
+            is_target = was_target;
+            uint32_t dst = tmp;
+            emit_memcpy_dynamic(dst, src_data, elem_len);
             return;
         }
 
@@ -9816,6 +9919,84 @@ public:
         return nullptr;
     }
 
+    bool resize_unlimited_polymorphic_array_from_concrete_source(
+            ASR::expr_t *target, ASR::expr_t *source,
+            ASR::Array_t *target_array) {
+        ASR::Array_t *source_array = nullptr;
+        if (!expr_is_array(source, &source_array) ||
+                type_is_unlimited_polymorphic_array(
+                    ASRUtils::expr_type(source))) {
+            return false;
+        }
+        if (source_array->n_dims != target_array->n_dims) {
+            return false;
+        }
+        int64_t tag = polymorphic_actual_tag(source);
+        if (tag == 0) {
+            return false;
+        }
+
+        ArrayLinearView source_view =
+            emit_array_linear_view(source, source_array);
+        uint32_t target_desc = desc_ptr_of(target);
+        uint32_t old_base = desc_base_addr(target_desc);
+        uint32_t has_elements = lr_emit_icmp(s, LR_CMP_SGT,
+            V(source_view.total, ty_i64), I(0, ty_i64));
+        uint32_t alloc_elems = lr_emit_select(s, ty_i64,
+            V(has_elements, ty_i1), V(source_view.total, ty_i64), I(1, ty_i64));
+        uint32_t bytes = lr_emit_mul(s, ty_i64,
+            V(alloc_elems, ty_i64), V(source_view.elem_len, ty_i64));
+
+        uint32_t allocator = emit_call(
+            "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+        lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
+        declare_func("_lfortran_malloc_alloc", ty_ptr,
+            malloc_params, 2, false);
+        lr_operand_desc_t malloc_args[] = {
+            V(allocator, ty_ptr), V(bytes, ty_i64)
+        };
+        uint32_t new_base = emit_call("_lfortran_malloc_alloc",
+            ty_ptr, malloc_args, 2);
+
+        lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
+        declare_func("memset", ty_ptr, memset_params, 3, false);
+        lr_operand_desc_t memset_args[] = {
+            V(new_base, ty_ptr), I(0, ty_i32), V(bytes, ty_i64)
+        };
+        emit_call("memset", ty_ptr, memset_args, 3);
+
+        desc_store_base(target_desc, new_base);
+        desc_store_i64(target_desc, 8, source_view.elem_len);
+        desc_store_rank(target_desc, (int)target_array->n_dims);
+        desc_store_i64(target_desc, 24, emit_i64_const(tag));
+
+        uint32_t source_desc = 0;
+        bool source_descriptor = source_array->m_physical_type ==
+            ASR::array_physical_typeType::DescriptorArray;
+        if (source_descriptor) {
+            source_desc = desc_ptr_of(source);
+        }
+
+        uint32_t stride = source_view.elem_len;
+        for (size_t d = 0; d < target_array->n_dims; d++) {
+            uint32_t lbound = source_descriptor
+                ? desc_dim_lbound(source_desc, d)
+                : emit_array_dim_lbound(source_array, d);
+            uint32_t extent = source_descriptor
+                ? desc_dim_extent(source_desc, d)
+                : emit_array_dim_extent_for_expr(source, source_array, d);
+            int64_t base_off = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
+            desc_store_i64(target_desc, base_off + 0, lbound);
+            desc_store_i64(target_desc, base_off + 8, extent);
+            desc_store_i64(target_desc, base_off + 16, stride);
+            stride = lr_emit_mul(s, ty_i64,
+                V(stride, ty_i64), V(extent, ty_i64));
+        }
+
+        emit_free_if_nonnull(allocator, old_base);
+        return true;
+    }
+
     void visit_ReAlloc(const ASR::ReAlloc_t &x) {
         for (size_t i = 0; i < x.n_args; i++) {
             const ASR::alloc_arg_t &arg = x.m_args[i];
@@ -9854,15 +10035,19 @@ public:
             // offset-24 tag.  The trailing array_op copy loop then re-copies
             // harmlessly against the now-correct descriptor.
             if (!arg.m_type && ASR::is_a<ASR::Array_t>(*naked) &&
-                    ASRUtils::is_unlimited_polymorphic_type(
-                        ASR::down_cast<ASR::Array_t>(naked)->m_type)) {
+                    type_is_unlimited_polymorphic_array(at)) {
+                ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(naked);
                 ASR::expr_t *src = realloc_source_from_dims(
                     arg.m_dims, arg.n_dims);
+                if (src && resize_unlimited_polymorphic_array_from_concrete_source(
+                        arg.m_a, src, array_t)) {
+                    continue;
+                }
                 if (src && type_is_unlimited_polymorphic_array(
                         ASRUtils::expr_type(src))) {
                     emit_allocatable_descriptor_array_assignment_from_desc(
                         desc_ptr_of(arg.m_a), desc_ptr_of(src),
-                        ASR::down_cast<ASR::Array_t>(naked));
+                        array_t);
                     continue;
                 }
             }
@@ -9920,6 +10105,8 @@ public:
                 ? struct_symbol_from_type_decl(arg.m_sym_subclass) : nullptr;
             elem_bytes = tst ? (int64_t)struct_storage_size(tst)
                 : element_byte_size(arg.m_type);
+        } else if (type_is_unlimited_polymorphic_array(at)) {
+            elem_bytes = (int64_t)lr_type_size_or_default(ty_poly_desc);
         } else {
             elem_bytes = array_element_stride_bytes(arg.m_a, array_t->m_type);
         }
