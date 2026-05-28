@@ -6603,10 +6603,17 @@ public:
                     bv = ASR::down_cast<ASR::Variable_t>(sym);
                 }
             }
-            bool safe_local = bv
+            // A local or SAVE scalar/array element of default (non-pointer,
+            // non-allocatable, non-character) type has its data stored
+            // in-place, so GetPointer already yields the storage address --
+            // the c_ptr value itself.  The trailing load would dereference it
+            // and return the element value instead (c_loc(save_arr(1)) then
+            // hands back the data, not its address).
+            bool safe_direct = bv
                 && bv->m_intent == ASR::intentType::Local
-                && bv->m_storage == ASR::storage_typeType::Default;
-            if (safe_local && !ASRUtils::is_character(*at)
+                && (bv->m_storage == ASR::storage_typeType::Default
+                    || bv->m_storage == ASR::storage_typeType::Save);
+            if (safe_direct && !ASRUtils::is_character(*at)
                 && !ASRUtils::is_allocatable(at)
                 && !ASRUtils::is_pointer(at)) {
                 visit_expr(*x.m_arg);
