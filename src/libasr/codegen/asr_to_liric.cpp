@@ -11786,6 +11786,9 @@ public:
             visit_expr(*actual);
             is_target = was_target;
             uint32_t base = tmp;
+            if (is_scalar_struct_pointer_target(actual)) {
+                base = lr_emit_load(s, ty_ptr, V(base, ty_ptr));
+            }
             ASR::Struct_t *st = struct_symbol_for_concrete_expr(actual);
             bool uses_raw_chars = false;
             uint64_t elem_bytes = st
