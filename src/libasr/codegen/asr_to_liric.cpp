@@ -11049,6 +11049,15 @@ public:
         return raw && ASR::is_a<ASR::StructMethodDeclaration_t>(*raw);
     }
 
+    bool dt_needs_dynamic_dispatch(ASR::expr_t *dt_expr) {
+        if (!dt_expr) return true;
+        ASR::ttype_t *type = ASRUtils::type_get_past_allocatable_pointer(
+            ASRUtils::expr_type(dt_expr));
+        return ASRUtils::is_class_type(type) ||
+            type_is_limited_polymorphic_array(type) ||
+            type_is_unlimited_polymorphic_array(type);
+    }
+
     bool emit_dynamic_subroutine_dispatch(ASR::Function_t *fn,
             ASR::symbol_t *call_sym,
             const std::string &method_name,
@@ -12022,12 +12031,14 @@ public:
             return;
         }
 
-        if (fn && emit_dynamic_subroutine_dispatch(fn, x.m_name,
+        if (fn && dt_needs_dynamic_dispatch(x.m_dt) &&
+                emit_dynamic_subroutine_dispatch(fn, x.m_name,
                 dynamic_method_name(x.m_name, fn), args, x.m_dt)) {
             emit_class_writebacks();
             return;
         }
-        if (fn && function_is_interface(fn) && x.m_dt) {
+        if (fn && function_is_interface(fn) && x.m_dt &&
+                dt_needs_dynamic_dispatch(x.m_dt)) {
             uint32_t data_ptr = dispatch_data_ptr_from_dt(x.m_dt);
             uint32_t fptr = load_object_method_ptr(data_ptr,
                 dynamic_method_name(x.m_name, fn));
@@ -12347,7 +12358,8 @@ public:
                 args.data(), args.size());
             return;
         }
-        if (fn && function_is_interface(fn) && x.m_dt) {
+        if (fn && function_is_interface(fn) && x.m_dt &&
+                dt_needs_dynamic_dispatch(x.m_dt)) {
             // nopass deferred TBP: no passed-object arg, so dispatch
             // through x.m_dt instead — it holds the dispatch object
             // (e.g. self%obj for an allocatable class field).
