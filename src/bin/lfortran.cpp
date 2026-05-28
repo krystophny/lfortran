@@ -2199,8 +2199,15 @@ int link_executable(const std::vector<std::string> &infiles,
                 // instantiations of trim/index/scan/... into every
                 // consumer .o; these are byte-identical so we accept
                 // multiple definitions and let the linker keep one.
-                compile_cmd += " -llfortran_runtime_fortran"
-                    " -Wl,--allow-multiple-definition";
+                compile_cmd += " -llfortran_runtime_fortran";
+                // --allow-multiple-definition is a GNU ld/lld option; Apple's
+                // macOS linker rejects it outright (and dedups the weak runtime
+                // symbols on its own), so only pass it off macOS.
+                if (compiler_options.platform != LCompilers::Platform::macOS_Intel
+                && compiler_options.platform != LCompilers::Platform::macOS_ARM
+                && compiler_options.platform != LCompilers::Platform::macOS_PowerPC) {
+                    compile_cmd += " -Wl,--allow-multiple-definition";
+                }
             }
             if (compiler_options.openmp && CC.find("clang" ) != std::string::npos) {
                 std::string openmp_shared_library = compiler_options.openmp_lib_dir;
