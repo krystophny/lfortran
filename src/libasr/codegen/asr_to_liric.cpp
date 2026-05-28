@@ -11223,6 +11223,18 @@ public:
             v->m_intent != ASR::intentType::ReturnVar;
     }
 
+    bool is_procedure_value_type(ASR::ttype_t *type) {
+        type = ASRUtils::type_get_past_allocatable_pointer(type);
+        return ASR::is_a<ASR::FunctionType_t>(*type);
+    }
+
+    bool is_procedure_pointer_type(ASR::ttype_t *type) {
+        type = ASRUtils::type_get_past_allocatable_pointer(type);
+        if (!ASRUtils::is_pointer(type)) return false;
+        type = ASRUtils::type_get_past_pointer(type);
+        return ASR::is_a<ASR::FunctionType_t>(*type);
+    }
+
     // Function-pointer value to call through for a procedure-pointer symbol.
     // A procedure dummy's slot already holds the callee address; a local or
     // module/program-global procedure pointer holds the address in its
@@ -12473,6 +12485,18 @@ public:
                     // actual must make present() false (pass null).
                     args.push_back(V(emit_optional_actual_pointer(fn, i,
                         arg), ty_ptr));
+                } else if (formal_v &&
+                        is_procedure_value_type(formal_v->m_type) &&
+                        !ASRUtils::is_pointer(formal_v->m_type)) {
+                    ASR::Variable_t *actual_v = var_from_expr(arg);
+                    if (actual_v && is_procedure_pointer_type(
+                            actual_v->m_type)) {
+                        args.push_back(V(proc_pointer_callee(actual_v),
+                            ty_ptr));
+                    } else {
+                        visit_expr(*arg);
+                        args.push_back(V(tmp, ty_ptr));
+                    }
                 } else if (expr_is_storage_reference(arg)) {
                     bool was_target = is_target;
                     is_target = true;
