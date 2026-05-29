@@ -981,7 +981,23 @@ public:
         LIRIC_CMP_INT(x);
     }
     void visit_UnsignedIntegerCompare(const ASR::UnsignedIntegerCompare_t &x) {
-        LIRIC_CMP_INT(x);
+        // Unsigned comparisons need unsigned predicates: with signed ones a
+        // value whose top bit is set (e.g. 2^31 after repeated doubling) reads
+        // as negative, so `u < unsigned(0)` would wrongly be true.
+        LIRIC_PASSTHROUGH(x)
+        visit_expr(*x.m_left);  uint32_t l = tmp;
+        visit_expr(*x.m_right); uint32_t r = tmp;
+        lr_type_t *t = get_type(ASRUtils::expr_type(x.m_left));
+        int p = LR_CMP_EQ;
+        switch (x.m_op) {
+            case ASR::cmpopType::Eq:    p = LR_CMP_EQ;  break;
+            case ASR::cmpopType::NotEq: p = LR_CMP_NE;  break;
+            case ASR::cmpopType::Lt:    p = LR_CMP_ULT; break;
+            case ASR::cmpopType::LtE:   p = LR_CMP_ULE; break;
+            case ASR::cmpopType::Gt:    p = LR_CMP_UGT; break;
+            case ASR::cmpopType::GtE:   p = LR_CMP_UGE; break;
+        }
+        tmp = lr_emit_icmp(s, p, V(l, t), V(r, t));
     }
     void visit_RealCompare(const ASR::RealCompare_t &x) {
         LIRIC_CMP_REAL(x);
