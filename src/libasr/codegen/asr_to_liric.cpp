@@ -4116,6 +4116,15 @@ public:
                 ArrayLinearView vw = emit_array_linear_view(value, va);
                 int nd = (int)va->n_dims;
                 int64_t eb = element_byte_size(va->m_type);
+                // A reshape with a runtime shape has null result-type dim
+                // lengths; take the extents from its shape so the realloc
+                // target gets the full element count, not 1 per dim.
+                ASR::ArrayReshape_t *resh =
+                    reshape_with_runtime_shape(value, va);
+                std::vector<uint32_t> resh_ext;
+                if (resh) {
+                    resh_ext = emit_reshape_extents(resh->m_shape, va);
+                }
                 uint32_t tmpdesc = emit_desc_alloca(nd);
                 desc_store_base(tmpdesc, vw.base);
                 desc_store_i64(tmpdesc, 8, emit_i64_const(eb));
@@ -4124,8 +4133,10 @@ public:
                     emit_string_array_len_hint(va->m_type));
                 uint32_t stride = emit_i64_const(eb);
                 for (int d = 0; d < nd; d++) {
-                    uint32_t lb = emit_array_dim_lbound(va, (size_t)d);
-                    uint32_t ext = emit_array_dim_extent(va, (size_t)d);
+                    uint32_t lb = resh ? emit_i64_const(1)
+                        : emit_array_dim_lbound(va, (size_t)d);
+                    uint32_t ext = resh ? resh_ext[d]
+                        : emit_array_dim_extent(va, (size_t)d);
                     int64_t bo = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
                     desc_store_i64(tmpdesc, bo + 0, lb);
                     desc_store_i64(tmpdesc, bo + 8, ext);
@@ -15852,6 +15863,27 @@ public:
         uint32_t elem_len;
     };
 
+    // If `expr` (past array-physical casts) is an ArrayReshape whose result
+    // type has a deferred (null) dim length -- i.e. its shape is a runtime
+    // expression -- return it so the caller takes the element count from the
+    // reshape's shape argument rather than the (unknown) type dims.
+    ASR::ArrayReshape_t *reshape_with_runtime_shape(ASR::expr_t *expr,
+            ASR::Array_t *array_t) {
+        ASR::expr_t *e = expr;
+        while (ASR::is_a<ASR::ArrayPhysicalCast_t>(*e)) {
+            e = ASR::down_cast<ASR::ArrayPhysicalCast_t>(e)->m_arg;
+        }
+        if (!ASR::is_a<ASR::ArrayReshape_t>(*e)) {
+            return nullptr;
+        }
+        for (size_t d = 0; d < array_t->n_dims; d++) {
+            if (!array_t->m_dims[d].m_length) {
+                return ASR::down_cast<ASR::ArrayReshape_t>(e);
+            }
+        }
+        return nullptr;
+    }
+
     ArrayLinearView emit_array_linear_view(ASR::expr_t *expr,
                                            ASR::Array_t *array_t) {
         if (array_t->m_physical_type ==
@@ -15875,6 +15907,14 @@ public:
         uint32_t total = 0;
         if (static_total > 0) {
             total = emit_i64_const(static_total);
+        } else if (ASR::ArrayReshape_t *resh = reshape_with_runtime_shape(
+                expr, array_t)) {
+            // A reshape with a runtime shape has deferred (null) result-type
+            // dim lengths, so the element count must come from its shape
+            // argument, not the type dims (which would read 1 per dim and
+            // truncate the copy to a single element).
+            total = emit_extent_total(
+                emit_reshape_extents(resh->m_shape, array_t));
         } else {
             total = emit_runtime_array_total_for_expr(expr, array_t);
         }
