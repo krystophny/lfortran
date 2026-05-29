@@ -7897,8 +7897,35 @@ public:
                 }
             }
         }
-        if (target_is_subroutine_call_array_temp &&
-                ASR::is_a<ASR::ArraySection_t>(*x.m_value)) {
+        // A subroutine-call array temp aliased to an array source via
+        // associate: copy the source descriptor into the temp's descriptor so
+        // its base/dims address the real data.  array_passed_in_function_call
+        // emits this for an array-section source and for the contiguous copy-in
+        // path `associate(temp => prepared_array)` where the source is an
+        // allocatable/pointer/descriptor-array Var.  Without copying the
+        // descriptor the temp's base stays null and the callee, handed the temp
+        // as its result out-arg, writes through a null pointer.
+        bool assoc_src_has_descriptor =
+            ASR::is_a<ASR::ArraySection_t>(*x.m_value);
+        if (target_is_subroutine_call_array_temp && !assoc_src_has_descriptor &&
+                ASR::is_a<ASR::Var_t>(*x.m_value)) {
+            // Only the contiguous copy-in of a *prepared* array (e.g. the
+            // allocatable array_op temp holding g(...) in `y = g(...) + 1`).
+            // Chained temp->temp associates (subroutine_call_temp =>
+            // subroutine_call_temp) have their own aliasing and must not be
+            // descriptor-copied here.
+            ASR::Variable_t *src_var = var_from_expr(x.m_value);
+            ASR::ttype_t *vt0 = ASRUtils::expr_type(x.m_value);
+            ASR::ttype_t *vcore =
+                ASRUtils::type_get_past_allocatable_pointer(vt0);
+            assoc_src_has_descriptor =
+                src_var && !var_is_subroutine_call_array_temp(src_var) &&
+                (ASRUtils::is_allocatable(vt0) || ASRUtils::is_pointer(vt0) ||
+                 (ASR::is_a<ASR::Array_t>(*vcore) &&
+                  ASR::down_cast<ASR::Array_t>(vcore)->m_physical_type ==
+                      ASR::array_physical_typeType::DescriptorArray));
+        }
+        if (target_is_subroutine_call_array_temp && assoc_src_has_descriptor) {
             uint32_t src_desc = desc_ptr_of(x.m_value);
             bool was_target = is_target;
             is_target = true;
