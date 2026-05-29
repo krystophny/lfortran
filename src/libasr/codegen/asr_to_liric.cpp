@@ -19742,10 +19742,12 @@ found_offset:
         if (res_arr->m_physical_type ==
                 ASR::array_physical_typeType::DescriptorArray) {
             uint32_t src_desc = 0;
+            bool have_src_desc = false;
             ArrayLinearView src_view = {0, 0, 0};
             if (src_arr->m_physical_type ==
                     ASR::array_physical_typeType::DescriptorArray) {
                 src_desc = desc_ptr_of(x.m_array);
+                have_src_desc = true;
             } else {
                 src_view = emit_array_linear_view(x.m_array, src_arr);
             }
@@ -19774,7 +19776,7 @@ found_offset:
 
             uint32_t src_base;
             uint32_t src_total;
-            if (src_desc) {
+            if (have_src_desc) {
                 src_base = desc_base_addr(src_desc);
                 src_total = descriptor_array_element_count(
                     src_desc, (int)src_arr->n_dims);
