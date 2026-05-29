@@ -10198,6 +10198,16 @@ public:
                     ASR::Struct_t *member_st = struct_symbol_from_type_decl(
                         member->m_type_declaration);
                     initialize_struct_storage(member_st, field_ptr);
+                } else if (ASRUtils::is_allocatable(member_type) &&
+                        !ASRUtils::is_unlimited_polymorphic_type(member_type) &&
+                        !ASRUtils::is_class_type(core)) {
+                    // A plain allocatable scalar component (e.g. integer,
+                    // allocatable :: xx) is a pointer slot that must start
+                    // unallocated; without nulling it, allocated() reads stack
+                    // garbage and a later deallocate frees an invalid pointer.
+                    // class(*)/class components are {data,tag} poly-descriptors,
+                    // not bare pointers, and are left to the class machinery.
+                    lr_emit_store(s, LR_NULL(ty_ptr), V(field_ptr, ty_ptr));
                 }
             }
             byte_offset += storage_size_for_variable(member);
@@ -10231,6 +10241,15 @@ public:
                 }
                 core = ASRUtils::type_get_past_array(core);
                 if (ASR::is_a<ASR::String_t>(*core)) {
+                    return true;
+                }
+                // A plain allocatable scalar component needs its pointer slot
+                // nulled on entry.  class(*)/class poly-descriptor components
+                // and pointer scalars are handled by the class machinery, not
+                // here, so they do not force struct initialization.
+                if (ASRUtils::is_allocatable(member_type) &&
+                        !ASRUtils::is_unlimited_polymorphic_type(member_type) &&
+                        !ASRUtils::is_class_type(core)) {
                     return true;
                 }
                 continue;
