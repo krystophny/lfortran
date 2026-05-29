@@ -7099,6 +7099,128 @@ public:
             expr_is_cchar_string_cast(cast->m_arg);
     }
 
+    // Character sequence association: a character scalar passed to a
+    // `character x(*)`/`character x(:)` dummy (DescriptorArray) appears in
+    // ASR as Cast(scalar, StringToArray, Array(String,...,DescriptorArray)).
+    // The callee reads a CFI descriptor, so materialise a proper 1-D
+    // descriptor whose extent = total_len / element_char_len and whose
+    // byte-stride = element_char_len.  (Passing the bare {ptr,len} string
+    // descriptor only worked for index 1, where delta*stride == 0.)
+    // Peel an optional ArrayPhysicalCast wrapper to expose an inner
+    // StringToArray Cast (character sequence association).  Returns null
+    // when the expression is not such a cast.
+    ASR::Cast_t *string_to_array_inner_cast(ASR::expr_t *expr) {
+        if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*expr)) {
+            expr = ASR::down_cast<ASR::ArrayPhysicalCast_t>(expr)->m_arg;
+        }
+        if (!ASR::is_a<ASR::Cast_t>(*expr)) return nullptr;
+        ASR::Cast_t *cast = ASR::down_cast<ASR::Cast_t>(expr);
+        return cast->m_kind == ASR::cast_kindType::StringToArray
+            ? cast : nullptr;
+    }
+
+    bool is_string_to_char_array_descriptor_arg(ASR::Function_t *fn,
+            size_t i, ASR::expr_t *expr) {
+        ASR::Cast_t *cast = string_to_array_inner_cast(expr);
+        if (!cast) return false;
+        if (is_string_to_cchar_array_cast(expr)) return false;
+        ASR::ttype_t *ct = ASRUtils::type_get_past_allocatable_pointer(
+            ASRUtils::expr_type(expr));
+        if (!ASR::is_a<ASR::Array_t>(*ct)) return false;
+        if (ASR::down_cast<ASR::Array_t>(ct)->m_physical_type !=
+                ASR::array_physical_typeType::DescriptorArray) {
+            return false;
+        }
+        return !formal_expects_raw_array_data(fn, i, expr);
+    }
+
+    uint32_t emit_string_to_array_descriptor(ASR::Cast_t *cast) {
+        // A liric character DescriptorArray stores its elements as an array
+        // of {ptr,len} string descriptors (16 bytes each), not raw bytes.
+        // Sequence-associating a character scalar therefore means building
+        // a str_desc array whose i-th entry points at the i-th element-sized
+        // slice of the source string.
+        ASR::ttype_t *ct = ASRUtils::type_get_past_allocatable_pointer(
+            cast->m_type);
+        ASR::ttype_t *et = ASRUtils::type_get_past_array(ct);
+        int64_t elem_clen = 1, kind = 1;
+        if (ASR::is_a<ASR::String_t>(*et)) {
+            ASR::String_t *st = ASR::down_cast<ASR::String_t>(et);
+            if (!(st->m_len && ASRUtils::extract_value(st->m_len, elem_clen))) {
+                elem_clen = 1;
+            }
+            kind = st->m_kind > 0 ? (int64_t)st->m_kind : 1;
+            if (elem_clen < 1) elem_clen = 1;
+        }
+        int64_t elem_clen_bytes = elem_clen * kind;
+        int64_t sd_bytes = element_byte_size(et);   // str_desc size (16)
+
+        visit_expr(*cast->m_arg);
+        uint32_t str_desc = tmp;
+        uint32_t f0 = 0, f1 = 1;
+        uint32_t src_data = lr_emit_extractvalue(s, ty_ptr,
+            V(str_desc, ty_str_desc), &f0, 1);
+        uint32_t total_len = lr_emit_extractvalue(s, ty_i64,
+            V(str_desc, ty_str_desc), &f1, 1);
+        uint32_t extent = (elem_clen == 1)
+            ? total_len
+            : lr_emit_sdiv(s, ty_i64, V(total_len, ty_i64),
+                I(elem_clen, ty_i64));
+
+        // Allocate the str_desc array (at least one element).
+        uint32_t has = lr_emit_icmp(s, LR_CMP_SGT,
+            V(extent, ty_i64), I(0, ty_i64));
+        uint32_t alloc_n = lr_emit_select(s, ty_i64,
+            V(has, ty_i1), V(extent, ty_i64), I(1, ty_i64));
+        uint32_t alloc_bytes = lr_emit_mul(s, ty_i64,
+            V(alloc_n, ty_i64), I(sd_bytes, ty_i64));
+        uint32_t arr_base = emit_malloc_bytes(alloc_bytes);
+
+        // Populate: arr_base[i] = { src_data + i*elem_clen_bytes, elem_clen }.
+        uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+        lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+        lr_error_t err;
+        uint32_t head_bb = lr_session_block(s);
+        uint32_t body_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_br(s, head_bb);
+
+        lr_session_set_block(s, head_bb, &err);
+        uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+        uint32_t more = lr_emit_icmp(s, LR_CMP_SLT,
+            V(idx, ty_i64), V(extent, ty_i64));
+        lr_emit_condbr(s, V(more, ty_i1), body_bb, done_bb);
+
+        lr_session_set_block(s, body_bb, &err);
+        uint32_t char_off = lr_emit_mul(s, ty_i64,
+            V(idx, ty_i64), I(elem_clen_bytes, ty_i64));
+        lr_operand_desc_t coff[1] = {V(char_off, ty_i64)};
+        uint32_t char_ptr = lr_emit_gep(s, ty_i8, V(src_data, ty_ptr),
+            coff, 1);
+        uint32_t sd0 = lr_emit_insertvalue(s, ty_str_desc,
+            LR_UNDEF(ty_str_desc), V(char_ptr, ty_ptr), &f0, 1);
+        uint32_t sd1 = lr_emit_insertvalue(s, ty_str_desc,
+            V(sd0, ty_str_desc), I(elem_clen, ty_i64), &f1, 1);
+        uint32_t elem_ptr = emit_linear_elem_ptr(arr_base, idx,
+            emit_i64_const(sd_bytes));
+        lr_emit_store(s, V(sd1, ty_str_desc), V(elem_ptr, ty_ptr));
+        uint32_t next = lr_emit_add(s, ty_i64, V(idx, ty_i64), I(1, ty_i64));
+        lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+        lr_emit_br(s, head_bb);
+
+        lr_session_set_block(s, done_bb, &err);
+        uint32_t desc = emit_desc_alloca(1);
+        desc_store_base(desc, arr_base);
+        desc_store_i64(desc, 8, emit_i64_const(sd_bytes));
+        desc_store_rank(desc, 1);
+        desc_store_i64(desc, 24, emit_i64_const(elem_clen));
+        int64_t bo = DESC_HEADER_BYTES;
+        desc_store_i64(desc, bo + DESC_DIM_LBOUND, emit_i64_const(1));
+        desc_store_i64(desc, bo + DESC_DIM_EXTENT, extent);
+        desc_store_i64(desc, bo + DESC_DIM_STRIDE, emit_i64_const(sd_bytes));
+        return desc;
+    }
+
     bool expr_is_bindc_char_scalar(ASR::expr_t *expr) {
         ASR::Variable_t *v = var_from_expr(expr);
         return v && is_bindc_char_scalar_variable(v);
@@ -13344,7 +13466,10 @@ public:
                     args.push_back(V(tmp, vt));
                     continue;
                 }
-                if (formal_is_unlimited_polymorphic_array(fn, i)) {
+                if (is_string_to_char_array_descriptor_arg(fn, i, arg)) {
+                    args.push_back(V(emit_string_to_array_descriptor(
+                        string_to_array_inner_cast(arg)), ty_ptr));
+                } else if (formal_is_unlimited_polymorphic_array(fn, i)) {
                     args.push_back(V(emit_polymorphic_assumed_rank_actual(arg),
                         ty_ptr));
                 } else if (formal_is_unlimited_polymorphic(fn, i)) {
@@ -13744,7 +13869,10 @@ public:
                     args.push_back(V(tmp, vt));
                     continue;
                 }
-                if (formal_is_unlimited_polymorphic_array(fn, i)) {
+                if (is_string_to_char_array_descriptor_arg(fn, i, arg)) {
+                    args.push_back(V(emit_string_to_array_descriptor(
+                        string_to_array_inner_cast(arg)), ty_ptr));
+                } else if (formal_is_unlimited_polymorphic_array(fn, i)) {
                     args.push_back(V(emit_polymorphic_assumed_rank_actual(arg),
                         ty_ptr));
                 } else if (formal_is_unlimited_polymorphic(fn, i)) {
