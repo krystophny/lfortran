@@ -1693,7 +1693,18 @@ namespace LCompilers {
             bool skip_save_restore) {
             const Location& loc = arr_var->base.loc;
             ASRUtils::ASRBuilder builder(al, loc);
+            // The cast context (perform_cast/cast_kind/casted_type) describes the
+            // enclosing constructor's coercion.  A per-element Cast overrides it,
+            // but only for that element: reset to the incoming context each
+            // iteration so a casted element (e.g. [real :: 9, ...]) does not leak
+            // its IntegerToReal kind onto a following already-typed element.
+            bool orig_perform_cast = perform_cast;
+            ASR::cast_kindType orig_cast_kind = cast_kind;
+            ASR::ttype_t* orig_casted_type = casted_type;
             for( size_t k = 0; k < x->n_args; k++ ) {
+                perform_cast = orig_perform_cast;
+                cast_kind = orig_cast_kind;
+                casted_type = orig_casted_type;
                 ASR::expr_t* curr_init = x->m_args[k];
                 if( ASR::is_a<ASR::Cast_t>(*curr_init) ) {
                     perform_cast = true;
