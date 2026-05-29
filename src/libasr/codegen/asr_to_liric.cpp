@@ -299,7 +299,29 @@ public:
                     at->m_physical_type
                     == ASR::array_physical_typeType::PointerArray) {
                 int64_t total = ASRUtils::get_fixed_size_of_array(t);
-                if (total <= 0) total = 1;
+                if (total <= 0) {
+                    // get_fixed_size_of_array only folds dim lengths that
+                    // carry a pre-computed m_value; an array_op-created temp
+                    // can have an unfolded constant IntegerBinOp length (1*3).
+                    // Fold it here so the temp is sized to its real extent
+                    // instead of collapsing to a single element, which under-
+                    // allocates its storage (a callee then writes out of
+                    // bounds, corrupting the result).
+                    int64_t prod = 1;
+                    bool folded = at->n_dims > 0;
+                    for (size_t d = 0; d < at->n_dims; d++) {
+                        int64_t ext = 0;
+                        if (at->m_dims[d].m_length &&
+                                extract_int_const(at->m_dims[d].m_length, ext)
+                                && ext > 0) {
+                            prod *= ext;
+                        } else {
+                            folded = false;
+                            break;
+                        }
+                    }
+                    total = folded ? prod : 1;
+                }
                 return lr_type_array_s(s, et, (uint64_t)total);
             }
             // Descriptor-style array: full CFI-compatible descriptor
@@ -15626,6 +15648,32 @@ public:
                 ASR::down_cast<ASR::IntrinsicElementalFunction_t>(expr);
             if (fn->m_value) {
                 return extract_int_const(fn->m_value, value);
+            }
+        }
+        // Fold a binop of constant operands directly.  ASRUtils::extract_value
+        // only folds an IntegerBinOp that already carries a pre-computed
+        // m_value; array_op-created dim lengths (e.g. 1*3) often do not, which
+        // would otherwise leave a constant-extent array temp un-sized.
+        if (ASR::is_a<ASR::IntegerBinOp_t>(*expr)) {
+            ASR::IntegerBinOp_t *b = ASR::down_cast<ASR::IntegerBinOp_t>(expr);
+            int64_t l = 0, r = 0;
+            if (extract_int_const(b->m_left, l) &&
+                    extract_int_const(b->m_right, r)) {
+                switch (b->m_op) {
+                    case ASR::binopType::Add: value = l + r; return true;
+                    case ASR::binopType::Sub: value = l - r; return true;
+                    case ASR::binopType::Mul: value = l * r; return true;
+                    case ASR::binopType::Div:
+                        if (r != 0) { value = l / r; return true; }
+                        break;
+                    case ASR::binopType::Pow: {
+                        int64_t p = 1;
+                        for (int64_t i = 0; i < r; i++) p *= l;
+                        value = p;
+                        return true;
+                    }
+                    default: break;
+                }
             }
         }
         return false;
