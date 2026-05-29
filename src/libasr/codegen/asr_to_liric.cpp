@@ -186,6 +186,14 @@ public:
     // length across calls even when the length expression's variables drift.
     std::unordered_map<uint64_t, uint32_t> allocatable_string_entry_len_slot;
     std::unordered_set<uint64_t> runtime_pointer_arrays;
+    // Program-level variable globals indexed by name, so a contained
+    // subprogram's host-associated copy (a distinct nested_vars Variable with
+    // its own hash) aliases the same storage rather than synthesising a
+    // decoupled zero global.  program_fixed_array_by_name additionally records
+    // FixedSizeArray host vars so a DescriptorArray view can synthesise a
+    // descriptor over the shared raw storage.
+    std::unordered_map<std::string, uint32_t> program_global_by_name;
+    std::unordered_map<std::string, ASR::Array_t*> program_fixed_array_by_name;
     std::unordered_set<uint64_t> array_section_call_temps;
     // Scalar intrinsic pointers whose slot holds an indirection address (set
     // by an EQUIVALENCE / c_f_pointer CPtrToPointer rather than carrying the
@@ -2246,6 +2254,18 @@ public:
             uint32_t sym = lr_session_intern(s, gname.c_str());
             lr_globals[h] = sym;
             var_to_sym[v] = sym;
+            // Index program-level globals by name so a contained subprogram's
+            // host-associated copy (a distinct nested_vars Variable) can alias
+            // the same storage instead of synthesising a decoupled zero global.
+            program_global_by_name[v->m_name] = sym;
+            ASR::ttype_t *pvt =
+                ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+            if (ASR::is_a<ASR::Array_t>(*pvt) &&
+                    ASR::down_cast<ASR::Array_t>(pvt)->m_physical_type ==
+                        ASR::array_physical_typeType::FixedSizeArray) {
+                program_fixed_array_by_name[v->m_name] =
+                    ASR::down_cast<ASR::Array_t>(pvt);
+            }
         }
         // Build a name -> sym map of the program-level variables so we
         // can alias nested-context ExternalSymbols (which point to
@@ -2886,6 +2906,70 @@ public:
             if (is_array && runtime_pointer_arrays.count(h)) {
                 tmp = lr_emit_load(s, ty_ptr, LR_GLOBAL(sym, ty_ptr));
                 return;
+            }
+            // A contained subprogram host-associates a program FixedSizeArray
+            // (storage shared via the program global) but views it as a
+            // DescriptorArray.  The raw global holds packed data, not a CFI
+            // descriptor, so synthesise a descriptor over it with the host's
+            // static dims rather than reading the data bytes as a descriptor.
+            // A contained subprogram host-associates a program array but the
+            // nested_vars pass gave it a decoupled proxy global (resolved sym
+            // differs from the program's global for the same name).  Redirect
+            // to the real program storage.  If the host var is a FixedSizeArray
+            // but this view is a DescriptorArray, synthesise a descriptor over
+            // the raw storage with the host's static dims.  (The program's own
+            // access has sym == the program global, so it is left untouched.)
+            // A host-associated reference resolves through an ExternalSymbol
+            // (the nested_vars proxy); a same-named local/dummy of the
+            // contained scope does not, so gating on that avoids false matches.
+            // Restricted to a host FixedSizeArray of non-string elements (the
+            // case proven broken); other host kinds keep existing handling.
+            if (is_array && sym_before_external != raw_sym) {
+                auto fa_it = program_fixed_array_by_name.find(v->m_name);
+                auto nm_it = program_global_by_name.find(v->m_name);
+                ASR::Array_t *view_arr = ASR::down_cast<ASR::Array_t>(vt);
+                if (fa_it != program_fixed_array_by_name.end() &&
+                        nm_it != program_global_by_name.end() &&
+                        nm_it->second != sym &&
+                        (int)view_arr->n_dims == (int)fa_it->second->n_dims) {
+                    ASR::Array_t *fa = fa_it->second;
+                    ASR::ttype_t *fe = ASRUtils::type_get_past_array(
+                        ASRUtils::type_get_past_allocatable_pointer(
+                            fa->m_type));
+                    if (!ASR::is_a<ASR::String_t>(*fe)) {
+                        uint32_t real_sym = nm_it->second;
+                        lr_operand_desc_t no_off[1] = {I(0, ty_i64)};
+                        uint32_t data = lr_emit_gep(s, ty_i8,
+                            LR_GLOBAL(real_sym, ty_ptr), no_off, 1);
+                        if (view_arr->m_physical_type !=
+                                ASR::array_physical_typeType::DescriptorArray) {
+                            // Contained view is also raw FixedSize: share the
+                            // data pointer directly.
+                            tmp = data;
+                            return;
+                        }
+                        int nd = (int)fa->n_dims;
+                        int64_t eb = element_byte_size(fa->m_type);
+                        uint32_t desc = emit_desc_alloca(nd);
+                        desc_store_base(desc, data);
+                        desc_store_i64(desc, 8, emit_i64_const(eb));
+                        desc_store_rank(desc, nd);
+                        desc_store_i64(desc, 24, emit_i64_const(0));
+                        uint32_t stride = emit_i64_const(eb);
+                        for (int d = 0; d < nd; d++) {
+                            int64_t bo = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
+                            uint32_t lb = emit_array_dim_lbound(fa, (size_t)d);
+                            uint32_t ext = emit_array_dim_extent(fa, (size_t)d);
+                            desc_store_i64(desc, bo + 0, lb);
+                            desc_store_i64(desc, bo + 8, ext);
+                            desc_store_i64(desc, bo + 16, stride);
+                            stride = lr_emit_mul(s, ty_i64,
+                                V(stride, ty_i64), V(ext, ty_i64));
+                        }
+                        tmp = desc;
+                        return;
+                    }
+                }
             }
             if (!is_array && indirect_scalar_pointers.count(h)) {
                 tmp = load_indirect_scalar_pointer(
