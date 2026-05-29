@@ -13275,6 +13275,28 @@ public:
                         // the callee got the pointer field's address and read
                         // the pointer bytes as the struct.
                         arg_ptr = lr_emit_load(s, ty_ptr, V(arg_ptr, ty_ptr));
+                    } else if (ASR::is_a<ASR::StructInstanceMember_t>(*arg) &&
+                            ASRUtils::is_pointer(ASRUtils::expr_type(arg)) &&
+                            !(formal && ASRUtils::is_pointer(
+                                formal->m_type))) {
+                        // A scalar intrinsic-typed pointer COMPONENT (e.g.
+                        // integer,pointer :: p inside a derived type) passed to
+                        // a non-pointer dummy passes the POINTEE.  The slot
+                        // holds the target address; load it once so the callee
+                        // reads the pointed-to value, not the pointer's bytes.
+                        // (Restricted to components; plain pointer vars are left
+                        // to the existing path to avoid separate-compilation
+                        // regressions.)
+                        ASR::ttype_t *pt = ASRUtils::type_get_past_pointer(
+                            ASRUtils::expr_type(arg));
+                        ASR::ttype_t *pcore =
+                            ASRUtils::type_get_past_array(pt);
+                        if (!ASR::is_a<ASR::Array_t>(*pt) &&
+                                !ASR::is_a<ASR::String_t>(*pcore) &&
+                                !ASR::is_a<ASR::StructType_t>(*pcore)) {
+                            arg_ptr = lr_emit_load(s, ty_ptr,
+                                V(arg_ptr, ty_ptr));
+                        }
                     }
                     if (formal_expects_raw_array_data(fn, i, arg)) {
                         arg_ptr = desc_base_addr(arg_ptr);
@@ -13633,6 +13655,28 @@ public:
                         // the callee got the pointer field's address and read
                         // the pointer bytes as the struct.
                         arg_ptr = lr_emit_load(s, ty_ptr, V(arg_ptr, ty_ptr));
+                    } else if (ASR::is_a<ASR::StructInstanceMember_t>(*arg) &&
+                            ASRUtils::is_pointer(ASRUtils::expr_type(arg)) &&
+                            !(formal && ASRUtils::is_pointer(
+                                formal->m_type))) {
+                        // A scalar intrinsic-typed pointer COMPONENT (e.g.
+                        // integer,pointer :: p inside a derived type) passed to
+                        // a non-pointer dummy passes the POINTEE.  The slot
+                        // holds the target address; load it once so the callee
+                        // reads the pointed-to value, not the pointer's bytes.
+                        // (Restricted to components; plain pointer vars are left
+                        // to the existing path to avoid separate-compilation
+                        // regressions.)
+                        ASR::ttype_t *pt = ASRUtils::type_get_past_pointer(
+                            ASRUtils::expr_type(arg));
+                        ASR::ttype_t *pcore =
+                            ASRUtils::type_get_past_array(pt);
+                        if (!ASR::is_a<ASR::Array_t>(*pt) &&
+                                !ASR::is_a<ASR::String_t>(*pcore) &&
+                                !ASR::is_a<ASR::StructType_t>(*pcore)) {
+                            arg_ptr = lr_emit_load(s, ty_ptr,
+                                V(arg_ptr, ty_ptr));
+                        }
                     }
                     if (formal_expects_raw_array_data(fn, i, arg)) {
                         arg_ptr = desc_base_addr(arg_ptr);
