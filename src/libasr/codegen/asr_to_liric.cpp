@@ -2487,6 +2487,24 @@ public:
                     is_allocatable_struct_type(v->m_type)) {
                 deallocate_string_var(x.m_args[i]);
             }
+            // An intent(out) derived-type dummy with default-initialized
+            // components is reset to those defaults on entry (Fortran
+            // semantics; the LLVM backend does the same).  Without this the
+            // callee keeps the caller's stale value.
+            if (v->m_intent == ASR::intentType::Out &&
+                    !ASRUtils::is_allocatable(v->m_type) &&
+                    !ASRUtils::is_pointer(v->m_type)) {
+                ASR::ttype_t *vt = ASRUtils::type_get_past_array(
+                    ASRUtils::type_get_past_allocatable_pointer(v->m_type));
+                if (ASR::is_a<ASR::StructType_t>(*vt)) {
+                    ASR::Struct_t *st = struct_symbol_from_type_decl(
+                        v->m_type_declaration);
+                    if (st && struct_storage_needs_initialization(st)) {
+                        uint32_t slot = desc_ptr_of(x.m_args[i]);
+                        initialize_struct_variable_storage(slot, v);
+                    }
+                }
+            }
         }
         // Runtime bounds can depend on compiler-created temporaries.
         // Fill those before allocating runtime-sized PointerArrays.
