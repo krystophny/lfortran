@@ -3685,7 +3685,13 @@ public:
         for (int d = 0; d < n_dims; d++) {
             uint32_t extent = desc_dim_extent(src_desc, d);
             int64_t base_off = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
-            desc_store_i64(dst_desc, base_off + 0, emit_i64_const(1));
+            // Reallocating-assignment inherits the lower bounds of the RHS
+            // (Fortran intrinsic assignment to an allocatable), so `c = b`
+            // with b declared b(0:n) gives c the bound 0, not the default 1.
+            // The source descriptor already carries 1 for an expression temp
+            // (array constructor, reshape, elemental result).
+            desc_store_i64(dst_desc, base_off + 0,
+                desc_dim_lbound(src_desc, d));
             desc_store_i64(dst_desc, base_off + 8, extent);
             desc_store_i64(dst_desc, base_off + 16, stride);
             stride = lr_emit_mul(s, ty_i64,
