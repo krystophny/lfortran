@@ -15748,12 +15748,65 @@ public:
         uint32_t fmt_data = 0;
         uint32_t fmt_len = 0;
         if (sf.m_fmt) {
-            visit_expr(*sf.m_fmt);
-            uint32_t fld0 = 0, fld1 = 1;
-            fmt_data = lr_emit_extractvalue(s, ty_ptr,
-                V(tmp, ty_str_desc), &fld0, 1);
-            fmt_len = lr_emit_extractvalue(s, ty_i64,
-                V(tmp, ty_str_desc), &fld1, 1);
+            ASR::ttype_t *fmt_ty =
+                ASRUtils::type_get_past_allocatable_pointer(
+                    ASRUtils::expr_type(sf.m_fmt));
+            ASR::Array_t *fmt_arr = nullptr;
+            if (ASR::is_a<ASR::Array_t>(*fmt_ty)) {
+                fmt_arr = ASR::down_cast<ASR::Array_t>(fmt_ty);
+            }
+            if (fmt_arr) {
+                // A character-array FMT (e.g. write(u, fmt_arr)): the format
+                // is the concatenation of the array elements' characters.
+                // Each element is a {ptr,len} string descriptor, so gather the
+                // per-element character runs into one contiguous buffer.
+                ASR::ttype_t *fe = ASRUtils::type_get_past_array(
+                    ASRUtils::type_get_past_allocatable_pointer(
+                        fmt_arr->m_type));
+                int64_t ecl = 0;
+                get_fixed_string_len(fe, ecl);
+                ArrayLinearView v = emit_array_linear_view(sf.m_fmt, fmt_arr);
+                uint32_t total = lr_emit_mul(s, ty_i64,
+                    V(v.total, ty_i64), I(ecl, ty_i64));
+                uint32_t buf = emit_malloc_bytes(total);
+                uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+                lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+                lr_error_t ferr;
+                uint32_t head = lr_session_block(s);
+                uint32_t body = lr_session_block(s);
+                uint32_t done = lr_session_block(s);
+                lr_emit_br(s, head);
+                lr_session_set_block(s, head, &ferr);
+                uint32_t i = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+                uint32_t more = lr_emit_icmp(s, LR_CMP_SLT,
+                    V(i, ty_i64), V(v.total, ty_i64));
+                lr_emit_condbr(s, V(more, ty_i1), body, done);
+                lr_session_set_block(s, body, &ferr);
+                uint32_t sd_ptr = emit_linear_elem_ptr(v.base, i, v.elem_len);
+                uint32_t sd = lr_emit_load(s, ty_str_desc, V(sd_ptr, ty_ptr));
+                uint32_t f0 = 0;
+                uint32_t edata = lr_emit_extractvalue(s, ty_ptr,
+                    V(sd, ty_str_desc), &f0, 1);
+                uint32_t dst_off = lr_emit_mul(s, ty_i64,
+                    V(i, ty_i64), I(ecl, ty_i64));
+                lr_operand_desc_t doff[1] = {V(dst_off, ty_i64)};
+                uint32_t dst = lr_emit_gep(s, ty_i8, V(buf, ty_ptr), doff, 1);
+                emit_memcpy_dynamic(dst, edata, emit_i64_const(ecl));
+                uint32_t next = lr_emit_add(s, ty_i64, V(i, ty_i64),
+                    I(1, ty_i64));
+                lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+                lr_emit_br(s, head);
+                lr_session_set_block(s, done, &ferr);
+                fmt_data = buf;
+                fmt_len = total;
+            } else {
+                visit_expr(*sf.m_fmt);
+                uint32_t fld0 = 0, fld1 = 1;
+                fmt_data = lr_emit_extractvalue(s, ty_ptr,
+                    V(tmp, ty_str_desc), &fld0, 1);
+                fmt_len = lr_emit_extractvalue(s, ty_i64,
+                    V(tmp, ty_str_desc), &fld1, 1);
+            }
         }
 
         std::vector<uint32_t> arg_slots;
