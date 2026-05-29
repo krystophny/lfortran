@@ -2463,6 +2463,22 @@ public:
                     lr_emit_store(s, V(p, pt), V(slot, ty_ptr));
                 }
                 lr_symtab[h] = slot;
+            } else if (v->m_value_attr && v_is_array_ty &&
+                    ASRUtils::get_fixed_size_of_array(
+                        ASR::down_cast<ASR::Array_t>(vt_naked)->m_dims,
+                        ASR::down_cast<ASR::Array_t>(vt_naked)->n_dims) > 0) {
+                // A VALUE array dummy receives a private copy: the param p is
+                // the actual's contiguous data pointer; copy its bytes into a
+                // fresh local buffer so writes inside the callee do not reach
+                // the caller's storage. (VALUE requires explicit/fixed shape.)
+                ASR::Array_t *adummy = ASR::down_cast<ASR::Array_t>(vt_naked);
+                int64_t total = ASRUtils::get_fixed_size_of_array(
+                    adummy->m_dims, adummy->n_dims);
+                uint64_t bytes = (uint64_t)total *
+                    (uint64_t)element_byte_size(adummy->m_type);
+                uint32_t buf = emit_storage_alloca_nbytes(bytes);
+                emit_memcpy_bytes(buf, p, bytes);
+                lr_symtab[h] = buf;
             } else if (ftype->m_abi == ASR::abiType::BindC &&
                     bindc_formal_is_cfi_array(v)) {
                 uint32_t internal = v->m_presence ==
