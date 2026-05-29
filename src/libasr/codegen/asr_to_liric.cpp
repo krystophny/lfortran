@@ -13145,8 +13145,11 @@ public:
                     "liric: get_command_argument_value expects two args");
             }
             uint32_t number = emit_i32_value(x.m_args[0].m_value);
-            visit_expr(*x.m_args[1].m_value);
-            uint32_t receiver = tmp;
+            // The receiver is a CChar string cast; we need its data POINTER as
+            // the output buffer.  visit_expr on a CChar StringPhysicalCast
+            // loads the first byte (the by-value char convention), which would
+            // be passed as a garbage pointer and faulted on write.
+            uint32_t receiver = emit_cchar_data_ptr(x.m_args[1].m_value);
             uint32_t sym = lr_session_intern(s,
                 "_lfortran_get_command_argument_value");
             lr_operand_desc_t cargs[2] = {
