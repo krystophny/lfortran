@@ -11444,7 +11444,12 @@ public:
         ASR::ttype_t *expr_t = ASRUtils::expr_type(v);
         ASR::ttype_t *at = ASRUtils::type_get_past_allocatable_pointer(expr_t);
         if (ASR::is_a<ASR::Array_t>(*at)) {
-            if (!ASRUtils::is_allocatable(expr_t)) {
+            // deallocate applies to both ALLOCATABLE and POINTER arrays: free
+            // the data and reset the descriptor (nulling the base) so
+            // associated()/allocated() report false afterwards.  Previously a
+            // pointer array returned early, leaking and leaving it associated.
+            if (!ASRUtils::is_allocatable(expr_t) &&
+                    !ASRUtils::is_pointer(expr_t)) {
                 return;
             }
             ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(at);
