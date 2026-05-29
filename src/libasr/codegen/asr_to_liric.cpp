@@ -8036,6 +8036,12 @@ public:
             return;
         }
         bool value_is_descriptor_array = false;
+        // True when the source is a bare whole allocatable/pointer array Var,
+        // whose descriptor can later be reset in place (move_alloc, realloc,
+        // deallocate).  A local pointer target must then capture a COPY of the
+        // descriptor, not alias the source's descriptor slot, so it stays
+        // associated with the data after the source is moved away.
+        bool source_is_mutable_whole_array_var = false;
         if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*x.m_value)) {
             ASR::ArrayPhysicalCast_t *cast =
                 ASR::down_cast<ASR::ArrayPhysicalCast_t>(x.m_value);
@@ -8106,6 +8112,8 @@ public:
                      ASR::down_cast<ASR::Array_t>(vcore)->m_physical_type ==
                          ASR::array_physical_typeType::DescriptorArray)) {
                 value_is_descriptor_array = true;
+                source_is_mutable_whole_array_var =
+                    ASRUtils::is_allocatable(vt0) || ASRUtils::is_pointer(vt0);
             }
         }
         bool value_is_descriptor_pointer = value_is_descriptor_array ||
@@ -8153,6 +8161,10 @@ public:
         bool mark_indirect_scalar = false;
         uint64_t indirect_scalar_hash = 0;
         bool target_byref_ptr_dummy = false;
+        // A local pointer target aliasing a mutable whole-array source: copy
+        // the source descriptor's contents into the target's own inline
+        // descriptor (below) rather than aliasing the source's descriptor slot.
+        bool local_inline_descriptor_copy = false;
         if (ASR::is_a<ASR::Var_t>(*x.m_target)) {
             ASR::Var_t *target = ASR::down_cast<ASR::Var_t>(x.m_target);
             ASR::symbol_t *sym =
@@ -8184,6 +8196,13 @@ public:
                         // and a garbage extent.  Copy the descriptor contents
                         // into the shared slot instead.
                         target_byref_ptr_dummy = true;
+                    } else if (source_is_mutable_whole_array_var &&
+                            ASRUtils::is_pointer(target_var->m_type)) {
+                        // c => a, c a local pointer array, a a mutable whole
+                        // array.  Give c its own descriptor copy so a later
+                        // move_alloc/realloc/deallocate of a leaves c associated
+                        // with the (moved) data.
+                        local_inline_descriptor_copy = true;
                     } else {
                         mark_runtime_pointer_array = true;
                         runtime_pointer_array_hash = h;
@@ -8383,6 +8402,19 @@ public:
             if (ASR::is_a<ASR::Array_t>(*tt)) {
                 ndims = (int)ASR::down_cast<ASR::Array_t>(tt)->n_dims;
             }
+            emit_memcpy_bytes(dst, rhs,
+                (uint64_t)(DESC_HEADER_BYTES + DESC_DIM_BYTES *
+                    (ndims > 0 ? ndims : 1)));
+            return;
+        }
+        // c => a (local pointer array => mutable whole array): copy the source
+        // descriptor's contents into c's own inline descriptor so c keeps its
+        // base and bounds when a is later move_alloc'd / reallocated / freed.
+        if (value_is_descriptor_pointer && local_inline_descriptor_copy) {
+            ASR::ttype_t *tt = ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(x.m_target));
+            int ndims = ASR::is_a<ASR::Array_t>(*tt)
+                ? (int)ASR::down_cast<ASR::Array_t>(tt)->n_dims : 1;
             emit_memcpy_bytes(dst, rhs,
                 (uint64_t)(DESC_HEADER_BYTES + DESC_DIM_BYTES *
                     (ndims > 0 ? ndims : 1)));
