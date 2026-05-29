@@ -2089,18 +2089,42 @@ public:
             ASRUtils::type_get_past_allocatable_pointer(v->m_type);
         if (!ASR::is_a<ASR::Array_t>(*type)) return false;
         ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(type);
-        if (array_t->m_physical_type !=
+        if (array_t->m_physical_type ==
                 ASR::array_physical_typeType::PointerArray) {
+            bool runtime = false;
+            for (size_t d = 0; d < array_t->n_dims; d++) {
+                int64_t extent = 0;
+                if (!array_t->m_dims[d].m_length ||
+                        !ASRUtils::extract_value(
+                            array_t->m_dims[d].m_length, extent)) {
+                    runtime = true;
+                    break;
+                }
+            }
+            if (runtime && array_out) *array_out = array_t;
+            return runtime;
+        }
+        // FixedSizeArray automatics (an explicit-shape local sized by a
+        // dummy/expr, e.g. `real :: r(x)` or `r(size(A)-4)`) also need heap
+        // storage sized at entry: storage_size_for_variable cannot fold a
+        // runtime extent, so the inline alloca is mis-sized.  Route them
+        // through the same heap+snapshot path so size()/bounds read the
+        // extent captured at entry, before the bound variable drifts.  This
+        // requires an explicit length on every dim (a true automatic array,
+        // not assumed/deferred shape) with at least one non-constant.
+        if (array_t->m_physical_type !=
+                ASR::array_physical_typeType::FixedSizeArray) {
             return false;
         }
         bool runtime = false;
         for (size_t d = 0; d < array_t->n_dims; d++) {
             int64_t extent = 0;
-            if (!array_t->m_dims[d].m_length ||
-                    !ASRUtils::extract_value(
-                        array_t->m_dims[d].m_length, extent)) {
+            if (!array_t->m_dims[d].m_length) {
+                return false;
+            }
+            if (!ASRUtils::extract_value(
+                    array_t->m_dims[d].m_length, extent)) {
                 runtime = true;
-                break;
             }
         }
         if (runtime && array_out) *array_out = array_t;
@@ -2506,11 +2530,12 @@ public:
                             return true;
                         }
                     }
-                } else if (ASR::is_a<ASR::Assignment_t>(*stmt)) {
-                    ASR::Assignment_t *assign =
-                        ASR::down_cast<ASR::Assignment_t>(stmt);
-                    return runtime_deps.count(var_name(assign->m_target)) > 0;
                 }
+                // A plain Assignment to a bound dependency (e.g. `x = 1`
+                // before `real :: r(x)`) must NOT be pre-run: a Fortran
+                // automatic-array bound is evaluated on entry, so the array
+                // has to be sized from the entry value, not the reassigned
+                // one.  Only output-producing calls are run ahead.
                 return false;
             };
             for (size_t i = 0; i < x.n_body; i++) {
@@ -7773,7 +7798,12 @@ public:
             uint32_t stride = emit_i64_const(elem_bytes);
             for (size_t d = 0; d < shape_array_t->n_dims; d++) {
                 uint32_t lbound = emit_array_dim_lbound(shape_array_t, d);
-                uint32_t extent = emit_array_dim_extent(shape_array_t, d);
+                // Use the entry-snapshot extent for an automatic array whose
+                // bound variable may have drifted (e.g. `keep(x)` then `x=1`):
+                // the descriptor handed to an assumed-shape dummy must carry
+                // the size captured at entry, not the re-evaluated bound.
+                uint32_t extent = emit_array_dim_extent_for_expr(
+                    x.m_arg, shape_array_t, d);
                 int64_t base_off = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
                 desc_store_i64(desc, base_off + 0, lbound);
                 desc_store_i64(desc, base_off + 8, extent);
