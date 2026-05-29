@@ -10882,13 +10882,23 @@ public:
                         visit_expr(*x.m_source);
                         is_target = wt;
                         uint32_t sptr = tmp;
-                        uint32_t src_data =
-                            (expr_is_allocatable_struct(x.m_source)
-                            || ASRUtils::is_class_type(ASRUtils::extract_type(
-                                ASRUtils::expr_type(x.m_source))))
-                            ? class_data_ptr(lr_emit_load(s, ty_ptr,
-                                V(sptr, ty_ptr)))
-                            : sptr;
+                        uint32_t src_data;
+                        if (expr_is_allocatable_struct(x.m_source)
+                                || ASRUtils::is_class_type(
+                                    ASRUtils::extract_type(
+                                        ASRUtils::expr_type(x.m_source)))) {
+                            src_data = class_data_ptr(lr_emit_load(s, ty_ptr,
+                                V(sptr, ty_ptr)));
+                        } else if (ASRUtils::is_pointer(
+                                ASRUtils::expr_type(x.m_source))) {
+                            // A plain pointer source (type(t),pointer): sptr is
+                            // the pointer slot; load it to reach the pointee,
+                            // else the copy reads the pointer's bytes.
+                            src_data = lr_emit_load(s, ty_ptr,
+                                V(sptr, ty_ptr));
+                        } else {
+                            src_data = sptr;
+                        }
                         emit_struct_source_copy(data, src_data, st);
                     }
                     continue;
