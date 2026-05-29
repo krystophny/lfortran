@@ -10728,7 +10728,50 @@ public:
         return true;
     }
 
+    void store_allocate_stat(ASR::expr_t *stat_expr, int32_t value) {
+        bool was_target = is_target;
+        is_target = true;
+        visit_expr(*stat_expr);
+        is_target = was_target;
+        lr_emit_store(s, I(value, ty_i32), V(tmp, ty_ptr));
+    }
+
     void visit_Allocate(const ASR::Allocate_t &x) {
+        // allocate(a, stat=s) where `a` is an already-allocated allocatable
+        // array: the standard sets s to a positive error code and leaves `a`
+        // unchanged.  Handle the single-arg array case with stat= here; without
+        // this liric reallocates and reports success.  (No source=/mold=.)
+        if (x.m_stat && !x.m_source && x.n_args == 1) {
+            const ASR::alloc_arg_t &arg = x.m_args[0];
+            ASR::ttype_t *at0 = ASRUtils::expr_type(arg.m_a);
+            ASR::ttype_t *core0 =
+                ASRUtils::type_get_past_allocatable_pointer(at0);
+            if (ASRUtils::is_allocatable(at0) &&
+                    ASR::is_a<ASR::Array_t>(*core0) &&
+                    ASR::down_cast<ASR::Array_t>(core0)->m_physical_type ==
+                        ASR::array_physical_typeType::DescriptorArray) {
+                uint32_t desc = desc_ptr_of(arg.m_a);
+                uint32_t base = desc_base_addr(desc);
+                uint32_t already = lr_emit_icmp(s, LR_CMP_NE,
+                    V(base, ty_ptr), LR_NULL(ty_ptr));
+                lr_error_t err;
+                uint32_t do_bb = lr_session_block(s);
+                uint32_t err_bb = lr_session_block(s);
+                uint32_t end_bb = lr_session_block(s);
+                lr_emit_condbr(s, V(already, ty_i1), err_bb, do_bb);
+                // Already allocated: write a positive stat, leave a unchanged.
+                lr_session_set_block(s, err_bb, &err);
+                store_allocate_stat(x.m_stat, 1);
+                lr_emit_br(s, end_bb);
+                // Not allocated: perform the allocation, stat = 0.
+                lr_session_set_block(s, do_bb, &err);
+                allocate_array(arg);
+                store_allocate_stat(x.m_stat, 0);
+                lr_emit_br(s, end_bb);
+                lr_session_set_block(s, end_bb, &err);
+                return;
+            }
+        }
         for (size_t i = 0; i < x.n_args; i++) {
             const ASR::alloc_arg_t &arg = x.m_args[i];
             ASR::ttype_t *at = ASRUtils::expr_type(arg.m_a);
