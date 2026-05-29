@@ -2066,9 +2066,16 @@ public:
         }
         if (ASRUtils::extract_value(array_t->m_dims[dim].m_length,
                 extent)) {
-            return emit_i64_const(extent);
+            // A negative declared extent denotes a zero-size dimension.
+            return emit_i64_const(extent < 0 ? 0 : extent);
         }
-        return emit_i64_expr(array_t->m_dims[dim].m_length);
+        // A computed extent below zero clamps to 0 (Fortran: an array bound
+        // expression yielding a negative extent gives a zero-size dimension).
+        uint32_t e = emit_i64_expr(array_t->m_dims[dim].m_length);
+        uint32_t is_neg = lr_emit_icmp(s, LR_CMP_SLT,
+            V(e, ty_i64), I(0, ty_i64));
+        return lr_emit_select(s, ty_i64, V(is_neg, ty_i1),
+            I(0, ty_i64), V(e, ty_i64));
     }
 
     uint32_t emit_array_dim_lbound(ASR::Array_t *array_t, size_t dim) {
@@ -20476,6 +20483,16 @@ found_offset:
     // total = product of extent for each dimension.  Without a dim
     // argument, walk all n dims of the array's type.
 
+    // size() is always non-negative: a descriptor extent stored below zero
+    // (e.g. a result temp whose bound expression `size(a)-4` evaluated
+    // negative) denotes an empty dimension, so clamp it to 0.
+    uint32_t clamp_extent_nonneg(uint32_t ext) {
+        uint32_t is_neg = lr_emit_icmp(s, LR_CMP_SLT,
+            V(ext, ty_i64), I(0, ty_i64));
+        return lr_emit_select(s, ty_i64, V(is_neg, ty_i1),
+            I(0, ty_i64), V(ext, ty_i64));
+    }
+
     void visit_ArraySize(const ASR::ArraySize_t &x) {
         LIRIC_PASSTHROUGH(x)
 
@@ -20515,15 +20532,24 @@ found_offset:
                     return lr_emit_add(s, rt, I(extent, rt), I(0, rt));
                 }
                 if (extract_int_const(length, extent)) {
-                    return lr_emit_add(s, rt, I(extent, rt), I(0, rt));
+                    // A negative declared extent is a zero-size dimension.
+                    return lr_emit_add(s, rt,
+                        I(extent < 0 ? 0 : extent, rt), I(0, rt));
                 }
+                uint32_t raw;
                 uint32_t snap = try_load_snapshot_extent(x.m_v, (size_t)dim);
                 if (snap) {
-                    return cast_int_value(snap, ty_i64, rt);
+                    raw = cast_int_value(snap, ty_i64, rt);
+                } else {
+                    visit_expr(*length);
+                    lr_type_t *lt = get_type(ASRUtils::expr_type(length));
+                    raw = cast_int_value(tmp, lt, rt);
                 }
-                visit_expr(*length);
-                lr_type_t *lt = get_type(ASRUtils::expr_type(length));
-                return cast_int_value(tmp, lt, rt);
+                // A computed extent below zero clamps to a zero-size dimension.
+                uint32_t is_neg = lr_emit_icmp(s, LR_CMP_SLT,
+                    V(raw, rt), I(0, rt));
+                return lr_emit_select(s, rt, V(is_neg, ty_i1),
+                    I(0, rt), V(raw, rt));
             };
             int64_t req_dim_value = 0;
             bool const_dim = x.m_dim &&
@@ -20577,6 +20603,7 @@ found_offset:
                     extract_int_const(array_t->m_dims[d].m_length,
                         extent);
                 }
+                if (extent < 0) extent = 0;
                 prod *= extent;
             }
             tmp = lr_emit_add(s, rt, I(prod, rt), I(0, rt));
@@ -20606,7 +20633,8 @@ found_offset:
             lr_operand_desc_t gep[1] = {V(off, ty_i64)};
             uint32_t p = lr_emit_gep(s, ty_i8,
                 V(desc, ty_ptr), gep, 1);
-            uint32_t ext = lr_emit_load(s, ty_i64, V(p, ty_ptr));
+            uint32_t ext = clamp_extent_nonneg(
+                lr_emit_load(s, ty_i64, V(p, ty_ptr)));
             lr_type_t *rt2 = get_type(x.m_type);
             if (rt2 == ty_i64) {
                 tmp = ext;
@@ -20648,7 +20676,8 @@ found_offset:
             lr_operand_desc_t ext_gep[1] = {V(ext_off, ty_i64)};
             uint32_t ext_p = lr_emit_gep(s, ty_i8,
                 V(desc, ty_ptr), ext_gep, 1);
-            uint32_t ext = lr_emit_load(s, ty_i64, V(ext_p, ty_ptr));
+            uint32_t ext = clamp_extent_nonneg(
+                lr_emit_load(s, ty_i64, V(ext_p, ty_ptr)));
             uint32_t prod = lr_emit_load(s, ty_i64, V(prod_ptr, ty_ptr));
             prod = lr_emit_mul(s, ty_i64, V(prod, ty_i64), V(ext, ty_i64));
             lr_emit_store(s, V(prod, ty_i64), V(prod_ptr, ty_ptr));
@@ -20675,7 +20704,7 @@ found_offset:
         uint32_t prod = 0;
         bool first = true;
         for (int64_t d = start_dim; d < end_dim; d++) {
-            uint32_t ext = desc_dim_extent(desc, d);
+            uint32_t ext = clamp_extent_nonneg(desc_dim_extent(desc, d));
             if (first) {
                 prod = ext;
                 first = false;
