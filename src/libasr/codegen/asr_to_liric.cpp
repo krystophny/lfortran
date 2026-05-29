@@ -2499,6 +2499,36 @@ public:
                 ASRUtils::symbol_get_past_external(arg_var->m_v);
             if (!ASR::is_a<ASR::Variable_t>(*arg_sym)) continue;
             ASR::Variable_t *v = down_cast<ASR::Variable_t>(arg_sym);
+            // A VALUE array dummy with a RUNTIME extent (e.g. a(n) where n is
+            // another VALUE arg) is copied here, after the first loop has
+            // registered the size variables, so its runtime extent can be
+            // evaluated.  Fixed-shape VALUE arrays were already copied above.
+            if (v->m_value_attr) {
+                ASR::ttype_t *vn =
+                    ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+                if (ASR::is_a<ASR::Array_t>(*vn)) {
+                    ASR::Array_t *ad = ASR::down_cast<ASR::Array_t>(vn);
+                    if (ASRUtils::get_fixed_size_of_array(
+                            ad->m_dims, ad->n_dims) <= 0) {
+                        uint64_t hh = get_hash((ASR::asr_t *)v);
+                        auto it = lr_symtab.find(hh);
+                        if (it != lr_symtab.end()) {
+                            uint32_t srcp = it->second;
+                            uint32_t total = emit_i64_const(1);
+                            for (size_t d = 0; d < ad->n_dims; d++) {
+                                total = lr_emit_mul(s, ty_i64, V(total, ty_i64),
+                                    V(emit_array_dim_extent(ad, d), ty_i64));
+                            }
+                            uint32_t bytes = lr_emit_mul(s, ty_i64,
+                                V(total, ty_i64),
+                                I(element_byte_size(ad->m_type), ty_i64));
+                            uint32_t buf = emit_malloc_bytes(bytes);
+                            emit_memcpy_dynamic(buf, srcp, bytes);
+                            lr_symtab[hh] = buf;
+                        }
+                    }
+                }
+            }
             if (v->m_intent == ASR::intentType::Out &&
                     is_allocatable_struct_type(v->m_type)) {
                 deallocate_string_var(x.m_args[i]);
