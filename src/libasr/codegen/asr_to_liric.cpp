@@ -13636,7 +13636,10 @@ public:
         }
         visit_expr(*x.m_arg);
         uint32_t val = tmp;
-        lr_type_t *src_t = get_type(ASRUtils::expr_type(x.m_arg));
+        // visit_expr dereferences a scalar Pointer arg to its pointee value,
+        // so the source type must be the pointee's, not ty_ptr; otherwise the
+        // value is mistyped as a pointer and the cast reinterprets its bits.
+        lr_type_t *src_t = value_type_for_expr(x.m_arg);
         lr_type_t *dst_t = get_type(x.m_type);
 
         switch (x.m_kind) {
