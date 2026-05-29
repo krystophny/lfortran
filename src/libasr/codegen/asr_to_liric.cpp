@@ -8043,6 +8043,25 @@ public:
                 value_is_descriptor_array = true;
             }
         }
+        // associate(name => whole_allocatable_or_pointer_array) or a bare
+        // descriptor-array Var: the source carries a runtime descriptor, so the
+        // associate name must alias that descriptor (with its real extents),
+        // not get a zero-initialised inline descriptor.  Excludes subroutine-
+        // call array temps, which the dedicated path above already handles.
+        if (!value_is_descriptor_array && ASR::is_a<ASR::Var_t>(*x.m_value)) {
+            ASR::Variable_t *src_var = var_from_expr(x.m_value);
+            ASR::ttype_t *vt0 = ASRUtils::expr_type(x.m_value);
+            ASR::ttype_t *vcore =
+                ASRUtils::type_get_past_allocatable_pointer(vt0);
+            if (src_var && !var_is_subroutine_call_array_temp(src_var) &&
+                    ASR::is_a<ASR::Array_t>(*vcore) &&
+                    (ASRUtils::is_allocatable(vt0) ||
+                     ASRUtils::is_pointer(vt0) ||
+                     ASR::down_cast<ASR::Array_t>(vcore)->m_physical_type ==
+                         ASR::array_physical_typeType::DescriptorArray)) {
+                value_is_descriptor_array = true;
+            }
+        }
         bool value_is_descriptor_pointer = value_is_descriptor_array ||
             type_is_unlimited_polymorphic_array(
                 ASRUtils::expr_type(x.m_value));
