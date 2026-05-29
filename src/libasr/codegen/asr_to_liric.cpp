@@ -16883,6 +16883,26 @@ public:
                 down_cast<ASR::StringFormat_t>(values[0]);
             FormattedString formatted = emit_string_format(*sf);
             if (internal_string_write) {
+                // The format runtime flags an argument/edit-descriptor type
+                // mismatch by setting result[0] = '\b'.  With iostat= present,
+                // an internal write must report a nonzero status and leave the
+                // buffer rather than write the error text.
+                uint32_t first = lr_emit_load(s, ty_i8,
+                    V(formatted.data, ty_ptr));
+                uint32_t is_err = lr_emit_icmp(s, LR_CMP_EQ,
+                    V(first, ty_i8), I(8, ty_i8));
+                lr_error_t werr;
+                uint32_t err_bb = lr_session_block(s);
+                uint32_t ok_bb = lr_session_block(s);
+                uint32_t end_bb = lr_session_block(s);
+                lr_emit_condbr(s, V(is_err, ty_i1), err_bb, ok_bb);
+                lr_session_set_block(s, err_bb, &werr);
+                if (x.m_iostat && external_iostat) {
+                    lr_emit_store(s, I(5006, ty_i32),
+                        V(external_iostat, ty_ptr));
+                }
+                lr_emit_br(s, end_bb);
+                lr_session_set_block(s, ok_bb, &werr);
                 if (internal_unit_is_value) {
                     internal_write_chunk_desc(internal_unit_desc,
                         formatted.data, formatted.len);
@@ -16890,6 +16910,8 @@ public:
                     internal_write_chunk(internal_unit_desc_ptr,
                         formatted.data, formatted.len);
                 }
+                lr_emit_br(s, end_bb);
+                lr_session_set_block(s, end_bb, &werr);
                 return;
             }
             if (external_integer_write) {
