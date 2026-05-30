@@ -11987,6 +11987,12 @@ public:
             ty_ptr, malloc_args, 2);
 
         // Populate descriptor.
+        // For an assumed-length character array dummy the per-element char
+        // length is established by the actual and lives in the incoming
+        // descriptor (offset 24); capture it before the offset-24 store below
+        // overwrites it, so an allocate(arr(n)) of `character(*) :: arr(:)`
+        // keeps the right element length instead of 0.
+        uint32_t incoming_char_len = desc_load_i64(desc_ptr, 24);
         desc_store_base(desc_ptr, data);
         // elem_len at offset 8
         desc_store_i64(desc_ptr, 8,
@@ -12093,6 +12099,10 @@ public:
                 } else {
                     len64 = emit_expr_i64(string_t->m_len);
                 }
+            } else {
+                // Assumed-length element (character(*) :: arr(:)): the length
+                // came from the actual via the incoming descriptor.
+                len64 = incoming_char_len;
             }
         }
         desc_store_i64(desc_ptr, 24, len64);
