@@ -13892,6 +13892,22 @@ public:
             : nullptr;
         bool fn_is_bindc = fn_ftype &&
             fn_ftype->m_abi == ASR::abiType::BindC;
+        // A concrete actual wrapped into a class descriptor for a
+        // class(..) intent(out/inout) dummy is a COPY; after the call the
+        // modified data must be copied back to the actual (e.g. `self%x = 10`
+        // inside a select type on the dummy).  SubroutineCall already does
+        // this; functions need it too.
+        struct ClassWriteback {
+            uint32_t dst;
+            uint32_t src;
+            uint64_t nbytes;
+        };
+        std::vector<ClassWriteback> class_writebacks;
+        auto emit_class_writebacks = [&]() {
+            for (const ClassWriteback &w : class_writebacks) {
+                emit_memcpy_bytes(w.dst, w.src, w.nbytes);
+            }
+        };
         std::vector<lr_operand_desc_t> args;
         for (size_t i = 0; i < x.n_args; i++) {
             if (x.m_args[i].m_value) {
@@ -13920,8 +13936,16 @@ public:
                         V(tmp, ty_ptr));
                     args.push_back(V(data_ptr, ty_ptr));
                 } else if (needs_concrete_to_class_wrap(fn, i, arg)) {
-                    args.push_back(V(
-                        emit_class_wrapper_for_concrete(arg, fn, i), ty_ptr));
+                    uint32_t actual_ptr = 0;
+                    uint64_t data_bytes = 0;
+                    uint32_t data_ptr = emit_class_wrapper_for_concrete(
+                        arg, fn, i, &actual_ptr, &data_bytes);
+                    args.push_back(V(data_ptr, ty_ptr));
+                    if (formal_v && formal_v->m_intent != ASR::intentType::In &&
+                            expr_is_storage_reference(arg)) {
+                        class_writebacks.push_back(
+                            {actual_ptr, data_ptr, data_bytes});
+                    }
                 } else if (formal_is_optional(fn, i) &&
                         (ASRUtils::is_allocatable(ASRUtils::expr_type(arg)) ||
                          ASRUtils::is_pointer(ASRUtils::expr_type(arg))) &&
@@ -14043,6 +14067,8 @@ public:
                 sret_args.insert(sret_args.end(), args.begin(), args.end());
                 lr_emit_call_void(s, V(interface_fptr, ty_ptr),
                     sret_args.data(), sret_args.size());
+                emit_class_writebacks();
+
                 if (is_target) { tmp = ret_slot; return; }
                 tmp = lr_emit_load(s, ret, V(ret_slot, ty_ptr));
                 return;
@@ -14050,6 +14076,7 @@ public:
             uint32_t call_value = lr_emit_call(s, ret,
                 V(interface_fptr, ty_ptr), args.data(), args.size());
             tmp = function_return_abi_to_internal(call_value, x.m_type);
+            emit_class_writebacks();
             return;
         }
         if (is_proc_ptr) {
@@ -14061,6 +14088,7 @@ public:
             uint32_t call_value = lr_emit_call(s, ret, V(fptr, ty_ptr),
                 args.data(), args.size());
             tmp = function_return_abi_to_internal(call_value, x.m_type);
+            emit_class_writebacks();
             return;
         }
         if (fn && function_is_interface(fn) && !args.empty() &&
@@ -14070,6 +14098,7 @@ public:
             uint32_t call_value = lr_emit_call(s, ret, V(fptr, ty_ptr),
                 args.data(), args.size());
             tmp = function_return_abi_to_internal(call_value, x.m_type);
+            emit_class_writebacks();
             return;
         }
         if (fn && function_is_interface(fn) && x.m_dt &&
@@ -14083,6 +14112,7 @@ public:
             uint32_t call_value = lr_emit_call(s, ret, V(fptr, ty_ptr),
                 args.data(), args.size());
             tmp = function_return_abi_to_internal(call_value, x.m_type);
+            emit_class_writebacks();
             return;
         }
         // TBP function on a POLYMORPHIC object whose binding resolved to a
@@ -14098,6 +14128,7 @@ public:
             uint32_t call_value = lr_emit_call(s, ret, V(fptr, ty_ptr),
                 args.data(), args.size());
             tmp = function_return_abi_to_internal(call_value, x.m_type);
+            emit_class_writebacks();
             return;
         }
         uint32_t sym = lr_session_intern(s, callable_name(fn).c_str());
@@ -14108,6 +14139,8 @@ public:
             sret_args.insert(sret_args.end(), args.begin(), args.end());
             lr_emit_call_void(s, LR_GLOBAL(sym, ty_ptr),
                 sret_args.data(), sret_args.size());
+            emit_class_writebacks();
+
             if (is_target) { tmp = ret_slot; return; }
             tmp = lr_emit_load(s, ret, V(ret_slot, ty_ptr));
             return;
@@ -14115,6 +14148,7 @@ public:
         uint32_t call_value = lr_emit_call(s, ret, LR_GLOBAL(sym, ty_ptr),
                            args.data(), args.size());
         tmp = function_return_abi_to_internal(call_value, x.m_type);
+        emit_class_writebacks();
     }
 
     // --- Cast ---
