@@ -18319,6 +18319,19 @@ public:
         return desc_base_addr(dptr);
     }
 
+    // Data (target address) field of a class(*) scalar pointer, whose slot
+    // holds a {data, tag} poly_desc.  associated() tests this field.
+    uint32_t poly_scalar_ptr_data(ASR::expr_t *e) {
+        bool was_target = is_target;
+        is_target = true;
+        visit_expr(*e);
+        is_target = was_target;
+        uint32_t slot = tmp;
+        uint32_t pd = lr_emit_load(s, ty_poly_desc, V(slot, ty_ptr));
+        uint32_t f0 = 0;
+        return lr_emit_extractvalue(s, ty_ptr, V(pd, ty_poly_desc), &f0, 1);
+    }
+
     void visit_PointerAssociated(const ASR::PointerAssociated_t &x) {
         LIRIC_PASSTHROUGH(x)
         ASR::ttype_t *ptr_type = ASRUtils::expr_type(x.m_ptr);
@@ -18328,6 +18341,9 @@ public:
         uint32_t p;
         if (ptr_is_array) {
             p = array_assoc_base(x.m_ptr);
+        } else if (ASRUtils::is_unlimited_polymorphic_type(ptr_core)) {
+            // class(*) scalar pointer: compare the poly_desc data field.
+            p = poly_scalar_ptr_data(x.m_ptr);
         } else if (expr_is_indirect_scalar_pointer(x.m_ptr)) {
             // The slot holds the target address; is_target yields that pointer
             // value (not the dereferenced pointee), which associated() tests
@@ -18352,7 +18368,10 @@ public:
                 ASRUtils::type_get_past_allocatable_pointer(
                     ASRUtils::expr_type(x.m_tgt));
             uint32_t t;
-            if (ASR::is_a<ASR::CPtr_t>(*ptr_core) &&
+            if (ASRUtils::is_unlimited_polymorphic_type(tgt_core) &&
+                    !ASR::is_a<ASR::Array_t>(*tgt_core)) {
+                t = poly_scalar_ptr_data(x.m_tgt);
+            } else if (ASR::is_a<ASR::CPtr_t>(*ptr_core) &&
                     ASR::is_a<ASR::CPtr_t>(*tgt_core)) {
                 visit_expr(*x.m_tgt);
                 t = tmp;
