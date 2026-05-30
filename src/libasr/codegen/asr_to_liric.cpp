@@ -5153,6 +5153,17 @@ public:
         visit_expr(*x.m_value);
         uint32_t rhs = tmp;
         lr_type_t *t = value_type_for_expr(x.m_value);
+        // The elemental/broadcast pass can hand a scalar-valued RHS that still
+        // carries an array result type (e.g. `b(i) = .not. a(i)` lowers to a
+        // LogicalNot whose m_type is the whole-array DescriptorArray while its
+        // argument and emitted value are a single element).  Storing that
+        // scalar with the array's descriptor-struct type into the scalar target
+        // overflows.  The scalar target governs the store, so use its type.
+        ASR::ttype_t *vmt = ASRUtils::type_get_past_allocatable_pointer(
+            ASRUtils::expr_type(x.m_value));
+        if (ASR::is_a<ASR::Array_t>(*vmt)) {
+            t = value_type_for_expr(x.m_target);
+        }
         is_target = true;
         visit_expr(*x.m_target);
         is_target = false;
