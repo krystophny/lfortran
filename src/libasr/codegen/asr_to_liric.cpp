@@ -18811,6 +18811,58 @@ public:
     // Lower intrinsic class(*) selection from the direct backend's
     // small polymorphic ABI: {data pointer, intrinsic type tag}.
 
+    // Symbol named by a select-type branch (type is / class is), else null.
+    ASR::symbol_t *type_stmt_named_sym(ASR::type_stmt_t *stmt) {
+        if (stmt->type == ASR::type_stmtType::TypeStmtName) {
+            return ASR::down_cast<ASR::TypeStmtName_t>(stmt)->m_sym;
+        }
+        if (stmt->type == ASR::type_stmtType::ClassStmt) {
+            return ASR::down_cast<ASR::ClassStmt_t>(stmt)->m_sym;
+        }
+        return nullptr;
+    }
+
+    // Match condition for one select-type branch.  `type is (T)` matches the
+    // exact dynamic tag; `class is (T)` also matches any descendant of T (an
+    // is-a test), EXCEPT descendant tags that another branch names explicitly
+    // (so a more specific `type is`/`class is` branch still wins per F2008
+    // most-specific selection).
+    uint32_t emit_select_type_branch_match(uint32_t selector_tag,
+            ASR::type_stmt_t *stmt, int64_t branch_tag,
+            const ASR::SelectType_t &x) {
+        uint32_t cond = lr_emit_icmp(s, LR_CMP_EQ,
+            V(selector_tag, ty_i64), I(branch_tag, ty_i64));
+        if (stmt->type != ASR::type_stmtType::ClassStmt) return cond;
+        ASR::Struct_t *base = struct_symbol_from_type_decl(
+            ASR::down_cast<ASR::ClassStmt_t>(stmt)->m_sym);
+        if (!base) return cond;
+        std::unordered_set<int64_t> other_named;
+        for (size_t k = 0; k < x.n_body; k++) {
+            if (x.m_body[k] == stmt) continue;
+            ASR::symbol_t *nsym = type_stmt_named_sym(x.m_body[k]);
+            ASR::Struct_t *nst = struct_symbol_from_type_decl(nsym);
+            if (nst) other_named.insert(struct_symbol_tag((ASR::symbol_t *)nst));
+        }
+        for (ASR::Struct_t *desc_st : known_structs) {
+            ASR::Struct_t *anc = desc_st;
+            bool is_desc = false;
+            while (anc->m_parent) {
+                ASR::symbol_t *psym =
+                    ASRUtils::symbol_get_past_external(anc->m_parent);
+                if (!ASR::is_a<ASR::Struct_t>(*psym)) break;
+                anc = ASR::down_cast<ASR::Struct_t>(psym);
+                if (anc == base) { is_desc = true; break; }
+            }
+            if (!is_desc) continue;
+            int64_t dtag = struct_symbol_tag((ASR::symbol_t *)desc_st);
+            if (other_named.count(dtag)) continue;
+            uint32_t m = lr_emit_icmp(s, LR_CMP_EQ,
+                V(selector_tag, ty_i64), I(dtag, ty_i64));
+            cond = lr_emit_or(s, ty_i1, V(cond, ty_i1), V(m, ty_i1));
+        }
+        return cond;
+    }
+
     void visit_SelectType(const ASR::SelectType_t &x) {
         auto visit_type_stmt_body = [&](ASR::type_stmt_t *stmt) {
             ASR::stmt_t **body = nullptr;
@@ -18902,8 +18954,8 @@ public:
                         if (branch_tag == 0) continue;
                         uint32_t then_bb = lr_session_block(s);
                         uint32_t else_bb = lr_session_block(s);
-                        uint32_t cond = lr_emit_icmp(s, LR_CMP_EQ,
-                            V(selector_tag, ty_i64), I(branch_tag, ty_i64));
+                        uint32_t cond = emit_select_type_branch_match(
+                            selector_tag, x.m_body[i], branch_tag, x);
                         lr_emit_condbr(s, V(cond, ty_i1), then_bb, else_bb);
                         lr_session_set_block(s, then_bb, &err);
                         visit_type_stmt_body(x.m_body[i]);
@@ -18931,9 +18983,8 @@ public:
                     if (branch_tag == 0) continue;
                     uint32_t then_bb = lr_session_block(s);
                     uint32_t else_bb = lr_session_block(s);
-                    uint32_t cond = lr_emit_icmp(s, LR_CMP_EQ,
-                        V(selector_tag, ty_i64),
-                        I(branch_tag, ty_i64));
+                    uint32_t cond = emit_select_type_branch_match(
+                        selector_tag, x.m_body[i], branch_tag, x);
                     lr_emit_condbr(s, V(cond, ty_i1), then_bb, else_bb);
                     lr_session_set_block(s, then_bb, &err);
                     visit_type_stmt_body(x.m_body[i]);
@@ -18987,8 +19038,8 @@ public:
 
             uint32_t then_bb = lr_session_block(s);
             uint32_t else_bb = lr_session_block(s);
-            uint32_t cond = lr_emit_icmp(s, LR_CMP_EQ,
-                V(selector_tag, ty_i64), I(branch_tag, ty_i64));
+            uint32_t cond = emit_select_type_branch_match(
+                selector_tag, x.m_body[i], branch_tag, x);
             lr_emit_condbr(s, V(cond, ty_i1), then_bb, else_bb);
 
             lr_session_set_block(s, then_bb, &err);
