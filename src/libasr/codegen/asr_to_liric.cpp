@@ -8229,6 +8229,19 @@ public:
     }
 
     bool array_section_uses_runtime_source(ASR::ArraySection_t *sec) {
+        // A section with a RUNTIME (non-constant) bound needs a runtime
+        // descriptor alias even over a FixedSizeArray source -- e.g. the
+        // array_op-generated `temp(idx : idx + ArraySize(v) - 1)` that fills a
+        // computed-array constructor element.  Without this the associate
+        // skips the descriptor-pointer path and the section write never lands.
+        for (size_t d = 0; d < sec->n_args; d++) {
+            ASR::expr_t *bnds[3] = {sec->m_args[d].m_left,
+                sec->m_args[d].m_right, sec->m_args[d].m_step};
+            for (ASR::expr_t *b : bnds) {
+                int64_t cv = 0;
+                if (b && !ASRUtils::extract_value(b, cv)) return true;
+            }
+        }
         ASR::ttype_t *type = ASRUtils::type_get_past_allocatable_pointer(
             ASRUtils::expr_type(sec->m_v));
         if (!ASR::is_a<ASR::Array_t>(*type)) return false;
