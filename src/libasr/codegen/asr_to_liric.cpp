@@ -5079,6 +5079,7 @@ public:
                 st = struct_symbol_from_type_decl(sym);
             }
             if (expr_is_allocatable_struct(x.m_target)) {
+                emit_finalize_allocated_struct_slot(dst, st);
                 dst = ensure_allocatable_struct_data(
                     dst, st, var_from_expr(x.m_target));
             }
@@ -15392,6 +15393,62 @@ public:
             byte_offset += storage_size_for_variable(member);
         }
         active.erase(h);
+    }
+
+    // True when st itself, or any of its non-allocatable struct members
+    // (recursively), declares a FINAL binding.  Used to avoid emitting a
+    // finalize null-check around assignments to types that never finalize.
+    bool struct_subtree_has_finalizer(ASR::Struct_t *st,
+            std::unordered_set<uint64_t> &seen) {
+        if (!st) return false;
+        if (!seen.insert(get_hash((ASR::asr_t *)st)).second) return false;
+        for (size_t i = 0; i < st->n_member_functions; i++) {
+            ASR::symbol_t *fs =
+                st->m_symtab->parent->get_symbol(st->m_member_functions[i]);
+            if (!fs) continue;
+            fs = ASRUtils::symbol_get_past_external(fs);
+            if (ASR::is_a<ASR::Function_t>(*fs) &&
+                    ASR::down_cast<ASR::Function_t>(fs)->n_args == 1) {
+                return true;
+            }
+        }
+        std::vector<ASR::Variable_t *> members;
+        collect_struct_members_parent_first(st, members);
+        for (ASR::Variable_t *m : members) {
+            ASR::ttype_t *mt =
+                ASRUtils::type_get_past_allocatable_pointer(m->m_type);
+            mt = ASRUtils::type_get_past_array(mt);
+            if (ASR::is_a<ASR::StructType_t>(*mt) &&
+                    !ASRUtils::is_allocatable(m->m_type) &&
+                    !ASRUtils::is_pointer(m->m_type)) {
+                ASR::Struct_t *mst = struct_symbol_from_type_decl(
+                    m->m_type_declaration);
+                if (struct_subtree_has_finalizer(mst, seen)) return true;
+            }
+        }
+        return false;
+    }
+
+    // F2018 7.5.6.3 para 1: an allocated allocatable LHS is finalized before
+    // an intrinsic assignment overwrites it.  No-op when the slot is
+    // unallocated or the type subtree has no FINAL binding.
+    void emit_finalize_allocated_struct_slot(uint32_t slot,
+                                             ASR::Struct_t *st) {
+        if (!st) return;
+        std::unordered_set<uint64_t> seen;
+        if (!struct_subtree_has_finalizer(st, seen)) return;
+        lr_error_t err;
+        uint32_t raw = lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
+        uint32_t is_null = lr_emit_icmp(s, LR_CMP_EQ,
+            V(raw, ty_ptr), LR_NULL(ty_ptr));
+        uint32_t fin_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(is_null, ty_i1), done_bb, fin_bb);
+        lr_session_set_block(s, fin_bb, &err);
+        std::unordered_set<uint64_t> active;
+        emit_struct_finalizers(class_data_ptr(raw), st, active);
+        lr_emit_br(s, done_bb);
+        lr_session_set_block(s, done_bb, &err);
     }
 
     void emit_scope_finalizers(SymbolTable *symtab) {
