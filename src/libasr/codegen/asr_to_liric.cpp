@@ -12985,6 +12985,59 @@ public:
         }
     }
 
+    ASR::Struct_t *struct_from_tag(int64_t tag) {
+        for (ASR::Struct_t *st : known_structs) {
+            if (struct_symbol_tag((ASR::symbol_t *)st) == tag) return st;
+        }
+        return nullptr;
+    }
+
+    ASR::Function_t *resolve_tbp_override(ASR::Struct_t *st,
+            const std::string &mname) {
+        ASR::Struct_t *cur = st;
+        while (cur) {
+            if (cur->m_symtab) {
+                for (auto &item : cur->m_symtab->get_scope()) {
+                    ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
+                        item.second);
+                    if (sym && ASR::is_a<ASR::StructMethodDeclaration_t>(*sym)) {
+                        ASR::StructMethodDeclaration_t *m =
+                            ASR::down_cast<ASR::StructMethodDeclaration_t>(sym);
+                        if (mname == m->m_name) {
+                            return resolve_to_function(m->m_proc);
+                        }
+                    }
+                }
+            }
+            if (!cur->m_parent) break;
+            ASR::symbol_t *p =
+                ASRUtils::symbol_get_past_external(cur->m_parent);
+            cur = ASR::is_a<ASR::Struct_t>(*p)
+                ? ASR::down_cast<ASR::Struct_t>(p) : nullptr;
+        }
+        return nullptr;
+    }
+
+    // A class pointer associated to a concrete (non-polymorphic) target has no
+    // runtime class header, so a TBP call on it cannot read a vtable.  Resolve
+    // the override statically from the recorded concrete tag.
+    ASR::Function_t *static_tbp_override_for_concrete_alias(ASR::expr_t *dt,
+            ASR::symbol_t *call_sym) {
+        if (!dt || !ASR::is_a<ASR::Var_t>(*dt)) return nullptr;
+        if (!is_tbp_call_symbol(call_sym)) return nullptr;
+        ASR::symbol_t *vsym = ASRUtils::symbol_get_past_external(
+            ASR::down_cast<ASR::Var_t>(dt)->m_v);
+        auto it = class_alias_concrete_tag.find(get_hash((ASR::asr_t *)vsym));
+        if (it == class_alias_concrete_tag.end()) return nullptr;
+        ASR::Struct_t *cst = struct_from_tag(it->second);
+        if (!cst) return nullptr;
+        ASR::symbol_t *raw_call = ASRUtils::symbol_get_past_external(call_sym);
+        std::string mname = ASR::is_a<ASR::StructMethodDeclaration_t>(*raw_call)
+            ? ASR::down_cast<ASR::StructMethodDeclaration_t>(raw_call)->m_name
+            : ASRUtils::symbol_name(call_sym);
+        return resolve_tbp_override(cst, mname);
+    }
+
     bool is_tbp_call_symbol(ASR::symbol_t *call_sym) {
         if (!call_sym) return false;
         if (ASR::is_a<ASR::StructMethodDeclaration_t>(*call_sym)) {
@@ -14786,6 +14839,15 @@ public:
             emit_class_writebacks();
             return;
         }
+        // A TBP called on a class pointer aliasing a concrete target has no
+        // runtime vtable; resolve the override statically and call it directly.
+        // Reassigning fn to the concrete (non-interface) override disables the
+        // interface-gated dynamic blocks below; the remaining one is guarded.
+        ASR::Function_t *static_override =
+            static_tbp_override_for_concrete_alias(x.m_dt, x.m_name);
+        if (static_override) {
+            fn = static_override;
+        }
         if (fn && function_is_interface(fn) && !args.empty() &&
                 is_tbp_call_symbol(x.m_name) && x.m_dt &&
                 ASRUtils::is_class_type(
@@ -14820,7 +14882,7 @@ public:
         // TBP function on a POLYMORPHIC object whose binding resolved to a
         // concrete (declared-type) implementation: dispatch through the
         // object's vtable so a dynamic-type override is reached.
-        if (fn && x.m_dt && is_tbp_call_symbol(x.m_name) &&
+        if (!static_override && fn && x.m_dt && is_tbp_call_symbol(x.m_name) &&
                 ASRUtils::is_class_type(
                     ASRUtils::type_get_past_allocatable_pointer(
                         ASRUtils::expr_type(x.m_dt)))) {
