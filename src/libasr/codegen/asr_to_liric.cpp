@@ -14297,7 +14297,14 @@ public:
             return;
         }
         if (fn && function_is_interface(fn) && !args.empty() &&
-                is_tbp_call_symbol(x.m_name)) {
+                is_tbp_call_symbol(x.m_name) && x.m_dt &&
+                ASRUtils::is_class_type(
+                    ASRUtils::type_get_past_allocatable_pointer(
+                        ASRUtils::expr_type(x.m_dt)))) {
+            // Vtable dispatch only when the object is polymorphic.  A TBP on a
+            // non-polymorphic object (e.g. a module-function binding defined in
+            // a submodule, called on a concrete type) has no class header to
+            // read a vtable from; fall through to the static direct call below.
             uint32_t fptr = load_object_method_ptr(args[0].vreg,
                 dynamic_method_name(x.m_name, fn));
             uint32_t call_value = lr_emit_call(s, ret, V(fptr, ty_ptr),
