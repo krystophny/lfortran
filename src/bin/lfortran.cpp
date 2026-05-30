@@ -1572,6 +1572,10 @@ int compile_to_object_file_liric(const std::string &infile,
     // IntrinsicImpureFunction nodes that no backend can lower directly.
     pass_manager.apply_passes(al, asr, compiler_options.po, diagnostics);
 
+    if (std::getenv("LF_DUMP_POSTPASS")) {
+        std::cerr << LCompilers::pickle(*asr, false, true, false) << std::endl;
+    }
+
     // ASR -> liric object
     {
         diagnostics.diagnostics.clear();
