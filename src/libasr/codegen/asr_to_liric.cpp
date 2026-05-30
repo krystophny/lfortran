@@ -17695,11 +17695,34 @@ public:
                 + v->m_name;
         }
         uint64_t nbytes = storage_size_for_variable(v);
-        std::vector<uint8_t> zeros(nbytes, 0);
+        std::vector<uint8_t> init_bytes(nbytes, 0);
+        // Encode a compile-time scalar initializer (e.g. a module variable
+        // `integer :: x = 10` referenced from a consuming program that loaded
+        // the module from its .mod) into .data.  The defining module's object
+        // emits the same value via register_module_globals; both copies are
+        // weak, so the linker coalesces them only correctly when they agree.
+        // Emitting zeros here would let the consumer's weak copy win and read 0.
+        ASR::ttype_t *t0 =
+            ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+        if (v->m_value && !ASRUtils::is_pointer(v->m_type) &&
+                !ASRUtils::is_allocatable(v->m_type) &&
+                !ASR::is_a<ASR::Array_t>(*t0) &&
+                (ASR::is_a<ASR::Integer_t>(*t0) ||
+                 ASR::is_a<ASR::Real_t>(*t0) ||
+                 ASR::is_a<ASR::Logical_t>(*t0) ||
+                 ASR::is_a<ASR::Complex_t>(*t0))) {
+            std::vector<uint8_t> sb;
+            if (encode_scalar_constant_bytes(v->m_value, v->m_type, sb)) {
+                for (size_t i = 0; i < sb.size() && i < nbytes; i++) {
+                    init_bytes[i] = sb[i];
+                }
+            }
+        }
         // Weak: identical module-global storage may be emitted by several
         // separately-compiled objects; let the linker coalesce the copies.
         lr_session_global_weak(s, gname.c_str(),
-            lr_type_array_s(s, ty_i8, nbytes), false, zeros.data(), nbytes);
+            lr_type_array_s(s, ty_i8, nbytes), false, init_bytes.data(),
+            nbytes);
         uint32_t sym = lr_session_intern(s, gname.c_str());
         lr_globals[h] = sym;
         return lr_emit_gep(s, ty_i8, LR_GLOBAL(sym, ty_ptr), no_off, 1);
