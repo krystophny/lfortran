@@ -18258,8 +18258,167 @@ public:
         // Emit values.  Skip inter-value separators (format='(A)' /
         // single-string is the only case we currently hit on fpm; the
         // multi-arg list-directed path can revisit this later).
-        for (size_t i = 0; i < n_values; i++) {
-            ASR::expr_t *val = values[i];
+        // An implied-do `(expr, i=lo,hi[,step])` expands into a runtime loop
+        // (visit_ImpliedDoLoop is a no-op, so without this its items read
+        // stale garbage); other values format inline.
+        std::function<void(ASR::expr_t *)> emit_write_value =
+                [&](ASR::expr_t *val) {
+            if (ASR::is_a<ASR::ImpliedDoLoop_t>(*val) &&
+                    ASR::is_a<ASR::Var_t>(
+                        *ASR::down_cast<ASR::ImpliedDoLoop_t>(val)->m_var)) {
+                ASR::ImpliedDoLoop_t *idl =
+                    ASR::down_cast<ASR::ImpliedDoLoop_t>(val);
+                uint32_t start = emit_expr_i64(idl->m_start);
+                uint32_t end = emit_expr_i64(idl->m_end);
+                uint32_t step = idl->m_increment
+                    ? emit_expr_i64(idl->m_increment) : emit_i64_const(1);
+                uint32_t loop_ptr = emit_target_ptr(idl->m_var);
+                lr_type_t *loop_lr = value_type_for_expr(idl->m_var);
+                uint32_t cur_ptr = lr_emit_alloca(s, ty_i64);
+                lr_emit_store(s, V(start, ty_i64), V(cur_ptr, ty_ptr));
+                lr_error_t lerr;
+                uint32_t head = lr_session_block(s);
+                uint32_t body = lr_session_block(s);
+                uint32_t done = lr_session_block(s);
+                lr_emit_br(s, head);
+                lr_session_set_block(s, head, &lerr);
+                uint32_t cur = lr_emit_load(s, ty_i64, V(cur_ptr, ty_ptr));
+                uint32_t step_pos = lr_emit_icmp(s, LR_CMP_SGT,
+                    V(step, ty_i64), I(0, ty_i64));
+                uint32_t asc = lr_emit_icmp(s, LR_CMP_SLE,
+                    V(cur, ty_i64), V(end, ty_i64));
+                uint32_t dsc = lr_emit_icmp(s, LR_CMP_SGE,
+                    V(cur, ty_i64), V(end, ty_i64));
+                uint32_t more = lr_emit_select(s, ty_i1,
+                    V(step_pos, ty_i1), V(asc, ty_i1), V(dsc, ty_i1));
+                lr_emit_condbr(s, V(more, ty_i1), body, done);
+                lr_session_set_block(s, body, &lerr);
+                uint32_t loop_val = cast_int_value(cur, ty_i64, loop_lr);
+                lr_emit_store(s, V(loop_val, loop_lr), V(loop_ptr, ty_ptr));
+                for (size_t j = 0; j < idl->n_values; j++) {
+                    emit_write_value(idl->m_values[j]);
+                }
+                uint32_t nxt = lr_emit_add(s, ty_i64,
+                    V(cur, ty_i64), V(step, ty_i64));
+                lr_emit_store(s, V(nxt, ty_i64), V(cur_ptr, ty_ptr));
+                lr_emit_br(s, head);
+                lr_session_set_block(s, done, &lerr);
+                return;
+            }
+            ASR::ttype_t *fullvt = ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(val));
+            // A whole-array value (e.g. the array-constructor temp that the
+            // implied-do pass lowers `(s, i=1,n)` into) must write each
+            // element; the scalar path below would read the array descriptor
+            // as a single str_desc and emit garbage.
+            if (ASR::is_a<ASR::Array_t>(*fullvt)) {
+                ASR::Array_t *arr_t = ASR::down_cast<ASR::Array_t>(fullvt);
+                ASR::ttype_t *et = ASRUtils::type_get_past_array(
+                    ASRUtils::type_get_past_allocatable_pointer(
+                        arr_t->m_type));
+                if (ASR::is_a<ASR::String_t>(*et)) {
+                    ArrayLinearView v = emit_array_linear_view(val, arr_t);
+                    // For an internal unit, append each element at a running
+                    // cursor (internal_write_chunk overwrites from offset 0 and
+                    // pads, which would collapse all elements to the last one),
+                    // then pad once from the cursor to the buffer end.
+                    uint32_t dst_data = 0, dst_cap = 0, cur_slot = 0;
+                    if (internal_string_write) {
+                        uint32_t dd = internal_unit_is_value
+                            ? internal_unit_desc
+                            : lr_emit_load(s, ty_str_desc,
+                                V(internal_unit_desc_ptr, ty_ptr));
+                        uint32_t df0 = 0, df1 = 1;
+                        dst_data = lr_emit_extractvalue(s, ty_ptr,
+                            V(dd, ty_str_desc), &df0, 1);
+                        dst_cap = lr_emit_extractvalue(s, ty_i64,
+                            V(dd, ty_str_desc), &df1, 1);
+                        cur_slot = lr_emit_alloca(s, ty_i64);
+                        lr_emit_store(s, I(0, ty_i64), V(cur_slot, ty_ptr));
+                    }
+                    uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+                    lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+                    lr_error_t aerr;
+                    uint32_t ahead = lr_session_block(s);
+                    uint32_t abody = lr_session_block(s);
+                    uint32_t adone = lr_session_block(s);
+                    lr_emit_br(s, ahead);
+                    lr_session_set_block(s, ahead, &aerr);
+                    uint32_t aidx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+                    uint32_t amore = lr_emit_icmp(s, LR_CMP_SLT,
+                        V(aidx, ty_i64), V(v.total, ty_i64));
+                    lr_emit_condbr(s, V(amore, ty_i1), abody, adone);
+                    lr_session_set_block(s, abody, &aerr);
+                    uint32_t eoff = lr_emit_mul(s, ty_i64,
+                        V(aidx, ty_i64), V(v.elem_len, ty_i64));
+                    lr_operand_desc_t eo[1] = {V(eoff, ty_i64)};
+                    uint32_t eptr = lr_emit_gep(s, ty_i8,
+                        V(v.base, ty_ptr), eo, 1);
+                    uint32_t edesc = lr_emit_load(s, ty_str_desc,
+                        V(eptr, ty_ptr));
+                    uint32_t f0 = 0, f1 = 1;
+                    uint32_t edata = lr_emit_extractvalue(s, ty_ptr,
+                        V(edesc, ty_str_desc), &f0, 1);
+                    uint32_t elen = lr_emit_extractvalue(s, ty_i64,
+                        V(edesc, ty_str_desc), &f1, 1);
+                    if (internal_string_write) {
+                        uint32_t cur = lr_emit_load(s, ty_i64,
+                            V(cur_slot, ty_ptr));
+                        uint32_t remain = lr_emit_sub(s, ty_i64,
+                            V(dst_cap, ty_i64), V(cur, ty_i64));
+                        uint32_t neg = lr_emit_icmp(s, LR_CMP_SLT,
+                            V(remain, ty_i64), I(0, ty_i64));
+                        remain = lr_emit_select(s, ty_i64, V(neg, ty_i1),
+                            I(0, ty_i64), V(remain, ty_i64));
+                        uint32_t fits = lr_emit_icmp(s, LR_CMP_SLT,
+                            V(elen, ty_i64), V(remain, ty_i64));
+                        uint32_t cpy = lr_emit_select(s, ty_i64, V(fits, ty_i1),
+                            V(elen, ty_i64), V(remain, ty_i64));
+                        lr_operand_desc_t doff[1] = {V(cur, ty_i64)};
+                        uint32_t dptr = lr_emit_gep(s, ty_i8,
+                            V(dst_data, ty_ptr), doff, 1);
+                        lr_type_t *mp[] = {ty_ptr, ty_ptr, ty_i64};
+                        declare_func("memcpy", ty_ptr, mp, 3, false);
+                        lr_operand_desc_t ma[] = {
+                            V(dptr, ty_ptr), V(edata, ty_ptr), V(cpy, ty_i64)
+                        };
+                        emit_call("memcpy", ty_ptr, ma, 3);
+                        uint32_t newcur = lr_emit_add(s, ty_i64,
+                            V(cur, ty_i64), V(cpy, ty_i64));
+                        lr_emit_store(s, V(newcur, ty_i64),
+                            V(cur_slot, ty_ptr));
+                    } else if (external_integer_write) {
+                        scratch_io_append(edata, elen);
+                    } else {
+                        file_write_emit_string(edata, elen);
+                    }
+                    uint32_t anxt = lr_emit_add(s, ty_i64,
+                        V(aidx, ty_i64), I(1, ty_i64));
+                    lr_emit_store(s, V(anxt, ty_i64), V(idx_ptr, ty_ptr));
+                    lr_emit_br(s, ahead);
+                    lr_session_set_block(s, adone, &aerr);
+                    if (internal_string_write) {
+                        uint32_t cur = lr_emit_load(s, ty_i64,
+                            V(cur_slot, ty_ptr));
+                        uint32_t pad = lr_emit_sub(s, ty_i64,
+                            V(dst_cap, ty_i64), V(cur, ty_i64));
+                        uint32_t neg = lr_emit_icmp(s, LR_CMP_SLT,
+                            V(pad, ty_i64), I(0, ty_i64));
+                        pad = lr_emit_select(s, ty_i64, V(neg, ty_i1),
+                            I(0, ty_i64), V(pad, ty_i64));
+                        lr_operand_desc_t poff[1] = {V(cur, ty_i64)};
+                        uint32_t pptr = lr_emit_gep(s, ty_i8,
+                            V(dst_data, ty_ptr), poff, 1);
+                        lr_type_t *msp[] = {ty_ptr, ty_i32, ty_i64};
+                        declare_func("memset", ty_ptr, msp, 3, false);
+                        lr_operand_desc_t msa[] = {
+                            V(pptr, ty_ptr), I(' ', ty_i32), V(pad, ty_i64)
+                        };
+                        emit_call("memset", ty_ptr, msa, 3);
+                    }
+                    return;
+                }
+            }
             ASR::ttype_t *vt = ASRUtils::expr_type(val);
             vt = ASRUtils::type_get_past_allocatable_pointer(vt);
             vt = ASRUtils::type_get_past_array(vt);
@@ -18292,6 +18451,9 @@ public:
             } else {
                 file_write_emit_string(data, len);
             }
+        };
+        for (size_t i = 0; i < n_values; i++) {
+            emit_write_value(values[i]);
         }
 
         // Trailer: m_end overrides the default "\n".  If advance=='no' the
