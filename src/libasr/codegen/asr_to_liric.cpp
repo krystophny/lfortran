@@ -14065,6 +14065,27 @@ public:
                     args.push_back(V(tmp, vt));
                     continue;
                 }
+                // A character scalar passed to an explicit-interface external
+                // subroutine (no liric body in this compilation): the external
+                // definition follows the standard Fortran ABI (a char data
+                // pointer), not liric's internal {ptr,len} str_desc.  Pass the
+                // data pointer (str_desc field 0), matching the LLVM backend,
+                // so an external C/Fortran routine reads the character bytes
+                // rather than the descriptor.
+                if (fn && function_is_interface(fn) && !fn_is_bindc &&
+                        formal_v && !formal_v->m_value_attr &&
+                        formal_v->m_intent != ASR::intentType::Out &&
+                        formal_v->m_intent != ASR::intentType::ReturnVar &&
+                        ASR::is_a<ASR::String_t>(
+                            *ASRUtils::type_get_past_allocatable_pointer(
+                                formal_v->m_type)) &&
+                        ASR::is_a<ASR::String_t>(
+                            *ASRUtils::type_get_past_array(
+                                ASRUtils::type_get_past_allocatable_pointer(
+                                    ASRUtils::expr_type(arg))))) {
+                    args.push_back(V(emit_string_data_len(arg).first, ty_ptr));
+                    continue;
+                }
                 if (is_string_to_char_array_descriptor_arg(fn, i, arg)) {
                     args.push_back(V(emit_string_to_array_descriptor(
                         string_to_array_inner_cast(arg)), ty_ptr));
@@ -14494,6 +14515,27 @@ public:
                     visit_expr(*arg);
                     lr_type_t *vt = get_type(formal_v->m_type);
                     args.push_back(V(tmp, vt));
+                    continue;
+                }
+                // A character scalar passed to an explicit-interface external
+                // subroutine (no liric body in this compilation): the external
+                // definition follows the standard Fortran ABI (a char data
+                // pointer), not liric's internal {ptr,len} str_desc.  Pass the
+                // data pointer (str_desc field 0), matching the LLVM backend,
+                // so an external C/Fortran routine reads the character bytes
+                // rather than the descriptor.
+                if (fn && function_is_interface(fn) && !fn_is_bindc &&
+                        formal_v && !formal_v->m_value_attr &&
+                        formal_v->m_intent != ASR::intentType::Out &&
+                        formal_v->m_intent != ASR::intentType::ReturnVar &&
+                        ASR::is_a<ASR::String_t>(
+                            *ASRUtils::type_get_past_allocatable_pointer(
+                                formal_v->m_type)) &&
+                        ASR::is_a<ASR::String_t>(
+                            *ASRUtils::type_get_past_array(
+                                ASRUtils::type_get_past_allocatable_pointer(
+                                    ASRUtils::expr_type(arg))))) {
+                    args.push_back(V(emit_string_data_len(arg).first, ty_ptr));
                     continue;
                 }
                 if (is_string_to_char_array_descriptor_arg(fn, i, arg)) {
