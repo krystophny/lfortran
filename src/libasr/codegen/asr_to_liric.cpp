@@ -17860,8 +17860,39 @@ public:
                 visit_expr(*x.m_selector);
                 is_target = was_target;
                 uint32_t raw_ptr = lr_emit_load(s, ty_ptr, V(tmp, ty_ptr));
-                uint32_t selector_tag = load_raw_object_type_tag(raw_ptr);
                     lr_error_t err;
+                    // A deallocated polymorphic allocatable reverts to its
+                    // declared type (F2008 7.3.2.3): when the data pointer is
+                    // null, use the declared type tag instead of dereferencing
+                    // the freed object (which segfaulted).
+                    int64_t declared_tag = 0;
+                    {
+                        ASR::symbol_t *dsym =
+                            ASRUtils::get_struct_sym_from_struct_expr(
+                                x.m_selector);
+                        ASR::Struct_t *dst =
+                            struct_symbol_from_type_decl(dsym);
+                        if (dst) {
+                            declared_tag =
+                                struct_symbol_tag((ASR::symbol_t *)dst);
+                        }
+                    }
+                    uint32_t tag_slot = lr_emit_alloca(s, ty_i64);
+                    lr_emit_store(s, I(declared_tag, ty_i64),
+                        V(tag_slot, ty_ptr));
+                    uint32_t nn = lr_emit_icmp(s, LR_CMP_NE,
+                        V(raw_ptr, ty_ptr), LR_NULL(ty_ptr));
+                    uint32_t load_bb = lr_session_block(s);
+                    uint32_t after_bb = lr_session_block(s);
+                    lr_emit_condbr(s, V(nn, ty_i1), load_bb, after_bb);
+                    lr_session_set_block(s, load_bb, &err);
+                    lr_emit_store(s,
+                        V(load_raw_object_type_tag(raw_ptr), ty_i64),
+                        V(tag_slot, ty_ptr));
+                    lr_emit_br(s, after_bb);
+                    lr_session_set_block(s, after_bb, &err);
+                    uint32_t selector_tag = lr_emit_load(s, ty_i64,
+                        V(tag_slot, ty_ptr));
                     uint32_t merge_bb = lr_session_block(s);
                     for (size_t i = 0; i < x.n_body; i++) {
                         int64_t branch_tag = type_stmt_tag(x.m_body[i]);
