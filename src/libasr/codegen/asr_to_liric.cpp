@@ -9546,6 +9546,18 @@ public:
             lr_operand_desc_t gep_idx[1] = {V(byte_off, ty_i64)};
             uint32_t elem_ptr = lr_emit_gep(s, ty_i8,
                 V(base, ty_ptr), gep_idx, 1);
+            ASR::Variable_t *holder_var = var_from_expr(x.m_v);
+            if (holder_var && holder_var->m_presence ==
+                    ASR::presenceType::Optional &&
+                    (array_t->m_physical_type ==
+                        ASR::array_physical_typeType::PointerArray ||
+                     array_t->m_physical_type ==
+                        ASR::array_physical_typeType::UnboundedPointerArray)) {
+                uint32_t present = lr_emit_icmp(s, LR_CMP_NE,
+                    V(base, ty_ptr), LR_NULL(ty_ptr));
+                elem_ptr = lr_emit_select(s, ty_ptr, V(present, ty_i1),
+                    V(elem_ptr, ty_ptr), LR_NULL(ty_ptr));
+            }
 
             if (is_target) {
                 tmp = elem_ptr;
