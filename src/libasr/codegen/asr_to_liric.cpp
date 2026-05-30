@@ -8453,6 +8453,25 @@ public:
     // store the rvalue.
 
     void visit_Associate(const ASR::Associate_t &x) {
+        // `p => NULL()` for a character pointer: its slot is a {ptr,len}
+        // str_desc, so store a null descriptor.  PointerNullConstant yields a
+        // bare 8-byte null pointer; storing that into the str_desc slot
+        // mismatches the type and the malformed store dereferences null.
+        if (ASR::is_a<ASR::PointerNullConstant_t>(*x.m_value) &&
+                ASR::is_a<ASR::Var_t>(*x.m_target)) {
+            ASR::ttype_t *tt = ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(x.m_target));
+            if (ASR::is_a<ASR::String_t>(*tt)) {
+                uint32_t dst = emit_target_ptr(x.m_target);
+                uint32_t f0 = 0, f1 = 1;
+                uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
+                    LR_UNDEF(ty_str_desc), LR_NULL(ty_ptr), &f0, 1);
+                uint32_t d1 = lr_emit_insertvalue(s, ty_str_desc,
+                    V(d0, ty_str_desc), I(0, ty_i64), &f1, 1);
+                lr_emit_store(s, V(d1, ty_str_desc), V(dst, ty_ptr));
+                return;
+            }
+        }
         // Pointer bounds-remapping: ptr(lb:ub[:step]) => target.  The target
         // is an ArraySection over the pointer itself; stamp the pointer's
         // descriptor with the remapped lower bound and extent over the
@@ -21490,6 +21509,14 @@ found_offset:
             uint32_t ptr = lr_emit_load(s, ty_ptr, V(mem_ptr, ty_ptr));
             ASR::ttype_t *pointee = ASRUtils::type_get_past_pointer(x.m_type);
             tmp = lr_emit_load(s, get_type(pointee), V(ptr, ty_ptr));
+        } else if (ASRUtils::is_pointer(x.m_type) &&
+                ASR::is_a<ASR::String_t>(
+                    *ASRUtils::type_get_past_array(
+                        ASRUtils::type_get_past_pointer(x.m_type)))) {
+            // A `character, pointer` component holds an inline {ptr,len}
+            // str_desc (a pointer-associate stores the target's descriptor
+            // there), so load the descriptor, not an 8-byte pointer.
+            tmp = lr_emit_load(s, ty_str_desc, V(mem_ptr, ty_ptr));
         } else {
             lr_type_t *mt = get_type(x.m_type);
             tmp = lr_emit_load(s, mt, V(mem_ptr, ty_ptr));
