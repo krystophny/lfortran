@@ -17006,9 +17006,29 @@ public:
         }
         if (namelist_type_code(elem) < 0) return false;
         if (is_arr) {
-            if (ASR::is_a<ASR::String_t>(*elem)) return false;
             ASR::Array_t *arr = ASR::down_cast<ASR::Array_t>(vt);
-            if (arr->m_physical_type !=
+            bool string_elem = ASR::is_a<ASR::String_t>(*elem);
+            if (string_elem) {
+                // Character arrays are bridged to the runtime's contiguous
+                // char* layout (gather on write, scatter back on read), so
+                // the per-element length must be a compile-time constant.
+                // Their storage is a str_desc array addressed identically
+                // for FixedSize and Pointer physical types.
+                int64_t clen = 0;
+                ASR::String_t *st = ASR::down_cast<ASR::String_t>(elem);
+                if (!(st->m_len &&
+                        ASRUtils::extract_value(st->m_len, clen))) {
+                    return false;
+                }
+                if (arr->m_physical_type !=
+                        ASR::array_physical_typeType::FixedSizeArray &&
+                        arr->m_physical_type !=
+                        ASR::array_physical_typeType::SIMDArray &&
+                        arr->m_physical_type !=
+                        ASR::array_physical_typeType::PointerArray) {
+                    return false;
+                }
+            } else if (arr->m_physical_type !=
                     ASR::array_physical_typeType::FixedSizeArray &&
                     arr->m_physical_type !=
                     ASR::array_physical_typeType::SIMDArray) {
@@ -17056,6 +17076,18 @@ public:
         uint32_t shape;
     };
 
+    // A character-array namelist member is bridged to the runtime's
+    // contiguous char* layout: on write its per-element {ptr,len} runs are
+    // gathered into `buf`; on read the runtime fills `buf` and we scatter
+    // the bytes back into the original str_desc elements at `desc_base`.
+    struct NmlCharArrayCopyback {
+        uint32_t desc_base;   // str_desc array base (16-byte elements)
+        uint32_t buf;         // contiguous char buffer
+        int64_t total;        // element count
+        int64_t elem_len;     // per-element char length
+    };
+    std::vector<NmlCharArrayCopyback> nml_pending_copybacks;
+
     // Append leaf namelist items reachable from storage at `addr`.  A
     // derived-type scalar recurses into its members (names become
     // `name%member`), matching the LLVM backend's add_struct_members.
@@ -17092,7 +17124,34 @@ public:
         item.data = addr;
         item.shape_null = true;
         item.shape = 0;
-        if (ASR::is_a<ASR::String_t>(*elem)) {
+        if (ASR::is_a<ASR::String_t>(*elem) && is_arr) {
+            // Character array: liric stores it as an array of 16-byte
+            // {ptr,len} str_desc elements, but the runtime namelist code
+            // wants one contiguous char* with stride elem_len.  Gather the
+            // per-element bytes into a buffer now (correct for write), and
+            // record the buffer so the read path can scatter back.
+            int64_t clen = 0;
+            ASR::String_t *st = ASR::down_cast<ASR::String_t>(elem);
+            ASRUtils::extract_value(st->m_len, clen);
+            ASR::Array_t *arr = ASR::down_cast<ASR::Array_t>(vt);
+            int64_t total = ASRUtils::get_fixed_size_of_array(
+                arr->m_dims, arr->n_dims);
+            uint32_t buf = emit_storage_alloca_nbytes(
+                (uint64_t)total * (uint64_t)clen);
+            for (int64_t j = 0; j < total; j++) {
+                lr_operand_desc_t doff[1] = {I(j * 16, ty_i64)};
+                uint32_t dptr = lr_emit_gep(s, ty_i8, V(addr, ty_ptr),
+                    doff, 1);
+                uint32_t edata = lr_emit_load(s, ty_ptr, V(dptr, ty_ptr));
+                lr_operand_desc_t boff[1] = {I(j * clen, ty_i64)};
+                uint32_t bdst = lr_emit_gep(s, ty_i8, V(buf, ty_ptr),
+                    boff, 1);
+                emit_memcpy_bytes(bdst, edata, (uint64_t)clen);
+            }
+            item.data = buf;
+            item.elem_len = clen;
+            nml_pending_copybacks.push_back({addr, buf, total, clen});
+        } else if (ASR::is_a<ASR::String_t>(*elem)) {
             // Scalar character: slot holds a {data_ptr,len} descriptor.
             item.data = lr_emit_load(s, ty_ptr, V(addr, ty_ptr));
             int64_t len_const = 0;
@@ -17121,7 +17180,27 @@ public:
         out.push_back(item);
     }
 
+    // Scatter the contiguous read buffer for each character-array namelist
+    // member back into its original str_desc elements.  Called after a
+    // namelist READ; a no-op when no char arrays were bridged.
+    void emit_namelist_char_copybacks() {
+        for (const NmlCharArrayCopyback &cb : nml_pending_copybacks) {
+            for (int64_t j = 0; j < cb.total; j++) {
+                lr_operand_desc_t doff[1] = {I(j * 16, ty_i64)};
+                uint32_t dptr = lr_emit_gep(s, ty_i8, V(cb.desc_base, ty_ptr),
+                    doff, 1);
+                uint32_t edata = lr_emit_load(s, ty_ptr, V(dptr, ty_ptr));
+                lr_operand_desc_t boff[1] = {I(j * cb.elem_len, ty_i64)};
+                uint32_t bsrc = lr_emit_gep(s, ty_i8, V(cb.buf, ty_ptr),
+                    boff, 1);
+                emit_memcpy_bytes(edata, bsrc, (uint64_t)cb.elem_len);
+            }
+        }
+        nml_pending_copybacks.clear();
+    }
+
     uint32_t build_namelist_group(ASR::symbol_t *nml_sym) {
+        nml_pending_copybacks.clear();
         nml_sym = ASRUtils::symbol_get_past_external(nml_sym);
         ASR::Namelist_t *nml = ASR::down_cast<ASR::Namelist_t>(nml_sym);
         std::string gname = LCompilers::to_lower(nml->m_group_name);
@@ -18262,6 +18341,7 @@ public:
             uint32_t iostat = emit_iostat_ptr(x.m_iostat);
             uint32_t group = build_namelist_group(x.m_nml);
             emit_namelist_io("_lfortran_namelist_read", unit, iostat, group);
+            emit_namelist_char_copybacks();
             return;
         }
         if (x.m_nml && x.m_unit && namelist_char_scalar_unit(x.m_unit) &&
@@ -18280,6 +18360,7 @@ public:
                 V(group, ty_ptr)
             };
             emit_call_void("_lfortran_namelist_read_str", args, 4);
+            emit_namelist_char_copybacks();
             return;
         }
         if (x.m_nml && x.m_unit && namelist_supported(x.m_nml)) {
@@ -18328,6 +18409,7 @@ public:
                     V(group, ty_ptr)
                 };
                 emit_call_void("_lfortran_namelist_read_str_array", args, 5);
+                emit_namelist_char_copybacks();
                 return;
             }
         }
