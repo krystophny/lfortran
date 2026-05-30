@@ -11994,6 +11994,37 @@ public:
             lr_emit_store(s, LR_NULL(ty_ptr), V(slot, ty_ptr));
             return;
         }
+        if (ASRUtils::is_allocatable(expr_t) &&
+                (ASR::is_a<ASR::Integer_t>(*at) || ASR::is_a<ASR::Real_t>(*at) ||
+                 ASR::is_a<ASR::Logical_t>(*at) ||
+                 ASR::is_a<ASR::Complex_t>(*at))) {
+            // Allocatable intrinsic scalar (e.g. `integer, allocatable :: xx`,
+            // including a derived-type component): the slot holds the heap
+            // pointer.  Free it when non-null and null the slot so allocated()
+            // reports false.  Previously this fell through to a no-op, leaking
+            // and leaving the entity allocated (e.g. an intent(out) reset).
+            bool wt = is_target;
+            is_target = true;
+            visit_expr(*v);
+            is_target = wt;
+            uint32_t slot = tmp;
+            uint32_t raw = lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
+            uint32_t has_data = lr_emit_icmp(s, LR_CMP_NE,
+                V(raw, ty_ptr), LR_NULL(ty_ptr));
+            lr_error_t err;
+            uint32_t free_bb = lr_session_block(s);
+            uint32_t done_bb = lr_session_block(s);
+            lr_emit_condbr(s, V(has_data, ty_i1), free_bb, done_bb);
+            lr_session_set_block(s, free_bb, &err);
+            uint32_t allocator = emit_call(
+                "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+            lr_operand_desc_t fa[] = {V(allocator, ty_ptr), V(raw, ty_ptr)};
+            emit_call_void("_lfortran_free_alloc", fa, 2);
+            lr_emit_br(s, done_bb);
+            lr_session_set_block(s, done_bb, &err);
+            lr_emit_store(s, LR_NULL(ty_ptr), V(slot, ty_ptr));
+            return;
+        }
         if (!ASR::is_a<ASR::String_t>(*at)) {
             // Non-string deallocate is a no-op until we have array
             // descriptor support.
