@@ -17292,6 +17292,58 @@ public:
         internal_write_chunk_desc(dst_desc, data, len);
     }
 
+    // Internal write to a CHARACTER ARRAY unit: the formatted output is a set
+    // of records separated by '\n' (one per format reversion); distribute each
+    // record into a successive array element, blank-padded to its length.  The
+    // array is a contiguous run of `count` 16-byte str_desc elements at `base`.
+    void internal_write_string_array(uint32_t base, int64_t count,
+                                     uint32_t data, uint32_t total_len) {
+        lr_error_t err;
+        uint32_t cursor_ptr = lr_emit_alloca(s, ty_i64);
+        lr_emit_store(s, I(0, ty_i64), V(cursor_ptr, ty_ptr));
+        uint32_t scan_ptr = lr_emit_alloca(s, ty_i64);
+        for (int64_t j = 0; j < count; j++) {
+            uint32_t seg_start = lr_emit_load(s, ty_i64, V(cursor_ptr, ty_ptr));
+            lr_emit_store(s, V(seg_start, ty_i64), V(scan_ptr, ty_ptr));
+            uint32_t head = lr_session_block(s);
+            uint32_t body = lr_session_block(s);
+            uint32_t notend = lr_session_block(s);
+            uint32_t done = lr_session_block(s);
+            lr_emit_br(s, head);
+            lr_session_set_block(s, head, &err);
+            uint32_t k = lr_emit_load(s, ty_i64, V(scan_ptr, ty_ptr));
+            uint32_t at_end = lr_emit_icmp(s, LR_CMP_SGE,
+                V(k, ty_i64), V(total_len, ty_i64));
+            lr_emit_condbr(s, V(at_end, ty_i1), done, notend);
+            lr_session_set_block(s, notend, &err);
+            lr_operand_desc_t koff[1] = {V(k, ty_i64)};
+            uint32_t cptr = lr_emit_gep(s, ty_i8, V(data, ty_ptr), koff, 1);
+            uint32_t ch = lr_emit_load(s, ty_i8, V(cptr, ty_ptr));
+            uint32_t is_nl = lr_emit_icmp(s, LR_CMP_EQ,
+                V(ch, ty_i8), I(10, ty_i8));
+            uint32_t step = lr_session_block(s);
+            lr_emit_condbr(s, V(is_nl, ty_i1), done, step);
+            lr_session_set_block(s, step, &err);
+            uint32_t k1 = lr_emit_add(s, ty_i64, V(k, ty_i64), I(1, ty_i64));
+            lr_emit_store(s, V(k1, ty_i64), V(scan_ptr, ty_ptr));
+            lr_emit_br(s, head);
+            lr_session_set_block(s, done, &err);
+            uint32_t seg_end = lr_emit_load(s, ty_i64, V(scan_ptr, ty_ptr));
+            uint32_t seg_len = lr_emit_sub(s, ty_i64,
+                V(seg_end, ty_i64), V(seg_start, ty_i64));
+            lr_operand_desc_t soff[1] = {V(seg_start, ty_i64)};
+            uint32_t seg_data = lr_emit_gep(s, ty_i8, V(data, ty_ptr),
+                soff, 1);
+            lr_operand_desc_t eoff[1] = {I(j * 16, ty_i64)};
+            uint32_t edesc_ptr = lr_emit_gep(s, ty_i8, V(base, ty_ptr),
+                eoff, 1);
+            internal_write_chunk(edesc_ptr, seg_data, seg_len);
+            uint32_t nc = lr_emit_add(s, ty_i64,
+                V(seg_end, ty_i64), I(1, ty_i64));
+            lr_emit_store(s, V(nc, ty_i64), V(cursor_ptr, ty_ptr));
+        }
+    }
+
     // Storage address of a Variable (local slot, module/program global, or
     // a lazily-declared global), mirroring visit_Var's is_target resolution.
     uint32_t emit_variable_address(ASR::Variable_t *v) {
@@ -17710,14 +17762,45 @@ public:
         uint32_t internal_unit_desc_ptr = 0;
         uint32_t internal_unit_desc = 0;
         bool internal_unit_is_value = false;
+        bool internal_unit_is_string_array = false;
+        uint32_t internal_array_base = 0;
+        int64_t internal_array_count = 0;
         bool external_integer_write = false;
         uint32_t external_unit = 0;
         uint32_t external_iostat = emit_iostat_ptr(x.m_iostat);
         if (x.m_unit) {
-            ASR::ttype_t *ut = ASRUtils::expr_type(x.m_unit);
-            ut = ASRUtils::type_get_past_allocatable_pointer(ut);
-            ut = ASRUtils::type_get_past_array(ut);
-            if (ASR::is_a<ASR::String_t>(*ut)) {
+            ASR::ttype_t *ut_full = ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(x.m_unit));
+            ASR::ttype_t *ut = ASRUtils::type_get_past_array(ut_full);
+            // A character ARRAY unit: each array element is one output record.
+            if (ASR::is_a<ASR::Array_t>(*ut_full) &&
+                    ASR::is_a<ASR::String_t>(*ut)) {
+                ASR::Array_t *uarr = ASR::down_cast<ASR::Array_t>(ut_full);
+                int64_t cnt = ASRUtils::get_fixed_size_of_array(
+                    uarr->m_dims, uarr->n_dims);
+                // A char array's str_desc storage is addressed identically
+                // (base + i*16) for FixedSize, Pointer and SIMD physical types.
+                bool addressable = uarr->m_physical_type ==
+                        ASR::array_physical_typeType::FixedSizeArray ||
+                    uarr->m_physical_type ==
+                        ASR::array_physical_typeType::PointerArray ||
+                    uarr->m_physical_type ==
+                        ASR::array_physical_typeType::SIMDArray;
+                if (addressable && cnt > 0) {
+                    internal_string_write = true;
+                    internal_unit_is_string_array = true;
+                    internal_array_count = cnt;
+                    bool was_target = is_target;
+                    is_target = true;
+                    visit_expr(*x.m_unit);
+                    is_target = was_target;
+                    internal_array_base = tmp;
+                }
+            }
+            if (internal_unit_is_string_array) {
+                // Character-array unit: captured above; records are split
+                // into elements at the write site.
+            } else if (ASR::is_a<ASR::String_t>(*ut)) {
                 internal_string_write = true;
                 if (ASR::is_a<ASR::StringSection_t>(*x.m_unit) ||
                         ASR::is_a<ASR::StringItem_t>(*x.m_unit)) {
@@ -17820,7 +17903,10 @@ public:
                 }
                 lr_emit_br(s, end_bb);
                 lr_session_set_block(s, ok_bb, &werr);
-                if (internal_unit_is_value) {
+                if (internal_unit_is_string_array) {
+                    internal_write_string_array(internal_array_base,
+                        internal_array_count, formatted.data, formatted.len);
+                } else if (internal_unit_is_value) {
                     internal_write_chunk_desc(internal_unit_desc,
                         formatted.data, formatted.len);
                 } else {
