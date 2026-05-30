@@ -8699,6 +8699,28 @@ public:
             is_target = false;
             rhs = lr_emit_load(s, ty_poly_desc, V(tmp, ty_ptr));
             t = ty_poly_desc;
+        } else if (ASRUtils::is_unlimited_polymorphic_type(
+                    ASRUtils::expr_type(x.m_target)) &&
+                !ASR::is_a<ASR::Array_t>(
+                    *ASRUtils::type_get_past_allocatable_pointer(
+                        ASRUtils::expr_type(x.m_target)))) {
+            // p => concrete_target where p is a class(*) scalar pointer: build
+            // a {data, tag} poly_desc with the target's address and its dynamic
+            // type tag, so a later select type / associated() sees the concrete
+            // type.  A plain value store would lose the tag (select type then
+            // hit `class default`).
+            is_target = true;
+            visit_expr(*x.m_value);
+            is_target = false;
+            uint32_t data = tmp;
+            int64_t tag = polymorphic_type_tag(ASRUtils::expr_type(x.m_value));
+            uint32_t f0 = 0, f1 = 1;
+            uint32_t d0 = lr_emit_insertvalue(s, ty_poly_desc,
+                LR_UNDEF(ty_poly_desc), V(data, ty_ptr), &f0, 1);
+            uint32_t d1 = lr_emit_insertvalue(s, ty_poly_desc,
+                V(d0, ty_poly_desc), I(tag, ty_i64), &f1, 1);
+            rhs = d1;
+            t = ty_poly_desc;
         } else {
             visit_expr(*x.m_value);
             rhs = tmp;
