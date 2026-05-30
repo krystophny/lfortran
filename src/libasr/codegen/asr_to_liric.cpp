@@ -5911,6 +5911,58 @@ public:
                 tmp = out_base;
                 return;
             }
+            // transfer(character_scalar, numeric_mold[, SIZE]): reinterpret the
+            // character DATA bytes (str_desc field 0), not the {ptr,len}
+            // descriptor itself, as the destination element type.
+            int64_t dst_eb = element_byte_size(elem_t);
+            if (dst_eb > 0) {
+                int64_t total_c = ASRUtils::get_fixed_size_of_array(
+                    array_t->m_dims, array_t->n_dims);
+                visit_expr(*x.m_source);
+                uint32_t src_desc = tmp;
+                uint32_t fld0 = 0, fld1 = 1;
+                uint32_t src_data = lr_emit_extractvalue(s, ty_ptr,
+                    V(src_desc, ty_str_desc), &fld0, 1);
+                uint32_t src_len = lr_emit_extractvalue(s, ty_i64,
+                    V(src_desc, ty_str_desc), &fld1, 1);
+                // Element count: a constant mold extent, else the runtime dim
+                // length (transfer SIZE), else derived from the source bytes.
+                uint32_t total;
+                if (total_c > 0) {
+                    total = emit_i64_const(total_c);
+                } else if (array_t->n_dims == 1 &&
+                        array_t->m_dims[0].m_length) {
+                    total = emit_i64_expr(array_t->m_dims[0].m_length);
+                } else {
+                    total = lr_emit_sdiv(s, ty_i64,
+                        V(src_len, ty_i64), I(dst_eb, ty_i64));
+                }
+                uint32_t dst_bytes = lr_emit_mul(s, ty_i64,
+                    V(total, ty_i64), I(dst_eb, ty_i64));
+                uint32_t out = emit_malloc_bytes(dst_bytes);
+                uint32_t lt = lr_emit_icmp(s, LR_CMP_SLT,
+                    V(dst_bytes, ty_i64), V(src_len, ty_i64));
+                uint32_t copy_bytes = lr_emit_select(s, ty_i64,
+                    V(lt, ty_i1), V(dst_bytes, ty_i64), V(src_len, ty_i64));
+                emit_memcpy_dynamic(out, src_data, copy_bytes);
+                if (array_t->m_physical_type ==
+                        ASR::array_physical_typeType::DescriptorArray) {
+                    uint32_t desc = emit_desc_alloca(1);
+                    desc_store_base(desc, out);
+                    desc_store_i64(desc, 8, emit_i64_const(dst_eb));
+                    desc_store_rank(desc, 1);
+                    desc_store_i64(desc, DESC_HEADER_BYTES + DESC_DIM_LBOUND,
+                        emit_i64_const(1));
+                    desc_store_i64(desc, DESC_HEADER_BYTES + DESC_DIM_EXTENT,
+                        total);
+                    desc_store_i64(desc, DESC_HEADER_BYTES + DESC_DIM_STRIDE,
+                        emit_i64_const(dst_eb));
+                    tmp = desc;
+                } else {
+                    tmp = out;
+                }
+                return;
+            }
         }
         if (ASR::is_a<ASR::String_t>(*dst_type) &&
                 ASR::is_a<ASR::Array_t>(*src_type)) {
