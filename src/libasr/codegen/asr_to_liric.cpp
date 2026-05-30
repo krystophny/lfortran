@@ -299,7 +299,9 @@ public:
     }
 
     bool is_cchar_string_type(ASR::ttype_t *t) {
-        t = ASRUtils::type_get_past_allocatable_pointer(t);
+        if (ASRUtils::is_allocatable(t) || ASRUtils::is_pointer(t)) {
+            return false;
+        }
         t = ASRUtils::type_get_past_array(t);
         if (!ASR::is_a<ASR::String_t>(*t)) {
             return false;
@@ -431,11 +433,11 @@ public:
     }
 
     lr_type_t *load_type_for_var(ASR::Variable_t *v) {
-        if (ASRUtils::is_pointer(v->m_type)) {
-            ASR::ttype_t *pointee =
-                ASRUtils::type_get_past_pointer(v->m_type);
-            pointee = ASRUtils::type_get_past_allocatable(pointee);
-            if (ASR::is_a<ASR::String_t>(*pointee)) {
+        if (ASRUtils::is_pointer(v->m_type) ||
+                ASRUtils::is_allocatable(v->m_type)) {
+            ASR::ttype_t *core =
+                ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+            if (ASR::is_a<ASR::String_t>(*core)) {
                 return ty_str_desc;
             }
         }
@@ -444,6 +446,13 @@ public:
 
     lr_type_t *value_type_for_expr(ASR::expr_t *expr) {
         ASR::ttype_t *t = ASRUtils::expr_type(expr);
+        if (ASRUtils::is_pointer(t) || ASRUtils::is_allocatable(t)) {
+            ASR::ttype_t *core =
+                ASRUtils::type_get_past_allocatable_pointer(t);
+            if (ASR::is_a<ASR::String_t>(*core)) {
+                return ty_str_desc;
+            }
+        }
         if (ASRUtils::is_pointer(t)) {
             ASR::ttype_t *pointee = ASRUtils::type_get_past_pointer(t);
             pointee = ASRUtils::type_get_past_allocatable(pointee);
@@ -465,6 +474,10 @@ public:
 
     bool is_bindc_char_scalar_variable(ASR::Variable_t *v) {
         if (v->m_abi != ASR::abiType::BindC) {
+            return false;
+        }
+        if (ASRUtils::is_allocatable(v->m_type) ||
+                ASRUtils::is_pointer(v->m_type)) {
             return false;
         }
         ASR::ttype_t *t =
@@ -13729,6 +13742,10 @@ public:
         ASR::ttype_t *formal_core =
             ASRUtils::type_get_past_allocatable_pointer(formal->m_type);
         bool formal_is_char = ASR::is_a<ASR::String_t>(*formal_core);
+        if (formal_is_char && (ASRUtils::is_allocatable(formal->m_type) ||
+                ASRUtils::is_pointer(formal->m_type))) {
+            return false;
+        }
 
         ASR::ttype_t *actual_type = ASRUtils::expr_type(actual);
         ASR::ttype_t *actual_core =
@@ -13763,6 +13780,46 @@ public:
         store_i8_at(cfi, 22, cfi_attribute_code(formal->m_type));
         store_i8_at(cfi, 23, 0);
         args.push_back(V(cfi, ty_ptr));
+        params.push_back(ty_ptr);
+        return true;
+    }
+
+    bool bindc_formal_is_char_descriptor(ASR::Variable_t *formal) {
+        if (!ASRUtils::is_allocatable(formal->m_type) &&
+                !ASRUtils::is_pointer(formal->m_type)) {
+            return false;
+        }
+        ASR::ttype_t *core =
+            ASRUtils::type_get_past_allocatable_pointer(formal->m_type);
+        if (ASR::is_a<ASR::Array_t>(*core)) {
+            return false;
+        }
+        core = ASRUtils::type_get_past_array(core);
+        return ASR::is_a<ASR::String_t>(*core);
+    }
+
+    bool prepare_bindc_char_descriptor_arg(ASR::expr_t *actual,
+            ASR::Variable_t *formal, std::vector<lr_operand_desc_t> &args,
+            std::vector<lr_type_t *> &params) {
+        if (!bindc_formal_is_char_descriptor(formal)) {
+            return false;
+        }
+        ASR::expr_t *source = expr_is_cchar_string_cast(actual)
+            ? cchar_cast_source(actual) : actual;
+        if (expr_is_storage_reference(source)) {
+            bool was_target = is_target;
+            is_target = true;
+            visit_expr(*source);
+            is_target = was_target;
+            args.push_back(V(tmp, ty_ptr));
+            params.push_back(ty_ptr);
+            return true;
+        }
+        visit_expr(*source);
+        lr_type_t *at = value_type_for_expr(source);
+        uint32_t slot = emit_temp_slot(at);
+        lr_emit_store(s, V(tmp, at), V(slot, ty_ptr));
+        args.push_back(V(slot, ty_ptr));
         params.push_back(ty_ptr);
         return true;
     }
@@ -14166,6 +14223,10 @@ public:
                         continue;
                     }
                     if (prepare_bindc_cfi_scalar_arg(actual, formal,
+                            cargs, params)) {
+                        continue;
+                    }
+                    if (prepare_bindc_char_descriptor_arg(actual, formal,
                             cargs, params)) {
                         continue;
                     }
@@ -14601,6 +14662,10 @@ public:
                             continue;
                         }
                         if (prepare_bindc_cfi_scalar_arg(actual, formal,
+                                cargs, params)) {
+                            continue;
+                        }
+                        if (prepare_bindc_char_descriptor_arg(actual, formal,
                                 cargs, params)) {
                             continue;
                         }
