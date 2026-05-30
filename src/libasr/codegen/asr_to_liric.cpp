@@ -11104,7 +11104,26 @@ public:
         ASR::ttype_t *mold_type = ASRUtils::expr_type(mold);
         bool mold_is_indirect = ASRUtils::is_allocatable(mold_type) ||
             ASRUtils::is_pointer(mold_type);
-        if (ASRUtils::is_class_type(ASRUtils::extract_type(mold_type)) &&
+        if (ASRUtils::is_pointer(mold_type) &&
+                ASRUtils::is_class_type(
+                    ASRUtils::extract_type(mold_type))) {
+            // A class POINTER mold (`class(T),pointer::y; y => concrete`): the
+            // slot holds the pointee's DATA pointer directly (no class header
+            // to strip), and a pointer to a concrete target has the pointer's
+            // declared dynamic type.  class_data_ptr(load(y)) would skip a
+            // non-existent header and copy garbage (x%v read 0).
+            mold_data = lr_emit_load(s, ty_ptr, V(mold_ptr, ty_ptr));
+            ASR::Struct_t *mold_st = struct_symbol_for_concrete_expr(mold);
+            if (!mold_st) {
+                mold_st = declared;
+            }
+            if (!mold_st) {
+                return false;
+            }
+            mold_tag = emit_i64_const(
+                struct_symbol_tag((ASR::symbol_t *)mold_st));
+        } else if (ASRUtils::is_class_type(
+                    ASRUtils::extract_type(mold_type)) &&
                 !mold_is_indirect) {
             // A by-reference class dummy: visit_expr already yields the
             // data pointer (past the class header), exactly as member
