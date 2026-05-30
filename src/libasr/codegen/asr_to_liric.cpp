@@ -10149,8 +10149,17 @@ public:
     // resolving the element struct symbol from the array expression.
     int64_t array_element_stride_bytes(ASR::expr_t *array_expr,
             ASR::ttype_t *elem_type) {
-        ASR::Struct_t *st = struct_symbol_for_concrete_expr(array_expr);
-        if (st) return (int64_t)struct_storage_size(st);
+        // Only size from the declared struct when the element type is actually
+        // a derived type; otherwise an intrinsic array whose Variable carries a
+        // spurious struct type_declaration (e.g. a compiler temp tagged
+        // ~assumed_type) would size as an empty struct (1 byte), corrupting the
+        // descriptor elem_len/stride.
+        ASR::ttype_t *ec = ASRUtils::type_get_past_array(
+            ASRUtils::type_get_past_allocatable_pointer(elem_type));
+        if (ASR::is_a<ASR::StructType_t>(*ec)) {
+            ASR::Struct_t *st = struct_symbol_for_concrete_expr(array_expr);
+            if (st) return (int64_t)struct_storage_size(st);
+        }
         return element_byte_size(elem_type);
     }
 
