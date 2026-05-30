@@ -4842,6 +4842,42 @@ public:
         ASR::ttype_t *target_type = ASRUtils::expr_type(x.m_target);
         target_type = ASRUtils::type_get_past_allocatable_pointer(target_type);
         target_type = ASRUtils::type_get_past_array(target_type);
+        if (!target_is_array && ASR::is_a<ASR::ArrayItem_t>(*x.m_target) &&
+                ASR::is_a<ASR::BitCast_t>(*x.m_value)) {
+            ASR::BitCast_t *bitcast = ASR::down_cast<ASR::BitCast_t>(
+                x.m_value);
+            ASR::ttype_t *src_type =
+                ASRUtils::type_get_past_allocatable_pointer(
+                    ASRUtils::expr_type(bitcast->m_source));
+            ASR::ttype_t *dst_type =
+                ASRUtils::type_get_past_allocatable_pointer(bitcast->m_type);
+            if (bitcast->m_size && !ASR::is_a<ASR::Array_t>(*src_type) &&
+                    !ASR::is_a<ASR::String_t>(*src_type) &&
+                    !ASR::is_a<ASR::Array_t>(*dst_type) &&
+                    !ASR::is_a<ASR::String_t>(*dst_type)) {
+                ASR::ArrayItem_t *target_item =
+                    ASR::down_cast<ASR::ArrayItem_t>(x.m_target);
+                ASR::ttype_t *owner_type =
+                    ASRUtils::type_get_past_allocatable_pointer(
+                        ASRUtils::expr_type(target_item->m_v));
+                if (ASR::is_a<ASR::Array_t>(*owner_type)) {
+                    ASR::Array_t *owner_array =
+                        ASR::down_cast<ASR::Array_t>(owner_type);
+                    uint32_t idx = array_item_linear_index(*target_item,
+                        owner_array);
+                    uint32_t rhs = emit_scalar_transfer_chunk(
+                        bitcast->m_source, src_type, dst_type, idx,
+                        ASR::is_a<ASR::ArrayItem_t>(*bitcast->m_source));
+                    bool was_target = is_target;
+                    is_target = true;
+                    visit_expr(*x.m_target);
+                    is_target = was_target;
+                    lr_emit_store(s, V(rhs, get_type(target_type)),
+                        V(tmp, ty_ptr));
+                    return;
+                }
+            }
+        }
         if (!target_is_array && expr_is_bindc_char_scalar(x.m_target)) {
             uint32_t rhs = emit_scalar_char_value(x.m_value);
             bool was_target = is_target;
@@ -5983,6 +6019,28 @@ public:
         return lin;
     }
 
+    uint32_t emit_scalar_transfer_chunk(ASR::expr_t *source,
+            ASR::ttype_t *src_type, ASR::ttype_t *dst_type,
+            uint32_t idx, bool source_is_indexed) {
+        int64_t dst_eb = element_byte_size(dst_type);
+        visit_expr(*source);
+        lr_type_t *src_lr = value_type_for_expr(source);
+        uint32_t slot = 0;
+        if (src_lr == ty_i1) {
+            slot = emit_logical_value_byte_slot(tmp, src_type);
+        } else {
+            slot = emit_temp_slot(src_lr);
+            lr_emit_store(s, V(tmp, src_lr), V(slot, ty_ptr));
+        }
+        uint32_t byte_off = source_is_indexed
+            ? emit_i64_const(0)
+            : lr_emit_mul(s, ty_i64, V(idx, ty_i64), I(dst_eb, ty_i64));
+        lr_operand_desc_t off[1] = {V(byte_off, ty_i64)};
+        uint32_t chunk = lr_emit_gep(s, ty_i8, V(slot, ty_ptr), off, 1);
+        lr_type_t *dst_lr = get_type(dst_type);
+        return lr_emit_load(s, dst_lr, V(chunk, ty_ptr));
+    }
+
     void visit_BitCast(const ASR::BitCast_t &x) {
         ASR::ttype_t *dst_type = ASRUtils::type_get_past_allocatable_pointer(
             x.m_type);
@@ -6362,30 +6420,13 @@ public:
                 ASR::Array_t *mold_array =
                     ASR::down_cast<ASR::Array_t>(mold_array_type);
                 uint32_t idx = array_item_linear_index(*mold_item, mold_array);
-                visit_expr(*x.m_source);
-                lr_type_t *src_lr = value_type_for_expr(x.m_source);
-                uint32_t slot = 0;
-                if (src_lr == ty_i1) {
-                    slot = emit_logical_value_byte_slot(tmp, src_type);
-                } else {
-                    slot = emit_temp_slot(src_lr);
-                    lr_emit_store(s, V(tmp, src_lr), V(slot, ty_ptr));
-                }
                 // A per-element source (ArrayItem indexed by the loop
                 // variable) maps 1:1 to this result element: reinterpret the
                 // whole source element (offset 0).  A whole/scalar source is a
                 // contiguous blob distributed across the result, so this
                 // element takes the idx-th dst-sized chunk.
-                uint32_t byte_off =
-                    ASR::is_a<ASR::ArrayItem_t>(*x.m_source)
-                    ? emit_i64_const(0)
-                    : lr_emit_mul(s, ty_i64, V(idx, ty_i64),
-                        I(dst_eb, ty_i64));
-                lr_operand_desc_t off[1] = {V(byte_off, ty_i64)};
-                uint32_t chunk = lr_emit_gep(s, ty_i8,
-                    V(slot, ty_ptr), off, 1);
-                lr_type_t *dst_lr = get_type(dst_type);
-                tmp = lr_emit_load(s, dst_lr, V(chunk, ty_ptr));
+                tmp = emit_scalar_transfer_chunk(x.m_source, src_type,
+                    dst_type, idx, ASR::is_a<ASR::ArrayItem_t>(*x.m_source));
                 return;
             }
         }
