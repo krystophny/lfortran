@@ -14975,19 +14975,53 @@ public:
             case ASRUtils::IntrinsicElementalFunctions::Exp2:
                 emit_real_libm_unary(x, "exp2f", "exp2");
                 return;
-            case ASRUtils::IntrinsicElementalFunctions::SameTypeAs:
-            case ASRUtils::IntrinsicElementalFunctions::ExtendsTypeOf: {
+            case ASRUtils::IntrinsicElementalFunctions::SameTypeAs: {
                 if (x.n_args != 2) {
                     throw CodeGenError(
-                        "liric: same_type_as/extends_type_of expects two args");
+                        "liric: same_type_as expects two args");
                 }
-                // ExtendsTypeOf is approximated as same-tag compare: we
-                // lack a runtime parent-chain registry, so subtyping
-                // cases will fail at runtime rather than at link time.
                 uint32_t tag_a = load_polymorphic_tag_from_expr(x.m_args[0]);
                 uint32_t tag_b = load_polymorphic_tag_from_expr(x.m_args[1]);
                 tmp = lr_emit_icmp(s, LR_CMP_EQ,
                     V(tag_a, ty_i64), V(tag_b, ty_i64));
+                return;
+            }
+            case ASRUtils::IntrinsicElementalFunctions::ExtendsTypeOf: {
+                if (x.n_args != 2) {
+                    throw CodeGenError(
+                        "liric: extends_type_of expects two args");
+                }
+                // extends_type_of(A, B) is true when A's dynamic type is B's
+                // type or a descendant of it.  Same-type is the tag equality;
+                // for every known type T, also accept (tagA==tag(T) &&
+                // tagB==tag(P)) for each proper ancestor P of T, derived from
+                // the ASR parent chain.  No runtime table needed.
+                uint32_t tag_a = load_polymorphic_tag_from_expr(x.m_args[0]);
+                uint32_t tag_b = load_polymorphic_tag_from_expr(x.m_args[1]);
+                uint32_t result = lr_emit_icmp(s, LR_CMP_EQ,
+                    V(tag_a, ty_i64), V(tag_b, ty_i64));
+                for (ASR::Struct_t *desc_st : known_structs) {
+                    int64_t desc_tag =
+                        struct_symbol_tag((ASR::symbol_t *)desc_st);
+                    ASR::Struct_t *anc = desc_st;
+                    while (anc->m_parent) {
+                        ASR::symbol_t *psym =
+                            ASRUtils::symbol_get_past_external(anc->m_parent);
+                        if (!ASR::is_a<ASR::Struct_t>(*psym)) break;
+                        anc = ASR::down_cast<ASR::Struct_t>(psym);
+                        int64_t anc_tag =
+                            struct_symbol_tag((ASR::symbol_t *)anc);
+                        uint32_t m1 = lr_emit_icmp(s, LR_CMP_EQ,
+                            V(tag_a, ty_i64), I(desc_tag, ty_i64));
+                        uint32_t m2 = lr_emit_icmp(s, LR_CMP_EQ,
+                            V(tag_b, ty_i64), I(anc_tag, ty_i64));
+                        uint32_t both = lr_emit_and(s, ty_i1,
+                            V(m1, ty_i1), V(m2, ty_i1));
+                        result = lr_emit_or(s, ty_i1,
+                            V(result, ty_i1), V(both, ty_i1));
+                    }
+                }
+                tmp = result;
                 return;
             }
             default: break;
