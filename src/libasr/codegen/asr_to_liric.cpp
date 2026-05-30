@@ -2284,11 +2284,21 @@ public:
             program_global_by_name[v->m_name] = sym;
             ASR::ttype_t *pvt =
                 ASRUtils::type_get_past_allocatable_pointer(v->m_type);
-            if (ASR::is_a<ASR::Array_t>(*pvt) &&
-                    ASR::down_cast<ASR::Array_t>(pvt)->m_physical_type ==
-                        ASR::array_physical_typeType::FixedSizeArray) {
-                program_fixed_array_by_name[v->m_name] =
-                    ASR::down_cast<ASR::Array_t>(pvt);
+            if (ASR::is_a<ASR::Array_t>(*pvt)) {
+                ASR::Array_t *pa = ASR::down_cast<ASR::Array_t>(pvt);
+                ASR::ttype_t *pe = ASRUtils::type_get_past_array(
+                    ASRUtils::type_get_past_allocatable_pointer(pa->m_type));
+                // A char array stores its str_desc elements inline in the
+                // global (physical type PointerArray), addressable by
+                // base + i*elem_byte_size just like a FixedSizeArray, so a
+                // host-associated view can synthesise a descriptor over it.
+                if (pa->m_physical_type ==
+                        ASR::array_physical_typeType::FixedSizeArray ||
+                    (ASR::is_a<ASR::String_t>(*pe) &&
+                     pa->m_physical_type ==
+                        ASR::array_physical_typeType::PointerArray)) {
+                    program_fixed_array_by_name[v->m_name] = pa;
+                }
             }
         }
         // Build a name -> sym map of the program-level variables so we
@@ -2960,7 +2970,10 @@ public:
                     ASR::ttype_t *fe = ASRUtils::type_get_past_array(
                         ASRUtils::type_get_past_allocatable_pointer(
                             fa->m_type));
-                    if (!ASR::is_a<ASR::String_t>(*fe)) {
+                    // String elements are 16-byte str_desc records stored
+                    // inline, addressed by base + i*elem_byte_size like any
+                    // other element, so the synthesis applies to them too.
+                    if (fe) {
                         uint32_t real_sym = nm_it->second;
                         lr_operand_desc_t no_off[1] = {I(0, ty_i64)};
                         uint32_t data = lr_emit_gep(s, ty_i8,
