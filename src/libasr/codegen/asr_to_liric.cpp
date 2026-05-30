@@ -13778,6 +13778,23 @@ public:
                             cargs, params)) {
                         continue;
                     }
+                    if (!formal->m_value_attr &&
+                            is_bindc_char_scalar_variable(formal) &&
+                            !expr_is_cchar_string_cast(actual) &&
+                            ASR::is_a<ASR::String_t>(
+                                *ASRUtils::type_get_past_array(
+                                    ASRUtils::type_get_past_allocatable_pointer(
+                                        ASRUtils::expr_type(actual))))) {
+                        // A bind(c) character(1) dummy without VALUE is a C
+                        // char*.  Pass the actual string's data pointer
+                        // (str_desc field 0), not the address of its
+                        // {ptr,len} descriptor, which the callee would
+                        // otherwise read pointer bytes from as the character.
+                        cargs.push_back(V(emit_string_data_len(actual).first,
+                            ty_ptr));
+                        params.push_back(ty_ptr);
+                        continue;
+                    }
                     if (expr_is_storage_reference(actual)) {
                         bool was_target = is_target;
                         is_target = true;
