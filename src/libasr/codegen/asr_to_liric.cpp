@@ -1577,6 +1577,21 @@ public:
         return is_allocatable_struct_type(ASRUtils::expr_type(expr));
     }
 
+    bool is_allocatable_intrinsic_scalar_type(ASR::ttype_t *type) {
+        if (!ASRUtils::is_allocatable(type)) return false;
+        ASR::ttype_t *core = ASRUtils::type_get_past_allocatable_pointer(type);
+        if (ASR::is_a<ASR::Array_t>(*core)) return false;
+        core = ASRUtils::type_get_past_array(core);
+        return ASR::is_a<ASR::Integer_t>(*core) ||
+            ASR::is_a<ASR::Real_t>(*core) ||
+            ASR::is_a<ASR::Logical_t>(*core) ||
+            ASR::is_a<ASR::Complex_t>(*core);
+    }
+
+    bool expr_is_allocatable_intrinsic_scalar(ASR::expr_t *expr) {
+        return is_allocatable_intrinsic_scalar_type(ASRUtils::expr_type(expr));
+    }
+
     // A plain `type(t), pointer :: p` variable (scalar, non-array, non-
     // allocatable struct pointer).  Its slot holds the target's address, so
     // member access and value assignment must dereference it to alias the
@@ -2973,6 +2988,15 @@ public:
                     lr_emit_load(s, ty_i8, V(slot, ty_ptr));
                 return;
             }
+            if (!is_target && !is_array &&
+                    is_allocatable_intrinsic_scalar_type(v->m_type)) {
+                ASR::ttype_t *core =
+                    ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+                core = ASRUtils::type_get_past_array(core);
+                uint32_t data = lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
+                tmp = lr_emit_load(s, get_type(core), V(data, ty_ptr));
+                return;
+            }
             if (is_array && runtime_pointer_arrays.count(h)) {
                 tmp = lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
                 return;
@@ -3006,6 +3030,18 @@ public:
                     LR_GLOBAL(sym, ty_ptr), no_off, 1);
                 tmp = is_target ? slot :
                     lr_emit_load(s, ty_i8, V(slot, ty_ptr));
+                return;
+            }
+            if (!is_target && !is_array &&
+                    is_allocatable_intrinsic_scalar_type(v->m_type)) {
+                lr_operand_desc_t no_off[1] = {I(0, ty_i64)};
+                uint32_t slot = lr_emit_gep(s, ty_i8,
+                    LR_GLOBAL(sym, ty_ptr), no_off, 1);
+                ASR::ttype_t *core =
+                    ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+                core = ASRUtils::type_get_past_array(core);
+                uint32_t data = lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
+                tmp = lr_emit_load(s, get_type(core), V(data, ty_ptr));
                 return;
             }
             if (is_array && runtime_pointer_arrays.count(h)) {
@@ -5269,6 +5305,21 @@ public:
             }
             uint32_t data = ensure_allocatable_struct_data(
                 slot, st, var_from_expr(x.m_target));
+            lr_emit_store(s, V(rhs, rhs_t), V(data, ty_ptr));
+            return;
+        }
+
+        if (!target_is_array &&
+                is_allocatable_intrinsic_scalar_type(target_expr_type)) {
+            visit_expr(*x.m_value);
+            uint32_t rhs = tmp;
+            lr_type_t *rhs_t = value_type_for_expr(x.m_value);
+            bool was_target = is_target;
+            is_target = true;
+            visit_expr(*x.m_target);
+            is_target = was_target;
+            uint32_t data = ensure_allocatable_scalar_data(
+                tmp, target_expr_type);
             lr_emit_store(s, V(rhs, rhs_t), V(data, ty_ptr));
             return;
         }
@@ -11489,6 +11540,24 @@ public:
         lr_emit_store(s, V(data, ty_ptr), V(slot, ty_ptr));
     }
 
+    uint32_t ensure_allocatable_scalar_data(uint32_t slot,
+                                            ASR::ttype_t *type) {
+        uint32_t raw0 = lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
+        uint32_t is_null = lr_emit_icmp(s, LR_CMP_EQ,
+            V(raw0, ty_ptr), LR_NULL(ty_ptr));
+        lr_error_t err;
+        uint32_t alloc_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(is_null, ty_i1), alloc_bb, done_bb);
+
+        lr_session_set_block(s, alloc_bb, &err);
+        emit_allocatable_scalar_allocation(slot, type);
+        lr_emit_br(s, done_bb);
+
+        lr_session_set_block(s, done_bb, &err);
+        return lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
+    }
+
     uint32_t ensure_allocatable_struct_data(uint32_t slot,
                                             ASR::Struct_t *st,
                                             ASR::Variable_t *target_var) {
@@ -14709,6 +14778,11 @@ public:
                         uint32_t raw = lr_emit_load(s, ty_ptr,
                             V(arg_ptr, ty_ptr));
                         arg_ptr = class_data_ptr(raw);
+                    } else if (expr_is_allocatable_intrinsic_scalar(arg) &&
+                            !(formal && (ASRUtils::is_allocatable(
+                                    formal->m_type) ||
+                                ASRUtils::is_pointer(formal->m_type)))) {
+                        arg_ptr = lr_emit_load(s, ty_ptr, V(arg_ptr, ty_ptr));
                     } else if (is_scalar_struct_pointer_target(arg) &&
                             !(formal && ASRUtils::is_pointer(
                                 formal->m_type))) {
@@ -15162,6 +15236,11 @@ public:
                         uint32_t raw = lr_emit_load(s, ty_ptr,
                             V(arg_ptr, ty_ptr));
                         arg_ptr = class_data_ptr(raw);
+                    } else if (expr_is_allocatable_intrinsic_scalar(arg) &&
+                            !(formal && (ASRUtils::is_allocatable(
+                                    formal->m_type) ||
+                                ASRUtils::is_pointer(formal->m_type)))) {
+                        arg_ptr = lr_emit_load(s, ty_ptr, V(arg_ptr, ty_ptr));
                     } else if (is_scalar_struct_pointer_target(arg) &&
                             !(formal && ASRUtils::is_pointer(
                                 formal->m_type))) {
@@ -21889,6 +21968,12 @@ found_offset:
 
         if (is_target) {
             tmp = mem_ptr;
+        } else if (is_allocatable_intrinsic_scalar_type(x.m_type)) {
+            ASR::ttype_t *core =
+                ASRUtils::type_get_past_allocatable_pointer(x.m_type);
+            core = ASRUtils::type_get_past_array(core);
+            uint32_t data = lr_emit_load(s, ty_ptr, V(mem_ptr, ty_ptr));
+            tmp = lr_emit_load(s, get_type(core), V(data, ty_ptr));
         } else if (is_scalar_intrinsic_pointer_type(x.m_type)) {
             uint32_t ptr = lr_emit_load(s, ty_ptr, V(mem_ptr, ty_ptr));
             ASR::ttype_t *pointee = ASRUtils::type_get_past_pointer(x.m_type);
