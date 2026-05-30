@@ -8961,7 +8961,18 @@ static int read_complex_expr(FILE *filep, char *buffer, size_t bufsize) {
             if (ch == ')') break;
         }
         buffer[i] = '\0';
-        return (ch == ')') ? 1 : 0;
+        if (ch != ')') return 0;
+        // Consume the trailing value separator (blanks then at most one
+        // comma) so the following list item does not read the comma as a
+        // null value.  Mirrors the no-parentheses branch below; a newline,
+        // slash, or next-value char is pushed back to preserve record and
+        // null-value semantics.
+        int sep;
+        while ((sep = fgetc(filep)) != EOF && (sep == ' ' || sep == '\t'));
+        if (sep != EOF && sep != ',') {
+            ungetc(sep, filep);
+        }
+        return 1;
     } else {
         int paren_depth = (ch == '(') ? 1 : 0;
         buffer[i++] = (char)ch;
