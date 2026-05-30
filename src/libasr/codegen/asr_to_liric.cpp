@@ -14388,7 +14388,16 @@ public:
             return;
         }
 
-        if (fn && dt_needs_dynamic_dispatch(x.m_dt) &&
+        // A TBP called on a class pointer aliasing a concrete target has no
+        // runtime vtable; resolve the override statically (see the matching
+        // FunctionCall path).  Reassigning fn to the concrete override
+        // disables the interface-gated dynamic blocks; the last is guarded.
+        ASR::Function_t *static_override =
+            static_tbp_override_for_concrete_alias(x.m_dt, x.m_name);
+        if (static_override) {
+            fn = static_override;
+        }
+        if (!static_override && fn && dt_needs_dynamic_dispatch(x.m_dt) &&
                 emit_dynamic_subroutine_dispatch(fn, x.m_name,
                 dynamic_method_name(x.m_name, fn), args, x.m_dt)) {
             emit_class_writebacks();
@@ -14407,7 +14416,7 @@ public:
         // TBP call on a POLYMORPHIC object whose binding resolved to a concrete
         // (declared-type) implementation: still dispatch through the object's
         // vtable, since the dynamic type may override the method.
-        if (fn && x.m_dt && is_tbp_call_symbol(x.m_name) &&
+        if (!static_override && fn && x.m_dt && is_tbp_call_symbol(x.m_name) &&
                 ASRUtils::is_class_type(
                     ASRUtils::type_get_past_allocatable_pointer(
                         ASRUtils::expr_type(x.m_dt)))) {
