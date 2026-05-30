@@ -5917,6 +5917,29 @@ public:
         }
         bool copy_data =
             ASRUtils::is_unlimited_polymorphic_type(target_array->m_type);
+        if (ASR::expr_t *optional_source =
+                optional_array_dummy_source_from_expr(x.m_components[0])) {
+            uint32_t optional_desc = desc_ptr_of(optional_source);
+            uint32_t is_null = lr_emit_icmp(s, LR_CMP_EQ,
+                V(optional_desc, ty_ptr), LR_NULL(ty_ptr));
+            lr_error_t err;
+            uint32_t reset_bb = lr_session_block(s);
+            uint32_t resize_bb = lr_session_block(s);
+            uint32_t done_bb = lr_session_block(s);
+            lr_emit_condbr(s, V(is_null, ty_i1), reset_bb, resize_bb);
+
+            lr_session_set_block(s, reset_bb, &err);
+            reset_descriptor_array(desc_ptr_of(x.m_target), target_array);
+            lr_emit_br(s, done_bb);
+
+            lr_session_set_block(s, resize_bb, &err);
+            resize_descriptor_array_like(
+                x.m_target, x.m_components[0], target_array, copy_data);
+            lr_emit_br(s, done_bb);
+
+            lr_session_set_block(s, done_bb, &err);
+            return;
+        }
         resize_descriptor_array_like(
             x.m_target, x.m_components[0], target_array, copy_data);
     }
@@ -7781,6 +7804,13 @@ public:
         return formal && formal->m_presence == ASR::presenceType::Optional;
     }
 
+    ASR::expr_t *peel_array_physical_casts(ASR::expr_t *expr) {
+        while (ASR::is_a<ASR::ArrayPhysicalCast_t>(*expr)) {
+            expr = ASR::down_cast<ASR::ArrayPhysicalCast_t>(expr)->m_arg;
+        }
+        return expr;
+    }
+
     bool formal_expects_raw_array_data(ASR::Function_t *fn, size_t i,
             ASR::expr_t *actual) {
         if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*actual)) {
@@ -7920,6 +7950,25 @@ public:
         return lr_emit_icmp(s, LR_CMP_EQ, I(1, ty_i1), I(1, ty_i1));
     }
 
+    uint32_t emit_optional_desc_base(uint32_t desc) {
+        uint32_t out = lr_emit_alloca(s, ty_ptr);
+        lr_emit_store(s, LR_NULL(ty_ptr), V(out, ty_ptr));
+        uint32_t has_desc = lr_emit_icmp(s, LR_CMP_NE,
+            V(desc, ty_ptr), LR_NULL(ty_ptr));
+        lr_error_t err;
+        uint32_t load_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(has_desc, ty_i1), load_bb, done_bb);
+
+        lr_session_set_block(s, load_bb, &err);
+        uint32_t base = desc_base_addr(desc);
+        lr_emit_store(s, V(base, ty_ptr), V(out, ty_ptr));
+        lr_emit_br(s, done_bb);
+
+        lr_session_set_block(s, done_bb, &err);
+        return lr_emit_load(s, ty_ptr, V(out, ty_ptr));
+    }
+
     uint32_t emit_optional_data_from_pointer_slot(uint32_t storage) {
         uint32_t out = lr_emit_alloca(s, ty_ptr);
         lr_emit_store(s, LR_NULL(ty_ptr), V(out, ty_ptr));
@@ -7937,6 +7986,60 @@ public:
 
         lr_session_set_block(s, done_bb, &err);
         return lr_emit_load(s, ty_ptr, V(out, ty_ptr));
+    }
+
+    ASR::Variable_t *optional_array_dummy_var_from_source(ASR::expr_t *expr) {
+        ASR::Variable_t *v = var_from_expr(expr);
+        if (!v || v->m_presence != ASR::presenceType::Optional ||
+                ASRUtils::is_allocatable(v->m_type) ||
+                ASRUtils::is_pointer(v->m_type)) {
+            return nullptr;
+        }
+        ASR::ttype_t *type =
+            ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+        return ASR::is_a<ASR::Array_t>(*type) ? v : nullptr;
+    }
+
+    ASR::Variable_t *optional_array_dummy_from_expr(ASR::expr_t *expr) {
+        return optional_array_dummy_var_from_source(
+            peel_array_physical_casts(expr));
+    }
+
+    ASR::expr_t *optional_array_dummy_source_from_expr(ASR::expr_t *expr) {
+        expr = peel_array_physical_casts(expr);
+        if (ASR::is_a<ASR::ArraySection_t>(*expr)) {
+            expr = peel_array_physical_casts(
+                ASR::down_cast<ASR::ArraySection_t>(expr)->m_v);
+        }
+        return optional_array_dummy_var_from_source(expr) ? expr : nullptr;
+    }
+
+    bool optional_array_dummy_for_raw_formal(ASR::Function_t *fn,
+            size_t formal_idx, ASR::expr_t *arg) {
+        if (!formal_is_optional(fn, formal_idx) ||
+                !optional_array_dummy_from_expr(arg)) {
+            return false;
+        }
+        return formal_expects_raw_array_data(fn, formal_idx, arg) ||
+            formal_expects_unbounded_array_data(fn, formal_idx, arg);
+    }
+
+    uint32_t emit_optional_array_dummy_raw_actual(ASR::expr_t *arg) {
+        ASR::expr_t *source = peel_array_physical_casts(arg);
+        bool was_target = is_target;
+        is_target = true;
+        visit_expr(*source);
+        is_target = was_target;
+        uint32_t storage = tmp;
+        ASR::ttype_t *type =
+            ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(source));
+        ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(type);
+        if (array_t->m_physical_type ==
+                ASR::array_physical_typeType::DescriptorArray) {
+            return emit_optional_desc_base(storage);
+        }
+        return storage;
     }
 
     uint32_t emit_optional_actual_pointer(ASR::Function_t *fn,
@@ -8974,7 +9077,6 @@ public:
                       ASR::array_physical_typeType::DescriptorArray));
         }
         if (target_is_subroutine_call_array_temp && assoc_src_has_descriptor) {
-            uint32_t src_desc = desc_ptr_of(x.m_value);
             bool was_target = is_target;
             is_target = true;
             visit_expr(*x.m_target);
@@ -8984,6 +9086,34 @@ public:
                 ASRUtils::expr_type(x.m_target));
             int ndims = ASR::is_a<ASR::Array_t>(*tt)
                 ? (int)ASR::down_cast<ASR::Array_t>(tt)->n_dims : 1;
+            ASR::expr_t *optional_source =
+                optional_array_dummy_source_from_expr(x.m_value);
+            if (optional_source && ASR::is_a<ASR::Array_t>(*tt)) {
+                ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(tt);
+                uint32_t optional_desc = desc_ptr_of(optional_source);
+                uint32_t is_null = lr_emit_icmp(s, LR_CMP_EQ,
+                    V(optional_desc, ty_ptr), LR_NULL(ty_ptr));
+                lr_error_t err;
+                uint32_t reset_bb = lr_session_block(s);
+                uint32_t copy_bb = lr_session_block(s);
+                uint32_t done_bb = lr_session_block(s);
+                lr_emit_condbr(s, V(is_null, ty_i1), reset_bb, copy_bb);
+
+                lr_session_set_block(s, reset_bb, &err);
+                reset_descriptor_array(dst, array_t);
+                lr_emit_br(s, done_bb);
+
+                lr_session_set_block(s, copy_bb, &err);
+                uint32_t src_desc = desc_ptr_of(x.m_value);
+                emit_memcpy_bytes(dst, src_desc,
+                    (uint64_t)(DESC_HEADER_BYTES + DESC_DIM_BYTES *
+                        (ndims > 0 ? ndims : 1)));
+                lr_emit_br(s, done_bb);
+
+                lr_session_set_block(s, done_bb, &err);
+                return;
+            }
+            uint32_t src_desc = desc_ptr_of(x.m_value);
             emit_memcpy_bytes(dst, src_desc,
                 (uint64_t)(DESC_HEADER_BYTES + DESC_DIM_BYTES *
                     (ndims > 0 ? ndims : 1)));
@@ -14717,6 +14847,10 @@ public:
                         class_writebacks.push_back(
                             {actual_ptr, data_ptr, data_bytes});
                     }
+                } else if (optional_array_dummy_for_raw_formal(formal_fn, i,
+                        arg)) {
+                    args.push_back(V(emit_optional_array_dummy_raw_actual(arg),
+                        ty_ptr));
                 } else if (formal_is_optional(fn, i) &&
                         (ASRUtils::is_allocatable(ASRUtils::expr_type(arg)) ||
                          ASRUtils::is_pointer(ASRUtils::expr_type(arg))) &&
@@ -15187,6 +15321,10 @@ public:
                         class_writebacks.push_back(
                             {actual_ptr, data_ptr, data_bytes});
                     }
+                } else if (optional_array_dummy_for_raw_formal(formal_fn, i,
+                        arg)) {
+                    args.push_back(V(emit_optional_array_dummy_raw_actual(arg),
+                        ty_ptr));
                 } else if (formal_is_optional(fn, i) &&
                         (ASRUtils::is_allocatable(ASRUtils::expr_type(arg)) ||
                          ASRUtils::is_pointer(ASRUtils::expr_type(arg))) &&
@@ -17618,6 +17756,41 @@ public:
         uint32_t elem_len;
     };
 
+    ArrayLinearView emit_optional_descriptor_array_linear_view(
+            ASR::expr_t *expr, ASR::Array_t *array_t,
+            ASR::expr_t *optional_source) {
+        uint32_t base_slot = lr_emit_alloca(s, ty_ptr);
+        uint32_t total_slot = lr_emit_alloca(s, ty_i64);
+        uint32_t elem_len_slot = lr_emit_alloca(s, ty_i64);
+        lr_emit_store(s, LR_NULL(ty_ptr), V(base_slot, ty_ptr));
+        lr_emit_store(s, I(0, ty_i64), V(total_slot, ty_ptr));
+        lr_emit_store(s, I(element_byte_size(array_t->m_type), ty_i64),
+            V(elem_len_slot, ty_ptr));
+
+        uint32_t source_desc = desc_ptr_of(optional_source);
+        uint32_t present = lr_emit_icmp(s, LR_CMP_NE,
+            V(source_desc, ty_ptr), LR_NULL(ty_ptr));
+        lr_error_t err;
+        uint32_t present_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(present, ty_i1), present_bb, done_bb);
+
+        lr_session_set_block(s, present_bb, &err);
+        uint32_t desc = desc_ptr_of(expr);
+        lr_emit_store(s, V(desc_base_addr(desc), ty_ptr),
+            V(base_slot, ty_ptr));
+        lr_emit_store(s, V(descriptor_array_element_count(
+            desc, (int)array_t->n_dims), ty_i64), V(total_slot, ty_ptr));
+        lr_emit_store(s, V(desc_load_i64(desc, 8), ty_i64),
+            V(elem_len_slot, ty_ptr));
+        lr_emit_br(s, done_bb);
+
+        lr_session_set_block(s, done_bb, &err);
+        return {lr_emit_load(s, ty_ptr, V(base_slot, ty_ptr)),
+            lr_emit_load(s, ty_i64, V(total_slot, ty_ptr)),
+            lr_emit_load(s, ty_i64, V(elem_len_slot, ty_ptr))};
+    }
+
     // If `expr` (past array-physical casts) is an ArrayReshape whose result
     // type has a deferred (null) dim length -- i.e. its shape is a runtime
     // expression -- return it so the caller takes the element count from the
@@ -17643,6 +17816,11 @@ public:
                                            ASR::Array_t *array_t) {
         if (array_t->m_physical_type ==
                 ASR::array_physical_typeType::DescriptorArray) {
+            if (ASR::expr_t *optional_source =
+                    optional_array_dummy_source_from_expr(expr)) {
+                return emit_optional_descriptor_array_linear_view(expr,
+                    array_t, optional_source);
+            }
             uint32_t desc = desc_ptr_of(expr);
             return {desc_base_addr(desc),
                 descriptor_array_element_count(desc, (int)array_t->n_dims),
@@ -19738,32 +19916,12 @@ public:
     // allocate path this is always the case; ArraySection results may
     // not be contiguous if step != 1.
 
-    void visit_ArrayIsContiguous(const ASR::ArrayIsContiguous_t &x) {
-        LIRIC_PASSTHROUGH(x)
-        ASR::ttype_t *at = ASRUtils::expr_type(x.m_array);
-        at = ASRUtils::type_get_past_allocatable_pointer(at);
-        if (ASR::is_a<ASR::Array_t>(*at)) {
-            ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(at);
-            if (array_t->m_physical_type !=
-                    ASR::array_physical_typeType::DescriptorArray) {
-                // FixedSizeArray / PointerArray (incl. fresh array
-                // constructors and locally-allocated fixed arrays) are
-                // always contiguous by construction; no descriptor to
-                // probe for stride.
-                tmp = lr_emit_add(s, ty_i1, I(1, ty_i1), I(0, ty_i1));
-                return;
-            }
-        }
+    uint32_t emit_descriptor_array_is_contiguous(uint32_t desc, int n_dims) {
         // An array is contiguous iff every dim's stride equals the packed
         // stride: stride[d] == elem_len * product(extent[0..d-1]).  Checking
         // only dim 0 wrongly reports a strided higher-dim section (e.g.
         // b(1:2,1:2) of a 5x3 array) as contiguous.
-        uint32_t desc = desc_ptr_of(x.m_array);
         uint32_t elem_len = desc_load_i64(desc, 8);
-        int n_dims = 1;
-        if (ASR::is_a<ASR::Array_t>(*at)) {
-            n_dims = (int)ASR::down_cast<ASR::Array_t>(at)->n_dims;
-        }
         uint32_t result = lr_emit_add(s, ty_i1, I(1, ty_i1), I(0, ty_i1));
         uint32_t expected = elem_len;
         for (int d = 0; d < n_dims; d++) {
@@ -19778,7 +19936,53 @@ public:
             expected = lr_emit_mul(s, ty_i64,
                 V(expected, ty_i64), V(extent_d, ty_i64));
         }
-        tmp = result;
+        return result;
+    }
+
+    void visit_ArrayIsContiguous(const ASR::ArrayIsContiguous_t &x) {
+        LIRIC_PASSTHROUGH(x)
+        ASR::ttype_t *at = ASRUtils::expr_type(x.m_array);
+        at = ASRUtils::type_get_past_allocatable_pointer(at);
+        int n_dims = 1;
+        if (ASR::is_a<ASR::Array_t>(*at)) {
+            ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(at);
+            n_dims = (int)array_t->n_dims;
+            if (array_t->m_physical_type !=
+                    ASR::array_physical_typeType::DescriptorArray) {
+                // FixedSizeArray / PointerArray (incl. fresh array
+                // constructors and locally-allocated fixed arrays) are
+                // always contiguous by construction; no descriptor to
+                // probe for stride.
+                tmp = lr_emit_add(s, ty_i1, I(1, ty_i1), I(0, ty_i1));
+                return;
+            }
+        }
+        if (ASR::expr_t *optional_source =
+                optional_array_dummy_source_from_expr(x.m_array)) {
+            uint32_t result_slot = lr_emit_alloca(s, ty_i1);
+            lr_emit_store(s, I(1, ty_i1), V(result_slot, ty_ptr));
+            uint32_t optional_desc = desc_ptr_of(optional_source);
+            uint32_t present = lr_emit_icmp(s, LR_CMP_NE,
+                V(optional_desc, ty_ptr), LR_NULL(ty_ptr));
+            lr_error_t err;
+            uint32_t present_bb = lr_session_block(s);
+            uint32_t done_bb = lr_session_block(s);
+            lr_emit_condbr(s, V(present, ty_i1), present_bb, done_bb);
+
+            lr_session_set_block(s, present_bb, &err);
+            uint32_t desc = desc_ptr_of(x.m_array);
+            uint32_t is_contiguous =
+                emit_descriptor_array_is_contiguous(desc, n_dims);
+            lr_emit_store(s, V(is_contiguous, ty_i1),
+                V(result_slot, ty_ptr));
+            lr_emit_br(s, done_bb);
+
+            lr_session_set_block(s, done_bb, &err);
+            tmp = lr_emit_load(s, ty_i1, V(result_slot, ty_ptr));
+            return;
+        }
+        uint32_t desc = desc_ptr_of(x.m_array);
+        tmp = emit_descriptor_array_is_contiguous(desc, n_dims);
     }
 
     // --- FileRead ---
