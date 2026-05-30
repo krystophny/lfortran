@@ -9441,6 +9441,10 @@ LFORTRAN_API void _lfortran_read_array_complex_float(struct _lfortran_complex_32
         }
     } else {
         for (int i = 0; i < array_size;) {
+            if (list_directed_check_null_repeat(unit_num)) {
+                i++;
+                continue;
+            }
             char buffer[200];
             int rc = read_complex_expr(filep, buffer, sizeof(buffer));
             if (rc == -1) {
@@ -9454,6 +9458,21 @@ LFORTRAN_API void _lfortran_read_array_complex_float(struct _lfortran_complex_32
             }
             convert_fortran_d_exponent(buffer);
             struct _lfortran_complex_32 value;
+            int null_count = list_directed_parse_null_repeat(buffer);
+            if (null_count > 0) {
+                int remaining_slots = array_size - i;
+                int consume = null_count < remaining_slots
+                    ? null_count : remaining_slots;
+                i += consume;
+                if (null_count > consume) {
+                    struct UNIT_FILE *uf_ = find_unit(unit_num);
+                    if (uf_) {
+                        uf_->lf_list_dir_null_remaining =
+                            null_count - consume;
+                    }
+                }
+                continue;
+            }
             int repeat_count = 1;
             char *value_start = buffer;
             char *star = strchr(buffer, '*');
@@ -9596,6 +9615,10 @@ LFORTRAN_API void _lfortran_read_array_complex_double(struct _lfortran_complex_6
         }
     } else {
         for (int i = 0; i < array_size;) {
+            if (list_directed_check_null_repeat(unit_num)) {
+                i++;
+                continue;
+            }
             char buffer[200];
             int rc = read_complex_expr(filep, buffer, sizeof(buffer));
             if (rc == -1) {
@@ -9609,6 +9632,21 @@ LFORTRAN_API void _lfortran_read_array_complex_double(struct _lfortran_complex_6
             }
             convert_fortran_d_exponent(buffer);
             struct _lfortran_complex_64 value;
+            int null_count = list_directed_parse_null_repeat(buffer);
+            if (null_count > 0) {
+                int remaining_slots = array_size - i;
+                int consume = null_count < remaining_slots
+                    ? null_count : remaining_slots;
+                i += consume;
+                if (null_count > consume) {
+                    struct UNIT_FILE *uf_ = find_unit(unit_num);
+                    if (uf_) {
+                        uf_->lf_list_dir_null_remaining =
+                            null_count - consume;
+                    }
+                }
+                continue;
+            }
             int repeat_count = 1;
             char *value_start = buffer;
             char *star = strchr(buffer, '*');
