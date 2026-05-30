@@ -10631,6 +10631,17 @@ public:
                 if (ASR::is_a<ASR::Array_t>(*member_core)) {
                     emit_array_value_to_storage(member->m_value,
                         ASR::down_cast<ASR::Array_t>(member_core), field_ptr);
+                } else if (ASR::is_a<ASR::String_t>(*member_core)) {
+                    // A char member with a constant default
+                    // (character(N) :: c = "x"): set up a DECLARED-LENGTH
+                    // str_desc buffer first, then copy the default into it.
+                    // Storing the default's {ptr,len} directly would set the
+                    // capacity to the default's length (e.g. 0 for ""), so a
+                    // later `c = "hello"` would truncate to 0 chars.
+                    initialize_heap_string_descriptor(field_ptr,
+                        ASR::down_cast<ASR::String_t>(member_core));
+                    visit_expr(*member->m_value);
+                    emit_string_assignment_to_desc_slot(field_ptr, tmp);
                 } else {
                     visit_expr(*member->m_value);
                     lr_type_t *value_type =
