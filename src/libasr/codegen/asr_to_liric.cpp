@@ -163,6 +163,14 @@ public:
     uint32_t tmp;               // current expression result vreg
     bool is_target;             // true when visiting assignment LHS
     uint32_t proc_return;       // return block for current function
+    // OPEN-time connection modes for the formatted write currently being
+    // emitted.  Active only inside an external-unit FileWrite; print and
+    // internal writes use the default mode (0).  Mirrors asr_to_llvm's
+    // current_decimal_mode / current_sign_mode / current_round_mode.
+    bool format_modes_active = false;
+    uint32_t cur_decimal_mode = 0;
+    uint32_t cur_sign_mode = 0;
+    uint32_t cur_round_mode = 0;
     Allocator &al;
     CompilerOptions &co;
     diag::Diagnostics &diag;
@@ -14582,6 +14590,7 @@ public:
     // _lcompilers_string_format_fortran, then print via _lfortran_printf.
 
     void visit_Print(const ASR::Print_t &x) {
+        format_modes_active = false;
         if (!x.m_text) return;
 
         ASR::expr_t *text = x.m_text;
@@ -16132,6 +16141,26 @@ public:
         uint32_t allocator;
     };
 
+    // Query an OPEN-time connection mode (decimal / sign / round) for a unit.
+    uint32_t emit_unit_mode_query(const char *fn, uint32_t unit) {
+        lr_type_t *params[] = {ty_i32};
+        declare_func(fn, ty_i32, params, 1, false);
+        lr_operand_desc_t a[] = {V(unit, ty_i32)};
+        return emit_call(fn, ty_i32, a, 1);
+    }
+
+    // The decimal/sign/round operand for a format call: the live connection
+    // mode when emitting an external formatted write, else the default (0).
+    lr_operand_desc_t fmt_decimal_op() {
+        return format_modes_active ? V(cur_decimal_mode, ty_i32) : I(0, ty_i32);
+    }
+    lr_operand_desc_t fmt_sign_op() {
+        return format_modes_active ? V(cur_sign_mode, ty_i32) : I(0, ty_i32);
+    }
+    lr_operand_desc_t fmt_round_op() {
+        return format_modes_active ? V(cur_round_mode, ty_i32) : I(0, ty_i32);
+    }
+
     FormattedString emit_string_format(const ASR::StringFormat_t &sf) {
         std::string serial;
         for (size_t i = 0; i < sf.n_args; i++) {
@@ -16284,10 +16313,10 @@ public:
         call_args.push_back(LR_GLOBAL(serial_sym, ty_ptr));
         call_args.push_back(V(out_len_ptr, ty_ptr));
         call_args.push_back(I((int64_t)array_sizes.size(), ty_i32));
-        call_args.push_back(I(0, ty_i32));
-        call_args.push_back(I(0, ty_i32));
-        call_args.push_back(I(0, ty_i32));
-        call_args.push_back(I(0, ty_i32));
+        call_args.push_back(I(0, ty_i32));     // string_lengths_cnt
+        call_args.push_back(fmt_decimal_op());
+        call_args.push_back(fmt_sign_op());
+        call_args.push_back(fmt_round_op());
         for (uint32_t array_size : array_sizes) {
             call_args.push_back(V(array_size, ty_i64));
         }
@@ -16349,9 +16378,9 @@ public:
         ops[5]  = V(out_len_ptr, ty_ptr);
         ops[6]  = I(0, ty_i32);
         ops[7]  = I(0, ty_i32);
-        ops[8]  = I(0, ty_i32);
-        ops[9]  = I(0, ty_i32);
-        ops[10] = I(0, ty_i32);
+        ops[8]  = fmt_decimal_op();
+        ops[9]  = fmt_sign_op();
+        ops[10] = fmt_round_op();
         ops[11] = V(slot, ty_ptr);
         d.op = LR_OP_CALL;
         d.type = ty_ptr;
@@ -16396,9 +16425,9 @@ public:
         ops[5]  = V(out_len_ptr, ty_ptr);
         ops[6]  = I(0, ty_i32);
         ops[7]  = I(0, ty_i32);
-        ops[8]  = I(0, ty_i32);
-        ops[9]  = I(0, ty_i32);
-        ops[10] = I(0, ty_i32);
+        ops[8]  = fmt_decimal_op();
+        ops[9]  = fmt_sign_op();
+        ops[10] = fmt_round_op();
         ops[11] = V(value_ptr, ty_ptr);
         d.op = LR_OP_CALL;
         d.type = ty_ptr;
@@ -17532,6 +17561,7 @@ public:
     }
 
     void visit_FileWrite(const ASR::FileWrite_t &x) {
+        format_modes_active = false;
         if (x.m_nml && namelist_external_unit(x.m_unit) &&
                 namelist_supported(x.m_nml)) {
             uint32_t unit;
@@ -17617,6 +17647,15 @@ public:
                     value_type_for_expr(x.m_unit), ty_i32);
                 external_integer_write = true;
                 scratch_io_clear();
+                // Honour the unit's OPEN-time decimal/sign/round modes in the
+                // formatted output, matching the LLVM backend.
+                cur_decimal_mode = emit_unit_mode_query(
+                    "_lfortran_get_decimal_mode", external_unit);
+                cur_sign_mode = emit_unit_mode_query(
+                    "_lfortran_get_sign_mode", external_unit);
+                cur_round_mode = emit_unit_mode_query(
+                    "_lfortran_get_round_mode", external_unit);
+                format_modes_active = true;
             } else {
                 throw CodeGenError(
                     "liric: write() unit must be integer or string");
