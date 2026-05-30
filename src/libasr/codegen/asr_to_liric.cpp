@@ -10059,7 +10059,24 @@ public:
                 continue;
             }
             core = ASRUtils::type_get_past_array(core);
-            if (ASR::is_a<ASR::StructType_t>(*core)) {
+            if (ASRUtils::is_allocatable(member_type) ||
+                    ASRUtils::is_pointer(member_type)) {
+                // A pointer/allocatable scalar member is a pointer-sized slot
+                // (deferred string = 16-byte {ptr,len} descriptor, unlimited
+                // polymorphic = 16-byte poly_desc), NOT its element width.
+                // Without this a struct whose only member is e.g.
+                // `integer, allocatable :: xx` was sized 4 instead of 8, so a
+                // descriptor array of it strided by 4 and read misaligned
+                // pointers.
+                if (ASR::is_a<ASR::String_t>(*core)) {
+                    nbytes += 16;
+                } else if (ASRUtils::is_unlimited_polymorphic_type(
+                        member_type)) {
+                    nbytes += 16;
+                } else {
+                    nbytes += 8;
+                }
+            } else if (ASR::is_a<ASR::StructType_t>(*core)) {
                 nbytes += struct_type_storage_size_from_signature(core);
             } else {
                 nbytes += storage_size_or_default(member_type,
