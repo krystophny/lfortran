@@ -12074,9 +12074,14 @@ public:
             }
             ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(at);
             if (array_t->m_physical_type !=
-                    ASR::array_physical_typeType::DescriptorArray) {
+                    ASR::array_physical_typeType::DescriptorArray &&
+                    array_t->m_physical_type !=
+                    ASR::array_physical_typeType::AssumedRankArray) {
                 return;
             }
+            // An assumed-rank dummy (dimension(..)) is backed by a CFI
+            // descriptor just like a DescriptorArray, so deallocate frees its
+            // base and resets the descriptor the same way.
             uint32_t desc_ptr = desc_ptr_of(v);
             deallocate_descriptor_array(desc_ptr, array_t);
             return;
