@@ -19493,18 +19493,39 @@ public:
             return true;
         }
         if (ASR::is_a<ASR::String_t>(*type)) {
-            uint32_t desc_ptr = emit_target_ptr(target);
-            ASR::String_t *st = ASR::down_cast<ASR::String_t>(type);
-            int64_t len_const = -1;
+            uint32_t desc_ptr;
             uint32_t len = 0;
-            if (st->m_len && ASRUtils::extract_value(st->m_len, len_const)) {
-                len = emit_i64_const(len_const);
-            } else {
-                uint32_t desc = lr_emit_load(s, ty_str_desc,
-                    V(desc_ptr, ty_ptr));
+            if (ASR::is_a<ASR::StringSection_t>(*target) ||
+                    ASR::is_a<ASR::StringItem_t>(*target)) {
+                // A string section/item yields a str_desc VALUE (a view whose
+                // data pointer aliases the source), not an address.  Store it
+                // in a temp slot so _lfortran_read_char receives `char** p`;
+                // the read then lands in the original variable.
+                bool wt = is_target;
+                is_target = true;
+                visit_expr(*target);
+                is_target = wt;
+                uint32_t sd = tmp;
                 uint32_t fld1 = 1;
                 len = lr_emit_extractvalue(s, ty_i64,
-                    V(desc, ty_str_desc), &fld1, 1);
+                    V(sd, ty_str_desc), &fld1, 1);
+                uint32_t slot = emit_temp_slot(ty_str_desc);
+                lr_emit_store(s, V(sd, ty_str_desc), V(slot, ty_ptr));
+                desc_ptr = slot;
+            } else {
+                desc_ptr = emit_target_ptr(target);
+                ASR::String_t *st = ASR::down_cast<ASR::String_t>(type);
+                int64_t len_const = -1;
+                if (st->m_len &&
+                        ASRUtils::extract_value(st->m_len, len_const)) {
+                    len = emit_i64_const(len_const);
+                } else {
+                    uint32_t desc = lr_emit_load(s, ty_str_desc,
+                        V(desc_ptr, ty_ptr));
+                    uint32_t fld1 = 1;
+                    len = lr_emit_extractvalue(s, ty_i64,
+                        V(desc, ty_str_desc), &fld1, 1);
+                }
             }
             lr_type_t *p[] = {ty_ptr, ty_i64, ty_i32, ty_ptr};
             declare_func("_lfortran_read_char", ty_void, p, 4, false);
