@@ -7120,19 +7120,26 @@ public:
     // its slot stays transparent, so it must not be treated as an indirection.
     bool cptr_anchor_is_save(ASR::expr_t *cptr) {
         ASR::expr_t *e = cptr;
+        bool peeled = false;
         if (ASR::is_a<ASR::PointerToCPtr_t>(*e)) {
             e = ASR::down_cast<ASR::PointerToCPtr_t>(e)->m_arg;
+            peeled = true;
         }
         if (ASR::is_a<ASR::GetPointer_t>(*e)) {
             e = ASR::down_cast<ASR::GetPointer_t>(e)->m_arg;
+            peeled = true;
         }
-        // Common-block EQUIVALENCE anchors the pointer at a common-block
-        // struct member; the frontend keeps that var transparent.
-        if (ASR::is_a<ASR::StructInstanceMember_t>(*e)) return true;
+        // Common-block EQUIVALENCE anchors the pointer at the ADDRESS of a
+        // struct member (c_loc(member) = PointerToCPtr(GetPointer(member))) --
+        // only that address-of form is an anchor.  A bare c_ptr-valued
+        // component (`c_f_pointer(d%i_ptr, p)`) is an ordinary c_ptr value, so
+        // `p` must still be registered as an indirect scalar pointer (else
+        // reads of `p` return the stored address instead of dereferencing).
+        if (ASR::is_a<ASR::StructInstanceMember_t>(*e)) return peeled;
         if (ASR::is_a<ASR::ArrayItem_t>(*e)) {
             e = ASR::down_cast<ASR::ArrayItem_t>(e)->m_v;
         }
-        if (ASR::is_a<ASR::StructInstanceMember_t>(*e)) return true;
+        if (ASR::is_a<ASR::StructInstanceMember_t>(*e)) return peeled;
         if (!ASR::is_a<ASR::Var_t>(*e)) return false;
         ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
             ASR::down_cast<ASR::Var_t>(e)->m_v);
