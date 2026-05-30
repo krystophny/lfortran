@@ -8120,6 +8120,34 @@ public:
             tmp = desc_base_addr(desc_ptr_of(x.m_arg));
             return;
         }
+        // AssumedRankArray -> a SCALAR intrinsic result type: the rank(0) arm
+        // of a `select rank` narrows the assumed-rank entity to a scalar whose
+        // storage sits at the descriptor base (offset 0).  Reading it as a
+        // value loads the scalar; as a target it yields the address.  Without
+        // this the descriptor pointer itself was used as the scalar value.
+        // Polymorphic (class/class(*)) and derived/string results keep the
+        // descriptor so a nested select type can still read the tag.
+        if (x.m_old == ASR::array_physical_typeType::AssumedRankArray) {
+            ASR::ttype_t *rt =
+                ASRUtils::type_get_past_allocatable_pointer(x.m_type);
+            // Polymorphic results fall through so the descriptor pointer
+            // survives for a nested select type (it reads the dynamic tag).
+            bool concrete_scalar = !ASRUtils::is_array(rt) &&
+                !ASRUtils::is_class_type(rt) &&
+                !ASRUtils::is_unlimited_polymorphic_type(rt);
+            if (concrete_scalar) {
+                uint32_t base = desc_base_addr(desc_ptr_of(x.m_arg));
+                // Struct/string scalars are storage references (the consumer
+                // copies from the address); intrinsic scalars load by value.
+                if (is_target || ASR::is_a<ASR::StructType_t>(*rt) ||
+                        ASR::is_a<ASR::String_t>(*rt)) {
+                    tmp = base;
+                } else {
+                    tmp = lr_emit_load(s, get_type(rt), V(base, ty_ptr));
+                }
+                return;
+            }
+        }
         LIRIC_PASSTHROUGH(x)
         if ((x.m_old == ASR::array_physical_typeType::PointerArray ||
                 x.m_old == ASR::array_physical_typeType::FixedSizeArray) &&
