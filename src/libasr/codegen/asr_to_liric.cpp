@@ -17516,6 +17516,14 @@ public:
         item.data = addr;
         item.shape_null = true;
         item.shape = 0;
+        if (ASR::is_a<ASR::Logical_t>(*elem) && !is_arr) {
+            // liric represents a logical as i1 in the low byte of a wider
+            // slot; the high bytes are uninitialised.  Tell the runtime to
+            // read/write exactly that one byte (LOGICAL1) so a .false. with
+            // garbage high bytes is not formatted as .true.
+            item.code = 6;
+            item.elem_len = 1;
+        }
         if (ASR::is_a<ASR::String_t>(*elem) && is_arr) {
             // Character array: liric stores it as an array of 16-byte
             // {ptr,len} str_desc elements, but the runtime namelist code
