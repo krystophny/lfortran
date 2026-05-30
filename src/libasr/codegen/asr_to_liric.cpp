@@ -1527,6 +1527,17 @@ public:
         return ASR::down_cast<ASR::Struct_t>(sym);
     }
 
+    // The element Struct of an array expression whose element type is a
+    // StructType, recovered from the source variable's type declaration (used
+    // for deep-copying struct arrays with allocatable/pointer components).
+    ASR::Struct_t *reshape_element_struct(ASR::expr_t *arr_expr,
+            ASR::ttype_t *elem_t) {
+        if (!ASR::is_a<ASR::StructType_t>(*elem_t)) return nullptr;
+        ASR::Variable_t *av = var_from_expr(arr_expr);
+        if (!av) return nullptr;
+        return struct_symbol_from_type_decl(av->m_type_declaration);
+    }
+
     bool is_allocatable_struct_type(ASR::ttype_t *type) {
         if (!ASRUtils::is_allocatable(type)) return false;
         if (ASRUtils::is_unlimited_polymorphic_type(type)) return false;
@@ -21634,7 +21645,45 @@ found_offset:
                 V(src_total, ty_i64), V(dst_total, ty_i64));
             uint32_t copy_bytes = lr_emit_mul(s, ty_i64,
                 V(copy_n, ty_i64), I(elem_sz, ty_i64));
-            emit_memcpy_dynamic(dst_ptr, src_base, copy_bytes);
+            // A struct element with allocatable/pointer components needs a deep
+            // copy: a flat memcpy would copy the component descriptors, leaving
+            // the reshaped result sharing the source's component buffers (so a
+            // later write to the source would corrupt the result).  Per-element
+            // emit_struct_storage_assignment clones the components.
+            ASR::Struct_t *elem_st = reshape_element_struct(x.m_array, elem_t);
+            if (elem_st && struct_storage_needs_initialization(elem_st)) {
+                lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
+                declare_func("memset", ty_ptr, memset_params, 3, false);
+                lr_operand_desc_t memset_args[] = {
+                    V(dst_ptr, ty_ptr), I(0, ty_i32), V(bytes, ty_i64)
+                };
+                emit_call("memset", ty_ptr, memset_args, 3);
+                lr_error_t derr;
+                uint32_t di = lr_emit_alloca(s, ty_i64);
+                lr_emit_store(s, I(0, ty_i64), V(di, ty_ptr));
+                uint32_t dh = lr_session_block(s);
+                uint32_t db = lr_session_block(s);
+                uint32_t dd = lr_session_block(s);
+                lr_emit_br(s, dh);
+                lr_session_set_block(s, dh, &derr);
+                uint32_t dcur = lr_emit_load(s, ty_i64, V(di, ty_ptr));
+                uint32_t dmore = lr_emit_icmp(s, LR_CMP_SLT,
+                    V(dcur, ty_i64), V(copy_n, ty_i64));
+                lr_emit_condbr(s, V(dmore, ty_i1), db, dd);
+                lr_session_set_block(s, db, &derr);
+                uint32_t delem = emit_linear_elem_ptr(dst_ptr, dcur,
+                    emit_i64_const(elem_sz));
+                uint32_t selem = emit_linear_elem_ptr(src_base, dcur,
+                    emit_i64_const(elem_sz));
+                emit_struct_storage_assignment(delem, selem, elem_st);
+                uint32_t dnext = lr_emit_add(s, ty_i64,
+                    V(dcur, ty_i64), I(1, ty_i64));
+                lr_emit_store(s, V(dnext, ty_i64), V(di, ty_ptr));
+                lr_emit_br(s, dh);
+                lr_session_set_block(s, dd, &derr);
+            } else {
+                emit_memcpy_dynamic(dst_ptr, src_base, copy_bytes);
+            }
 
             desc_store_base(desc, dst_ptr);
             tmp = desc;
