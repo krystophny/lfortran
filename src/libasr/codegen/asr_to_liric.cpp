@@ -13971,6 +13971,18 @@ public:
                             arg_ptr = lr_emit_load(s, ty_ptr,
                                 V(arg_ptr, ty_ptr));
                         }
+                    } else if (formal && ASRUtils::is_pointer(formal->m_type) &&
+                            !ASRUtils::is_pointer(ASRUtils::expr_type(arg)) &&
+                            !ASRUtils::is_allocatable(
+                                ASRUtils::expr_type(arg))) {
+                        // A target (non-pointer) actual passed to a POINTER
+                        // dummy: the callee reads the dummy as a pointer (load
+                        // slot -> pointee), so pass a slot holding the actual's
+                        // address (pointer-to-pointer), not the actual itself
+                        // (which the callee would deref as a pointer -> crash).
+                        uint32_t pslot = emit_temp_slot(ty_ptr);
+                        lr_emit_store(s, V(arg_ptr, ty_ptr), V(pslot, ty_ptr));
+                        arg_ptr = pslot;
                     }
                     if (formal_expects_raw_array_data(fn, i, arg)) {
                         arg_ptr = desc_base_addr(arg_ptr);
@@ -14378,6 +14390,18 @@ public:
                             arg_ptr = lr_emit_load(s, ty_ptr,
                                 V(arg_ptr, ty_ptr));
                         }
+                    } else if (formal && ASRUtils::is_pointer(formal->m_type) &&
+                            !ASRUtils::is_pointer(ASRUtils::expr_type(arg)) &&
+                            !ASRUtils::is_allocatable(
+                                ASRUtils::expr_type(arg))) {
+                        // A target (non-pointer) actual passed to a POINTER
+                        // dummy: the callee reads the dummy as a pointer (load
+                        // slot -> pointee), so pass a slot holding the actual's
+                        // address (pointer-to-pointer), not the actual itself
+                        // (which the callee would deref as a pointer -> crash).
+                        uint32_t pslot = emit_temp_slot(ty_ptr);
+                        lr_emit_store(s, V(arg_ptr, ty_ptr), V(pslot, ty_ptr));
+                        arg_ptr = pslot;
                     }
                     if (formal_expects_raw_array_data(fn, i, arg)) {
                         arg_ptr = desc_base_addr(arg_ptr);
