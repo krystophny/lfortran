@@ -7702,6 +7702,7 @@ public:
         desc_store_base(desc, data_ptr);
         desc_store_i64(desc, 8, emit_i64_const(elem_bytes));
         desc_store_rank(desc, 0);
+        store_i8_at(desc, 21, cfi_type_code(core));
         desc_store_i64(desc, 24, emit_i64_const(tag));
         desc_store_i64(desc, DESC_HEADER_BYTES + 0, emit_i64_const(1));
         desc_store_i64(desc, DESC_HEADER_BYTES + 8, emit_i64_const(1));
@@ -12851,8 +12852,14 @@ public:
             actual_array->m_physical_type ==
                 ASR::array_physical_typeType::AssumedRankArray;
 
+        uint32_t dyn_type_byte = UINT32_MAX;
         if (actual_is_descriptor) {
             uint32_t desc = desc_ptr_of(actual);
+            if (ASRUtils::is_unlimited_polymorphic_type(actual_type)) {
+                lr_operand_desc_t toff[1] = {I(21, ty_i64)};
+                uint32_t tp = lr_emit_gep(s, ty_i8, V(desc, ty_ptr), toff, 1);
+                dyn_type_byte = lr_emit_load(s, ty_i8, V(tp, ty_ptr));
+            }
             uint32_t cfi_base;
             uint32_t cfi_elem_len;
             if (is_char_array) {
@@ -12944,7 +12951,13 @@ public:
 
         store_i32_at(cfi, 16, 20260322);
         store_i8_at(cfi, 20, n_dims);
-        store_i8_at(cfi, 21, cfi_type_code(actual_type));
+        if (dyn_type_byte != UINT32_MAX) {
+            lr_operand_desc_t toff[1] = {I(21, ty_i64)};
+            uint32_t tp = lr_emit_gep(s, ty_i8, V(cfi, ty_ptr), toff, 1);
+            lr_emit_store(s, V(dyn_type_byte, ty_i8), V(tp, ty_ptr));
+        } else {
+            store_i8_at(cfi, 21, cfi_type_code(actual_type));
+        }
         store_i8_at(cfi, 22, cfi_attribute_code(formal->m_type));
         store_i8_at(cfi, 23, 0);
         args.push_back(V(cfi, ty_ptr));
