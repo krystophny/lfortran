@@ -13833,17 +13833,24 @@ public:
                         continue;
                     }
                     if (!formal->m_value_attr &&
+                            formal->m_intent != ASR::intentType::Out &&
+                            formal->m_intent != ASR::intentType::ReturnVar &&
+                            !function_is_interface(fn) &&
                             is_bindc_char_scalar_variable(formal) &&
                             !expr_is_cchar_string_cast(actual) &&
                             ASR::is_a<ASR::String_t>(
                                 *ASRUtils::type_get_past_array(
                                     ASRUtils::type_get_past_allocatable_pointer(
                                         ASRUtils::expr_type(actual))))) {
-                        // A bind(c) character(1) dummy without VALUE is a C
-                        // char*.  Pass the actual string's data pointer
-                        // (str_desc field 0), not the address of its
-                        // {ptr,len} descriptor, which the callee would
-                        // otherwise read pointer bytes from as the character.
+                        // A genuine bind(c) character dummy without VALUE is a
+                        // C char*: pass the actual string's data pointer
+                        // (str_desc field 0), not its {ptr,len} descriptor
+                        // address.  Restricted to DEFINED bind(c) procedures
+                        // (deftype Implementation): an implicit-interface
+                        // external is routed through this same bindc path but
+                        // its char dummies are read as descriptors, and its
+                        // function result is a synthesized out-arg, so passing
+                        // a bare data pointer there corrupts both.
                         cargs.push_back(V(emit_string_data_len(actual).first,
                             ty_ptr));
                         params.push_back(ty_ptr);
