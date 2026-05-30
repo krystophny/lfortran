@@ -1527,6 +1527,19 @@ public:
         return ASR::down_cast<ASR::Struct_t>(sym);
     }
 
+    // `arr%comp` where arr is an array of structs: a strided whole-array member
+    // view.  visit_StructInstanceMember builds a proper (strided) descriptor
+    // for it, so an enclosing FixedSize->Descriptor cast must pass that
+    // descriptor through rather than rebuild a contiguous one.
+    bool expr_is_array_struct_member(ASR::expr_t *expr) {
+        if (!ASR::is_a<ASR::StructInstanceMember_t>(*expr)) return false;
+        ASR::StructInstanceMember_t *m =
+            ASR::down_cast<ASR::StructInstanceMember_t>(expr);
+        ASR::ttype_t *ot = ASRUtils::type_get_past_allocatable_pointer(
+            ASRUtils::expr_type(m->m_v));
+        return ASR::is_a<ASR::Array_t>(*ot);
+    }
+
     // The element Struct of an array expression whose element type is a
     // StructType, recovered from the source variable's type declaration (used
     // for deep-copying struct arrays with allocatable/pointer components).
@@ -8369,6 +8382,13 @@ public:
         if ((x.m_old == ASR::array_physical_typeType::PointerArray ||
                 x.m_old == ASR::array_physical_typeType::FixedSizeArray) &&
                 x.m_new == ASR::array_physical_typeType::DescriptorArray) {
+            // `arr%comp` (a strided array-of-structs member) already evaluates
+            // to a proper strided descriptor; rebuilding here with a contiguous
+            // element stride would corrupt it.  Pass the descriptor through.
+            if (expr_is_array_struct_member(x.m_arg)) {
+                visit_expr(*x.m_arg);
+                return;
+            }
             ASR::ttype_t *type =
                 ASRUtils::type_get_past_allocatable_pointer(x.m_type);
             ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(type);
@@ -21265,28 +21285,62 @@ found_offset:
                 ASR::Array_t *owner_arr =
                     ASR::down_cast<ASR::Array_t>(owner_t);
                 int nd = (int)owner_arr->n_dims;
-                uint32_t owner_desc = v_ptr;
-                uint32_t owner_base = desc_base_addr(owner_desc);
-                lr_operand_desc_t moff[1] = {I((int64_t)byte_offset, ty_i64)};
-                uint32_t mbase = lr_emit_gep(s, ty_i8,
-                    V(owner_base, ty_ptr), moff, 1);
+                bool owner_is_desc = owner_arr->m_physical_type ==
+                    ASR::array_physical_typeType::DescriptorArray;
                 ASR::ttype_t *melem =
                     ASRUtils::type_get_past_array(x.m_type);
                 uint32_t ndesc = emit_desc_alloca(nd);
-                desc_store_base(ndesc, mbase);
                 desc_store_i64(ndesc, 8,
                     emit_i64_const(element_byte_size(melem)));
                 desc_store_rank(ndesc, nd);
                 desc_store_i64(ndesc, 24, emit_i64_const(0));
-                for (int d = 0; d < nd; d++) {
-                    uint32_t lb = desc_dim_lbound(owner_desc, d);
-                    uint32_t ext = desc_dim_extent(owner_desc, d);
-                    uint32_t ostride = desc_load_i64(owner_desc,
-                        DESC_HEADER_BYTES + DESC_DIM_BYTES * d + 16);
-                    int64_t bo = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
-                    desc_store_i64(ndesc, bo + 0, lb);
-                    desc_store_i64(ndesc, bo + 8, ext);
-                    desc_store_i64(ndesc, bo + 16, ostride);
+                if (owner_is_desc) {
+                    uint32_t owner_base = desc_base_addr(v_ptr);
+                    lr_operand_desc_t moff[1] = {
+                        I((int64_t)byte_offset, ty_i64)};
+                    uint32_t mbase = lr_emit_gep(s, ty_i8,
+                        V(owner_base, ty_ptr), moff, 1);
+                    desc_store_base(ndesc, mbase);
+                    for (int d = 0; d < nd; d++) {
+                        uint32_t lb = desc_dim_lbound(v_ptr, d);
+                        uint32_t ext = desc_dim_extent(v_ptr, d);
+                        uint32_t ostride = desc_load_i64(v_ptr,
+                            DESC_HEADER_BYTES + DESC_DIM_BYTES * d + 16);
+                        int64_t bo = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
+                        desc_store_i64(ndesc, bo + 0, lb);
+                        desc_store_i64(ndesc, bo + 8, ext);
+                        desc_store_i64(ndesc, bo + 16, ostride);
+                    }
+                } else {
+                    // FixedSizeArray / PointerArray owner: v_ptr is the raw
+                    // element storage (a PointerArray slot holds the data
+                    // pointer), NOT a CFI descriptor.  Stride consecutive
+                    // components by the owner's element (struct) size and take
+                    // extents/lbounds from the static array dims.
+                    uint32_t owner_base = owner_arr->m_physical_type ==
+                            ASR::array_physical_typeType::PointerArray
+                        ? lr_emit_load(s, ty_ptr, V(v_ptr, ty_ptr))
+                        : v_ptr;
+                    lr_operand_desc_t moff[1] = {
+                        I((int64_t)byte_offset, ty_i64)};
+                    uint32_t mbase = lr_emit_gep(s, ty_i8,
+                        V(owner_base, ty_ptr), moff, 1);
+                    desc_store_base(ndesc, mbase);
+                    int64_t elem_stride = array_element_stride_bytes(
+                        x.m_v, owner_arr->m_type);
+                    uint32_t stride = emit_i64_const(elem_stride);
+                    for (int d = 0; d < nd; d++) {
+                        uint32_t lb = emit_array_dim_lbound(owner_arr,
+                            (size_t)d);
+                        uint32_t ext = emit_array_dim_extent(owner_arr,
+                            (size_t)d);
+                        int64_t bo = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
+                        desc_store_i64(ndesc, bo + 0, lb);
+                        desc_store_i64(ndesc, bo + 8, ext);
+                        desc_store_i64(ndesc, bo + 16, stride);
+                        stride = lr_emit_mul(s, ty_i64,
+                            V(stride, ty_i64), V(ext, ty_i64));
+                    }
                 }
                 tmp = ndesc;
                 return;
