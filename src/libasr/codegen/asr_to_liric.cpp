@@ -8084,6 +8084,13 @@ public:
             if (!aliased) {
                 actual_ptr = lr_emit_load(s, ty_ptr, V(actual_ptr, ty_ptr));
             }
+        } else if (ASRUtils::is_pointer(ASRUtils::expr_type(actual))
+                && ASR::is_a<ASR::StructInstanceMember_t>(*actual)) {
+            // A pointer COMPONENT (e.g. `parser%table` where table is a
+            // pointer): its field holds the pointee address, so load it to
+            // reach the object.  The loaded pointee is also the correct
+            // inout write-back target (actual_ptr_out below).
+            actual_ptr = lr_emit_load(s, ty_ptr, V(actual_ptr, ty_ptr));
         }
         emit_memcpy_bytes(data_ptr, actual_ptr, data_bytes);
         if (actual_ptr_out) {
