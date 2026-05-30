@@ -21273,7 +21273,12 @@ public:
     // returns the field address for LHS use, otherwise loads the value.
 
     void visit_StructInstanceMember(const ASR::StructInstanceMember_t &x) {
-        LIRIC_PASSTHROUGH(x)
+        // In target (address) mode we must compute the member's storage
+        // address, not its folded compile-time value -- otherwise a member of
+        // a derived-type PARAMETER passed by reference would hand the callee
+        // the value reinterpreted as a pointer (deref -> crash).  Fold only
+        // when a value is wanted.
+        if (!is_target) { LIRIC_PASSTHROUGH(x) }
 
         ASR::ttype_t *vt = ASRUtils::expr_type(x.m_v);
         vt = ASRUtils::type_get_past_allocatable_pointer(vt);
