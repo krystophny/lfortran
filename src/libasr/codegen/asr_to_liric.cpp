@@ -5883,9 +5883,14 @@ public:
                 if (str_t->m_len) {
                     ASRUtils::extract_value(str_t->m_len, elem_chars);
                 }
-                uint32_t src_desc = desc_ptr_of(x.m_source);
-                uint32_t total = descriptor_array_element_count(
-                    src_desc, (int)array_t->n_dims);
+                // The source may be a descriptor, a pointer array, or an
+                // array constructor (`transfer(['x','y','z'], 'abc')`); the
+                // linear view yields the str_desc base and element count for
+                // any physical type.  Reading dim metadata off a non-
+                // descriptor source produced a bogus count and segfaulted.
+                ArrayLinearView sv = emit_array_linear_view(x.m_source,
+                    array_t);
+                uint32_t total = sv.total;
                 uint32_t out_len = lr_emit_mul(s, ty_i64,
                     V(total, ty_i64), I(elem_chars, ty_i64));
                 uint32_t allocator = emit_call(
@@ -5898,7 +5903,7 @@ public:
                 };
                 uint32_t out_data = emit_call("_lfortran_string_malloc_alloc",
                     ty_ptr, malloc_args, 2);
-                uint32_t src_base = desc_base_addr(src_desc);
+                uint32_t src_base = sv.base;
                 uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
                 lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
 
