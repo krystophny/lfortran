@@ -8594,7 +8594,10 @@ public:
         if (x.m_new == ASR::array_physical_typeType::UnboundedPointerArray &&
                 x.m_old == ASR::array_physical_typeType::DescriptorArray &&
                 expr_is_array_section_call_temp(x.m_arg)) {
-            tmp = desc_base_addr(desc_base_addr(desc_ptr_of(x.m_arg)));
+            uint32_t desc = desc_ptr_of(x.m_arg);
+            tmp = expr_is_descriptor_slot_call_temp(x.m_arg)
+                ? desc_base_addr(desc)
+                : desc_base_addr(desc_base_addr(desc));
             return;
         }
         if (x.m_new == ASR::array_physical_typeType::UnboundedPointerArray &&
