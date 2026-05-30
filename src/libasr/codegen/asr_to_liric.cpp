@@ -4443,7 +4443,20 @@ public:
 
         if (array_type->m_physical_type !=
                 ASR::array_physical_typeType::DescriptorArray) {
-            return fallback;
+            if (has_fixed_len) return fallback;
+            // Assumed/deferred-length non-descriptor char array (e.g. a
+            // character scalar sequence-associated to `character(*) :: s(n)`):
+            // the per-element length is stored in each str_desc element
+            // (field 1).  Read element 0 of the str_desc array base.
+            bool wt = is_target;
+            is_target = true;
+            visit_expr(*arg);
+            is_target = wt;
+            uint32_t base = tmp;
+            uint32_t desc0 = lr_emit_load(s, ty_str_desc, V(base, ty_ptr));
+            uint32_t f1 = 1;
+            return lr_emit_extractvalue(s, ty_i64,
+                V(desc0, ty_str_desc), &f1, 1);
         }
 
         return emit_descriptor_string_array_len(desc_ptr_of(arg), array_type);
@@ -7198,8 +7211,15 @@ public:
         ASR::ttype_t *ct = ASRUtils::type_get_past_allocatable_pointer(
             ASRUtils::expr_type(expr));
         if (!ASR::is_a<ASR::Array_t>(*ct)) return false;
-        if (ASR::down_cast<ASR::Array_t>(ct)->m_physical_type !=
-                ASR::array_physical_typeType::DescriptorArray) {
+        ASR::array_physical_typeType pt =
+            ASR::down_cast<ASR::Array_t>(ct)->m_physical_type;
+        // A PointerArray result (a character scalar sequence-associated to an
+        // explicit-shape `character(L) :: s(N)` dummy) is read by the callee as
+        // the raw str_desc array base, so emit the str_desc array and pass its
+        // base directly (emit_string_to_array_descriptor returns arr_base for
+        // PointerArray, a descriptor for DescriptorArray).
+        if (pt == ASR::array_physical_typeType::PointerArray) return true;
+        if (pt != ASR::array_physical_typeType::DescriptorArray) {
             return false;
         }
         return !formal_expects_raw_array_data(fn, i, expr);
@@ -7214,16 +7234,21 @@ public:
         ASR::ttype_t *ct = ASRUtils::type_get_past_allocatable_pointer(
             cast->m_type);
         ASR::ttype_t *et = ASRUtils::type_get_past_array(ct);
-        int64_t elem_clen = 1, kind = 1;
+        int64_t elem_clen_const = -1, kind = 1;
+        ASR::expr_t *len_expr = nullptr;
         if (ASR::is_a<ASR::String_t>(*et)) {
             ASR::String_t *st = ASR::down_cast<ASR::String_t>(et);
-            if (!(st->m_len && ASRUtils::extract_value(st->m_len, elem_clen))) {
-                elem_clen = 1;
-            }
             kind = st->m_kind > 0 ? (int64_t)st->m_kind : 1;
-            if (elem_clen < 1) elem_clen = 1;
+            if (st->m_len &&
+                    ASRUtils::extract_value(st->m_len, elem_clen_const)) {
+                if (elem_clen_const < 1) elem_clen_const = 1;
+            } else {
+                // Assumed/deferred element length (e.g. `character(*) :: s(n)`):
+                // evaluate the runtime length so the str_desc stride and the
+                // implied extent (total_len / elem_clen) are correct.
+                len_expr = st->m_len;
+            }
         }
-        int64_t elem_clen_bytes = elem_clen * kind;
         int64_t sd_bytes = element_byte_size(et);   // str_desc size (16)
 
         visit_expr(*cast->m_arg);
@@ -7233,10 +7258,18 @@ public:
             V(str_desc, ty_str_desc), &f0, 1);
         uint32_t total_len = lr_emit_extractvalue(s, ty_i64,
             V(str_desc, ty_str_desc), &f1, 1);
-        uint32_t extent = (elem_clen == 1)
-            ? total_len
-            : lr_emit_sdiv(s, ty_i64, V(total_len, ty_i64),
-                I(elem_clen, ty_i64));
+        uint32_t elem_clen_v = (elem_clen_const >= 1)
+            ? emit_i64_const(elem_clen_const)
+            : (len_expr ? emit_i64_expr(len_expr) : emit_i64_const(1));
+        // Clamp to >= 1 so the divide and stride stay well-defined.
+        uint32_t lt1 = lr_emit_icmp(s, LR_CMP_SLT,
+            V(elem_clen_v, ty_i64), I(1, ty_i64));
+        elem_clen_v = lr_emit_select(s, ty_i64, V(lt1, ty_i1),
+            I(1, ty_i64), V(elem_clen_v, ty_i64));
+        uint32_t elem_clen_bytes_v = (kind == 1) ? elem_clen_v
+            : lr_emit_mul(s, ty_i64, V(elem_clen_v, ty_i64), I(kind, ty_i64));
+        uint32_t extent = lr_emit_sdiv(s, ty_i64,
+            V(total_len, ty_i64), V(elem_clen_v, ty_i64));
 
         // Allocate the str_desc array (at least one element).
         uint32_t has = lr_emit_icmp(s, LR_CMP_SGT,
@@ -7264,14 +7297,14 @@ public:
 
         lr_session_set_block(s, body_bb, &err);
         uint32_t char_off = lr_emit_mul(s, ty_i64,
-            V(idx, ty_i64), I(elem_clen_bytes, ty_i64));
+            V(idx, ty_i64), V(elem_clen_bytes_v, ty_i64));
         lr_operand_desc_t coff[1] = {V(char_off, ty_i64)};
         uint32_t char_ptr = lr_emit_gep(s, ty_i8, V(src_data, ty_ptr),
             coff, 1);
         uint32_t sd0 = lr_emit_insertvalue(s, ty_str_desc,
             LR_UNDEF(ty_str_desc), V(char_ptr, ty_ptr), &f0, 1);
         uint32_t sd1 = lr_emit_insertvalue(s, ty_str_desc,
-            V(sd0, ty_str_desc), I(elem_clen, ty_i64), &f1, 1);
+            V(sd0, ty_str_desc), V(elem_clen_v, ty_i64), &f1, 1);
         uint32_t elem_ptr = emit_linear_elem_ptr(arr_base, idx,
             emit_i64_const(sd_bytes));
         lr_emit_store(s, V(sd1, ty_str_desc), V(elem_ptr, ty_ptr));
@@ -7280,11 +7313,18 @@ public:
         lr_emit_br(s, head_bb);
 
         lr_session_set_block(s, done_bb, &err);
+        // An explicit-shape (PointerArray) dummy reads its parameter as the raw
+        // str_desc array base, not a CFI descriptor: hand back arr_base.
+        if (ASR::is_a<ASR::Array_t>(*ct) &&
+                ASR::down_cast<ASR::Array_t>(ct)->m_physical_type ==
+                    ASR::array_physical_typeType::PointerArray) {
+            return arr_base;
+        }
         uint32_t desc = emit_desc_alloca(1);
         desc_store_base(desc, arr_base);
         desc_store_i64(desc, 8, emit_i64_const(sd_bytes));
         desc_store_rank(desc, 1);
-        desc_store_i64(desc, 24, emit_i64_const(elem_clen));
+        desc_store_i64(desc, 24, elem_clen_v);
         int64_t bo = DESC_HEADER_BYTES;
         desc_store_i64(desc, bo + DESC_DIM_LBOUND, emit_i64_const(1));
         desc_store_i64(desc, bo + DESC_DIM_EXTENT, extent);
