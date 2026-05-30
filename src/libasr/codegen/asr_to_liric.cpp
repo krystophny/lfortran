@@ -5018,6 +5018,23 @@ public:
             ASRUtils::type_get_past_allocatable_pointer(value_struct_type);
         value_struct_type =
             ASRUtils::type_get_past_array(value_struct_type);
+        // Polymorphic allocatable scalar = limited-polymorphic array element
+        // (`tmp = obj(i)` with class(base) :: obj(:)): the element's dynamic
+        // type is in obj's array descriptor (runtime tag @24, size @8), not
+        // its static parent type.  Copying by the parent stamps the wrong
+        // tag (select type mismatches) and under-copies/under-allocates.
+        if (!target_is_array &&
+                expr_is_allocatable_struct(x.m_target) &&
+                ASRUtils::is_class_type(ASRUtils::extract_type(
+                    ASRUtils::expr_type(x.m_target))) &&
+                ASR::is_a<ASR::ArrayItem_t>(*x.m_value) &&
+                type_is_limited_polymorphic_array(ASRUtils::expr_type(
+                    ASR::down_cast<ASR::ArrayItem_t>(x.m_value)->m_v))) {
+            emit_poly_alloc_assign_from_poly_array_item(x.m_target,
+                ASR::down_cast<ASR::ArrayItem_t>(x.m_value));
+            return;
+        }
+
         if (!target_is_array &&
                 ASR::is_a<ASR::StructType_t>(*target_struct_type) &&
                 expr_is_storage_reference(x.m_value) &&
@@ -10785,6 +10802,87 @@ public:
         lr_session_set_block(s, done_bb, &err);
         uint32_t raw = lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
         return class_data_ptr(raw);
+    }
+
+    // Intrinsic assignment `tmp = obj(i)` where tmp is a polymorphic
+    // allocatable scalar and obj is a limited-polymorphic array
+    // (class(base) :: obj(:)).  obj(i)'s dynamic type is not its declared
+    // (parent) type; the runtime tag and element byte size live in obj's
+    // array descriptor at offset 24 and 8.  Copying by the static struct
+    // type stamps the parent tag (select type then matches the wrong arm)
+    // and copies the parent's (often empty) member set into an
+    // under-allocated buffer.  Reallocate tmp to the dynamic element size,
+    // stamp the runtime tag, and copy the element bytes.
+    void emit_poly_alloc_assign_from_poly_array_item(
+            ASR::expr_t *target, ASR::ArrayItem_t *src_item) {
+        uint32_t src_desc = desc_ptr_of(src_item->m_v);
+        uint32_t dyn_tag = desc_load_i64(src_desc, 24);
+        uint32_t elem_len = desc_load_i64(src_desc, 8);
+
+        bool was_target = is_target;
+        is_target = true;
+        visit_expr(*reinterpret_cast<ASR::expr_t *>(src_item));
+        is_target = was_target;
+        uint32_t src = tmp;
+
+        is_target = true;
+        visit_expr(*target);
+        is_target = was_target;
+        uint32_t slot = tmp;
+
+        // Free the prior allocation (sized for the static type), then
+        // allocate header + dynamic element bytes.
+        lr_error_t err;
+        uint32_t raw0 = lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
+        uint32_t is_null = lr_emit_icmp(s, LR_CMP_EQ,
+            V(raw0, ty_ptr), LR_NULL(ty_ptr));
+        uint32_t free_bb = lr_session_block(s);
+        uint32_t alloc_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(is_null, ty_i1), alloc_bb, free_bb);
+
+        lr_session_set_block(s, free_bb, &err);
+        uint32_t allocator0 = emit_call(
+            "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+        lr_operand_desc_t free_args[] = {
+            V(allocator0, ty_ptr), V(raw0, ty_ptr)
+        };
+        emit_call_void("_lfortran_free_alloc", free_args, 2);
+        lr_emit_br(s, alloc_bb);
+
+        lr_session_set_block(s, alloc_bb, &err);
+        uint32_t raw_nbytes = lr_emit_add(s, ty_i64,
+            V(elem_len, ty_i64), I(class_header_bytes(), ty_i64));
+        uint32_t allocator = emit_call(
+            "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+        lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
+        declare_func("_lfortran_malloc_alloc", ty_ptr,
+            malloc_params, 2, false);
+        lr_operand_desc_t malloc_args[] = {
+            V(allocator, ty_ptr), V(raw_nbytes, ty_i64)
+        };
+        uint32_t raw = emit_call("_lfortran_malloc_alloc", ty_ptr,
+            malloc_args, 2);
+        lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
+        declare_func("memset", ty_ptr, memset_params, 3, false);
+        lr_operand_desc_t memset_args[] = {
+            V(raw, ty_ptr), I(0, ty_i32), V(raw_nbytes, ty_i64)
+        };
+        emit_call("memset", ty_ptr, memset_args, 3);
+        lr_emit_store(s, V(dyn_tag, ty_i64), V(raw, ty_ptr));
+        lr_emit_store(s, V(raw, ty_ptr), V(slot, ty_ptr));
+        uint32_t data = class_data_ptr(raw);
+        emit_memcpy_dynamic(data, src, elem_len);
+
+        // Keep the side tag slot (if any) in sync with the heap tag.
+        ASR::Variable_t *tv = var_from_expr(target);
+        if (tv) {
+            uint64_t h = get_hash((ASR::asr_t *)tv);
+            auto it = class_tag_slots.find(h);
+            if (it != class_tag_slots.end()) {
+                lr_emit_store(s, V(dyn_tag, ty_i64),
+                    V(it->second, ty_ptr));
+            }
+        }
     }
 
     // Copy a source struct (allocate(dst, source=src)) into the freshly
