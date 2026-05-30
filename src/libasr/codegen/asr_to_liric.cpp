@@ -10653,6 +10653,42 @@ public:
                 ASRUtils::type_get_past_allocatable_pointer(member_type);
             if (ASR::is_a<ASR::Array_t>(*core)) {
                 initialize_local_array_descriptor(field_ptr, member_type);
+                // A FIXED-SIZE array member is stored inline with no
+                // descriptor (initialize_local_array_descriptor no-ops on it).
+                // Its struct/string elements still need their str_desc buffers
+                // / defaults set up, e.g. a `type(t) :: comp(N)` component whose
+                // t has a character field (without this comp(i)%char_field reads
+                // a null str_desc and prints blank).
+                ASR::Array_t *marr = ASR::down_cast<ASR::Array_t>(core);
+                ASR::ttype_t *melem = ASRUtils::type_get_past_array(core);
+                if (marr->m_physical_type !=
+                        ASR::array_physical_typeType::DescriptorArray) {
+                    int64_t total = ASRUtils::get_fixed_size_of_array(
+                        marr->m_dims, marr->n_dims);
+                    int64_t estride = (int64_t)element_byte_size(melem);
+                    if (ASR::is_a<ASR::StructType_t>(*melem) && total > 0) {
+                        ASR::Struct_t *est = struct_symbol_from_type_decl(
+                            member->m_type_declaration);
+                        if (est && struct_storage_needs_initialization(est)) {
+                            for (int64_t i = 0; i < total; i++) {
+                                lr_operand_desc_t eo[1] =
+                                    {I(i * estride, ty_i64)};
+                                uint32_t ep = lr_emit_gep(s, ty_i8,
+                                    V(field_ptr, ty_ptr), eo, 1);
+                                initialize_struct_storage(est, ep);
+                            }
+                        }
+                    } else if (ASR::is_a<ASR::String_t>(*melem) && total > 0) {
+                        ASR::String_t *est =
+                            ASR::down_cast<ASR::String_t>(melem);
+                        for (int64_t i = 0; i < total; i++) {
+                            lr_operand_desc_t eo[1] = {I(i * estride, ty_i64)};
+                            uint32_t ep = lr_emit_gep(s, ty_i8,
+                                V(field_ptr, ty_ptr), eo, 1);
+                            initialize_heap_string_descriptor(ep, est);
+                        }
+                    }
+                }
             } else {
                 core = ASRUtils::type_get_past_array(core);
                 bool has_scalar_default = member->m_value &&
