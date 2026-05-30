@@ -208,6 +208,7 @@ public:
     std::unordered_map<std::string, uint32_t> program_global_by_name;
     std::unordered_map<std::string, ASR::Array_t*> program_fixed_array_by_name;
     std::unordered_set<uint64_t> array_section_call_temps;
+    std::unordered_set<uint64_t> descriptor_slot_array_temps;
     // Scalar intrinsic pointers whose slot holds an indirection address (set
     // by an EQUIVALENCE / c_f_pointer CPtrToPointer rather than carrying the
     // value transparently).  Reading such a var loads the slot pointer and
@@ -2253,6 +2254,18 @@ public:
         return slot;
     }
 
+    uint32_t emit_runtime_descriptor_array_slot(ASR::Variable_t *v,
+            ASR::Array_t *array_t) {
+        uint64_t v_hash = get_hash((ASR::asr_t *)v);
+        uint32_t desc = emit_desc_alloca((int)array_t->n_dims);
+        initialize_local_array_descriptor(desc, v->m_type);
+        uint32_t slot = lr_emit_alloca(s, ty_ptr);
+        lr_emit_store(s, V(desc, ty_ptr), V(slot, ty_ptr));
+        runtime_pointer_arrays.insert(v_hash);
+        descriptor_slot_array_temps.insert(v_hash);
+        return slot;
+    }
+
     // Try to find a snapshotted extent for `expr` at dimension `dim`.
     // Returns the loaded i64 extent, or 0 if no snapshot applies.
     uint32_t try_load_snapshot_extent(ASR::expr_t *expr, size_t dim) {
@@ -2655,6 +2668,8 @@ public:
                 }
             }
         }
+        prescan_stmt_list_for_descriptor_slot_temps(x.m_body, x.n_body);
+
         // Runtime bounds can depend on compiler-created temporaries.
         // Fill those before allocating runtime-sized PointerArrays.
         std::vector<ASR::Variable_t *> delayed_runtime_arrays;
@@ -6368,6 +6383,12 @@ public:
         uint32_t slot;
         if (needs_static_storage) {
             slot = emit_save_global_for_var(v);
+        } else if (descriptor_slot_array_temps.count(h)) {
+            ASR::ttype_t *type =
+                ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+            ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(type);
+            slot = emit_runtime_descriptor_array_slot(v, array_t);
+            runtime_array = array_t;
         } else if (pointer_array_has_runtime_dims(v, &runtime_array)) {
             slot = emit_runtime_pointer_array_slot(v, runtime_array);
         } else {
@@ -6447,6 +6468,8 @@ public:
         lr_error_t err;
         uint32_t end_bb = lr_session_block(s);
         push_named_exit(blk->m_name, end_bb);
+        prescan_stmt_list_for_descriptor_slot_temps(
+            blk->m_body, blk->n_body);
         for (auto &item : blk->m_symtab->get_scope()) {
             if (!ASR::is_a<ASR::Variable_t>(*item.second)) continue;
             ASR::Variable_t *v = down_cast<ASR::Variable_t>(item.second);
@@ -6485,6 +6508,8 @@ public:
         ASR::AssociateBlock_t *blk =
             down_cast<ASR::AssociateBlock_t>(
                 ASRUtils::symbol_get_past_external(x.m_m));
+        prescan_stmt_list_for_descriptor_slot_temps(
+            blk->m_body, blk->n_body);
         for (auto &item : blk->m_symtab->get_scope()) {
             if (!ASR::is_a<ASR::Variable_t>(*item.second)) continue;
             ASR::Variable_t *v = down_cast<ASR::Variable_t>(item.second);
@@ -8335,6 +8360,15 @@ public:
         return array_section_call_temps.count(get_hash((ASR::asr_t *)v));
     }
 
+    bool expr_is_descriptor_slot_call_temp(ASR::expr_t *expr) {
+        if (!ASR::is_a<ASR::Var_t>(*expr)) return false;
+        ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
+            ASR::down_cast<ASR::Var_t>(expr)->m_v);
+        if (!ASR::is_a<ASR::Variable_t>(*sym)) return false;
+        ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(sym);
+        return descriptor_slot_array_temps.count(get_hash((ASR::asr_t *)v));
+    }
+
     bool array_section_uses_runtime_source(ASR::ArraySection_t *sec) {
         // A section with a RUNTIME (non-constant) bound needs a runtime
         // descriptor alias even over a FixedSizeArray source -- e.g. the
@@ -8355,6 +8389,191 @@ public:
         ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(type);
         return array_t->m_physical_type !=
             ASR::array_physical_typeType::FixedSizeArray;
+    }
+
+    bool associate_value_needs_descriptor_slot(ASR::expr_t *expr) {
+        if (ASR::is_a<ASR::ArraySection_t>(*expr)) {
+            return array_section_uses_runtime_source(
+                ASR::down_cast<ASR::ArraySection_t>(expr));
+        }
+        if (expr_is_descriptor_slot_call_temp(expr)) return true;
+        if (ASR::is_a<ASR::StructInstanceMember_t>(*expr) ||
+                ASR::is_a<ASR::ComplexRe_t>(*expr) ||
+                ASR::is_a<ASR::ComplexIm_t>(*expr)) {
+            ASR::ttype_t *mt =
+                ASRUtils::type_get_past_allocatable_pointer(
+                    ASRUtils::expr_type(expr));
+            return ASR::is_a<ASR::Array_t>(*mt);
+        }
+        if (ASR::is_a<ASR::Cast_t>(*expr)) {
+            ASR::Cast_t *c = ASR::down_cast<ASR::Cast_t>(expr);
+            if (c->m_kind == ASR::cast_kindType::ClassToStruct ||
+                    c->m_kind == ASR::cast_kindType::ClassToClass) {
+                ASR::ttype_t *ct =
+                    ASRUtils::type_get_past_allocatable_pointer(c->m_type);
+                return ASR::is_a<ASR::Array_t>(*ct);
+            }
+        }
+        if (type_is_unlimited_polymorphic_array(ASRUtils::expr_type(expr))) {
+            return true;
+        }
+        if (ASR::is_a<ASR::Var_t>(*expr)) {
+            ASR::Variable_t *src_var = var_from_expr(expr);
+            ASR::ttype_t *vt = src_var ? src_var->m_type :
+                ASRUtils::expr_type(expr);
+            ASR::ttype_t *core =
+                ASRUtils::type_get_past_allocatable_pointer(vt);
+            return src_var && !var_is_subroutine_call_array_temp(src_var) &&
+                ASR::is_a<ASR::Array_t>(*core) &&
+                (ASRUtils::is_allocatable(vt) || ASRUtils::is_pointer(vt) ||
+                 ASR::down_cast<ASR::Array_t>(core)->m_physical_type ==
+                     ASR::array_physical_typeType::DescriptorArray);
+        }
+        return false;
+    }
+
+    void mark_descriptor_slot_call_temp(ASR::expr_t *target,
+            ASR::expr_t *value) {
+        if (!ASR::is_a<ASR::Var_t>(*target)) return;
+        ASR::Variable_t *target_var = var_from_expr(target);
+        if (!target_var || !var_is_subroutine_call_array_temp(target_var)) {
+            return;
+        }
+        if (!associate_value_needs_descriptor_slot(value)) return;
+        uint64_t h = get_hash((ASR::asr_t *)target_var);
+        descriptor_slot_array_temps.insert(h);
+        if (ASR::is_a<ASR::ArraySection_t>(*value) ||
+                expr_is_array_section_call_temp(value)) {
+            array_section_call_temps.insert(h);
+        }
+    }
+
+    void prescan_stmt_list_for_descriptor_slot_temps(
+            ASR::stmt_t **body, size_t n_body) {
+        for (size_t i = 0; i < n_body; i++) {
+            prescan_descriptor_slot_temps(body[i]);
+        }
+    }
+
+    void prescan_descriptor_slot_temps(ASR::stmt_t *stmt) {
+        if (!stmt) return;
+        switch (stmt->type) {
+            case ASR::stmtType::Associate: {
+                ASR::Associate_t *as = ASR::down_cast<ASR::Associate_t>(stmt);
+                mark_descriptor_slot_call_temp(as->m_target, as->m_value);
+                break;
+            }
+            case ASR::stmtType::If: {
+                ASR::If_t *ifx = ASR::down_cast<ASR::If_t>(stmt);
+                prescan_stmt_list_for_descriptor_slot_temps(
+                    ifx->m_body, ifx->n_body);
+                prescan_stmt_list_for_descriptor_slot_temps(
+                    ifx->m_orelse, ifx->n_orelse);
+                break;
+            }
+            case ASR::stmtType::DoLoop: {
+                ASR::DoLoop_t *dl = ASR::down_cast<ASR::DoLoop_t>(stmt);
+                prescan_stmt_list_for_descriptor_slot_temps(
+                    dl->m_body, dl->n_body);
+                break;
+            }
+            case ASR::stmtType::WhileLoop: {
+                ASR::WhileLoop_t *wl = ASR::down_cast<ASR::WhileLoop_t>(stmt);
+                prescan_stmt_list_for_descriptor_slot_temps(
+                    wl->m_body, wl->n_body);
+                break;
+            }
+            case ASR::stmtType::Select: {
+                ASR::Select_t *sel = ASR::down_cast<ASR::Select_t>(stmt);
+                for (size_t i = 0; i < sel->n_body; i++) {
+                    ASR::case_stmt_t *cs = sel->m_body[i];
+                    if (cs->type == ASR::case_stmtType::CaseStmt) {
+                        ASR::CaseStmt_t *c =
+                            ASR::down_cast<ASR::CaseStmt_t>(cs);
+                        prescan_stmt_list_for_descriptor_slot_temps(
+                            c->m_body, c->n_body);
+                    } else if (cs->type ==
+                            ASR::case_stmtType::CaseStmt_Range) {
+                        ASR::CaseStmt_Range_t *c =
+                            ASR::down_cast<ASR::CaseStmt_Range_t>(cs);
+                        prescan_stmt_list_for_descriptor_slot_temps(
+                            c->m_body, c->n_body);
+                    }
+                }
+                prescan_stmt_list_for_descriptor_slot_temps(
+                    sel->m_default, sel->n_default);
+                break;
+            }
+            case ASR::stmtType::SelectRank: {
+                ASR::SelectRank_t *sel =
+                    ASR::down_cast<ASR::SelectRank_t>(stmt);
+                for (size_t i = 0; i < sel->n_body; i++) {
+                    ASR::rank_stmt_t *rs = sel->m_body[i];
+                    if (rs->type == ASR::rank_stmtType::RankExpr) {
+                        ASR::RankExpr_t *re =
+                            ASR::down_cast<ASR::RankExpr_t>(rs);
+                        prescan_stmt_list_for_descriptor_slot_temps(
+                            re->m_body, re->n_body);
+                    }
+                }
+                prescan_stmt_list_for_descriptor_slot_temps(
+                    sel->m_default, sel->n_default);
+                break;
+            }
+            case ASR::stmtType::SelectType: {
+                ASR::SelectType_t *sel =
+                    ASR::down_cast<ASR::SelectType_t>(stmt);
+                auto scan_type_stmt = [&](ASR::type_stmt_t *ts) {
+                    ASR::stmt_t **body = nullptr;
+                    size_t n_body = 0;
+                    if (ts->type == ASR::type_stmtType::TypeStmtType) {
+                        ASR::TypeStmtType_t *s =
+                            ASR::down_cast<ASR::TypeStmtType_t>(ts);
+                        body = s->m_body;
+                        n_body = s->n_body;
+                    } else if (ts->type ==
+                            ASR::type_stmtType::TypeStmtName) {
+                        ASR::TypeStmtName_t *s =
+                            ASR::down_cast<ASR::TypeStmtName_t>(ts);
+                        body = s->m_body;
+                        n_body = s->n_body;
+                    } else if (ts->type == ASR::type_stmtType::ClassStmt) {
+                        ASR::ClassStmt_t *s =
+                            ASR::down_cast<ASR::ClassStmt_t>(ts);
+                        body = s->m_body;
+                        n_body = s->n_body;
+                    }
+                    prescan_stmt_list_for_descriptor_slot_temps(body, n_body);
+                };
+                for (size_t i = 0; i < sel->n_body; i++) {
+                    scan_type_stmt(sel->m_body[i]);
+                }
+                for (size_t i = 0; i < sel->n_default; i++) {
+                    prescan_descriptor_slot_temps(sel->m_default[i]);
+                }
+                break;
+            }
+            case ASR::stmtType::BlockCall: {
+                ASR::BlockCall_t *bc = ASR::down_cast<ASR::BlockCall_t>(stmt);
+                ASR::Block_t *blk = down_cast<ASR::Block_t>(
+                    ASRUtils::symbol_get_past_external(bc->m_m));
+                prescan_stmt_list_for_descriptor_slot_temps(
+                    blk->m_body, blk->n_body);
+                break;
+            }
+            case ASR::stmtType::AssociateBlockCall: {
+                ASR::AssociateBlockCall_t *bc =
+                    ASR::down_cast<ASR::AssociateBlockCall_t>(stmt);
+                ASR::AssociateBlock_t *blk =
+                    down_cast<ASR::AssociateBlock_t>(
+                        ASRUtils::symbol_get_past_external(bc->m_m));
+                prescan_stmt_list_for_descriptor_slot_temps(
+                    blk->m_body, blk->n_body);
+                break;
+            }
+            default:
+                break;
+        }
     }
 
     // --- ArrayPhysicalCast ---
@@ -8462,8 +8681,10 @@ public:
         }
         if (x.m_new == ASR::array_physical_typeType::PointerArray &&
                 x.m_old == ASR::array_physical_typeType::DescriptorArray &&
-                expr_is_array_section_call_temp(x.m_arg)) {
-            tmp = desc_base_addr(desc_ptr_of(x.m_arg));
+                (expr_is_array_section_call_temp(x.m_arg) ||
+                 expr_is_descriptor_slot_call_temp(x.m_arg))) {
+            uint32_t desc = desc_ptr_of(x.m_arg);
+            tmp = is_target ? desc : desc_base_addr(desc);
             return;
         }
         visit_expr(*x.m_arg);
@@ -8632,6 +8853,9 @@ public:
             ASR::Variable_t *target_var = var_from_expr(x.m_target);
             target_is_subroutine_call_array_temp =
                 target_var && var_is_subroutine_call_array_temp(target_var);
+            if (target_is_subroutine_call_array_temp) {
+                mark_descriptor_slot_call_temp(x.m_target, x.m_value);
+            }
             if (target_is_subroutine_call_array_temp) {
                 bool mark_array_section_temp =
                     expr_is_array_section_call_temp(x.m_value);
