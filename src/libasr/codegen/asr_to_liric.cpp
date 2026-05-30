@@ -18871,6 +18871,14 @@ public:
                 t = array_assoc_base(x.m_tgt);
             } else if (is_scalar_intrinsic_pointer_target(x.m_tgt)) {
                 t = emit_scalar_intrinsic_pointer_value(x.m_tgt);
+            } else if (ASRUtils::is_pointer(ASRUtils::expr_type(x.m_tgt))) {
+                // The target is itself a POINTER: associated(p, q) compares the
+                // two pointers' VALUES (the addresses they hold), so load q's
+                // pointer value (non-target) -- matching how p is taken above.
+                // Using q's slot address instead made associated(p, q) false
+                // even when both point at the same object.
+                visit_expr(*x.m_tgt);
+                t = tmp;
             } else {
                 bool was_target = is_target;
                 is_target = true;
