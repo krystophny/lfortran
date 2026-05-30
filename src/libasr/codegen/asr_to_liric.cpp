@@ -186,6 +186,11 @@ public:
     // Member access on these dereferences the slot like a struct pointer and
     // applies NO class_data_ptr header offset.
     std::unordered_set<uint64_t> class_alias_data_ptr;
+    // For a class pointer associated to a CONCRETE target (`p => x` where x is
+    // a non-polymorphic target with no runtime class header): maps p's hash to
+    // the target's static struct tag, so select type / allocate(source=p) see
+    // the right dynamic type even though there is no header to read it from.
+    std::unordered_map<uint64_t, int64_t> class_alias_concrete_tag;
     // For `character(expr), allocatable :: v` where expr is a runtime
     // (non-constant) ExpressionLength: maps v's hash to an i64 slot holding
     // the length evaluated once at the variable's declaration (procedure
@@ -8611,6 +8616,18 @@ public:
             ASR::symbol_t *tsym = ASRUtils::symbol_get_past_external(
                 ASR::down_cast<ASR::Var_t>(x.m_target)->m_v);
             class_alias_data_ptr.insert(get_hash((ASR::asr_t *)tsym));
+            // Record the concrete target's dynamic type so a later select type
+            // / allocate(source=p) reads the right tag (the target has no
+            // runtime class header to read it from).
+            if (ASRUtils::is_class_type(ASRUtils::extract_type(
+                    ASRUtils::expr_type(x.m_target)))) {
+                ASR::Struct_t *vst =
+                    struct_symbol_for_concrete_expr(x.m_value);
+                if (vst) {
+                    class_alias_concrete_tag[get_hash((ASR::asr_t *)tsym)] =
+                        struct_symbol_tag((ASR::symbol_t *)vst);
+                }
+            }
         } else if (ASR::is_a<ASR::Var_t>(*x.m_target) &&
                 ASR::is_a<ASR::Cast_t>(*x.m_value) &&
                 ASRUtils::is_pointer(ASRUtils::expr_type(x.m_target)) &&
@@ -11113,15 +11130,32 @@ public:
             // declared dynamic type.  class_data_ptr(load(y)) would skip a
             // non-existent header and copy garbage (x%v read 0).
             mold_data = lr_emit_load(s, ty_ptr, V(mold_ptr, ty_ptr));
-            ASR::Struct_t *mold_st = struct_symbol_for_concrete_expr(mold);
-            if (!mold_st) {
-                mold_st = declared;
+            // Prefer the dynamic type recorded at `p => target` (the target may
+            // be an EXTENSION of the pointer's declared type); fall back to the
+            // pointer's declared concrete type.
+            int64_t recorded_tag = 0;
+            if (ASR::is_a<ASR::Var_t>(*mold)) {
+                ASR::symbol_t *msym = ASRUtils::symbol_get_past_external(
+                    ASR::down_cast<ASR::Var_t>(mold)->m_v);
+                auto it = class_alias_concrete_tag.find(
+                    get_hash((ASR::asr_t *)msym));
+                if (it != class_alias_concrete_tag.end()) {
+                    recorded_tag = it->second;
+                }
             }
-            if (!mold_st) {
-                return false;
+            if (recorded_tag != 0) {
+                mold_tag = emit_i64_const(recorded_tag);
+            } else {
+                ASR::Struct_t *mold_st = struct_symbol_for_concrete_expr(mold);
+                if (!mold_st) {
+                    mold_st = declared;
+                }
+                if (!mold_st) {
+                    return false;
+                }
+                mold_tag = emit_i64_const(
+                    struct_symbol_tag((ASR::symbol_t *)mold_st));
             }
-            mold_tag = emit_i64_const(
-                struct_symbol_tag((ASR::symbol_t *)mold_st));
         } else if (ASRUtils::is_class_type(
                     ASRUtils::extract_type(mold_type)) &&
                 !mold_is_indirect) {
@@ -15137,6 +15171,17 @@ public:
     // For class(T) arguments the tag is the i64 at the start of the
     // class header (offset -class_header_bytes from the data ptr).
     uint32_t load_polymorphic_tag_from_expr(ASR::expr_t *arg) {
+        // A class pointer associated to a concrete target has no runtime class
+        // header; return its recorded static target tag.
+        if (ASR::is_a<ASR::Var_t>(*arg)) {
+            ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
+                ASR::down_cast<ASR::Var_t>(arg)->m_v);
+            auto it = class_alias_concrete_tag.find(
+                get_hash((ASR::asr_t *)sym));
+            if (it != class_alias_concrete_tag.end()) {
+                return emit_i64_const(it->second);
+            }
+        }
         ASR::ttype_t *at = ASRUtils::type_get_past_allocatable_pointer(
             ASRUtils::expr_type(arg));
         if (ASRUtils::is_unlimited_polymorphic_type(at)) {
