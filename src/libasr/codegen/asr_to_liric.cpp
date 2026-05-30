@@ -8049,6 +8049,23 @@ public:
     void emit_array_value_to_storage(ASR::expr_t *value,
                                      ASR::Array_t *target_array,
                                      uint32_t dst) {
+        if (ASR::is_a<ASR::PointerNullConstant_t>(*value)) {
+            // Null-pointer array initializer (e.g.
+            // type(c_funptr) :: procs(5) = c_null_funptr): there is no array
+            // data to copy; zero-fill the storage so every element is null.
+            int64_t total = ASRUtils::get_fixed_size_of_array(
+                target_array->m_dims, target_array->n_dims);
+            if (total <= 0) total = 1;
+            uint64_t bytes = (uint64_t)total *
+                element_byte_size(target_array->m_type);
+            lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
+            declare_func("memset", ty_ptr, memset_params, 3, false);
+            lr_operand_desc_t margs[] = {
+                V(dst, ty_ptr), I(0, ty_i32), I((int64_t)bytes, ty_i64)
+            };
+            emit_call("memset", ty_ptr, margs, 3);
+            return;
+        }
         ASR::Array_t *value_array = nullptr;
         if (!expr_is_array(value, &value_array)) {
             throw CodeGenError(
