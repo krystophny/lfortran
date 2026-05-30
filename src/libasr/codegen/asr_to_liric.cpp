@@ -6437,6 +6437,24 @@ public:
         pop_named_exit(blk->m_name);
     }
 
+    // True if the associate block body binds `v` via an Associate statement
+    // (a pointer alias to an lvalue), as opposed to a value Assignment.
+    bool block_var_bound_by_associate(ASR::AssociateBlock_t *blk,
+            ASR::Variable_t *v) {
+        for (size_t i = 0; i < blk->n_body; i++) {
+            if (!ASR::is_a<ASR::Associate_t>(*blk->m_body[i])) continue;
+            ASR::Associate_t *as =
+                ASR::down_cast<ASR::Associate_t>(blk->m_body[i]);
+            if (ASR::is_a<ASR::Var_t>(*as->m_target) &&
+                    ASRUtils::symbol_get_past_external(
+                        ASR::down_cast<ASR::Var_t>(as->m_target)->m_v)
+                        == (ASR::symbol_t *)v) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     void visit_AssociateBlockCall(const ASR::AssociateBlockCall_t &x) {
         ASR::AssociateBlock_t *blk =
             down_cast<ASR::AssociateBlock_t>(
@@ -6453,6 +6471,33 @@ public:
             // (__libasr_created__assignment_value_ for `x = x OP y` inside the
             // block) frees a garbage pointer.
             emit_local_variable(v);
+            // An ASSOCIATE name bound to a non-lvalue expression (e.g.
+            // `associate(nv => v * 2.0)`) is typed Pointer(scalar) but the
+            // construct initialises it with a value Assignment in the block
+            // body, which stores THROUGH the (null) pointer slot -> null
+            // dereference.  Give such value-bound scalar-pointer names backing
+            // storage and mark them indirect so both the store and later reads
+            // dereference the slot consistently.  A name bound to a real lvalue
+            // (`v => t%x`, lowered to an Associate) must NOT get this treatment:
+            // its Associate stores the lvalue's address into the slot directly.
+            ASR::ttype_t *vt = v->m_type;
+            if (ASRUtils::is_pointer(vt) &&
+                    !block_var_bound_by_associate(blk, v)) {
+                ASR::ttype_t *pointee =
+                    ASRUtils::type_get_past_allocatable_pointer(vt);
+                if (!ASR::is_a<ASR::Array_t>(*pointee) &&
+                        !ASR::is_a<ASR::StructType_t>(*pointee) &&
+                        !ASR::is_a<ASR::String_t>(*pointee) &&
+                        (ASR::is_a<ASR::Integer_t>(*pointee) ||
+                         ASR::is_a<ASR::Real_t>(*pointee) ||
+                         ASR::is_a<ASR::Logical_t>(*pointee) ||
+                         ASR::is_a<ASR::Complex_t>(*pointee))) {
+                    uint32_t backing = lr_emit_alloca(s, get_type(pointee));
+                    lr_emit_store(s, V(backing, ty_ptr),
+                        V(lr_symtab[h], ty_ptr));
+                    indirect_scalar_pointers.insert(h);
+                }
+            }
         }
         for (size_t i = 0; i < blk->n_body; i++) {
             visit_stmt(*blk->m_body[i]);
