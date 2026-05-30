@@ -2297,6 +2297,7 @@ public:
 
     void visit_Program(const ASR::Program_t &x) {
         goto_blocks.clear();
+        prescan_stmt_list_for_descriptor_slot_temps(x.m_body, x.n_body);
 
         // Hoist program-level variables into the .bss section as
         // globals BEFORE visiting contained subroutines.  Contained
@@ -2323,7 +2324,8 @@ public:
                 var_to_sym[v] = lr_globals[h];
                 continue;
             }
-            uint64_t nbytes = storage_size_for_variable(v);
+            uint64_t nbytes = descriptor_slot_array_temps.count(h)
+                ? 8 : storage_size_for_variable(v);
             std::vector<uint8_t> zeros(nbytes, 0);
             std::string gname = std::string("_lr_pg_") + std::to_string(h)
                 + "_" + v->m_name;
@@ -2333,6 +2335,9 @@ public:
             uint32_t sym = lr_session_intern(s, gname.c_str());
             lr_globals[h] = sym;
             var_to_sym[v] = sym;
+            if (descriptor_slot_array_temps.count(h)) {
+                runtime_pointer_arrays.insert(h);
+            }
             // Index program-level globals by name so a contained subprogram's
             // host-associated copy (a distinct nested_vars Variable) can alias
             // the same storage instead of synthesising a decoupled zero global.
@@ -2431,6 +2436,15 @@ public:
             lr_operand_desc_t no_off[1] = {I(0, ty_i64)};
             uint32_t slot = lr_emit_gep(s, ty_i8,
                 LR_GLOBAL(sym, ty_ptr), no_off, 1);
+            if (descriptor_slot_array_temps.count(h)) {
+                ASR::ttype_t *type =
+                    ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+                ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(type);
+                uint32_t desc = emit_desc_alloca((int)array_t->n_dims);
+                initialize_descriptor_shape(desc, array_t);
+                lr_emit_store(s, V(desc, ty_ptr), V(slot, ty_ptr));
+                continue;
+            }
             initialize_local_array_descriptor(slot, v->m_type);
             initialize_local_string_descriptor(slot, v->m_type);
             initialize_inline_string_array(slot, v);
@@ -7576,6 +7590,12 @@ public:
                 ASR::down_cast<ASR::ArrayPhysicalCast_t>(expr);
             return expr_is_storage_reference(cast->m_arg);
         }
+        if (ASR::is_a<ASR::ComplexRe_t>(*expr) ||
+                ASR::is_a<ASR::ComplexIm_t>(*expr)) {
+            ASR::ttype_t *type = ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(expr));
+            return ASR::is_a<ASR::Array_t>(*type);
+        }
         if (ASR::is_a<ASR::GetPointer_t>(*expr)) {
             // GetPointer(x) yields the address of x, so it is a storage
             // reference whenever x is (e.g. an array element passed by
@@ -10800,6 +10820,29 @@ public:
         }
         return array->m_physical_type ==
             ASR::array_physical_typeType::DescriptorArray;
+    }
+
+    void initialize_descriptor_shape(uint32_t desc_ptr,
+            ASR::Array_t *array) {
+        int n_dims = (int)array->n_dims;
+        int64_t elem_bytes = element_byte_size(array->m_type);
+        desc_store_null_base(desc_ptr);
+        desc_store_i64(desc_ptr, 8, emit_i64_const(elem_bytes));
+        desc_store_rank(desc_ptr, n_dims);
+        desc_store_i64(desc_ptr, 24,
+            emit_string_array_len_hint(array->m_type));
+        uint32_t stride = emit_i64_const(elem_bytes);
+        for (int d = 0; d < n_dims; d++) {
+            int64_t base_off = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
+            desc_store_i64(desc_ptr, base_off + 0,
+                emit_array_dim_lbound(array, d));
+            uint32_t extent = array->m_dims[d].m_length
+                ? emit_array_dim_extent(array, d) : emit_i64_const(0);
+            desc_store_i64(desc_ptr, base_off + 8, extent);
+            desc_store_i64(desc_ptr, base_off + 16, stride);
+            stride = lr_emit_mul(s, ty_i64,
+                V(stride, ty_i64), V(extent, ty_i64));
+        }
     }
 
     void initialize_local_array_descriptor(uint32_t desc_ptr,
