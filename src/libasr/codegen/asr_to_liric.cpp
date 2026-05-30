@@ -20841,6 +20841,8 @@ found_offset:
             ASR::Array_t *array_t = down_cast<ASR::Array_t>(vt);
             if (array_t->m_physical_type !=
                     ASR::array_physical_typeType::DescriptorArray &&
+                    array_t->m_physical_type !=
+                    ASR::array_physical_typeType::AssumedRankArray &&
                     const_dim) {
                 int req_dim;
                 ASRUtils::extract_value(x.m_dim, req_dim);
@@ -20931,9 +20933,13 @@ found_offset:
             }
             if (array_t->m_physical_type !=
                     ASR::array_physical_typeType::DescriptorArray &&
+                    array_t->m_physical_type !=
+                    ASR::array_physical_typeType::AssumedRankArray &&
                     !const_dim) {
                 // FixedSize / Pointer array with runtime dim: chain
-                // selects over the n compile-time dims.
+                // selects over the n compile-time dims.  Assumed-rank has no
+                // compile-time dims (it arrives as a descriptor), so it must
+                // fall through to the runtime descriptor read below.
                 int64_t n_dims = (int64_t)array_t->n_dims;
                 visit_expr(*x.m_dim);
                 lr_type_t *dt = get_type(ASRUtils::expr_type(x.m_dim));
