@@ -17757,12 +17757,16 @@ public:
     // derived type whose leaf members are all themselves supported.
     bool namelist_type_supported(ASR::ttype_t *vtype,
             ASR::symbol_t *type_decl) {
-        if (ASRUtils::is_allocatable(vtype) ||
-                ASRUtils::is_pointer(vtype)) {
+        if (ASRUtils::is_allocatable(vtype)) {
             return false;
         }
         ASR::ttype_t *vt =
             ASRUtils::type_get_past_allocatable_pointer(vtype);
+        // A host-associated character namelist member reaches an internal
+        // procedure typed as Pointer(String), but its storage is the inline
+        // str_desc shared from the host (not a pointer to it), so look past the
+        // pointer here and let emit_variable_address yield the storage address
+        // unchanged -- the same path the non-pointer members already take.
         bool is_arr = ASR::is_a<ASR::Array_t>(*vt);
         ASR::ttype_t *elem = ASRUtils::type_get_past_array(vt);
         if (ASR::is_a<ASR::StructType_t>(*elem)) {
@@ -17845,6 +17849,10 @@ public:
         int32_t code;
         int32_t rank;
         int64_t elem_len;
+        // Runtime element length (str_desc len field) when the character
+        // length is not a compile-time constant (host-associated proxy);
+        // 0 means use the constant elem_len above.
+        uint32_t elem_len_runtime = 0;
         uint32_t data;
         bool shape_null;
         uint32_t shape;
@@ -17941,6 +17949,17 @@ public:
             if (st->m_len &&
                     ASRUtils::extract_value(st->m_len, len_const)) {
                 item.elem_len = len_const;
+            } else {
+                // Length is not a compile-time constant (e.g. a
+                // host-associated character reaches the contained scope as a
+                // Pointer(String) whose declared length was dropped).  The
+                // str_desc carries the true length in its second field, so
+                // read it at runtime.
+                lr_operand_desc_t loff[1] = {I(8, ty_i64)};
+                uint32_t lptr = lr_emit_gep(s, ty_i8, V(addr, ty_ptr),
+                    loff, 1);
+                item.elem_len_runtime =
+                    lr_emit_load(s, ty_i64, V(lptr, ty_ptr));
             }
         }
         if (is_arr) {
@@ -18008,7 +18027,9 @@ public:
             nml_store_field(ibase, 0, LR_GLOBAL(iname_sym, ty_ptr));
             nml_store_field(ibase, 8, I(it.code, ty_i32));
             nml_store_field(ibase, 12, I(it.rank, ty_i32));
-            nml_store_field(ibase, 16, I(it.elem_len, ty_i64));
+            nml_store_field(ibase, 16, it.elem_len_runtime
+                ? V(it.elem_len_runtime, ty_i64)
+                : I(it.elem_len, ty_i64));
             nml_store_field(ibase, 24, V(it.data, ty_ptr));
             nml_store_field(ibase, 32,
                 it.shape_null ? LR_NULL(ty_ptr) : V(it.shape, ty_ptr));
