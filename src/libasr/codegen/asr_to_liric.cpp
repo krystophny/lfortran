@@ -7053,7 +7053,16 @@ public:
             bool safe_direct = bv && in_place_intent
                 && (bv->m_storage == ASR::storage_typeType::Default
                     || bv->m_storage == ASR::storage_typeType::Save);
-            if (safe_direct && !ASRUtils::is_character(*at)
+            // A scalar default-type derived-type member (e.g. a COMMON-block
+            // member `common%a` in an EQUIVALENCE anchor) is stored in place,
+            // so GetPointer already yields its address; the trailing load would
+            // wrongly dereference it.
+            bool member_in_place =
+                ASR::is_a<ASR::StructInstanceMember_t>(*base) &&
+                !ASR::is_a<ASR::Array_t>(
+                    *ASRUtils::type_get_past_allocatable_pointer(at));
+            if ((safe_direct || member_in_place)
+                && !ASRUtils::is_character(*at)
                 && !ASRUtils::is_allocatable(at)
                 && !ASRUtils::is_pointer(at)) {
                 visit_expr(*x.m_arg);
@@ -7166,8 +7175,10 @@ public:
         // holds an indirection address, so later reads/writes through the var
         // must dereference it.  Record it for visit_Var.  Inserted only after
         // the store above, so the slot itself was resolved without the deref.
-        if (ASR::is_a<ASR::Var_t>(*x.m_ptr)
-                && !cptr_anchor_is_save(x.m_cptr)) {
+        // Applies to COMMON/SAVE anchors too: the pointer var has its own slot
+        // holding the anchor address (GetPointer now yields the address, not
+        // the value), so reads must dereference to reach the anchored storage.
+        if (ASR::is_a<ASR::Var_t>(*x.m_ptr)) {
             ASR::symbol_t *psym = ASRUtils::symbol_get_past_external(
                 ASR::down_cast<ASR::Var_t>(x.m_ptr)->m_v);
             if (ASR::is_a<ASR::Variable_t>(*psym)) {
