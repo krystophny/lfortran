@@ -8447,6 +8447,59 @@ public:
                     stride);
                 return;
             }
+            // Multi-dimensional bounds remapping: ptr(lb1:ub1, lb2:ub2, ...)
+            // => target.  Stamp the pointer's rank-N descriptor with each
+            // dim's remapped lower bound and extent over the source's
+            // contiguous data, with packed column-major strides.
+            bool all_ranges = sec->n_args >= 2;
+            for (size_t d = 0; d < sec->n_args && all_ranges; d++) {
+                if (!sec->m_args[d].m_left || !sec->m_args[d].m_right) {
+                    all_ranges = false;
+                }
+            }
+            if (all_ranges && expr_is_array(x.m_value, &src_arr)) {
+                ArrayLinearView sv = emit_array_linear_view(x.m_value,
+                    src_arr);
+                is_target = true;
+                visit_expr(*sec->m_v);
+                is_target = false;
+                uint32_t pdesc = tmp;
+                desc_store_base(pdesc, sv.base);
+                desc_store_i64(pdesc, 8, sv.elem_len);
+                desc_store_rank(pdesc, (int)sec->n_args);
+                int64_t tag = 0;
+                if (type_is_unlimited_polymorphic_array(
+                        ASRUtils::expr_type(sec->m_v)) &&
+                        !type_is_unlimited_polymorphic_array(
+                            ASRUtils::expr_type(x.m_value))) {
+                    tag = polymorphic_type_tag(src_arr->m_type);
+                }
+                desc_store_i64(pdesc, 24, emit_i64_const(tag));
+                uint32_t stride = sv.elem_len;
+                for (size_t d = 0; d < sec->n_args; d++) {
+                    uint32_t lb = emit_i64_expr(sec->m_args[d].m_left);
+                    uint32_t ub = emit_i64_expr(sec->m_args[d].m_right);
+                    uint32_t span = lr_emit_sub(s, ty_i64,
+                        V(ub, ty_i64), V(lb, ty_i64));
+                    uint32_t dstride = stride;
+                    if (sec->m_args[d].m_step) {
+                        uint32_t step = emit_i64_expr(sec->m_args[d].m_step);
+                        span = lr_emit_sdiv(s, ty_i64,
+                            V(span, ty_i64), V(step, ty_i64));
+                        dstride = lr_emit_mul(s, ty_i64,
+                            V(stride, ty_i64), V(step, ty_i64));
+                    }
+                    uint32_t extent = lr_emit_add(s, ty_i64,
+                        V(span, ty_i64), I(1, ty_i64));
+                    int64_t bo = DESC_HEADER_BYTES + DESC_DIM_BYTES * (int)d;
+                    desc_store_i64(pdesc, bo + DESC_DIM_LBOUND, lb);
+                    desc_store_i64(pdesc, bo + DESC_DIM_EXTENT, extent);
+                    desc_store_i64(pdesc, bo + DESC_DIM_STRIDE, dstride);
+                    stride = lr_emit_mul(s, ty_i64,
+                        V(dstride, ty_i64), V(extent, ty_i64));
+                }
+                return;
+            }
         }
         bool target_is_subroutine_call_array_temp = false;
         if (ASR::is_a<ASR::Var_t>(*x.m_target)) {
