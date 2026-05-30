@@ -7718,6 +7718,8 @@ public:
             if (cast->m_old ==
                     ASR::array_physical_typeType::DescriptorArray &&
                     cast->m_new !=
+                    ASR::array_physical_typeType::UnboundedPointerArray &&
+                    cast->m_new !=
                     ASR::array_physical_typeType::DescriptorArray) {
                 return true;
             }
