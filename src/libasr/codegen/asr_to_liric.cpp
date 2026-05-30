@@ -6844,8 +6844,19 @@ public:
             // the c_ptr value itself.  The trailing load would dereference it
             // and return the element value instead (c_loc(save_arr(1)) then
             // hands back the data, not its address).
-            bool safe_direct = bv
-                && bv->m_intent == ASR::intentType::Local
+            // A dummy argument of non-pointer/non-allocatable/non-character
+            // type holds its data in place too (the parameter is the data
+            // base / by-reference address), so GetPointer(dummy(i)) is already
+            // the storage address -- the load would deref it and hand back the
+            // element value (NULL for an uninitialised element).  Treat dummy
+            // intents like Local.
+            bool in_place_intent =
+                bv && (bv->m_intent == ASR::intentType::Local
+                    || bv->m_intent == ASR::intentType::In
+                    || bv->m_intent == ASR::intentType::Out
+                    || bv->m_intent == ASR::intentType::InOut
+                    || bv->m_intent == ASR::intentType::Unspecified);
+            bool safe_direct = bv && in_place_intent
                 && (bv->m_storage == ASR::storage_typeType::Default
                     || bv->m_storage == ASR::storage_typeType::Save);
             if (safe_direct && !ASRUtils::is_character(*at)
