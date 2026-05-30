@@ -12411,8 +12411,44 @@ public:
                 lr_emit_condbr(s, V(has_data, ty_i1), finalize_bb, done_bb);
 
                 lr_session_set_block(s, finalize_bb, &err);
-                std::unordered_set<uint64_t> active;
-                emit_struct_finalizers(class_data_ptr(raw), st, active);
+                bool is_poly = ASRUtils::is_class_type(
+                    ASRUtils::extract_type(expr_t));
+                if (is_poly) {
+                    // A polymorphic allocatable: finalize the DYNAMIC type
+                    // (read the class-header tag and call the matching
+                    // descendant's finalizer), not the declared type which
+                    // may have no FINAL while the dynamic type does.
+                    uint32_t tag = load_raw_object_type_tag(raw);
+                    uint32_t data = class_data_ptr(raw);
+                    for (ASR::Struct_t *desc_st : known_structs) {
+                        bool is_desc = desc_st == st;
+                        ASR::Struct_t *anc = desc_st;
+                        while (!is_desc && anc->m_parent) {
+                            ASR::symbol_t *p =
+                                ASRUtils::symbol_get_past_external(
+                                    anc->m_parent);
+                            if (!ASR::is_a<ASR::Struct_t>(*p)) break;
+                            anc = ASR::down_cast<ASR::Struct_t>(p);
+                            if (anc == st) is_desc = true;
+                        }
+                        if (!is_desc) continue;
+                        int64_t dtag =
+                            struct_symbol_tag((ASR::symbol_t *)desc_st);
+                        uint32_t match = lr_emit_icmp(s, LR_CMP_EQ,
+                            V(tag, ty_i64), I(dtag, ty_i64));
+                        uint32_t then_bb = lr_session_block(s);
+                        uint32_t next_bb = lr_session_block(s);
+                        lr_emit_condbr(s, V(match, ty_i1), then_bb, next_bb);
+                        lr_session_set_block(s, then_bb, &err);
+                        std::unordered_set<uint64_t> active;
+                        emit_struct_finalizers(data, desc_st, active);
+                        lr_emit_br(s, next_bb);
+                        lr_session_set_block(s, next_bb, &err);
+                    }
+                } else {
+                    std::unordered_set<uint64_t> active;
+                    emit_struct_finalizers(class_data_ptr(raw), st, active);
+                }
                 lr_emit_br(s, done_bb);
 
                 lr_session_set_block(s, done_bb, &err);
