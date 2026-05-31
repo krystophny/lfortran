@@ -315,6 +315,12 @@ public:
             ASR::string_physical_typeType::CChar;
     }
 
+    bool is_string_value_type(ASR::ttype_t *t) {
+        t = ASRUtils::type_get_past_allocatable_pointer(t);
+        t = ASRUtils::type_get_past_array(t);
+        return ASR::is_a<ASR::String_t>(*t);
+    }
+
     // --- Type mapping: ASR type -> liric type ---
 
     lr_type_t *get_type(ASR::ttype_t *t) {
@@ -3884,6 +3890,12 @@ public:
         lr_emit_store(s, V(d1, ty_str_desc), V(dst_ptr, ty_ptr));
     }
 
+    uint32_t clone_string_desc(uint32_t src_desc) {
+        uint32_t slot = emit_temp_slot(ty_str_desc);
+        emit_copy_string_to_uninit_desc(slot, src_desc);
+        return lr_emit_load(s, ty_str_desc, V(slot, ty_ptr));
+    }
+
     void emit_string_assignment_to_desc_slot(uint32_t dst_ptr,
                                              uint32_t src_desc) {
         uint32_t fld0 = 0;
@@ -5404,6 +5416,16 @@ public:
                 uint32_t dst = tmp;
                 uint32_t len = raw_char_array_elem_len(raw_item_array);
                 emit_string_copy_padded_to_data(dst, len, rhs);
+                return;
+            }
+            if (ASR::is_a<ASR::ListItem_t>(*x.m_target)) {
+                visit_expr(*x.m_value);
+                uint32_t rhs = tmp;
+                bool was_target = is_target;
+                is_target = true;
+                visit_expr(*x.m_target);
+                is_target = was_target;
+                emit_allocatable_string_assignment(tmp, rhs);
                 return;
             }
             if (is_string_section_target(x.m_target)) {
@@ -10964,6 +10986,30 @@ public:
             lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
             lr_emit_br(s, head_bb);
             lr_session_set_block(s, done_bb, &err);
+        } else if (is_string_value_type(list_t->m_type)) {
+            uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+            lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+            uint32_t head_bb = lr_session_block(s);
+            uint32_t body_bb = lr_session_block(s);
+            uint32_t done_bb = lr_session_block(s);
+            lr_emit_br(s, head_bb);
+            lr_error_t err;
+            lr_session_set_block(s, head_bb, &err);
+            uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+            uint32_t cond = lr_emit_icmp(s, LR_CMP_SLT, V(idx, ty_i64),
+                V(len, ty_i64));
+            lr_emit_condbr(s, V(cond, ty_i1), body_bb, done_bb);
+            lr_session_set_block(s, body_bb, &err);
+            uint32_t src_elem = list_elem_ptr(src_data, idx, elem_size);
+            uint32_t dst_elem = list_elem_ptr(dst_data, idx, elem_size);
+            uint32_t elem_desc = lr_emit_load(s, ty_str_desc,
+                V(src_elem, ty_ptr));
+            emit_copy_string_to_uninit_desc(dst_elem, elem_desc);
+            uint32_t next = lr_emit_add(s, ty_i64, V(idx, ty_i64),
+                I(1, ty_i64));
+            lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+            lr_emit_br(s, head_bb);
+            lr_session_set_block(s, done_bb, &err);
         } else {
             emit_memcpy_dynamic(dst_data, src_data, bytes);
         }
@@ -11037,6 +11083,8 @@ public:
             if (ASR::is_a<ASR::List_t>(*ASRUtils::expr_type(x.m_args[i]))) {
                 value = clone_list_desc(ASR::down_cast<ASR::List_t>(
                     ASRUtils::expr_type(x.m_args[i])), value);
+            } else if (is_string_value_type(list_t->m_type)) {
+                value = clone_string_desc(value);
             }
             uint32_t elem_ptr = list_elem_ptr(data, emit_i64_const((int64_t)i),
                 elem_size);
@@ -11069,6 +11117,8 @@ public:
         if (ASR::is_a<ASR::List_t>(*list_t->m_type)) {
             value = clone_list_desc(ASR::down_cast<ASR::List_t>(
                 list_t->m_type), value);
+        } else if (is_string_value_type(list_t->m_type)) {
+            value = clone_string_desc(value);
         }
         lr_emit_store(s, V(value, get_type(list_t->m_type)),
             V(elem_ptr, ty_ptr));
@@ -11109,6 +11159,8 @@ public:
         if (ASR::is_a<ASR::List_t>(*list_t->m_type)) {
             value = clone_list_desc(ASR::down_cast<ASR::List_t>(
                 list_t->m_type), value);
+        } else if (is_string_value_type(list_t->m_type)) {
+            value = clone_string_desc(value);
         }
         lr_emit_store(s, V(value, get_type(list_t->m_type)), V(src, ty_ptr));
         list_store_len(list_ptr, new_len);
@@ -20622,6 +20674,14 @@ public:
         emit_call("memset", ty_ptr, memset_args, 3);
     }
 
+    uint32_t emit_string_desc(uint32_t data, uint32_t len) {
+        uint32_t fld0 = 0, fld1 = 1;
+        uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
+            LR_UNDEF(ty_str_desc), V(data, ty_ptr), &fld0, 1);
+        return lr_emit_insertvalue(s, ty_str_desc,
+            V(d0, ty_str_desc), V(len, ty_i64), &fld1, 1);
+    }
+
     // Memcpy data[0:len] into the destination string descriptor's data
     // buffer, truncated to the buffer's declared length.  The
     // destination is assumed to be already large enough; reallocation
@@ -21222,6 +21282,7 @@ public:
         uint32_t internal_unit_desc_ptr = 0;
         uint32_t internal_unit_desc = 0;
         bool internal_unit_is_value = false;
+        bool internal_unit_is_allocatable = false;
         bool internal_unit_is_string_array = false;
         uint32_t internal_array_base = 0;
         int64_t internal_array_count = 0;
@@ -21275,6 +21336,8 @@ public:
                     internal_unit_desc = tmp;
                     internal_unit_is_value = true;
                 } else {
+                    internal_unit_is_allocatable =
+                        ASRUtils::is_allocatable(ASRUtils::expr_type(x.m_unit));
                     bool was_target = is_target;
                     is_target = true;
                     visit_expr(*x.m_unit);
@@ -21369,6 +21432,11 @@ public:
                 } else if (internal_unit_is_value) {
                     internal_write_chunk_desc(internal_unit_desc,
                         formatted.data, formatted.len);
+                } else if (internal_unit_is_allocatable) {
+                    uint32_t desc = emit_string_desc(
+                        formatted.data, formatted.len);
+                    emit_allocatable_string_assignment(
+                        internal_unit_desc_ptr, desc);
                 } else {
                     internal_write_chunk(internal_unit_desc_ptr,
                         formatted.data, formatted.len);
@@ -21593,6 +21661,10 @@ public:
             if (internal_string_write) {
                 if (internal_unit_is_value) {
                     internal_write_chunk_desc(internal_unit_desc, data, len);
+                } else if (internal_unit_is_allocatable) {
+                    uint32_t desc = emit_string_desc(data, len);
+                    emit_allocatable_string_assignment(
+                        internal_unit_desc_ptr, desc);
                 } else {
                     internal_write_chunk(internal_unit_desc_ptr, data, len);
                 }
