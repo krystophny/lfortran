@@ -1842,6 +1842,20 @@ public:
         return st && st->m_is_abstract;
     }
 
+    bool class_narrowing_cast_unwraps_poly_desc(ASR::expr_t *expr) {
+        if (!ASR::is_a<ASR::Cast_t>(*expr)) return false;
+        ASR::Cast_t *cast = ASR::down_cast<ASR::Cast_t>(expr);
+        if (cast->m_kind != ASR::cast_kindType::ClassToStruct &&
+                cast->m_kind != ASR::cast_kindType::ClassToClass) {
+            return false;
+        }
+        ASR::ttype_t *arg_type = ASRUtils::expr_type(cast->m_arg);
+        ASR::ttype_t *arg_naked =
+            ASRUtils::type_get_past_allocatable_pointer(arg_type);
+        return ASRUtils::is_unlimited_polymorphic_type(arg_type) &&
+            !ASR::is_a<ASR::Array_t>(*arg_naked);
+    }
+
     // A scalar class-typed pointer Var that, by the rules above, would be
     // skipped by is_scalar_struct_pointer_* (class exclusion) but actually
     // holds a headerless data pointer recorded at its pointer-associate.
@@ -24645,7 +24659,9 @@ public:
             // the target's address from p's slot so the member aliases the
             // pointee.
             v_ptr = lr_emit_load(s, ty_ptr, V(v_ptr, ty_ptr));
-        } else if (is_scalar_class_pointer_type(
+        } else if (!class_narrowing_cast_unwraps_poly_desc(
+                const_cast<ASR::expr_t *>(x.m_v)) &&
+                is_scalar_class_pointer_type(
                 const_cast<ASR::expr_t *>(x.m_v))) {
             v_ptr = lr_emit_load(s, ty_ptr, V(v_ptr, ty_ptr));
         } else if (is_class_data_ptr_alias(const_cast<ASR::expr_t *>(x.m_v))) {
