@@ -22827,7 +22827,7 @@ public:
             } else {
                 return false;
             }
-            uint32_t target_ptr = emit_target_ptr(target);
+            uint32_t target_ptr = emit_file_read_scalar_target_ptr(target);
             lr_type_t *p[] = {ty_ptr, ty_i64, ty_ptr, ty_ptr, ty_ptr, ty_ptr};
             declare_func(name, ty_void, p, 6, false);
             lr_operand_desc_t args[] = {
@@ -22844,7 +22844,7 @@ public:
             const char *name = (kind == 4) ? "_lfortran_string_read_c32"
                 : (kind == 8) ? "_lfortran_string_read_c64" : nullptr;
             if (!name) return false;
-            uint32_t target_ptr = emit_target_ptr(target);
+            uint32_t target_ptr = emit_file_read_scalar_target_ptr(target);
             lr_type_t *p[] = {ty_ptr, ty_i64, ty_ptr, ty_ptr, ty_ptr, ty_ptr};
             declare_func(name, ty_void, p, 6, false);
             lr_operand_desc_t args[] = {
@@ -22872,7 +22872,7 @@ public:
             emit_call_void("_lfortran_string_read_bool", args, 6);
             uint32_t v32 = lr_emit_load(s, ty_i32, V(tmp_i32, ty_ptr));
             uint32_t v1 = lr_emit_trunc(s, ty_i1, V(v32, ty_i32));
-            uint32_t target_ptr = emit_target_ptr(target);
+            uint32_t target_ptr = emit_file_read_scalar_target_ptr(target);
             lr_emit_store(s, V(v1, ty_i1), V(target_ptr, ty_ptr));
             return true;
         }
@@ -22901,7 +22901,7 @@ public:
         // (kind-cast) back.
         int int_kind = ASRUtils::extract_kind_from_ttype_t(target_type);
         lr_type_t *target_lr = get_type(target_type);
-        uint32_t target_ptr = emit_target_ptr(target);
+        uint32_t target_ptr = emit_file_read_scalar_target_ptr(target);
         bool use64 = (int_kind == 8);
         lr_type_t *rt = use64 ? ty_i64 : ty_i32;
         const char *name = use64 ? "_lfortran_string_read_i64"
