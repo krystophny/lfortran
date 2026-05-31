@@ -3891,8 +3891,6 @@ public:
             V(has_elements, ty_i1), V(total, ty_i64), I(1, ty_i64));
         uint32_t bytes = lr_emit_mul(s, ty_i64,
             V(alloc_elems, ty_i64), V(elem_len, ty_i64));
-        uint32_t copy_bytes = lr_emit_mul(s, ty_i64,
-            V(total, ty_i64), V(elem_len, ty_i64));
         lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
         declare_func("_lfortran_malloc_alloc", ty_ptr,
             malloc_params, 2, false);
@@ -3916,12 +3914,8 @@ public:
             };
             emit_call("memset", ty_ptr, memset_args, 3);
         } else {
-            lr_type_t *memcpy_params[] = {ty_ptr, ty_ptr, ty_i64};
-            declare_func("memcpy", ty_ptr, memcpy_params, 3, false);
-            lr_operand_desc_t memcpy_args[] = {
-                V(new_base, ty_ptr), V(src_base, ty_ptr), V(copy_bytes, ty_i64)
-            };
-            emit_call("memcpy", ty_ptr, memcpy_args, 3);
+            emit_copy_descriptor_to_linear(new_base, emit_i64_const(0),
+                src_desc, array_t);
         }
         store_descriptor_shape_with_base(dst_desc, new_base, elem_len,
             src_desc, array_t);
@@ -3944,8 +3938,8 @@ public:
             lr_operand_desc_t doff[1] = {V(eoff, ty_i64)};
             uint32_t delem = lr_emit_gep(s, ty_i8,
                 V(new_base, ty_ptr), doff, 1);
-            uint32_t selem = lr_emit_gep(s, ty_i8,
-                V(src_base, ty_ptr), doff, 1);
+            uint32_t selem = emit_descriptor_element_ptr(
+                src_desc, src_base, li, (int)array_t->n_dims);
             emit_struct_storage_assignment(delem, selem, elem_st);
             uint32_t lnext = lr_emit_add(s, ty_i64,
                 V(li, ty_i64), I(1, ty_i64));
@@ -3983,6 +3977,41 @@ public:
         }
         lr_operand_desc_t off[1] = {V(byte_off, ty_i64)};
         return lr_emit_gep(s, ty_i8, V(base, ty_ptr), off, 1);
+    }
+
+    void emit_copy_descriptor_to_descriptor(uint32_t dst_desc,
+            uint32_t src_desc, ASR::Array_t *array_t, uint32_t elem_len) {
+        int n_dims = (int)array_t->n_dims;
+        uint32_t src_base = desc_base_addr(src_desc);
+        uint32_t dst_base = desc_base_addr(dst_desc);
+        uint32_t total = descriptor_array_element_count(src_desc, n_dims);
+        uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+        lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+
+        lr_error_t err;
+        uint32_t head_bb = lr_session_block(s);
+        uint32_t body_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_br(s, head_bb);
+
+        lr_session_set_block(s, head_bb, &err);
+        uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+        uint32_t more = lr_emit_icmp(s, LR_CMP_SLT,
+            V(idx, ty_i64), V(total, ty_i64));
+        lr_emit_condbr(s, V(more, ty_i1), body_bb, done_bb);
+
+        lr_session_set_block(s, body_bb, &err);
+        uint32_t src_elem = emit_descriptor_element_ptr(
+            src_desc, src_base, idx, n_dims);
+        uint32_t dst_elem = emit_descriptor_element_ptr(
+            dst_desc, dst_base, idx, n_dims);
+        emit_memcpy_dynamic(dst_elem, src_elem, elem_len);
+        uint32_t next = lr_emit_add(s, ty_i64,
+            V(idx, ty_i64), I(1, ty_i64));
+        lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+        lr_emit_br(s, head_bb);
+
+        lr_session_set_block(s, done_bb, &err);
     }
 
     void emit_allocatable_string_descriptor_array_assignment_from_desc(
@@ -4426,14 +4455,8 @@ public:
             src_desc, (int)array_t->n_dims);
         uint32_t elem_len = desc_load_i64(dst_desc, 8);
         if (!ASR::is_a<ASR::String_t>(*elem_type)) {
-            uint32_t bytes = lr_emit_mul(s, ty_i64,
-                V(total, ty_i64), V(elem_len, ty_i64));
-            lr_type_t *memcpy_params[] = {ty_ptr, ty_ptr, ty_i64};
-            declare_func("memcpy", ty_ptr, memcpy_params, 3, false);
-            lr_operand_desc_t memcpy_args[] = {
-                V(dst_base, ty_ptr), V(src_base, ty_ptr), V(bytes, ty_i64)
-            };
-            emit_call("memcpy", ty_ptr, memcpy_args, 3);
+            emit_copy_descriptor_to_descriptor(
+                dst_desc, src_desc, array_t, elem_len);
             return;
         }
 
@@ -4453,13 +4476,10 @@ public:
         lr_emit_condbr(s, V(more, ty_i1), body_bb, done_bb);
 
         lr_session_set_block(s, body_bb, &err);
-        uint32_t elem_off = lr_emit_mul(s, ty_i64,
-            V(idx, ty_i64), V(elem_len, ty_i64));
-        lr_operand_desc_t off[1] = {V(elem_off, ty_i64)};
-        uint32_t src_elem = lr_emit_gep(s, ty_i8,
-            V(src_base, ty_ptr), off, 1);
-        uint32_t dst_elem = lr_emit_gep(s, ty_i8,
-            V(dst_base, ty_ptr), off, 1);
+        uint32_t src_elem = emit_descriptor_element_ptr(
+            src_desc, src_base, idx, (int)array_t->n_dims);
+        uint32_t dst_elem = emit_descriptor_element_ptr(
+            dst_desc, dst_base, idx, (int)array_t->n_dims);
         uint32_t src_value = lr_emit_load(s, ty_str_desc,
             V(src_elem, ty_ptr));
         emit_string_assignment_to_desc_slot(dst_elem, src_value);
