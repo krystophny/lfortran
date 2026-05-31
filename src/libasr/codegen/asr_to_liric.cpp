@@ -18163,11 +18163,13 @@ public:
         ASRUtils::IntrinsicElementalFunctions intrinsic =
             static_cast<ASRUtils::IntrinsicElementalFunctions>(
                 x.m_intrinsic_id);
-        ASR::ttype_t *result_type = ASRUtils::type_get_past_array(
-            ASRUtils::type_get_past_allocatable(x.m_type));
+        ASR::ttype_t *result_type = x.m_type
+            ? ASRUtils::type_get_past_array(
+                ASRUtils::type_get_past_allocatable(x.m_type))
+            : nullptr;
         if ((intrinsic == ASRUtils::IntrinsicElementalFunctions::Max ||
                 intrinsic == ASRUtils::IntrinsicElementalFunctions::Min) &&
-                ASR::is_a<ASR::String_t>(*result_type)) {
+                result_type && ASR::is_a<ASR::String_t>(*result_type)) {
             emit_min_max(x,
                 intrinsic == ASRUtils::IntrinsicElementalFunctions::Max);
             return;
