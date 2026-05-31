@@ -8334,6 +8334,8 @@ public:
             expr_type);
         if (ASR::is_a<ASR::Array_t>(*actual_type)) {
             uint32_t desc = desc_ptr_of(actual);
+            store_i8_at(desc, 21, cfi_type_code(
+                ASRUtils::type_get_past_array(actual_type)));
             if (!type_is_unlimited_polymorphic_array(expr_type)) {
                 int64_t tag = polymorphic_actual_tag(actual);
                 if (tag == 0) {
