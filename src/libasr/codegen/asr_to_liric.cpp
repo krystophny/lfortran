@@ -12657,6 +12657,18 @@ public:
                         ASR::down_cast<ASR::String_t>(member_core));
                     visit_expr(*member->m_value);
                     emit_string_assignment_to_desc_slot(field_ptr, tmp);
+                } else if (ASR::is_a<ASR::StructType_t>(*member_core) &&
+                        ASR::is_a<ASR::StructConstructor_t>(
+                            *member->m_value)) {
+                    emit_struct_constructor_to_storage(
+                        *ASR::down_cast<ASR::StructConstructor_t>(
+                            member->m_value), field_ptr);
+                } else if (ASR::is_a<ASR::StructType_t>(*member_core) &&
+                        ASR::is_a<ASR::StructConstant_t>(
+                            *member->m_value)) {
+                    emit_struct_constant_to_storage(
+                        *ASR::down_cast<ASR::StructConstant_t>(
+                            member->m_value), field_ptr);
                 } else {
                     visit_expr(*member->m_value);
                     uint32_t value = coerce_scalar_value_to_type(tmp,
