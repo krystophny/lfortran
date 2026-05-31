@@ -224,6 +224,7 @@ public:
     // against the possibly-mutated source variable.
     std::unordered_map<uint64_t, std::vector<uint32_t>>
         runtime_pointer_array_extents;
+    std::unordered_set<uint64_t> cptr_raw_char_arrays;
     std::unordered_set<uint64_t> known_struct_hashes;
     std::vector<ASR::Variable_t *> module_init_vars;
     std::vector<ASR::Struct_t *> known_structs;
@@ -4695,6 +4696,10 @@ public:
         }
 
         ASR::Variable_t *arg_var = var_from_expr(arg);
+        if (arg_var && cptr_raw_char_arrays.count(
+                get_hash((ASR::asr_t *)arg_var))) {
+            return desc_load_i64(desc_ptr_of(arg), 24);
+        }
         bool offset_24_is_type_tag = arg_var &&
             class_desc_aliases.count(get_hash((ASR::asr_t *)arg_var));
         return emit_descriptor_string_array_len(
@@ -7372,6 +7377,67 @@ public:
         tmp = lr_emit_zext(s, rt, V(byte, ty_i8));
     }
 
+    uint32_t emit_char_array_c_loc_buffer(ASR::expr_t *expr,
+                                          ASR::Array_t *array_t) {
+        ASR::ttype_t *elem_type = ASRUtils::type_get_past_array(
+            array_t->m_type);
+        if (is_cchar_string_type(elem_type)) {
+            bool was_target = is_target;
+            is_target = true;
+            visit_expr(*expr);
+            is_target = was_target;
+            return tmp;
+        }
+
+        ArrayLinearView view = emit_array_linear_view(expr, array_t);
+        uint32_t char_len = array_t->m_physical_type ==
+            ASR::array_physical_typeType::DescriptorArray
+            ? emit_string_array_len(expr, array_t)
+            : emit_string_array_len_hint(array_t->m_type);
+        uint32_t nbytes = lr_emit_mul(s, ty_i64,
+            V(view.total, ty_i64), V(char_len, ty_i64));
+        uint32_t has_bytes = lr_emit_icmp(s, LR_CMP_SGT,
+            V(nbytes, ty_i64), I(0, ty_i64));
+        uint32_t alloc_bytes = lr_emit_select(s, ty_i64,
+            V(has_bytes, ty_i1), V(nbytes, ty_i64), I(1, ty_i64));
+        uint32_t raw = emit_malloc_bytes(alloc_bytes);
+
+        uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+        lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+        lr_error_t err;
+        uint32_t head_bb = lr_session_block(s);
+        uint32_t body_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_br(s, head_bb);
+
+        lr_session_set_block(s, head_bb, &err);
+        uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+        uint32_t more = lr_emit_icmp(s, LR_CMP_SLT,
+            V(idx, ty_i64), V(view.total, ty_i64));
+        lr_emit_condbr(s, V(more, ty_i1), body_bb, done_bb);
+
+        lr_session_set_block(s, body_bb, &err);
+        uint32_t elem_ptr = emit_linear_elem_ptr(
+            view.base, idx, view.elem_len);
+        uint32_t elem_desc = lr_emit_load(s, ty_str_desc,
+            V(elem_ptr, ty_ptr));
+        uint32_t fld0 = 0;
+        uint32_t src_data = lr_emit_extractvalue(s, ty_ptr,
+            V(elem_desc, ty_str_desc), &fld0, 1);
+        uint32_t dst_off = lr_emit_mul(s, ty_i64,
+            V(idx, ty_i64), V(char_len, ty_i64));
+        lr_operand_desc_t off[1] = {V(dst_off, ty_i64)};
+        uint32_t dst = lr_emit_gep(s, ty_i8, V(raw, ty_ptr), off, 1);
+        emit_memcpy_dynamic(dst, src_data, char_len);
+        uint32_t next = lr_emit_add(s, ty_i64,
+            V(idx, ty_i64), I(1, ty_i64));
+        lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+        lr_emit_br(s, head_bb);
+
+        lr_session_set_block(s, done_bb, &err);
+        return raw;
+    }
+
     // c_loc(p) / PointerToCPtr: a c_ptr in this backend is the same
     // ty_ptr we already track for Fortran pointers, so this is just a
     // load through the pointer slot.  Mirrors what the LLVM backend
@@ -7391,6 +7457,18 @@ public:
         // baseline behaviour.
         if (ASR::is_a<ASR::GetPointer_t>(*x.m_arg)) {
             ASR::GetPointer_t *gp = ASR::down_cast<ASR::GetPointer_t>(x.m_arg);
+            ASR::ttype_t *gp_type =
+                ASRUtils::type_get_past_allocatable_pointer(
+                    ASRUtils::expr_type(gp->m_arg));
+            if (ASR::is_a<ASR::Array_t>(*gp_type)) {
+                ASR::Array_t *gp_array = ASR::down_cast<ASR::Array_t>(
+                    gp_type);
+                if (ASRUtils::is_character(
+                        *ASRUtils::type_get_past_array(gp_array->m_type))) {
+                    tmp = emit_char_array_c_loc_buffer(gp->m_arg, gp_array);
+                    return;
+                }
+            }
             if (ASR::is_a<ASR::Var_t>(*gp->m_arg)) {
                 ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
                     ASR::down_cast<ASR::Var_t>(gp->m_arg)->m_v);
@@ -7482,6 +7560,58 @@ public:
         // addresses.
         ASR::ttype_t *fptr_contained =
             ASRUtils::type_get_past_pointer(ASRUtils::expr_type(x.m_ptr));
+        if (ASR::is_a<ASR::Array_t>(*fptr_contained) &&
+                ASRUtils::is_character(
+                    *ASRUtils::type_get_past_array(fptr_contained))) {
+            ASR::Array_t *fptr_arr =
+                ASR::down_cast<ASR::Array_t>(fptr_contained);
+            int rank = (int)fptr_arr->n_dims;
+            visit_expr(*x.m_cptr);
+            uint32_t cptr = tmp;
+            bool was_target = is_target;
+            is_target = true;
+            visit_expr(*x.m_ptr);
+            is_target = was_target;
+            uint32_t desc = tmp;
+            desc_store_base(desc, cptr);
+            desc_store_i64(desc, 8, emit_i64_const(1));
+            desc_store_rank(desc, rank);
+            desc_store_i64(desc, 24, emit_i64_const(1));
+            ArrayLinearView shape_view{}, lb_view{};
+            bool have_shape = false, have_lb = false;
+            ASR::Array_t *tmp_arr = nullptr;
+            if (x.m_shape && !ASR::is_a<ASR::ArrayConstructor_t>(*x.m_shape)
+                    && expr_is_array(x.m_shape, &tmp_arr)) {
+                shape_view = emit_array_linear_view(x.m_shape, tmp_arr);
+                have_shape = true;
+            }
+            if (x.m_lower_bounds
+                    && !ASR::is_a<ASR::ArrayConstructor_t>(*x.m_lower_bounds)
+                    && expr_is_array(x.m_lower_bounds, &tmp_arr)) {
+                lb_view = emit_array_linear_view(x.m_lower_bounds, tmp_arr);
+                have_lb = true;
+            }
+            uint32_t stride = emit_i64_const(1);
+            for (int d = 0; d < rank; d++) {
+                uint32_t extent = x.m_shape
+                    ? cptr_shape_elem_i64(x.m_shape, shape_view, have_shape, d)
+                    : emit_i64_const(1);
+                uint32_t lbound = x.m_lower_bounds
+                    ? cptr_shape_elem_i64(
+                        x.m_lower_bounds, lb_view, have_lb, d)
+                    : emit_i64_const(1);
+                int64_t base_off = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
+                desc_store_i64(desc, base_off + DESC_DIM_LBOUND, lbound);
+                desc_store_i64(desc, base_off + DESC_DIM_EXTENT, extent);
+                desc_store_i64(desc, base_off + DESC_DIM_STRIDE, stride);
+                stride = lr_emit_mul(s, ty_i64,
+                    V(stride, ty_i64), V(extent, ty_i64));
+            }
+            if (ASR::Variable_t *v = var_from_expr(x.m_ptr)) {
+                cptr_raw_char_arrays.insert(get_hash((ASR::asr_t *)v));
+            }
+            return;
+        }
         if (ASR::is_a<ASR::Array_t>(*fptr_contained)
                 && !ASRUtils::is_character(
                     *ASRUtils::type_get_past_array(fptr_contained))) {
@@ -8018,6 +8148,39 @@ public:
             return nullptr;
         }
         return ASR::down_cast<ASR::Variable_t>(sym);
+    }
+
+    bool is_string_formal(ASR::Variable_t *formal) {
+        return formal &&
+            ASR::is_a<ASR::String_t>(
+                *ASRUtils::type_get_past_allocatable_pointer(
+                    formal->m_type));
+    }
+
+    bool is_cptr_raw_char_array_item(ASR::expr_t *expr) {
+        if (!ASR::is_a<ASR::ArrayItem_t>(*expr)) return false;
+        ASR::ArrayItem_t *item = ASR::down_cast<ASR::ArrayItem_t>(expr);
+        ASR::Variable_t *owner = var_from_expr(item->m_v);
+        if (!owner || cptr_raw_char_arrays.count(
+                get_hash((ASR::asr_t *)owner)) == 0) {
+            return false;
+        }
+        ASR::ttype_t *owner_type =
+            ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(item->m_v));
+        if (!ASR::is_a<ASR::Array_t>(*owner_type)) return false;
+        return ASR::is_a<ASR::String_t>(
+            *ASRUtils::type_get_past_array(owner_type));
+    }
+
+    uint32_t emit_cptr_raw_char_array_item_desc_slot(ASR::expr_t *expr) {
+        bool was_target = is_target;
+        is_target = false;
+        visit_expr(*expr);
+        is_target = was_target;
+        uint32_t slot = emit_temp_slot(ty_str_desc);
+        lr_emit_store(s, V(tmp, ty_str_desc), V(slot, ty_ptr));
+        return slot;
     }
 
     ASR::Function_t *procedure_pointer_interface(ASR::symbol_t *sym) {
@@ -10170,8 +10333,20 @@ public:
         uint32_t elem_ptr = lr_emit_gep(s, ty_i8,
             V(base, ty_ptr), gep_off, 1);
 
+        ASR::Variable_t *owner_var = var_from_expr(x.m_v);
+        bool raw_char_elem = owner_var &&
+            cptr_raw_char_arrays.count(get_hash((ASR::asr_t *)owner_var)) &&
+            ASR::is_a<ASR::String_t>(
+                *ASRUtils::type_get_past_array(array_t->m_type));
         if (is_target) {
             tmp = elem_ptr;
+        } else if (raw_char_elem) {
+            uint32_t len = desc_load_i64(desc, 24);
+            uint32_t f0 = 0, f1 = 1;
+            uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
+                LR_UNDEF(ty_str_desc), V(elem_ptr, ty_ptr), &f0, 1);
+            tmp = lr_emit_insertvalue(s, ty_str_desc,
+                V(d0, ty_str_desc), V(len, ty_i64), &f1, 1);
         } else {
             tmp = lr_emit_load(s, elem_type, V(elem_ptr, ty_ptr));
         }
@@ -15937,6 +16112,11 @@ public:
                         visit_expr(*arg);
                         args.push_back(V(tmp, ty_ptr));
                     }
+                } else if (is_string_formal(formal_v) &&
+                        is_cptr_raw_char_array_item(arg)) {
+                    args.push_back(V(
+                        emit_cptr_raw_char_array_item_desc_slot(arg),
+                        ty_ptr));
                 } else if (formal_expects_unbounded_array_data(
                         formal_fn, i, arg)) {
                     bool was_target = is_target;
@@ -16507,6 +16687,11 @@ public:
                     // actual must make present() false (pass null).
                     args.push_back(V(emit_optional_actual_pointer(fn, i,
                         arg), ty_ptr));
+                } else if (is_string_formal(formal_v) &&
+                        is_cptr_raw_char_array_item(arg)) {
+                    args.push_back(V(
+                        emit_cptr_raw_char_array_item_desc_slot(arg),
+                        ty_ptr));
                 } else if (formal_expects_unbounded_array_data(
                         formal_fn, i, arg)) {
                     bool was_target = is_target;
@@ -17231,6 +17416,43 @@ public:
             case ASRUtils::IntrinsicElementalFunctions::Min:
                 emit_min_max(x, /*is_max=*/false);
                 return;
+            case ASRUtils::IntrinsicElementalFunctions::Iachar: {
+                if (x.n_args != 1) {
+                    throw CodeGenError("liric: iachar() expects one arg");
+                }
+                visit_expr(*x.m_args[0]);
+                uint32_t fld0 = 0;
+                uint32_t data = lr_emit_extractvalue(s, ty_ptr,
+                    V(tmp, ty_str_desc), &fld0, 1);
+                uint32_t byte = lr_emit_load(s, ty_i8, V(data, ty_ptr));
+                lr_type_t *rt = get_type(x.m_type);
+                tmp = lr_emit_zext(s, rt, V(byte, ty_i8));
+                return;
+            }
+            case ASRUtils::IntrinsicElementalFunctions::Achar: {
+                if (x.n_args != 1) {
+                    throw CodeGenError("liric: achar() expects one arg");
+                }
+                visit_expr(*x.m_args[0]);
+                uint32_t v_i8 = cast_int_value(tmp,
+                    get_type(ASRUtils::expr_type(x.m_args[0])), ty_i8);
+                uint32_t alloc_ptr = emit_call(
+                    "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+                lr_type_t *params[] = {ty_ptr, ty_i8};
+                declare_func("_lfortran_str_chr_alloc", ty_ptr, params, 2,
+                    false);
+                lr_operand_desc_t args[] = {
+                    V(alloc_ptr, ty_ptr), V(v_i8, ty_i8)
+                };
+                uint32_t data = emit_call("_lfortran_str_chr_alloc",
+                    ty_ptr, args, 2);
+                uint32_t fld0 = 0, fld1 = 1;
+                uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
+                    LR_UNDEF(ty_str_desc), V(data, ty_ptr), &fld0, 1);
+                tmp = lr_emit_insertvalue(s, ty_str_desc,
+                    V(d0, ty_str_desc), I(1, ty_i64), &fld1, 1);
+                return;
+            }
             case ASRUtils::IntrinsicElementalFunctions::Real:
             case ASRUtils::IntrinsicElementalFunctions::Aimag: {
                 if (x.n_args < 1) {
