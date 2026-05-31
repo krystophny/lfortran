@@ -16133,7 +16133,10 @@ public:
             visit_expr(*actual);
             is_target = was_target;
             actual_storage = tmp;
-            if (actual_is_pointer_slot) {
+            if (actual_is_pointer_slot &&
+                    expr_is_indirect_scalar_pointer(actual)) {
+                base = actual_storage;
+            } else if (actual_is_pointer_slot) {
                 if (formal->m_intent == ASR::intentType::Out &&
                         ASRUtils::is_allocatable(actual_type)) {
                     uint32_t old_base = lr_emit_load(s, ty_ptr,
