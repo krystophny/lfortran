@@ -9112,6 +9112,8 @@ public:
             if (expr_is_allocatable_struct(actual)) {
                 uint32_t raw = lr_emit_load(s, ty_ptr, V(data_ptr, ty_ptr));
                 data_ptr = class_data_ptr(raw);
+            } else if (is_scalar_class_pointer_storage(actual)) {
+                data_ptr = lr_emit_load(s, ty_ptr, V(data_ptr, ty_ptr));
             }
         } else {
             visit_expr(*actual);
@@ -9491,6 +9493,8 @@ public:
             if (expr_is_allocatable_struct(actual)) {
                 uint32_t raw = lr_emit_load(s, ty_ptr, V(data_ptr, ty_ptr));
                 data_ptr = class_data_ptr(raw);
+            } else if (is_scalar_class_pointer_storage(actual)) {
+                data_ptr = lr_emit_load(s, ty_ptr, V(data_ptr, ty_ptr));
             }
         } else {
             visit_expr(*actual);
