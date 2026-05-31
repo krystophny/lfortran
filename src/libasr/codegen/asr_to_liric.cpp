@@ -2029,6 +2029,11 @@ public:
                 nbytes += 16;
                 continue;
             }
+            if (ASRUtils::is_allocatable(member->m_type) ||
+                    ASRUtils::is_pointer(member->m_type)) {
+                nbytes += storage_size_for_variable(member);
+                continue;
+            }
             ASR::Struct_t *member_struct =
                 struct_symbol_from_type_decl(member->m_type_declaration);
             if (member_struct) {
@@ -9327,6 +9332,53 @@ public:
         return nullptr;
     }
 
+    ASR::Struct_t *struct_member_decl_symbol(ASR::expr_t *expr) {
+        if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*expr)) {
+            return struct_member_decl_symbol(
+                ASR::down_cast<ASR::ArrayPhysicalCast_t>(expr)->m_arg);
+        }
+        if (ASR::is_a<ASR::ArrayItem_t>(*expr)) {
+            return struct_member_decl_symbol(
+                ASR::down_cast<ASR::ArrayItem_t>(expr)->m_v);
+        }
+        if (!ASR::is_a<ASR::StructInstanceMember_t>(*expr)) {
+            return nullptr;
+        }
+        ASR::StructInstanceMember_t *sm =
+            ASR::down_cast<ASR::StructInstanceMember_t>(expr);
+        ASR::Struct_t *parent_st = struct_member_decl_symbol(sm->m_v);
+        if (!parent_st) {
+            parent_st = struct_symbol_for_concrete_expr(sm->m_v);
+        }
+        ASR::symbol_t *parent_sym =
+            ASRUtils::get_struct_sym_from_struct_expr(sm->m_v);
+        if (!parent_st && !parent_sym) {
+            return nullptr;
+        }
+        if (!parent_st) {
+            parent_sym = ASRUtils::symbol_get_past_external(parent_sym);
+            if (!parent_sym || !ASR::is_a<ASR::Struct_t>(*parent_sym)) {
+                return nullptr;
+            }
+            parent_st = ASR::down_cast<ASR::Struct_t>(parent_sym);
+        }
+        ASR::symbol_t *member_ref =
+            ASRUtils::symbol_get_past_external(sm->m_m);
+        const char *member_name = ASRUtils::symbol_name(member_ref);
+        ASR::symbol_t *member_sym =
+            parent_st->m_symtab->resolve_symbol(member_name);
+        if (!member_sym) {
+            return nullptr;
+        }
+        member_sym = ASRUtils::symbol_get_past_external(member_sym);
+        if (!member_sym || !ASR::is_a<ASR::Variable_t>(*member_sym)) {
+            return nullptr;
+        }
+        ASR::Variable_t *member =
+            ASR::down_cast<ASR::Variable_t>(member_sym);
+        return struct_symbol_from_type_decl(member->m_type_declaration);
+    }
+
     uint32_t emit_class_wrapper_for_concrete(ASR::expr_t *actual,
                                              ASR::Function_t *fn = nullptr,
                                              size_t formal_idx = 0,
@@ -12127,6 +12179,33 @@ public:
         uint64_t nbytes = 0;
         for (size_t i = 0; i < st->n_data_member_types; i++) {
             ASR::ttype_t *member_type = st->m_data_member_types[i];
+            if (ASR::is_a<ASR::Allocatable_t>(*member_type) ||
+                    ASR::is_a<ASR::Pointer_t>(*member_type)) {
+                ASR::ttype_t *pointee =
+                    ASRUtils::type_get_past_allocatable_pointer(member_type);
+                if (ASR::is_a<ASR::Array_t>(*pointee)) {
+                    ASR::Array_t *array_t =
+                        ASR::down_cast<ASR::Array_t>(pointee);
+                    if (array_t->m_physical_type ==
+                            ASR::array_physical_typeType::DescriptorArray) {
+                        nbytes += DESC_HEADER_BYTES + DESC_DIM_BYTES *
+                            (array_t->n_dims > 0 ? array_t->n_dims : 1);
+                    } else {
+                        nbytes += 8;
+                    }
+                    continue;
+                }
+                ASR::ttype_t *pointee_core =
+                    ASRUtils::type_get_past_array(pointee);
+                if (ASR::is_a<ASR::String_t>(*pointee_core) ||
+                        ASRUtils::is_unlimited_polymorphic_type(
+                            member_type)) {
+                    nbytes += 16;
+                } else {
+                    nbytes += 8;
+                }
+                continue;
+            }
             ASR::ttype_t *core =
                 ASRUtils::type_get_past_allocatable_pointer(member_type);
             if (ASR::is_a<ASR::Array_t>(*core)) {
@@ -12205,7 +12284,13 @@ public:
         ASR::ttype_t *ec = ASRUtils::type_get_past_array(
             ASRUtils::type_get_past_allocatable_pointer(elem_type));
         if (ASR::is_a<ASR::StructType_t>(*ec)) {
-            ASR::Struct_t *st = struct_symbol_for_concrete_expr(array_expr);
+            ASR::Struct_t *st = struct_member_decl_symbol(array_expr);
+            if (!st) {
+                st = struct_symbol_for_concrete_expr(array_expr);
+            }
+            if (!st) {
+                st = struct_symbol_for_type(elem_type);
+            }
             if (st) return (int64_t)struct_storage_size(st);
         }
         return element_byte_size(elem_type);
@@ -14072,6 +14157,9 @@ public:
         // inherited parent members; size an extended-type element from its
         // struct symbol (parent chain included) so the data block, descriptor
         // elem_len and element stride all match the storage layout.
+        bool polymorphic_array_target =
+            ASRUtils::is_unlimited_polymorphic_type(at) ||
+            type_is_limited_polymorphic_array(at);
         int64_t elem_bytes;
         if (arg.m_type) {
             ASR::Struct_t *tst = arg.m_sym_subclass
@@ -14083,10 +14171,23 @@ public:
         } else {
             elem_bytes = array_element_stride_bytes(arg.m_a, array_t->m_type);
         }
+        ASR::ttype_t *static_elem_type =
+            ASRUtils::type_get_past_array(
+                ASRUtils::type_get_past_allocatable_pointer(array_t->m_type));
+        if (!polymorphic_array_target &&
+                ASR::is_a<ASR::StructType_t>(*static_elem_type)) {
+            ASR::Struct_t *st = struct_member_decl_symbol(arg.m_a);
+            if (!st) {
+                st = struct_symbol_for_concrete_expr(arg.m_a);
+            }
+            if (!st) {
+                st = struct_symbol_for_type(array_t->m_type);
+            }
+            if (st) {
+                elem_bytes = (int64_t)struct_storage_size(st);
+            }
+        }
         uint32_t elem_bytes_value = emit_i64_const(elem_bytes);
-        bool polymorphic_array_target =
-            ASRUtils::is_unlimited_polymorphic_type(at) ||
-            type_is_limited_polymorphic_array(at);
         bool has_dynamic_source_tag = false;
         uint32_t dynamic_source_tag = 0;
         if (dynamic_source && polymorphic_array_target &&
@@ -14268,11 +14369,26 @@ public:
         // `allocate(arr(N))`) must run the default-init helper on
         // each element so reads of `arr(i)%v` see 7 instead of 0.
         if (ASR::is_a<ASR::StructType_t>(*allocated_elem_type)) {
+            lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
+            declare_func("memset", ty_ptr, memset_params, 3, false);
+            lr_operand_desc_t memset_args[] = {
+                V(data, ty_ptr), I(0, ty_i32), V(byte_total, ty_i64)
+            };
+            emit_call("memset", ty_ptr, memset_args, 3);
             ASR::Variable_t *target_var = var_from_expr(arg.m_a);
             ASR::Struct_t *st = nullptr;
             if (target_var) {
                 st = struct_symbol_from_type_decl(
                     target_var->m_type_declaration);
+            }
+            if (!st) {
+                st = struct_member_decl_symbol(arg.m_a);
+            }
+            if (!st) {
+                st = struct_symbol_for_concrete_expr(arg.m_a);
+            }
+            if (!st) {
+                st = struct_symbol_for_type(allocated_elem_type);
             }
             if (!st) {
                 st = struct_symbol_from_type_decl(
