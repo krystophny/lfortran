@@ -1412,6 +1412,41 @@ public:
                                          : value;
     }
 
+    ASR::ttype_t *scalar_pointer_pointee_type(ASR::ttype_t *type) {
+        if (!ASRUtils::is_pointer(type)) return nullptr;
+        ASR::ttype_t *pointee = ASRUtils::type_get_past_pointer(type);
+        pointee = ASRUtils::type_get_past_allocatable(pointee);
+        if (ASR::is_a<ASR::Array_t>(*pointee)) return nullptr;
+        pointee = ASRUtils::type_get_past_array(pointee);
+        if (ASR::is_a<ASR::String_t>(*pointee) ||
+                ASR::is_a<ASR::StructType_t>(*pointee)) {
+            return nullptr;
+        }
+        return pointee;
+    }
+
+    uint32_t function_return_to_expr_value(uint32_t value,
+                                           ASR::ttype_t *type) {
+        uint32_t internal = function_return_abi_to_internal(value, type);
+        ASR::ttype_t *pointee = scalar_pointer_pointee_type(type);
+        if (!is_target && pointee) {
+            return lr_emit_load(s, get_type(pointee), V(internal, ty_ptr));
+        }
+        return internal;
+    }
+
+    uint32_t function_sret_return_to_expr_value(uint32_t slot,
+            lr_type_t *ret, ASR::ttype_t *type) {
+        ASR::ttype_t *pointee = scalar_pointer_pointee_type(type);
+        if (pointee) {
+            uint32_t ptr = lr_emit_load(s, ret, V(slot, ty_ptr));
+            if (is_target) return ptr;
+            return lr_emit_load(s, get_type(pointee), V(ptr, ty_ptr));
+        }
+        if (is_target) return slot;
+        return lr_emit_load(s, ret, V(slot, ty_ptr));
+    }
+
     std::string construct_key(char *name) {
         std::string key(name);
         for (char &c: key) {
@@ -9930,7 +9965,12 @@ public:
             if (is_scalar_intrinsic_pointer_target(x.m_value)) {
                 rhs = emit_scalar_intrinsic_pointer_value(x.m_value);
             } else {
+                bool was_target = is_target;
+                if (ASR::is_a<ASR::FunctionCall_t>(*x.m_value)) {
+                    is_target = true;
+                }
                 visit_expr(*x.m_value);
+                is_target = was_target;
                 rhs = tmp;
             }
             t = ty_ptr;
@@ -16536,7 +16576,7 @@ public:
                     params.size(), false);
                 uint32_t call_value = emit_call(cname.c_str(), ret,
                     cargs.data(), cargs.size());
-                tmp = function_return_abi_to_internal(call_value, x.m_type);
+                tmp = function_return_to_expr_value(call_value, x.m_type);
                 finish_bindc_cchar_array_args(scratch);
                 finish_bindc_struct_cfi_args(struct_scratch);
                 finish_bindc_scalar_cfi_args(scalar_scratch);
@@ -16821,13 +16861,13 @@ public:
                     sret_args.data(), sret_args.size());
                 emit_class_writebacks();
 
-                if (is_target) { tmp = ret_slot; return; }
-                tmp = lr_emit_load(s, ret, V(ret_slot, ty_ptr));
+                tmp = function_sret_return_to_expr_value(ret_slot, ret,
+                    x.m_type);
                 return;
             }
             uint32_t call_value = lr_emit_call(s, ret,
                 V(interface_fptr, ty_ptr), args.data(), args.size());
-            tmp = function_return_abi_to_internal(call_value, x.m_type);
+            tmp = function_return_to_expr_value(call_value, x.m_type);
             emit_class_writebacks();
             return;
         }
@@ -16839,7 +16879,7 @@ public:
                 : proc_pointer_callee(v);
             uint32_t call_value = lr_emit_call(s, ret, V(fptr, ty_ptr),
                 args.data(), args.size());
-            tmp = function_return_abi_to_internal(call_value, x.m_type);
+            tmp = function_return_to_expr_value(call_value, x.m_type);
             emit_class_writebacks();
             return;
         }
@@ -16865,7 +16905,7 @@ public:
                 dynamic_method_name(x.m_name, fn));
             uint32_t call_value = lr_emit_call(s, ret, V(fptr, ty_ptr),
                 args.data(), args.size());
-            tmp = function_return_abi_to_internal(call_value, x.m_type);
+            tmp = function_return_to_expr_value(call_value, x.m_type);
             emit_class_writebacks();
             return;
         }
@@ -16879,7 +16919,7 @@ public:
                 dynamic_method_name(x.m_name, fn));
             uint32_t call_value = lr_emit_call(s, ret, V(fptr, ty_ptr),
                 args.data(), args.size());
-            tmp = function_return_abi_to_internal(call_value, x.m_type);
+            tmp = function_return_to_expr_value(call_value, x.m_type);
             emit_class_writebacks();
             return;
         }
@@ -16895,7 +16935,7 @@ public:
                 dynamic_method_name(x.m_name, fn));
             uint32_t call_value = lr_emit_call(s, ret, V(fptr, ty_ptr),
                 args.data(), args.size());
-            tmp = function_return_abi_to_internal(call_value, x.m_type);
+            tmp = function_return_to_expr_value(call_value, x.m_type);
             emit_class_writebacks();
             return;
         }
@@ -16909,13 +16949,13 @@ public:
                 sret_args.data(), sret_args.size());
             emit_class_writebacks();
 
-            if (is_target) { tmp = ret_slot; return; }
-            tmp = lr_emit_load(s, ret, V(ret_slot, ty_ptr));
+            tmp = function_sret_return_to_expr_value(ret_slot, ret,
+                x.m_type);
             return;
         }
         uint32_t call_value = lr_emit_call(s, ret, LR_GLOBAL(sym, ty_ptr),
                            args.data(), args.size());
-        tmp = function_return_abi_to_internal(call_value, x.m_type);
+        tmp = function_return_to_expr_value(call_value, x.m_type);
         emit_class_writebacks();
     }
 
