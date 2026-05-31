@@ -9989,6 +9989,8 @@ public:
             uint32_t lb;
             int64_t formal_lb = 1;
             bool use_formal_lb = false;
+            uint32_t formal_lb_v = 0;
+            bool has_formal_lb_v = false;
             if (formal_array_v && r < formal_array_v->n_dims &&
                     !formal_array_v->m_dims[r].m_length) {
                 ASR::expr_t *start =
@@ -9996,11 +9998,19 @@ public:
                 if (!start) { use_formal_lb = true; formal_lb = 1; }
                 else if (ASRUtils::extract_value(start, formal_lb)) {
                     use_formal_lb = true;
+                } else {
+                    visit_expr(*start);
+                    lr_type_t *lt = get_type(ASRUtils::expr_type(start));
+                    formal_lb_v = cast_int_value(tmp, lt, ty_i64);
+                    has_formal_lb_v = true;
+                    use_formal_lb = true;
                 }
             }
             if (use_formal_lb) {
-                lb = lr_emit_add(s, ty_i64,
-                    I(formal_lb, ty_i64), I(0, ty_i64));
+                lb = has_formal_lb_v
+                    ? formal_lb_v
+                    : lr_emit_add(s, ty_i64,
+                        I(formal_lb, ty_i64), I(0, ty_i64));
             } else {
                 lb = desc_dim_lbound(desc, r);
             }
@@ -23890,16 +23900,21 @@ found_offset:
                             array_v->m_dims[req_dim].m_start;
                         ASR::expr_t *length =
                             array_v->m_dims[req_dim].m_length;
-                        int64_t lb_val = 1;
-                        bool start_const = (!start) ||
-                            ASRUtils::extract_value(start, lb_val);
-                        // Only the assumed-shape case (no compile-time
-                        // length) lets the dummy override the actual's
-                        // lbound; explicit-shape dummies are bound by
-                        // the actual.
-                        if (!length && start_const) {
-                            lbound = lr_emit_add(s, ty_i64,
-                                I(lb_val, ty_i64), I(0, ty_i64));
+                        // Only the assumed-shape case (no length) lets the
+                        // dummy override the actual's lbound; explicit-shape
+                        // dummies are bound by the actual.
+                        if (!length) {
+                            int64_t lb_val = 1;
+                            if (!start ||
+                                    ASRUtils::extract_value(start, lb_val)) {
+                                lbound = lr_emit_add(s, ty_i64,
+                                    I(lb_val, ty_i64), I(0, ty_i64));
+                            } else {
+                                visit_expr(*start);
+                                lr_type_t *lt = get_type(
+                                    ASRUtils::expr_type(start));
+                                lbound = cast_int_value(tmp, lt, ty_i64);
+                            }
                             used_declared_start = true;
                         }
                     }
