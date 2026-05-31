@@ -164,6 +164,7 @@ public:
     lr_session_t *s;
     uint32_t tmp;               // current expression result vreg
     bool is_target;             // true when visiting assignment LHS
+    bool force_array_section_descriptor = false;
     uint32_t proc_return;       // return block for current function
     // OPEN-time connection modes for the formatted write currently being
     // emitted.  Active only inside an external-unit FileWrite; print and
@@ -6711,6 +6712,16 @@ public:
             return;
         }
 
+        ASR::ttype_t *result_type =
+            ASRUtils::type_get_past_allocatable_pointer(x.m_type);
+        if (ASR::is_a<ASR::Array_t>(*result_type) &&
+                ASR::down_cast<ASR::Array_t>(result_type)->m_physical_type ==
+                    ASR::array_physical_typeType::UnboundedPointerArray &&
+                !force_array_section_descriptor) {
+            tmp = new_base;
+            return;
+        }
+
         // Allocate a fresh descriptor of rank=out_rank on the stack
         // and fill it.
         uint32_t new_desc = emit_desc_alloca(out_rank);
@@ -9005,11 +9016,21 @@ public:
 
     bool formal_expects_unbounded_array_data(ASR::Function_t *fn, size_t i,
             ASR::expr_t *actual) {
-        if (!ASR::is_a<ASR::ArrayPhysicalCast_t>(*actual)) return false;
-        ASR::ArrayPhysicalCast_t *cast =
-            ASR::down_cast<ASR::ArrayPhysicalCast_t>(actual);
-        if (cast->m_new !=
-                ASR::array_physical_typeType::UnboundedPointerArray) {
+        bool actual_unbounded = false;
+        if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*actual)) {
+            ASR::ArrayPhysicalCast_t *cast =
+                ASR::down_cast<ASR::ArrayPhysicalCast_t>(actual);
+            actual_unbounded = cast->m_new ==
+                ASR::array_physical_typeType::UnboundedPointerArray;
+        } else {
+            ASR::ttype_t *actual_type =
+                ASRUtils::type_get_past_allocatable_pointer(
+                    ASRUtils::expr_type(actual));
+            actual_unbounded = ASR::is_a<ASR::Array_t>(*actual_type) &&
+                ASR::down_cast<ASR::Array_t>(actual_type)->m_physical_type ==
+                    ASR::array_physical_typeType::UnboundedPointerArray;
+        }
+        if (!actual_unbounded) {
             return false;
         }
         ASR::Variable_t *formal = formal_arg_var(fn, i);
@@ -10605,7 +10626,11 @@ public:
                 lr_session_set_block(s, done_bb, &err);
                 return;
             }
+            bool force_desc_was = force_array_section_descriptor;
+            force_array_section_descriptor =
+                ASR::is_a<ASR::ArraySection_t>(*x.m_value);
             uint32_t src_desc = desc_ptr_of(x.m_value);
+            force_array_section_descriptor = force_desc_was;
             emit_memcpy_bytes(dst, src_desc,
                 (uint64_t)(DESC_HEADER_BYTES + DESC_DIM_BYTES *
                     (ndims > 0 ? ndims : 1)));
@@ -22539,8 +22564,18 @@ public:
                 ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
                     ASR::down_cast<ASR::Var_t>(x.m_vars[i])->m_v);
                 if (ASR::is_a<ASR::Variable_t>(*sym)) {
-                    reset_descriptor_array(emit_variable_address(
-                        ASR::down_cast<ASR::Variable_t>(sym)), array_t);
+                    ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(sym);
+                    uint64_t h = get_hash((ASR::asr_t *)v);
+                    uint32_t slot = emit_variable_address(v);
+                    if (descriptor_slot_array_temps.count(h)) {
+                        uint32_t desc =
+                            lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
+                        reset_descriptor_array(desc, array_t);
+                    } else if (runtime_pointer_arrays.count(h)) {
+                        lr_emit_store(s, LR_NULL(ty_ptr), V(slot, ty_ptr));
+                    } else {
+                        reset_descriptor_array(slot, array_t);
+                    }
                     continue;
                 }
             }
