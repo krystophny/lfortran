@@ -1812,6 +1812,29 @@ public:
             ASR::is_a<ASR::StructType_t>(*core);
     }
 
+    bool is_scalar_class_pointer_storage(ASR::expr_t *expr) {
+        expr = peel_class_narrowing_cast(expr);
+        if (!ASR::is_a<ASR::Var_t>(*expr) &&
+                !ASR::is_a<ASR::StructInstanceMember_t>(*expr)) {
+            return false;
+        }
+        ASR::ttype_t *type = ASRUtils::expr_type(expr);
+        if (!ASRUtils::is_pointer(type) || ASRUtils::is_allocatable(type)) {
+            return false;
+        }
+        ASR::ttype_t *core =
+            ASRUtils::type_get_past_pointer(type);
+        core = ASRUtils::type_get_past_array(core);
+        if (!ASR::is_a<ASR::StructType_t>(*core)) {
+            return false;
+        }
+        if (ASRUtils::is_class_type(ASRUtils::extract_type(type))) {
+            return true;
+        }
+        ASR::Struct_t *st = struct_symbol_for_concrete_expr(expr);
+        return st && st->m_is_abstract;
+    }
+
     // A scalar class-typed pointer Var that, by the rules above, would be
     // skipped by is_scalar_struct_pointer_* (class exclusion) but actually
     // holds a headerless data pointer recorded at its pointer-associate.
@@ -1832,7 +1855,10 @@ public:
     // (allocatable class) source, which needs class_data_ptr handling.
     bool is_scalar_class_data_ptr_target(ASR::expr_t *target,
             ASR::expr_t *value) {
-        if (!ASR::is_a<ASR::Var_t>(*target)) return false;
+        if (!ASR::is_a<ASR::Var_t>(*target) &&
+                !ASR::is_a<ASR::StructInstanceMember_t>(*target)) {
+            return false;
+        }
         // Only a plain Var source aliases headerless storage here.  A Cast
         // source (e.g. a select-type selector `sel => (ClassToClass x)`) has
         // its own descriptor/class handling and must not be rerouted.
@@ -3071,6 +3097,85 @@ public:
             ASRUtils::extract_type(formal->m_type));
     }
 
+    bool expr_base_var_matches(ASR::expr_t *a, ASR::expr_t *b) {
+        if (!a || !b) return false;
+        a = peel_class_narrowing_cast(a);
+        b = peel_class_narrowing_cast(b);
+        if (!ASR::is_a<ASR::Var_t>(*a) || !ASR::is_a<ASR::Var_t>(*b)) {
+            return false;
+        }
+        ASR::symbol_t *sa = ASRUtils::symbol_get_past_external(
+            ASR::down_cast<ASR::Var_t>(a)->m_v);
+        ASR::symbol_t *sb = ASRUtils::symbol_get_past_external(
+            ASR::down_cast<ASR::Var_t>(b)->m_v);
+        return get_hash((ASR::asr_t *)sa) == get_hash((ASR::asr_t *)sb);
+    }
+
+    bool is_tbp_pass_object_actual(ASR::symbol_t *call_sym,
+            ASR::expr_t *dt, ASR::expr_t *arg) {
+        return dt && is_tbp_call_symbol(call_sym) &&
+            (arg == dt || expr_base_var_matches(arg, dt));
+    }
+
+    bool needs_class_pointer_alias_formal_wrap(ASR::Function_t *fn,
+            size_t i, ASR::expr_t *arg, ASR::expr_t *dt,
+            ASR::symbol_t *call_sym) {
+        if (is_tbp_pass_object_actual(call_sym, dt, arg)) {
+            return false;
+        }
+        ASR::Variable_t *formal = formal_arg_var(fn, i);
+        if (!formal || formal->m_intent != ASR::intentType::In ||
+                !ASRUtils::is_pointer(formal->m_type) ||
+                !ASR::is_a<ASR::Var_t>(*arg)) {
+            return false;
+        }
+        ASR::ttype_t *formal_core =
+            ASRUtils::type_get_past_pointer(formal->m_type);
+        formal_core = ASRUtils::type_get_past_array(formal_core);
+        if (!ASR::is_a<ASR::StructType_t>(*formal_core)) {
+            return false;
+        }
+        ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
+            ASR::down_cast<ASR::Var_t>(arg)->m_v);
+        return class_alias_concrete_tag.count(
+            get_hash((ASR::asr_t *)sym)) > 0;
+    }
+
+    uint32_t emit_class_pointer_alias_formal_slot(ASR::expr_t *arg) {
+        ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
+            ASR::down_cast<ASR::Var_t>(arg)->m_v);
+        int64_t tag = class_alias_concrete_tag[
+            get_hash((ASR::asr_t *)sym)];
+        ASR::Struct_t *st = struct_from_tag(tag);
+        if (!st) {
+            throw CodeGenError(
+                "liric: class pointer wrapper cannot resolve target type");
+        }
+        uint64_t data_bytes = struct_storage_size(st);
+        uint64_t raw_bytes = (uint64_t)class_header_bytes() + data_bytes;
+        uint32_t raw = emit_malloc_bytes(emit_i64_const((int64_t)raw_bytes));
+        lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
+        declare_func("memset", ty_ptr, memset_params, 3, false);
+        lr_operand_desc_t memset_args[] = {
+            V(raw, ty_ptr), I(0, ty_i32), I((int64_t)raw_bytes, ty_i64)
+        };
+        emit_call("memset", ty_ptr, memset_args, 3);
+        lr_emit_store(s, I(tag, ty_i64), V(raw, ty_ptr));
+        emit_struct_vtable(raw, st);
+        uint32_t data_ptr = class_data_ptr(raw);
+
+        bool was_target = is_target;
+        is_target = true;
+        visit_expr(*arg);
+        is_target = was_target;
+        uint32_t actual_ptr = lr_emit_load(s, ty_ptr, V(tmp, ty_ptr));
+        emit_memcpy_bytes(data_ptr, actual_ptr, data_bytes);
+
+        uint32_t slot = lr_emit_alloca(s, ty_ptr);
+        lr_emit_store(s, V(data_ptr, ty_ptr), V(slot, ty_ptr));
+        return slot;
+    }
+
     void visit_Var(const ASR::Var_t &x) {
         ASR::symbol_t *sym_before_external = x.m_v;
         ASR::symbol_t *raw_sym =
@@ -4265,8 +4370,22 @@ public:
         return tmp_storage;
     }
 
+    void emit_allocatable_struct_component_copy(uint32_t dst_slot,
+            uint32_t src_data, ASR::Struct_t *st, int depth) {
+        uint32_t dst_data = ensure_allocatable_struct_data(
+            dst_slot, st, nullptr);
+        if (depth >= 4) {
+            emit_memcpy_bytes(dst_data, src_data, struct_storage_size(st));
+        } else {
+            uint32_t src_copy = emit_struct_deep_copy_temp(
+                src_data, st, depth + 1);
+            emit_struct_storage_assignment(dst_data, src_copy, st, depth + 1);
+        }
+    }
+
     void emit_allocatable_struct_component_assignment(uint32_t dst_slot,
-            uint32_t src_slot, ASR::Struct_t *st, int depth = 0) {
+            uint32_t src_slot, ASR::Struct_t *st, bool dynamic_class,
+            int depth = 0) {
         uint32_t src_raw = lr_emit_load(s, ty_ptr, V(src_slot, ty_ptr));
         uint32_t src_is_null = lr_emit_icmp(s, LR_CMP_EQ,
             V(src_raw, ty_ptr), LR_NULL(ty_ptr));
@@ -4283,14 +4402,46 @@ public:
 
         lr_session_set_block(s, copy_bb, &err);
         uint32_t src_data = class_data_ptr(src_raw);
-        uint32_t dst_data = ensure_allocatable_struct_data(
-            dst_slot, st, nullptr);
-        if (depth >= 4) {
-            emit_memcpy_bytes(dst_data, src_data, struct_storage_size(st));
+        if (dynamic_class) {
+            uint32_t src_tag = load_raw_object_type_tag(src_raw);
+            uint32_t match_done_bb = done_bb;
+            for (ASR::Struct_t *candidate : known_structs) {
+                if (st && !struct_derives_from(candidate, st) &&
+                        get_hash((ASR::asr_t *)candidate) !=
+                        get_hash((ASR::asr_t *)st)) {
+                    continue;
+                }
+                uint32_t then_bb = lr_session_block(s);
+                uint32_t next_bb = lr_session_block(s);
+                uint32_t matches = lr_emit_icmp(s, LR_CMP_EQ,
+                    V(src_tag, ty_i64),
+                    I(struct_symbol_tag((ASR::symbol_t *)candidate), ty_i64));
+                lr_emit_condbr(s, V(matches, ty_i1), then_bb, next_bb);
+
+                lr_session_set_block(s, then_bb, &err);
+                emit_allocatable_struct_allocation(dst_slot, candidate,
+                    nullptr);
+                uint32_t dst_raw = lr_emit_load(s, ty_ptr,
+                    V(dst_slot, ty_ptr));
+                uint32_t dst_data = class_data_ptr(dst_raw);
+                if (depth >= 4) {
+                    emit_memcpy_bytes(dst_data, src_data,
+                        struct_storage_size(candidate));
+                } else {
+                    emit_struct_storage_assignment(dst_data, src_data,
+                        candidate, depth + 1);
+                }
+                lr_emit_br(s, match_done_bb);
+
+                lr_session_set_block(s, next_bb, &err);
+            }
+            if (st && !st->m_is_abstract) {
+                emit_allocatable_struct_component_copy(dst_slot, src_data,
+                    st, depth);
+            }
         } else {
-            uint32_t src_copy = emit_struct_deep_copy_temp(
-                src_data, st, depth + 1);
-            emit_struct_storage_assignment(dst_data, src_copy, st, depth + 1);
+            emit_allocatable_struct_component_copy(dst_slot, src_data, st,
+                depth);
         }
         lr_emit_br(s, done_bb);
 
@@ -4383,8 +4534,11 @@ public:
                         ASRUtils::is_allocatable(member_type)) {
                     ASR::Struct_t *member_st = struct_symbol_from_type_decl(
                         member->m_type_declaration);
+                    bool dynamic_class_member = ASRUtils::is_class_type(
+                        ASRUtils::extract_type(member_type));
                     emit_allocatable_struct_component_assignment(
-                        dst_field, src_field, member_st, depth + 1);
+                        dst_field, src_field, member_st,
+                        dynamic_class_member, depth + 1);
                 } else if (ASR::is_a<ASR::StructType_t>(*core) &&
                         !ASRUtils::is_allocatable(member_type) &&
                         !ASRUtils::is_pointer(member_type)) {
@@ -5466,6 +5620,35 @@ public:
         }
 
         if (!target_is_array &&
+                expr_is_allocatable_struct(x.m_target) &&
+                expr_is_storage_reference(x.m_value) &&
+                ASR::is_a<ASR::StructType_t>(*value_struct_type)) {
+            ASR::Struct_t *target_decl =
+                struct_symbol_for_concrete_expr(x.m_target);
+            ASR::Struct_t *source_decl =
+                struct_symbol_for_concrete_expr(x.m_value);
+            bool dynamic_class_source =
+                ASRUtils::is_class_type(ASRUtils::extract_type(
+                    ASRUtils::expr_type(x.m_value))) ||
+                (target_decl && target_decl->m_is_abstract) ||
+                (source_decl && source_decl->m_is_abstract);
+            if (dynamic_class_source) {
+                bool was_target = is_target;
+                is_target = true;
+                visit_expr(*x.m_target);
+                is_target = was_target;
+                uint32_t slot = tmp;
+                ASR::Struct_t *declared = target_decl ?
+                    target_decl : source_decl;
+                if (declared && emit_mold_struct_allocation(
+                        slot, declared, x.m_value,
+                        var_from_expr(x.m_target))) {
+                    return;
+                }
+            }
+        }
+
+        if (!target_is_array &&
                 ASR::is_a<ASR::StructType_t>(*target_struct_type) &&
                 expr_is_storage_reference(x.m_value) &&
                 ASR::is_a<ASR::StructType_t>(*value_struct_type)) {
@@ -5509,6 +5692,12 @@ public:
                 st = struct_symbol_from_type_decl(sym);
             }
             if (expr_is_allocatable_struct(x.m_target)) {
+                if (st && st->m_is_abstract &&
+                        emit_mold_struct_allocation(
+                            dst, st, x.m_value,
+                            var_from_expr(x.m_target))) {
+                    return;
+                }
                 emit_finalize_allocated_struct_slot(dst, st);
                 dst = ensure_allocatable_struct_data(
                     dst, st, var_from_expr(x.m_target));
@@ -8709,6 +8898,107 @@ public:
         return true;
     }
 
+    ASR::ArrayItem_t *limited_polymorphic_array_item(ASR::expr_t *actual) {
+        actual = peel_class_narrowing_cast(actual);
+        if (!ASR::is_a<ASR::ArrayItem_t>(*actual)) return nullptr;
+        ASR::ArrayItem_t *item = ASR::down_cast<ASR::ArrayItem_t>(actual);
+        return type_is_limited_polymorphic_array(
+            ASRUtils::expr_type(item->m_v)) ? item : nullptr;
+    }
+
+    bool needs_poly_array_item_class_wrap(ASR::Function_t *fn, size_t i,
+                                          ASR::expr_t *actual) {
+        ASR::Variable_t *formal = formal_arg_var(fn, i);
+        if (!formal ||
+                ASRUtils::is_pointer(formal->m_type) ||
+                ASRUtils::is_allocatable(formal->m_type) ||
+                ASRUtils::is_unlimited_polymorphic_type(formal->m_type)) {
+            return false;
+        }
+        if (!ASRUtils::is_class_type(
+                ASRUtils::extract_type(formal->m_type))) {
+            return false;
+        }
+        return limited_polymorphic_array_item(actual) != nullptr;
+    }
+
+    uint32_t emit_class_wrapper_for_poly_array_item(ASR::ArrayItem_t *item) {
+        uint32_t desc = desc_ptr_of(item->m_v);
+        uint32_t tag = desc_load_i64(desc, 24);
+        uint32_t elem_len = desc_load_i64(desc, 8);
+        uint32_t raw_nbytes = lr_emit_add(s, ty_i64,
+            V(elem_len, ty_i64), I(class_header_bytes(), ty_i64));
+        uint32_t raw = emit_malloc_bytes(raw_nbytes);
+        lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
+        declare_func("memset", ty_ptr, memset_params, 3, false);
+        lr_operand_desc_t memset_args[] = {
+            V(raw, ty_ptr), I(0, ty_i32), V(raw_nbytes, ty_i64)
+        };
+        emit_call("memset", ty_ptr, memset_args, 3);
+        lr_emit_store(s, V(tag, ty_i64), V(raw, ty_ptr));
+
+        ASR::Struct_t *declared = struct_symbol_for_concrete_expr(item->m_v);
+        lr_error_t err;
+        uint32_t done_bb = lr_session_block(s);
+        for (ASR::Struct_t *candidate : known_structs) {
+            if (declared && !struct_derives_from(candidate, declared) &&
+                    get_hash((ASR::asr_t *)candidate) !=
+                    get_hash((ASR::asr_t *)declared)) {
+                continue;
+            }
+            uint32_t then_bb = lr_session_block(s);
+            uint32_t next_bb = lr_session_block(s);
+            uint32_t matches = lr_emit_icmp(s, LR_CMP_EQ,
+                V(tag, ty_i64),
+                I(struct_symbol_tag((ASR::symbol_t *)candidate), ty_i64));
+            lr_emit_condbr(s, V(matches, ty_i1), then_bb, next_bb);
+
+            lr_session_set_block(s, then_bb, &err);
+            emit_struct_vtable(raw, candidate);
+            lr_emit_br(s, done_bb);
+
+            lr_session_set_block(s, next_bb, &err);
+        }
+        lr_emit_br(s, done_bb);
+        lr_session_set_block(s, done_bb, &err);
+
+        bool was_target = is_target;
+        is_target = true;
+        visit_expr(*reinterpret_cast<ASR::expr_t *>(item));
+        is_target = was_target;
+        uint32_t src = tmp;
+        uint32_t data = class_data_ptr(raw);
+        emit_memcpy_dynamic(data, src, elem_len);
+        return data;
+    }
+
+    uint32_t emit_heap_class_wrapper_for_concrete(ASR::expr_t *actual) {
+        ASR::Struct_t *st = struct_symbol_for_concrete_expr(actual);
+        if (!st) {
+            throw CodeGenError(
+                "liric: heap class wrapper cannot resolve concrete struct");
+        }
+        uint64_t data_bytes = struct_storage_size(st);
+        uint64_t raw_bytes = (uint64_t)class_header_bytes() + data_bytes;
+        uint32_t raw = emit_malloc_bytes(emit_i64_const((int64_t)raw_bytes));
+        lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
+        declare_func("memset", ty_ptr, memset_params, 3, false);
+        lr_operand_desc_t memset_args[] = {
+            V(raw, ty_ptr), I(0, ty_i32), I((int64_t)raw_bytes, ty_i64)
+        };
+        emit_call("memset", ty_ptr, memset_args, 3);
+        lr_emit_store(s, I(struct_symbol_tag(
+            (ASR::symbol_t *)st), ty_i64), V(raw, ty_ptr));
+        emit_struct_vtable(raw, st);
+        uint32_t data_ptr = class_data_ptr(raw);
+        bool was_target = is_target;
+        is_target = true;
+        visit_expr(*actual);
+        is_target = was_target;
+        emit_memcpy_bytes(data_ptr, tmp, data_bytes);
+        return data_ptr;
+    }
+
     // Wrap a non-polymorphic `type(U)` actual into a stack-allocated class
     // descriptor `{tag, vtable[128], data}` so the polymorphic callee can
     // dispatch through the vtable.  Returns the data pointer (past the
@@ -9416,6 +9706,23 @@ public:
                 return;
             }
         }
+        if (ASR::is_a<ASR::Var_t>(*x.m_target) &&
+                ASR::is_a<ASR::Cast_t>(*x.m_value) &&
+                ASRUtils::is_pointer(ASRUtils::expr_type(x.m_target))) {
+            ASR::Cast_t *cast = ASR::down_cast<ASR::Cast_t>(x.m_value);
+            bool class_narrowing =
+                cast->m_kind == ASR::cast_kindType::ClassToClass ||
+                cast->m_kind == ASR::cast_kindType::ClassToStruct;
+            if (class_narrowing &&
+                    ASRUtils::is_pointer(ASRUtils::expr_type(cast->m_arg))) {
+                uint32_t dst = emit_target_ptr(x.m_target);
+                uint32_t src_slot = emit_target_ptr(cast->m_arg);
+                uint32_t src = lr_emit_load(s, ty_ptr,
+                    V(src_slot, ty_ptr));
+                lr_emit_store(s, V(src, ty_ptr), V(dst, ty_ptr));
+                return;
+            }
+        }
         // Pointer bounds-remapping: ptr(lb:ub[:step]) => target.  The target
         // is an ArraySection over the pointer itself; stamp the pointer's
         // descriptor with the remapped lower bound and extent over the
@@ -9866,27 +10173,36 @@ public:
             // as a data pointer).  Store the source ADDRESS, not its value,
             // and record p so member access dereferences without a header.
             if (ASRUtils::is_pointer(ASRUtils::expr_type(x.m_value))) {
+                is_target = true;
                 visit_expr(*x.m_value);
+                is_target = false;
+                rhs = lr_emit_load(s, ty_ptr, V(tmp, ty_ptr));
+            } else if (ASR::is_a<ASR::StructInstanceMember_t>(*x.m_target)) {
+                rhs = emit_heap_class_wrapper_for_concrete(x.m_value);
             } else {
                 is_target = true;
                 visit_expr(*x.m_value);
                 is_target = false;
             }
-            rhs = tmp;
+            if (rhs == 0) {
+                rhs = tmp;
+            }
             t = ty_ptr;
-            ASR::symbol_t *tsym = ASRUtils::symbol_get_past_external(
-                ASR::down_cast<ASR::Var_t>(x.m_target)->m_v);
-            class_alias_data_ptr.insert(get_hash((ASR::asr_t *)tsym));
-            // Record the concrete target's dynamic type so a later select type
-            // / allocate(source=p) reads the right tag (the target has no
-            // runtime class header to read it from).
-            if (ASRUtils::is_class_type(ASRUtils::extract_type(
-                    ASRUtils::expr_type(x.m_target)))) {
-                ASR::Struct_t *vst =
-                    struct_symbol_for_concrete_expr(x.m_value);
-                if (vst) {
-                    class_alias_concrete_tag[get_hash((ASR::asr_t *)tsym)] =
-                        struct_symbol_tag((ASR::symbol_t *)vst);
+            if (ASR::is_a<ASR::Var_t>(*x.m_target)) {
+                ASR::symbol_t *tsym = ASRUtils::symbol_get_past_external(
+                    ASR::down_cast<ASR::Var_t>(x.m_target)->m_v);
+                class_alias_data_ptr.insert(get_hash((ASR::asr_t *)tsym));
+                // Record the concrete target's dynamic type so a later select type
+                // / allocate(source=p) reads the right tag (the target has no
+                // runtime class header to read it from).
+                if (ASRUtils::is_class_type(ASRUtils::extract_type(
+                        ASRUtils::expr_type(x.m_target)))) {
+                    ASR::Struct_t *vst =
+                        struct_symbol_for_concrete_expr(x.m_value);
+                    if (vst) {
+                        class_alias_concrete_tag[get_hash((ASR::asr_t *)tsym)] =
+                            struct_symbol_tag((ASR::symbol_t *)vst);
+                    }
                 }
             }
         } else if (ASR::is_a<ASR::Var_t>(*x.m_target) &&
@@ -12541,6 +12857,9 @@ public:
         ASR::ttype_t *mold_type = ASRUtils::expr_type(mold);
         bool mold_is_indirect = ASRUtils::is_allocatable(mold_type) ||
             ASRUtils::is_pointer(mold_type);
+        ASR::Struct_t *mold_decl = struct_symbol_for_concrete_expr(mold);
+        bool mold_is_abstract_declared =
+            mold_decl && mold_decl->m_is_abstract;
         if (ASRUtils::is_pointer(mold_type) &&
                 ASRUtils::is_class_type(
                     ASRUtils::extract_type(mold_type))) {
@@ -12584,6 +12903,9 @@ public:
             // access uses it; the runtime type tag sits in the header just
             // before the data.  Loading mold_ptr here would read the first
             // data word as a pointer and crash.
+            mold_data = mold_ptr;
+            mold_tag = load_object_type_tag(mold_ptr);
+        } else if (mold_is_abstract_declared && !mold_is_indirect) {
             mold_data = mold_ptr;
             mold_tag = load_object_type_tag(mold_ptr);
         } else if (expr_is_allocatable_struct(mold)
@@ -14344,6 +14666,88 @@ public:
         }
     }
 
+    bool callable_dynamic_method(ASR::Function_t *target) {
+        return target &&
+            !(function_is_interface(target) &&
+              !function_is_module_procedure_interface(target));
+    }
+
+    void store_method_ptr(uint32_t slot, ASR::Function_t *target) {
+        if (!callable_dynamic_method(target)) return;
+        uint32_t sym = lr_session_intern(s, callable_name(target).c_str());
+        lr_emit_store(s, LR_GLOBAL(sym, ty_ptr), V(slot, ty_ptr));
+    }
+
+    uint32_t method_ptr_from_tag(uint32_t tag, ASR::Struct_t *declared,
+            const std::string &method_name) {
+        uint32_t result = lr_emit_alloca(s, ty_ptr);
+        lr_emit_store(s, LR_NULL(ty_ptr), V(result, ty_ptr));
+        if (declared && !declared->m_is_abstract) {
+            store_method_ptr(result,
+                resolve_tbp_override(declared, method_name));
+        }
+
+        lr_error_t err;
+        uint32_t done_bb = lr_session_block(s);
+        for (ASR::Struct_t *candidate : known_structs) {
+            if (declared && !struct_derives_from(candidate, declared) &&
+                    get_hash((ASR::asr_t *)candidate) !=
+                    get_hash((ASR::asr_t *)declared)) {
+                continue;
+            }
+            ASR::Function_t *target =
+                resolve_tbp_override(candidate, method_name);
+            if (!callable_dynamic_method(target)) continue;
+            uint32_t then_bb = lr_session_block(s);
+            uint32_t next_bb = lr_session_block(s);
+            uint32_t matches = lr_emit_icmp(s, LR_CMP_EQ,
+                V(tag, ty_i64),
+                I(struct_symbol_tag((ASR::symbol_t *)candidate), ty_i64));
+            lr_emit_condbr(s, V(matches, ty_i1), then_bb, next_bb);
+
+            lr_session_set_block(s, then_bb, &err);
+            store_method_ptr(result, target);
+            lr_emit_br(s, done_bb);
+
+            lr_session_set_block(s, next_bb, &err);
+        }
+        lr_emit_br(s, done_bb);
+        lr_session_set_block(s, done_bb, &err);
+        return lr_emit_load(s, ty_ptr, V(result, ty_ptr));
+    }
+
+    uint32_t method_ptr_from_polymorphic_array_item(ASR::expr_t *dt,
+            const std::string &method_name) {
+        if (!dt) return UINT32_MAX;
+        ASR::expr_t *base = dt;
+        while (ASR::is_a<ASR::Cast_t>(*base)) {
+            ASR::Cast_t *cast = ASR::down_cast<ASR::Cast_t>(base);
+            if (cast->m_kind == ASR::cast_kindType::ClassToClass ||
+                    cast->m_kind == ASR::cast_kindType::ClassToStruct) {
+                base = cast->m_arg;
+            } else {
+                break;
+            }
+        }
+        if (!ASR::is_a<ASR::ArrayItem_t>(*base)) return UINT32_MAX;
+        ASR::ArrayItem_t *item = ASR::down_cast<ASR::ArrayItem_t>(base);
+        ASR::ttype_t *owner_type = ASRUtils::expr_type(item->m_v);
+        if (!type_is_limited_polymorphic_array(owner_type)) {
+            return UINT32_MAX;
+        }
+        ASR::Struct_t *declared = struct_symbol_for_concrete_expr(item->m_v);
+        uint32_t tag = desc_load_i64(desc_ptr_of(item->m_v), 24);
+        return method_ptr_from_tag(tag, declared, method_name);
+    }
+
+    uint32_t dispatch_method_ptr(ASR::expr_t *dt,
+            const std::string &method_name, uint32_t data_ptr) {
+        uint32_t fptr = method_ptr_from_polymorphic_array_item(dt,
+            method_name);
+        if (fptr != UINT32_MAX) return fptr;
+        return load_object_method_ptr(data_ptr, method_name);
+    }
+
     ASR::Struct_t *struct_from_tag(int64_t tag) {
         for (ASR::Struct_t *st : known_structs) {
             if (struct_symbol_tag((ASR::symbol_t *)st) == tag) return st;
@@ -14437,7 +14841,7 @@ public:
         // TBP function lowered to a subroutine prepends the result
         // out-argument, so args[0] is the result, not the dispatch object.
         uint32_t base = dt ? dispatch_data_ptr_from_dt(dt) : args[0].vreg;
-        uint32_t fptr = load_object_method_ptr(base, method_name);
+        uint32_t fptr = dispatch_method_ptr(dt, method_name, base);
         lr_emit_call_void(s, V(fptr, ty_ptr),
             const_cast<lr_operand_desc_t *>(args.data()), args.size());
         return true;
@@ -14472,6 +14876,9 @@ public:
             }
         }
         if (is_class_data_ptr_alias(base)) {
+            return lr_emit_load(s, ty_ptr, V(addr, ty_ptr));
+        }
+        if (is_scalar_class_pointer_storage(base)) {
             return lr_emit_load(s, ty_ptr, V(addr, ty_ptr));
         }
         return addr;
@@ -16107,12 +16514,22 @@ public:
                         ty_ptr));
                 } else if (formal_is_unlimited_polymorphic(fn, i)) {
                     args.push_back(V(emit_polymorphic_actual(arg), ty_ptr));
+                } else if (needs_class_pointer_alias_formal_wrap(formal_fn, i,
+                        arg, x.m_dt, x.m_name)) {
+                    args.push_back(V(emit_class_pointer_alias_formal_slot(arg),
+                        ty_ptr));
                 } else if (arg_forwards_class_data_ptr(fn, i, arg)) {
                     is_target = true;
                     visit_expr(*arg);
                     is_target = false;
                     uint32_t data_ptr = lr_emit_load(s, ty_ptr,
                         V(tmp, ty_ptr));
+                    args.push_back(V(data_ptr, ty_ptr));
+                } else if (needs_poly_array_item_class_wrap(formal_fn, i,
+                        arg)) {
+                    uint32_t data_ptr =
+                        emit_class_wrapper_for_poly_array_item(
+                            limited_polymorphic_array_item(arg));
                     args.push_back(V(data_ptr, ty_ptr));
                 } else if (needs_concrete_to_class_wrap(fn, i, arg)) {
                     uint32_t actual_ptr = 0;
@@ -16207,6 +16624,10 @@ public:
                         uint32_t raw = lr_emit_load(s, ty_ptr,
                             V(arg_ptr, ty_ptr));
                         arg_ptr = class_data_ptr(raw);
+                    } else if (is_scalar_class_pointer_storage(arg) &&
+                            !(formal && ASRUtils::is_pointer(
+                                formal->m_type))) {
+                        arg_ptr = lr_emit_load(s, ty_ptr, V(arg_ptr, ty_ptr));
                     } else if (expr_is_allocatable_intrinsic_scalar(arg) &&
                             !(formal && (ASRUtils::is_allocatable(
                                     formal->m_type) ||
@@ -16315,8 +16736,8 @@ public:
         if (fn && function_is_interface(fn) && x.m_dt &&
                 dt_needs_dynamic_dispatch(x.m_dt)) {
             uint32_t data_ptr = dispatch_data_ptr_from_dt(x.m_dt);
-            uint32_t fptr = load_object_method_ptr(data_ptr,
-                dynamic_method_name(x.m_name, fn));
+            uint32_t fptr = dispatch_method_ptr(x.m_dt,
+                dynamic_method_name(x.m_name, fn), data_ptr);
             lr_emit_call_void(s, V(fptr, ty_ptr),
                 args.data(), args.size());
             emit_class_writebacks();
@@ -16330,8 +16751,8 @@ public:
                     ASRUtils::type_get_past_allocatable_pointer(
                         ASRUtils::expr_type(x.m_dt)))) {
             uint32_t data_ptr = dispatch_data_ptr_from_dt(x.m_dt);
-            uint32_t fptr = load_object_method_ptr(data_ptr,
-                dynamic_method_name(x.m_name, fn));
+            uint32_t fptr = dispatch_method_ptr(x.m_dt,
+                dynamic_method_name(x.m_name, fn), data_ptr);
             lr_emit_call_void(s, V(fptr, ty_ptr),
                 args.data(), args.size());
             emit_class_writebacks();
@@ -16694,12 +17115,22 @@ public:
                         ty_ptr));
                 } else if (formal_is_unlimited_polymorphic(fn, i)) {
                     args.push_back(V(emit_polymorphic_actual(arg), ty_ptr));
+                } else if (needs_class_pointer_alias_formal_wrap(formal_fn, i,
+                        arg, x.m_dt, x.m_name)) {
+                    args.push_back(V(emit_class_pointer_alias_formal_slot(arg),
+                        ty_ptr));
                 } else if (arg_forwards_class_data_ptr(fn, i, arg)) {
                     is_target = true;
                     visit_expr(*arg);
                     is_target = false;
                     uint32_t data_ptr = lr_emit_load(s, ty_ptr,
                         V(tmp, ty_ptr));
+                    args.push_back(V(data_ptr, ty_ptr));
+                } else if (needs_poly_array_item_class_wrap(formal_fn, i,
+                        arg)) {
+                    uint32_t data_ptr =
+                        emit_class_wrapper_for_poly_array_item(
+                            limited_polymorphic_array_item(arg));
                     args.push_back(V(data_ptr, ty_ptr));
                 } else if (needs_concrete_to_class_wrap(fn, i, arg)) {
                     uint32_t actual_ptr = 0;
@@ -16782,6 +17213,10 @@ public:
                         uint32_t raw = lr_emit_load(s, ty_ptr,
                             V(arg_ptr, ty_ptr));
                         arg_ptr = class_data_ptr(raw);
+                    } else if (is_scalar_class_pointer_storage(arg) &&
+                            !(formal && ASRUtils::is_pointer(
+                                formal->m_type))) {
+                        arg_ptr = lr_emit_load(s, ty_ptr, V(arg_ptr, ty_ptr));
                     } else if (expr_is_allocatable_intrinsic_scalar(arg) &&
                             !(formal && (ASRUtils::is_allocatable(
                                     formal->m_type) ||
@@ -16901,8 +17336,8 @@ public:
             // non-polymorphic object (e.g. a module-function binding defined in
             // a submodule, called on a concrete type) has no class header to
             // read a vtable from; fall through to the static direct call below.
-            uint32_t fptr = load_object_method_ptr(args[0].vreg,
-                dynamic_method_name(x.m_name, fn));
+            uint32_t fptr = dispatch_method_ptr(x.m_dt,
+                dynamic_method_name(x.m_name, fn), args[0].vreg);
             uint32_t call_value = lr_emit_call(s, ret, V(fptr, ty_ptr),
                 args.data(), args.size());
             tmp = function_return_to_expr_value(call_value, x.m_type);
@@ -16915,8 +17350,8 @@ public:
             // through x.m_dt instead — it holds the dispatch object
             // (e.g. self%obj for an allocatable class field).
             uint32_t data_ptr = dispatch_data_ptr_from_dt(x.m_dt);
-            uint32_t fptr = load_object_method_ptr(data_ptr,
-                dynamic_method_name(x.m_name, fn));
+            uint32_t fptr = dispatch_method_ptr(x.m_dt,
+                dynamic_method_name(x.m_name, fn), data_ptr);
             uint32_t call_value = lr_emit_call(s, ret, V(fptr, ty_ptr),
                 args.data(), args.size());
             tmp = function_return_to_expr_value(call_value, x.m_type);
@@ -16931,8 +17366,8 @@ public:
                     ASRUtils::type_get_past_allocatable_pointer(
                         ASRUtils::expr_type(x.m_dt)))) {
             uint32_t data_ptr = dispatch_data_ptr_from_dt(x.m_dt);
-            uint32_t fptr = load_object_method_ptr(data_ptr,
-                dynamic_method_name(x.m_name, fn));
+            uint32_t fptr = dispatch_method_ptr(x.m_dt,
+                dynamic_method_name(x.m_name, fn), data_ptr);
             uint32_t call_value = lr_emit_call(s, ret, V(fptr, ty_ptr),
                 args.data(), args.size());
             tmp = function_return_to_expr_value(call_value, x.m_type);
