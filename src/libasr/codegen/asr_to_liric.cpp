@@ -14515,6 +14515,32 @@ public:
             return true;
         }
 
+        if (ASR::is_a<ASR::Cast_t>(*actual)) {
+            ASR::Cast_t *cast = ASR::down_cast<ASR::Cast_t>(actual);
+            ASR::ttype_t *source_type =
+                ASRUtils::type_get_past_allocatable_pointer(
+                    ASRUtils::expr_type(cast->m_arg));
+            if (cast->m_kind == ASR::cast_kindType::StringToArray &&
+                    ASR::is_a<ASR::String_t>(
+                        *ASRUtils::type_get_past_array(source_type))) {
+                args.push_back(V(emit_string_data_len(cast->m_arg).first,
+                    ty_ptr));
+                params.push_back(ty_ptr);
+                return true;
+            }
+        }
+
+        ASR::ttype_t *actual_type =
+            ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(actual));
+        if (!ASR::is_a<ASR::Array_t>(*actual_type) &&
+                ASR::is_a<ASR::String_t>(
+                    *ASRUtils::type_get_past_array(actual_type))) {
+            args.push_back(V(emit_string_data_len(actual).first, ty_ptr));
+            params.push_back(ty_ptr);
+            return true;
+        }
+
         ASR::expr_t *source = nullptr;
         ASR::Array_t *array = nullptr;
         int64_t elem_chars_i64 = 0;
@@ -20563,6 +20589,13 @@ public:
         }
         if (emit_internal_integer_read(x)) {
             return;
+        }
+        if (!x.m_unit) {
+            uint32_t unit = emit_i32_const(-1);
+            uint32_t iostat = emit_iostat_ptr(x.m_iostat);
+            if (emit_external_file_read_values(x, unit, iostat)) {
+                return;
+            }
         }
         if (x.m_unit) {
             ASR::ttype_t *unit_type = ASRUtils::expr_type(x.m_unit);
