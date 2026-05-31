@@ -11211,6 +11211,38 @@ public:
                 LR_UNDEF(ty_str_desc), V(elem_ptr, ty_ptr), &f0, 1);
             tmp = lr_emit_insertvalue(s, ty_str_desc,
                 V(d0, ty_str_desc), V(len, ty_i64), &f1, 1);
+        } else if (ASR::is_a<ASR::String_t>(
+                *ASRUtils::type_get_past_array(array_t->m_type)) &&
+                elem_type == ty_str_desc) {
+            uint32_t elem_len = desc_load_i64(desc, 8);
+            uint32_t normal_len = emit_i64_const(
+                element_byte_size(array_t->m_type));
+            uint32_t is_raw = lr_emit_icmp(s, LR_CMP_NE,
+                V(elem_len, ty_i64), V(normal_len, ty_i64));
+            uint32_t slot = emit_temp_slot(ty_str_desc);
+            uint32_t raw_bb = lr_session_block(s);
+            uint32_t desc_bb = lr_session_block(s);
+            uint32_t done_bb = lr_session_block(s);
+            lr_emit_condbr(s, V(is_raw, ty_i1), raw_bb, desc_bb);
+
+            lr_error_t err;
+            lr_session_set_block(s, raw_bb, &err);
+            uint32_t f0 = 0, f1 = 1;
+            uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
+                LR_UNDEF(ty_str_desc), V(elem_ptr, ty_ptr), &f0, 1);
+            uint32_t raw_desc = lr_emit_insertvalue(s, ty_str_desc,
+                V(d0, ty_str_desc), V(elem_len, ty_i64), &f1, 1);
+            lr_emit_store(s, V(raw_desc, ty_str_desc), V(slot, ty_ptr));
+            lr_emit_br(s, done_bb);
+
+            lr_session_set_block(s, desc_bb, &err);
+            uint32_t elem_desc = lr_emit_load(s, ty_str_desc,
+                V(elem_ptr, ty_ptr));
+            lr_emit_store(s, V(elem_desc, ty_str_desc), V(slot, ty_ptr));
+            lr_emit_br(s, done_bb);
+
+            lr_session_set_block(s, done_bb, &err);
+            tmp = lr_emit_load(s, ty_str_desc, V(slot, ty_ptr));
         } else {
             tmp = lr_emit_load(s, elem_type, V(elem_ptr, ty_ptr));
         }
