@@ -17864,7 +17864,8 @@ public:
                     cname != "_lfortran_get_command_argument_length" &&
                     cname != "_lfortran_get_command_argument_status" &&
                     cname != "_lfortran_get_length_of_environment_variable" &&
-                    cname != "_lfortran_get_environment_variable_status") {
+                    cname != "_lfortran_get_environment_variable_status" &&
+                    cname != "_lfortran_get_environment_variable_status_value") {
                 std::vector<lr_operand_desc_t> cargs;
                 std::vector<lr_type_t *> params;
                 std::vector<BindCCharArrayArg> scratch;
@@ -17972,19 +17973,29 @@ public:
                 return;
             }
             if (cname == "_lfortran_get_length_of_environment_variable" ||
-                    cname == "_lfortran_get_environment_variable_status") {
-                if (x.n_args != 2 || !x.m_args[0].m_value ||
-                        !x.m_args[1].m_value) {
+                    cname == "_lfortran_get_environment_variable_status" ||
+                    cname == "_lfortran_get_environment_variable_status_value") {
+                bool has_value_len =
+                    cname == "_lfortran_get_environment_variable_status_value";
+                size_t expected_args = has_value_len ? 3 : 2;
+                if (x.n_args != expected_args || !x.m_args[0].m_value ||
+                        !x.m_args[1].m_value ||
+                        (has_value_len && !x.m_args[2].m_value)) {
                     throw CodeGenError(
-                        "liric: environment-variable helper expects two args");
+                        "liric: environment-variable helper arity mismatch");
                 }
                 uint32_t name = emit_cchar_data_ptr(x.m_args[0].m_value);
                 uint32_t name_len = emit_i32_value(x.m_args[1].m_value);
                 uint32_t sym = lr_session_intern(s, cname.c_str());
-                lr_operand_desc_t cargs[2] = {
-                    V(name, ty_ptr), V(name_len, ty_i32)};
+                std::vector<lr_operand_desc_t> cargs = {
+                    V(name, ty_ptr), V(name_len, ty_i32)
+                };
+                if (has_value_len) {
+                    uint32_t value_len = emit_i32_value(x.m_args[2].m_value);
+                    cargs.push_back(V(value_len, ty_i32));
+                }
                 tmp = lr_emit_call(s, ty_i32, LR_GLOBAL(sym, ty_ptr),
-                    cargs, 2);
+                    cargs.data(), cargs.size());
                 return;
             }
         }
