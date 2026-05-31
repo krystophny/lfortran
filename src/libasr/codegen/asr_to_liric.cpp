@@ -17416,6 +17416,14 @@ public:
     // For class(T) arguments the tag is the i64 at the start of the
     // class header (offset -class_header_bytes from the data ptr).
     uint32_t load_polymorphic_tag_from_expr(ASR::expr_t *arg) {
+        if (ASR::is_a<ASR::ArrayItem_t>(*arg)) {
+            ASR::ArrayItem_t *item = ASR::down_cast<ASR::ArrayItem_t>(arg);
+            ASR::ttype_t *owner_type = ASRUtils::expr_type(item->m_v);
+            if (type_is_limited_polymorphic_array(owner_type) ||
+                    type_is_unlimited_polymorphic_array(owner_type)) {
+                return desc_load_i64(desc_ptr_of(item->m_v), 24);
+            }
+        }
         // A class pointer associated to a concrete target has no runtime class
         // header; return its recorded static target tag.
         if (ASR::is_a<ASR::Var_t>(*arg)) {
