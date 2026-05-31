@@ -3005,7 +3005,16 @@ public:
                     return;
                 }
             }
-            uint32_t val = lr_emit_load(s, rt, V(slot, ty_ptr));
+            uint32_t val;
+            if (is_allocatable_intrinsic_scalar_type(v->m_type)) {
+                ASR::ttype_t *core =
+                    ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+                core = ASRUtils::type_get_past_array(core);
+                uint32_t data = lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
+                val = lr_emit_load(s, get_type(core), V(data, ty_ptr));
+            } else {
+                val = lr_emit_load(s, rt, V(slot, ty_ptr));
+            }
             if (rt == ty_f32 || rt == ty_f64) {
                 // Materialize into a concrete vreg with fsub(val, 0.0), which
                 // preserves a -0.0 result; fadd(-0.0, 0.0) collapses to +0.0
