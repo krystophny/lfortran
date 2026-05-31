@@ -1352,7 +1352,7 @@ namespace MoveAlloc {
         ASR::ttype_t* safe_arg_type_1 = get_safe_type(arg_types[1]);
         
         if (is_struct_type_from) {
-            fill_func_arg_sub_struct_type("from", safe_arg_type_0, In, new_args[0].m_value);
+            fill_func_arg_sub_struct_type("from", safe_arg_type_0, InOut, new_args[0].m_value);
         } else {
             fill_func_arg_sub("from", safe_arg_type_0, In);
         }
@@ -1396,8 +1396,18 @@ namespace MoveAlloc {
         bool is_allocatable_array_to = ASRUtils::is_array(arg_types[1]) &&
             ASRUtils::is_allocatable(arg_types[1]) &&
             ASRUtils::extract_physical_type(arg_types[1]) == ASR::array_physical_typeType::DescriptorArray;
+        bool is_allocatable_struct_scalar_from = is_struct_type_from &&
+            ASRUtils::is_allocatable(arg_types[0]) &&
+            !ASRUtils::is_array(arg_types[0]);
+        bool is_allocatable_struct_scalar_to = is_struct_type_to &&
+            ASRUtils::is_allocatable(arg_types[1]) &&
+            !ASRUtils::is_array(arg_types[1]);
 
         if (is_allocatable_array_from && is_allocatable_array_to) {
+            ASR::stmt_t* move_assign = ASRUtils::STMT(ASRUtils::make_Assignment_t_util(
+                al, loc, args[1], args[0], nullptr, false, true));
+            if_body.push_back(move_assign);
+        } else if (is_allocatable_struct_scalar_from && is_allocatable_struct_scalar_to) {
             ASR::stmt_t* move_assign = ASRUtils::STMT(ASRUtils::make_Assignment_t_util(
                 al, loc, args[1], args[0], nullptr, false, true));
             if_body.push_back(move_assign);

@@ -446,8 +446,20 @@ class FixMoveAssignment: public ASR::CallReplacerOnExpressionsVisitor<FixMoveAss
             bool is_value_allocatable_array = ASRUtils::is_array(value_type) &&
                                             ASRUtils::is_allocatable(value_type) &&
                                             ASRUtils::extract_physical_type(value_type) == ASR::array_physical_typeType::DescriptorArray;
+            ASR::ttype_t* target_core = ASRUtils::type_get_past_allocatable_pointer(target_type);
+            ASR::ttype_t* value_core = ASRUtils::type_get_past_allocatable_pointer(value_type);
+            bool is_target_allocatable_struct_scalar =
+                ASRUtils::is_allocatable(target_type) &&
+                !ASRUtils::is_array(target_type) &&
+                ASR::is_a<ASR::StructType_t>(*target_core);
+            bool is_value_allocatable_struct_scalar =
+                ASRUtils::is_allocatable(value_type) &&
+                !ASRUtils::is_array(value_type) &&
+                ASR::is_a<ASR::StructType_t>(*value_core);
 
-            if (x.m_move_allocation && (!is_target_allocatable_array || !is_value_allocatable_array)) {
+            if (x.m_move_allocation &&
+                    !((is_target_allocatable_array && is_value_allocatable_array) ||
+                    (is_target_allocatable_struct_scalar && is_value_allocatable_struct_scalar))) {
                 xx.m_move_allocation = false;
             }
         }

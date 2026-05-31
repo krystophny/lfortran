@@ -5751,6 +5751,24 @@ public:
             ASRUtils::type_get_past_allocatable_pointer(target_struct_type);
         target_struct_type =
             ASRUtils::type_get_past_array(target_struct_type);
+        if (!target_is_array && x.m_move_allocation &&
+                expr_is_allocatable_struct(x.m_target) &&
+                expr_is_allocatable_struct(x.m_value)) {
+            bool was_target = is_target;
+            is_target = true;
+            visit_expr(*x.m_value);
+            uint32_t src_slot = tmp;
+            visit_expr(*x.m_target);
+            uint32_t dst_slot = tmp;
+            is_target = was_target;
+
+            uint32_t src_raw = lr_emit_load(s, ty_ptr,
+                V(src_slot, ty_ptr));
+            lr_emit_store(s, V(src_raw, ty_ptr), V(dst_slot, ty_ptr));
+            lr_emit_store(s, LR_NULL(ty_ptr), V(src_slot, ty_ptr));
+            return;
+        }
+
         if ((ASR::is_a<ASR::StructConstructor_t>(*x.m_value) ||
                 ASR::is_a<ASR::StructConstant_t>(*x.m_value)) &&
                 ASR::is_a<ASR::StructType_t>(*target_struct_type)) {
