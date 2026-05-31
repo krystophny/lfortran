@@ -2910,10 +2910,14 @@ public:
                 if (ASR::is_a<ASR::SubroutineCall_t>(*stmt)) {
                     ASR::SubroutineCall_t *call =
                         ASR::down_cast<ASR::SubroutineCall_t>(stmt);
+                    ASR::Function_t *call_fn = resolve_to_function(call->m_name);
                     for (size_t i = 0; i < call->n_args; i++) {
                         if (runtime_deps.count(var_name(
                                 call->m_args[i].m_value)) > 0) {
-                            return true;
+                            ASR::Variable_t *formal =
+                                formal_arg_var(call_fn, i);
+                            return !formal ||
+                                formal->m_intent != ASR::intentType::In;
                         }
                     }
                 }
