@@ -675,8 +675,8 @@ public:
                 "liric: real array binop needs at least one array operand");
         }
 
-        ArrayLinearView left_view = {0, 0, 0};
-        ArrayLinearView right_view = {0, 0, 0};
+        ArrayLinearView left_view = {0, 0, 0, 0};
+        ArrayLinearView right_view = {0, 0, 0, 0};
         if (left_arr) {
             left_view = emit_array_linear_view(x.m_left, left_array);
         }
@@ -900,8 +900,8 @@ public:
                 "liric: array compare needs at least one array operand");
         }
 
-        ArrayLinearView left_view = {0, 0, 0};
-        ArrayLinearView right_view = {0, 0, 0};
+        ArrayLinearView left_view = {0, 0, 0, 0};
+        ArrayLinearView right_view = {0, 0, 0, 0};
         if (left_arr) {
             left_view = emit_array_linear_view(x.m_left, left_array);
         }
@@ -17795,7 +17795,16 @@ public:
         uint32_t base;
         uint32_t total;
         uint32_t elem_len;
+        uint32_t stride;
     };
+
+    uint32_t descriptor_first_dim_element_stride(uint32_t desc) {
+        uint32_t byte_stride = desc_load_i64(desc,
+            DESC_HEADER_BYTES + DESC_DIM_STRIDE);
+        uint32_t elem_len = desc_load_i64(desc, 8);
+        return lr_emit_sdiv(s, ty_i64, V(byte_stride, ty_i64),
+            V(elem_len, ty_i64));
+    }
 
     ArrayLinearView emit_optional_descriptor_array_linear_view(
             ASR::expr_t *expr, ASR::Array_t *array_t,
@@ -17803,10 +17812,12 @@ public:
         uint32_t base_slot = lr_emit_alloca(s, ty_ptr);
         uint32_t total_slot = lr_emit_alloca(s, ty_i64);
         uint32_t elem_len_slot = lr_emit_alloca(s, ty_i64);
+        uint32_t stride_slot = lr_emit_alloca(s, ty_i64);
         lr_emit_store(s, LR_NULL(ty_ptr), V(base_slot, ty_ptr));
         lr_emit_store(s, I(0, ty_i64), V(total_slot, ty_ptr));
         lr_emit_store(s, I(element_byte_size(array_t->m_type), ty_i64),
             V(elem_len_slot, ty_ptr));
+        lr_emit_store(s, I(1, ty_i64), V(stride_slot, ty_ptr));
 
         uint32_t source_desc = desc_ptr_of(optional_source);
         uint32_t present = lr_emit_icmp(s, LR_CMP_NE,
@@ -17824,12 +17835,15 @@ public:
             desc, (int)array_t->n_dims), ty_i64), V(total_slot, ty_ptr));
         lr_emit_store(s, V(desc_load_i64(desc, 8), ty_i64),
             V(elem_len_slot, ty_ptr));
+        lr_emit_store(s, V(descriptor_first_dim_element_stride(desc), ty_i64),
+            V(stride_slot, ty_ptr));
         lr_emit_br(s, done_bb);
 
         lr_session_set_block(s, done_bb, &err);
         return {lr_emit_load(s, ty_ptr, V(base_slot, ty_ptr)),
             lr_emit_load(s, ty_i64, V(total_slot, ty_ptr)),
-            lr_emit_load(s, ty_i64, V(elem_len_slot, ty_ptr))};
+            lr_emit_load(s, ty_i64, V(elem_len_slot, ty_ptr)),
+            lr_emit_load(s, ty_i64, V(stride_slot, ty_ptr))};
     }
 
     // If `expr` (past array-physical casts) is an ArrayReshape whose result
@@ -17865,7 +17879,8 @@ public:
             uint32_t desc = desc_ptr_of(expr);
             return {desc_base_addr(desc),
                 descriptor_array_element_count(desc, (int)array_t->n_dims),
-                desc_load_i64(desc, 8)};
+                desc_load_i64(desc, 8),
+                descriptor_first_dim_element_stride(desc)};
         }
 
         bool was_target = is_target;
@@ -17893,7 +17908,8 @@ public:
             total = emit_runtime_array_total_for_expr(expr, array_t);
         }
         return {base, total,
-            emit_i64_const(element_byte_size(array_t->m_type))};
+            emit_i64_const(element_byte_size(array_t->m_type)),
+            emit_i64_const(1)};
     }
 
     // Read dim d's value (extent or lower bound) from a CPtrToPointer shape /
@@ -18189,7 +18205,7 @@ public:
             V(res_total, ty_i64), V(elem_len, ty_i64));
         uint32_t dst = emit_malloc_bytes(bytes);
 
-        ArrayLinearView pad_view = {0, 0, 0};
+        ArrayLinearView pad_view = {0, 0, 0, 0};
         bool has_pad = x.m_pad != nullptr;
         if (has_pad) {
             ASR::Array_t *pad_array = nullptr;
@@ -20609,8 +20625,10 @@ public:
             lr_emit_condbr(s, V(more, ty_i1), body, done);
 
             lr_session_set_block(s, body, &err);
+            uint32_t elem_stride = lr_emit_mul(s, ty_i64,
+                V(view.elem_len, ty_i64), V(view.stride, ty_i64));
             uint32_t off = lr_emit_mul(s, ty_i64,
-                V(idx, ty_i64), V(view.elem_len, ty_i64));
+                V(idx, ty_i64), V(elem_stride, ty_i64));
             lr_operand_desc_t off_op[1] = {V(off, ty_i64)};
             uint32_t elem_ptr = lr_emit_gep(s, ty_i8,
                 V(view.base, ty_ptr), off_op, 1);
@@ -20677,6 +20695,7 @@ public:
             int kind = ASRUtils::extract_kind_from_ttype_t(elem_type);
             ArrayLinearView view = emit_array_linear_view(target, array_t);
             uint32_t count = cast_int_value(view.total, ty_i64, ty_i32);
+            uint32_t stride = cast_int_value(view.stride, ty_i64, ty_i32);
             lr_type_t *p[] = {
                 ty_ptr, ty_i32, ty_i32, ty_i32, ty_i32, ty_ptr
             };
@@ -20684,7 +20703,7 @@ public:
                 false);
             lr_operand_desc_t args[] = {
                 V(view.base, ty_ptr), V(count, ty_i32), I(kind, ty_i32),
-                I(1, ty_i32), V(unit, ty_i32),
+                V(stride, ty_i32), V(unit, ty_i32),
                 iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr)
             };
             emit_call_void("_lfortran_read_array_logical", args, 6);
@@ -20694,10 +20713,11 @@ public:
         }
         ArrayLinearView view = emit_array_linear_view(target, array_t);
         uint32_t count = cast_int_value(view.total, ty_i64, ty_i32);
+        uint32_t stride = cast_int_value(view.stride, ty_i64, ty_i32);
         lr_type_t *p[] = {ty_ptr, ty_i32, ty_i32, ty_i32, ty_ptr};
         declare_func(name, ty_void, p, 5, false);
         lr_operand_desc_t args[] = {
-            V(view.base, ty_ptr), V(count, ty_i32), I(1, ty_i32),
+            V(view.base, ty_ptr), V(count, ty_i32), V(stride, ty_i32),
             V(unit, ty_i32), iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr)
         };
         emit_call_void(name, args, 5);
@@ -22473,7 +22493,8 @@ found_offset:
                     uint32_t n = descriptor_array_element_count(
                         desc, (int)arg_array->n_dims);
                     parts.push_back({true, x.m_args[i], arg_array, desc,
-                        {0, n, desc_load_i64(desc, 8)}});
+                        {0, n, desc_load_i64(desc, 8),
+                            descriptor_first_dim_element_stride(desc)}});
                     total = lr_emit_add(s, ty_i64,
                         V(total, ty_i64), V(n, ty_i64));
                 } else {
@@ -22486,7 +22507,7 @@ found_offset:
                 }
             } else {
                 parts.push_back({false, x.m_args[i], nullptr, 0,
-                    {0, emit_i64_const(1), elem_len}});
+                    {0, emit_i64_const(1), elem_len, emit_i64_const(1)}});
                 total = lr_emit_add(s, ty_i64,
                     V(total, ty_i64), I(1, ty_i64));
             }
@@ -22623,7 +22644,7 @@ found_offset:
                 ASR::array_physical_typeType::DescriptorArray) {
             uint32_t src_desc = 0;
             bool have_src_desc = false;
-            ArrayLinearView src_view = {0, 0, 0};
+            ArrayLinearView src_view = {0, 0, 0, 0};
             if (src_arr->m_physical_type ==
                     ASR::array_physical_typeType::DescriptorArray) {
                 src_desc = desc_ptr_of(x.m_array);
