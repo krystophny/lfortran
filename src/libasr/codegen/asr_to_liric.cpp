@@ -1744,7 +1744,20 @@ public:
             ASR::is_a<ASR::StructType_t>(*pcore);
     }
 
+    ASR::expr_t *peel_class_narrowing_cast(ASR::expr_t *expr) {
+        while (ASR::is_a<ASR::Cast_t>(*expr)) {
+            ASR::Cast_t *cast = ASR::down_cast<ASR::Cast_t>(expr);
+            if (cast->m_kind != ASR::cast_kindType::ClassToClass &&
+                    cast->m_kind != ASR::cast_kindType::ClassToStruct) {
+                break;
+            }
+            expr = cast->m_arg;
+        }
+        return expr;
+    }
+
     bool is_scalar_class_pointer_type(ASR::expr_t *expr) {
+        expr = peel_class_narrowing_cast(expr);
         if (!ASR::is_a<ASR::Var_t>(*expr) &&
                 !ASR::is_a<ASR::StructInstanceMember_t>(*expr)) {
             return false;
@@ -1766,6 +1779,7 @@ public:
     // skipped by is_scalar_struct_pointer_* (class exclusion) but actually
     // holds a headerless data pointer recorded at its pointer-associate.
     bool is_class_data_ptr_alias(ASR::expr_t *expr) {
+        expr = peel_class_narrowing_cast(expr);
         if (!ASR::is_a<ASR::Var_t>(*expr)) return false;
         ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
             ASR::down_cast<ASR::Var_t>(expr)->m_v);
@@ -2996,19 +3010,16 @@ public:
     // the tag/vtable at the wrong offset (select type falls to class default).
     bool arg_forwards_class_data_ptr(ASR::Function_t *fn, size_t i,
             ASR::expr_t *arg) {
-        // Peel a select-type ClassToClass/ClassToStruct narrowing to reach the
-        // underlying class-pointer alias var.
-        ASR::expr_t *base = arg;
-        while (ASR::is_a<ASR::Cast_t>(*base)) {
-            ASR::Cast_t *c = ASR::down_cast<ASR::Cast_t>(base);
-            if (c->m_kind == ASR::cast_kindType::ClassToClass ||
-                    c->m_kind == ASR::cast_kindType::ClassToStruct) {
-                base = c->m_arg;
-            } else {
-                break;
+        ASR::expr_t *base = peel_class_narrowing_cast(arg);
+        if (!is_class_data_ptr_alias(base)) return false;
+        if (ASR::is_a<ASR::Var_t>(*base)) {
+            ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
+                ASR::down_cast<ASR::Var_t>(base)->m_v);
+            if (class_alias_concrete_tag.count(
+                    get_hash((ASR::asr_t *)sym)) > 0) {
+                return false;
             }
         }
-        if (!is_class_data_ptr_alias(base)) return false;
         ASR::Variable_t *formal = formal_arg_var(fn, i);
         if (!formal) return false;
         // Only a plain (non-pointer, non-allocatable) class dummy takes the
@@ -8467,6 +8478,20 @@ public:
         ASR::Variable_t *formal = formal_arg_var(fn, i);
         if (!formal) return false;
         if (ASRUtils::is_pointer(formal->m_type)) return false;
+        ASR::ttype_t *ft = ASRUtils::type_get_past_allocatable_pointer(
+            formal->m_type);
+        if (ASRUtils::is_unlimited_polymorphic_type(ft)) return false;
+        if (!ASRUtils::is_class_type(
+                ASRUtils::extract_type(formal->m_type))) return false;
+        ASR::expr_t *base = peel_class_narrowing_cast(actual);
+        if (is_class_data_ptr_alias(base) && ASR::is_a<ASR::Var_t>(*base)) {
+            ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
+                ASR::down_cast<ASR::Var_t>(base)->m_v);
+            if (class_alias_concrete_tag.count(
+                    get_hash((ASR::asr_t *)sym)) > 0) {
+                return struct_symbol_for_concrete_expr(actual) != nullptr;
+            }
+        }
         if (ASR::is_a<ASR::Cast_t>(*actual)) {
             ASR::Cast_t *cast = ASR::down_cast<ASR::Cast_t>(actual);
             if (cast->m_kind == ASR::cast_kindType::ClassToStruct ||
@@ -8478,10 +8503,6 @@ public:
                 }
             }
         }
-        ASR::ttype_t *ft = ASRUtils::type_get_past_allocatable_pointer(
-            formal->m_type);
-        if (ASRUtils::is_unlimited_polymorphic_type(ft)) return false;
-        if (!ASRUtils::is_class_type(ft)) return false;
         ASR::ttype_t *at = ASRUtils::type_get_past_allocatable_pointer(
             ASRUtils::expr_type(actual));
         if (!ASR::is_a<ASR::StructType_t>(*at)) return false;
@@ -8572,7 +8593,9 @@ public:
         visit_expr(*actual);
         is_target = was_target;
         uint32_t actual_ptr = tmp;
-        if (expr_is_allocatable_struct(actual)) {
+        if (is_class_data_ptr_alias(actual)) {
+            actual_ptr = lr_emit_load(s, ty_ptr, V(actual_ptr, ty_ptr));
+        } else if (expr_is_allocatable_struct(actual)) {
             uint32_t raw = lr_emit_load(s, ty_ptr, V(actual_ptr, ty_ptr));
             actual_ptr = class_data_ptr(raw);
         } else if (ASRUtils::is_pointer(ASRUtils::expr_type(actual))
