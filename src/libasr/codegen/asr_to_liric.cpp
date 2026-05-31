@@ -8692,6 +8692,10 @@ public:
 
     bool formal_expects_raw_array_data(ASR::Function_t *fn, size_t i,
             ASR::expr_t *actual) {
+        if (expr_is_array_section_call_temp(actual) ||
+                expr_is_descriptor_slot_call_temp(actual)) {
+            return true;
+        }
         if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*actual)) {
             ASR::ArrayPhysicalCast_t *cast =
                 ASR::down_cast<ASR::ArrayPhysicalCast_t>(actual);
@@ -9624,6 +9628,10 @@ public:
     }
 
     bool associate_value_needs_descriptor_slot(ASR::expr_t *expr) {
+        ASR::expr_t *peeled = peel_array_physical_casts(expr);
+        if (peeled != expr) {
+            return associate_value_needs_descriptor_slot(peeled);
+        }
         if (ASR::is_a<ASR::ArraySection_t>(*expr)) {
             return array_section_uses_runtime_source(
                 ASR::down_cast<ASR::ArraySection_t>(expr));
@@ -9674,8 +9682,9 @@ public:
         if (!associate_value_needs_descriptor_slot(value)) return;
         uint64_t h = get_hash((ASR::asr_t *)target_var);
         descriptor_slot_array_temps.insert(h);
-        if (ASR::is_a<ASR::ArraySection_t>(*value) ||
-                expr_is_array_section_call_temp(value)) {
+        ASR::expr_t *peeled = peel_array_physical_casts(value);
+        if (ASR::is_a<ASR::ArraySection_t>(*peeled) ||
+                expr_is_array_section_call_temp(peeled)) {
             array_section_call_temps.insert(h);
         }
     }
@@ -10149,9 +10158,11 @@ public:
             if (target_is_subroutine_call_array_temp) {
                 bool mark_array_section_temp =
                     expr_is_array_section_call_temp(x.m_value);
-                if (ASR::is_a<ASR::ArraySection_t>(*x.m_value)) {
+                ASR::expr_t *peeled_value =
+                    peel_array_physical_casts(x.m_value);
+                if (ASR::is_a<ASR::ArraySection_t>(*peeled_value)) {
                     mark_array_section_temp = array_section_uses_runtime_source(
-                        ASR::down_cast<ASR::ArraySection_t>(x.m_value));
+                        ASR::down_cast<ASR::ArraySection_t>(peeled_value));
                 }
                 if (mark_array_section_temp) {
                     array_section_call_temps.insert(
@@ -10180,12 +10191,17 @@ public:
             ASR::ttype_t *vt0 = ASRUtils::expr_type(x.m_value);
             ASR::ttype_t *vcore =
                 ASRUtils::type_get_past_allocatable_pointer(vt0);
+            if (expr_is_descriptor_slot_call_temp(x.m_value) ||
+                    expr_is_array_section_call_temp(x.m_value)) {
+                assoc_src_has_descriptor = true;
+            }
             assoc_src_has_descriptor =
-                src_var && !var_is_subroutine_call_array_temp(src_var) &&
+                assoc_src_has_descriptor ||
+                (src_var && !var_is_subroutine_call_array_temp(src_var) &&
                 (ASRUtils::is_allocatable(vt0) || ASRUtils::is_pointer(vt0) ||
                  (ASR::is_a<ASR::Array_t>(*vcore) &&
                   ASR::down_cast<ASR::Array_t>(vcore)->m_physical_type ==
-                      ASR::array_physical_typeType::DescriptorArray));
+                      ASR::array_physical_typeType::DescriptorArray)));
         }
         if (target_is_subroutine_call_array_temp && assoc_src_has_descriptor) {
             bool was_target = is_target;
