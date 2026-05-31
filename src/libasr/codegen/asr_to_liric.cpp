@@ -4616,6 +4616,55 @@ public:
         }
     }
 
+    bool array_item_is_created_string_temp(ASR::expr_t *target,
+            ASR::ArrayItem_t **item_out = nullptr) {
+        if (!ASR::is_a<ASR::ArrayItem_t>(*target)) {
+            return false;
+        }
+        ASR::ArrayItem_t *item = ASR::down_cast<ASR::ArrayItem_t>(target);
+        ASR::Variable_t *owner = var_from_expr(item->m_v);
+        if (!owner) {
+            return false;
+        }
+        if (std::string(owner->m_name).rfind("__libasr_created", 0) != 0) {
+            return false;
+        }
+        ASR::ttype_t *owner_type =
+            ASRUtils::type_get_past_allocatable_pointer(owner->m_type);
+        if (!ASR::is_a<ASR::Array_t>(*owner_type)) {
+            return false;
+        }
+        ASR::Array_t *array = ASR::down_cast<ASR::Array_t>(owner_type);
+        ASR::ttype_t *elem =
+            ASRUtils::type_get_past_allocatable_pointer(array->m_type);
+        elem = ASRUtils::type_get_past_array(elem);
+        if (!ASR::is_a<ASR::String_t>(*elem)) {
+            return false;
+        }
+        ASR::String_t *str = ASR::down_cast<ASR::String_t>(elem);
+        if (str->m_physical_type != ASR::DescriptorString) {
+            return false;
+        }
+        if (item_out) {
+            *item_out = item;
+        }
+        return true;
+    }
+
+    void emit_created_string_temp_array_item_assignment(ASR::expr_t *target,
+            uint32_t dst, uint32_t rhs) {
+        ASR::ArrayItem_t *item = nullptr;
+        if (!array_item_is_created_string_temp(target, &item)) {
+            emit_string_assignment_to_desc_slot(dst, rhs);
+            return;
+        }
+        emit_allocatable_string_assignment(dst, rhs);
+        uint32_t fld1 = 1;
+        uint32_t rhs_len = lr_emit_extractvalue(s, ty_i64,
+            V(rhs, ty_str_desc), &fld1, 1);
+        desc_store_i64(desc_ptr_of(item->m_v), 24, rhs_len);
+    }
+
     void visit_Assignment(const ASR::Assignment_t &x) {
         // A user-defined assignment (generic assignment(=)) is resolved by the
         // frontend into a SubroutineCall stored in m_overloaded; emit that
@@ -4976,7 +5025,8 @@ public:
                     allocatable_string_fixed_len(target_expr_type),
                     target_len_vreg);
             } else if (ASR::is_a<ASR::ArrayItem_t>(*x.m_target)) {
-                emit_string_assignment_to_desc_slot(dst, rhs);
+                emit_created_string_temp_array_item_assignment(
+                    x.m_target, dst, rhs);
             } else {
                 uint32_t dst_desc = lr_emit_load(s, ty_str_desc,
                     V(dst, ty_ptr));
