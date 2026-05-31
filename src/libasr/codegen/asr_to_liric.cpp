@@ -19382,7 +19382,10 @@ public:
             return true;
         }
         if (namelist_type_code(elem) < 0) return false;
-        if (!is_arr && ASRUtils::is_allocatable(vtype)) return false;
+        if (!is_arr && ASRUtils::is_allocatable(vtype) &&
+                !ASR::is_a<ASR::String_t>(*elem)) {
+            return false;
+        }
         if (!is_arr && ASRUtils::is_pointer(vtype) &&
                 !ASR::is_a<ASR::String_t>(*elem)) {
             return false;
