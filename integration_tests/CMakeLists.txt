@@ -1934,6 +1934,12 @@ RUN(NAME modules_73 LABELS gfortran llvm
         modules_73_node.f90 modules_73_map_base.f90 modules_73_map.f90
         modules_73_table.f90)
 RUN(NAME modules_74 LABELS gfortran llvm)
+RUN(NAME modules_75 LABELS gfortran llvm)
+RUN(NAME modules_76 LABELS gfortran llvm
+        EXTRAFILES modules_76_lexer.f90)
+RUN(NAME modules_77 LABELS gfortran llvm
+        EXTRAFILES modules_77_config.f90)
+RUN(NAME modules_78 LABELS gfortran llvm)
 
 RUN(NAME associate_06 LABELS gfortran EXTRAFILES
         associate_06_module.f90)

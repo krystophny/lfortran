@@ -1238,14 +1238,21 @@ public:
             if (init_vars_only && !var_needs_runtime_init(v)) continue;
             uint64_t h = get_hash((ASR::asr_t *)v);
             if (lr_globals.count(h)) continue;
+            ASR::ttype_t *t0 =
+                ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+            if (v->m_storage == ASR::storage_typeType::Parameter &&
+                    v->m_value && !ASRUtils::is_pointer(v->m_type) &&
+                    !ASRUtils::is_allocatable(v->m_type) &&
+                    !ASR::is_a<ASR::Array_t>(*t0) &&
+                    ASR::is_a<ASR::StructType_t>(*t0)) {
+                continue;
+            }
             uint64_t nbytes = storage_size_for_variable(v);
             std::vector<uint8_t> init_bytes(nbytes, 0);
             // Encode a compile-time scalar initializer into .data.  The runtime
             // module-var init only runs from a program entry; a separately
             // compiled module (its globals live in its own object, with no main
             // to run that init) would otherwise read 0 for `integer :: x = 89`.
-            ASR::ttype_t *t0 =
-                ASRUtils::type_get_past_allocatable_pointer(v->m_type);
             if (v->m_value && !ASRUtils::is_pointer(v->m_type) &&
                     !ASRUtils::is_allocatable(v->m_type) &&
                     !ASR::is_a<ASR::Array_t>(*t0) &&
@@ -2892,6 +2899,23 @@ public:
                     }
                 }
             }
+            bool optional_out_guard = v->m_presence ==
+                    ASR::presenceType::Optional &&
+                v->m_intent == ASR::intentType::Out &&
+                !v->m_value_attr;
+            uint32_t optional_out_done_bb = 0;
+            if (optional_out_guard) {
+                uint32_t param = lr_session_param(s,
+                    i + (uses_sret ? 1 : 0));
+                uint32_t present = lr_emit_icmp(s, LR_CMP_NE,
+                    V(param, ty_ptr), LR_NULL(ty_ptr));
+                lr_error_t err;
+                uint32_t present_bb = lr_session_block(s);
+                optional_out_done_bb = lr_session_block(s);
+                lr_emit_condbr(s, V(present, ty_i1), present_bb,
+                    optional_out_done_bb);
+                lr_session_set_block(s, present_bb, &err);
+            }
             if (v->m_intent == ASR::intentType::Out &&
                     is_allocatable_struct_type(v->m_type)) {
                 deallocate_string_var(x.m_args[i]);
@@ -2913,6 +2937,11 @@ public:
                         initialize_struct_variable_storage(slot, v);
                     }
                 }
+            }
+            if (optional_out_guard) {
+                lr_error_t err;
+                lr_emit_br(s, optional_out_done_bb);
+                lr_session_set_block(s, optional_out_done_bb, &err);
             }
         }
         prescan_stmt_list_for_descriptor_slot_temps(x.m_body, x.n_body);
@@ -4749,6 +4778,9 @@ public:
                         ? struct_symbol_from_type_decl(
                             member->m_type_declaration)
                         : nullptr;
+                    if (!elem_st && ASR::is_a<ASR::StructType_t>(*elem)) {
+                        elem_st = struct_symbol_for_type(elem);
+                    }
                     emit_allocatable_descriptor_array_assignment_from_desc(
                         dst_field, src_field, array_t, elem_st);
                 } else {
@@ -4775,6 +4807,9 @@ public:
                         ASRUtils::is_allocatable(member_type)) {
                     ASR::Struct_t *member_st = struct_symbol_from_type_decl(
                         member->m_type_declaration);
+                    if (!member_st) {
+                        member_st = struct_symbol_for_type(core);
+                    }
                     bool dynamic_class_member = ASRUtils::is_class_type(
                         ASRUtils::extract_type(member_type));
                     emit_allocatable_struct_component_assignment(
@@ -4785,6 +4820,9 @@ public:
                         !ASRUtils::is_pointer(member_type)) {
                     ASR::Struct_t *member_st = struct_symbol_from_type_decl(
                         member->m_type_declaration);
+                    if (!member_st) {
+                        member_st = struct_symbol_for_type(core);
+                    }
                     if (!emit_struct_defined_assignment(
                             dst_field, src_field, member_st)) {
                         emit_struct_storage_assignment(
@@ -6135,7 +6173,14 @@ public:
             }
             uint32_t data = ensure_allocatable_struct_data(
                 slot, st, var_from_expr(x.m_target));
-            lr_emit_store(s, V(rhs, rhs_t), V(data, ty_ptr));
+            if (st && ASR::is_a<ASR::StructType_t>(*value_type)) {
+                uint32_t src_slot = emit_temp_slot(rhs_t);
+                lr_emit_store(s, V(rhs, rhs_t), V(src_slot, ty_ptr));
+                uint32_t copy_src = emit_struct_deep_copy_temp(src_slot, st);
+                emit_struct_storage_assignment(data, copy_src, st);
+            } else {
+                lr_emit_store(s, V(rhs, rhs_t), V(data, ty_ptr));
+            }
             return;
         }
 
@@ -13155,6 +13200,9 @@ public:
                     if (ASR::is_a<ASR::StructType_t>(*melem) && total > 0) {
                         ASR::Struct_t *est = struct_symbol_from_type_decl(
                             member->m_type_declaration);
+                        if (!est) {
+                            est = struct_symbol_for_type(melem);
+                        }
                         if (est && struct_storage_needs_initialization(est)) {
                             for (int64_t i = 0; i < total; i++) {
                                 lr_operand_desc_t eo[1] =
@@ -13194,6 +13242,9 @@ public:
                         !ASRUtils::is_pointer(member_type)) {
                     ASR::Struct_t *member_st = struct_symbol_from_type_decl(
                         member->m_type_declaration);
+                    if (!member_st) {
+                        member_st = struct_symbol_for_type(core);
+                    }
                     initialize_struct_storage(member_st, field_ptr);
                 } else if (ASRUtils::is_allocatable(member_type) &&
                         !ASRUtils::is_unlimited_polymorphic_type(member_type) &&
@@ -13260,6 +13311,9 @@ public:
             if (ASR::is_a<ASR::StructType_t>(*core)) {
                 ASR::Struct_t *member_st = struct_symbol_from_type_decl(
                     member->m_type_declaration);
+                if (!member_st) {
+                    member_st = struct_symbol_for_type(core);
+                }
                 if (struct_storage_needs_initialization(member_st)) {
                     return true;
                 }
@@ -13595,6 +13649,9 @@ public:
                 ASR::Struct_t *elem_st = ASR::is_a<ASR::StructType_t>(*elem)
                     ? struct_symbol_from_type_decl(m->m_type_declaration)
                     : nullptr;
+                if (!elem_st && ASR::is_a<ASR::StructType_t>(*elem)) {
+                    elem_st = struct_symbol_for_type(elem);
+                }
                 desc_store_null_base(dst_field);
                 emit_allocatable_descriptor_array_assignment_from_desc(
                     dst_field, src_field, array_t, elem_st);
@@ -19539,9 +19596,16 @@ public:
             }
             ASR::Struct_t *st = struct_symbol_from_type_decl(
                 v->m_type_declaration);
+            if (!st) {
+                st = struct_symbol_for_type(vt);
+            }
             if (!st) continue;
             auto it = lr_symtab.find(get_hash((ASR::asr_t *)v));
             if (it == lr_symtab.end()) continue;
+            if (ASRUtils::is_allocatable(v->m_type)) {
+                emit_finalize_allocated_struct_slot(it->second, st);
+                continue;
+            }
             std::unordered_set<uint64_t> active;
             emit_struct_finalizers(it->second, st, active);
         }
@@ -22467,6 +22531,19 @@ public:
 
     void visit_Nullify(const ASR::Nullify_t &x) {
         for (size_t i = 0; i < x.n_vars; i++) {
+            ASR::Array_t *array_t = nullptr;
+            if (ASRUtils::is_pointer(ASRUtils::expr_type(x.m_vars[i])) &&
+                    is_descriptor_array_type(ASRUtils::expr_type(x.m_vars[i]),
+                        &array_t) &&
+                    ASR::is_a<ASR::Var_t>(*x.m_vars[i])) {
+                ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
+                    ASR::down_cast<ASR::Var_t>(x.m_vars[i])->m_v);
+                if (ASR::is_a<ASR::Variable_t>(*sym)) {
+                    reset_descriptor_array(emit_variable_address(
+                        ASR::down_cast<ASR::Variable_t>(sym)), array_t);
+                    continue;
+                }
+            }
             bool was_target = is_target;
             is_target = true;
             visit_expr(*x.m_vars[i]);
@@ -22736,13 +22813,17 @@ public:
     // a fixed-size array has no descriptor, so desc_ptr_of already yields the
     // data address and loading offset 0 would read the first element instead.
     uint32_t array_assoc_base(ASR::expr_t *e) {
+        ASR::ttype_t *expr_type = ASRUtils::expr_type(e);
         ASR::ttype_t *core = ASRUtils::type_get_past_allocatable_pointer(
-            ASRUtils::expr_type(e));
+            expr_type);
         uint32_t dptr = desc_ptr_of(e);
         if (ASR::is_a<ASR::Array_t>(*core) &&
                 ASR::down_cast<ASR::Array_t>(core)->m_physical_type ==
                     ASR::array_physical_typeType::FixedSizeArray) {
             return dptr;
+        }
+        if (ASRUtils::is_pointer(expr_type)) {
+            return desc_base_addr_or_null(dptr);
         }
         return desc_base_addr(dptr);
     }
@@ -25314,6 +25395,25 @@ found_offset:
     uint32_t desc_base_addr(uint32_t desc_ptr) {
         // base_addr is at offset 0, ty_ptr-sized.
         return lr_emit_load(s, ty_ptr, V(desc_ptr, ty_ptr));
+    }
+
+    uint32_t desc_base_addr_or_null(uint32_t desc_ptr) {
+        uint32_t out = lr_emit_alloca(s, ty_ptr);
+        lr_emit_store(s, LR_NULL(ty_ptr), V(out, ty_ptr));
+        uint32_t present = lr_emit_icmp(s, LR_CMP_NE,
+            V(desc_ptr, ty_ptr), LR_NULL(ty_ptr));
+        uint32_t load_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(present, ty_i1), load_bb, done_bb);
+
+        lr_error_t err;
+        lr_session_set_block(s, load_bb, &err);
+        lr_emit_store(s, V(desc_base_addr(desc_ptr), ty_ptr),
+            V(out, ty_ptr));
+        lr_emit_br(s, done_bb);
+
+        lr_session_set_block(s, done_bb, &err);
+        return lr_emit_load(s, ty_ptr, V(out, ty_ptr));
     }
 
     std::vector<uint32_t> emit_reshape_extents(ASR::expr_t *shape_expr,
