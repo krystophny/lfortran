@@ -8692,10 +8692,6 @@ public:
 
     bool formal_expects_raw_array_data(ASR::Function_t *fn, size_t i,
             ASR::expr_t *actual) {
-        if (expr_is_array_section_call_temp(actual) ||
-                expr_is_descriptor_slot_call_temp(actual)) {
-            return true;
-        }
         if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*actual)) {
             ASR::ArrayPhysicalCast_t *cast =
                 ASR::down_cast<ASR::ArrayPhysicalCast_t>(actual);
