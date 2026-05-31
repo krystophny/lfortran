@@ -1543,6 +1543,75 @@ public:
         return ASR::down_cast<ASR::Struct_t>(sym);
     }
 
+    bool struct_member_types_compatible(ASR::ttype_t *a,
+                                        ASR::ttype_t *b) {
+        a = ASRUtils::type_get_past_allocatable_pointer(a);
+        b = ASRUtils::type_get_past_allocatable_pointer(b);
+        a = ASRUtils::type_get_past_array(a);
+        b = ASRUtils::type_get_past_array(b);
+        if (a->type != b->type) return false;
+        if (ASR::is_a<ASR::Integer_t>(*a) ||
+                ASR::is_a<ASR::UnsignedInteger_t>(*a) ||
+                ASR::is_a<ASR::Real_t>(*a) ||
+                ASR::is_a<ASR::Logical_t>(*a) ||
+                ASR::is_a<ASR::Complex_t>(*a)) {
+            return ASRUtils::extract_kind_from_ttype_t(a) ==
+                ASRUtils::extract_kind_from_ttype_t(b);
+        }
+        if (ASR::is_a<ASR::String_t>(*a)) {
+            int64_t alen = 0, blen = 0;
+            return get_fixed_string_len(a, alen) &&
+                get_fixed_string_len(b, blen) && alen == blen;
+        }
+        if (ASR::is_a<ASR::StructType_t>(*a)) {
+            ASR::StructType_t *sa = ASR::down_cast<ASR::StructType_t>(a);
+            ASR::StructType_t *sb = ASR::down_cast<ASR::StructType_t>(b);
+            if (sa->n_data_member_types != sb->n_data_member_types) {
+                return false;
+            }
+            for (size_t i = 0; i < sa->n_data_member_types; i++) {
+                if (!struct_member_types_compatible(
+                        sa->m_data_member_types[i],
+                        sb->m_data_member_types[i])) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return ASRUtils::types_equal(a, b, nullptr, nullptr, true);
+    }
+
+    ASR::Struct_t *struct_symbol_for_type(ASR::ttype_t *type) {
+        type = ASRUtils::type_get_past_allocatable_pointer(type);
+        type = ASRUtils::type_get_past_array(type);
+        if (!ASR::is_a<ASR::StructType_t>(*type)) return nullptr;
+        ASR::StructType_t *want = ASR::down_cast<ASR::StructType_t>(type);
+        for (ASR::Struct_t *st : known_structs) {
+            if (!st->m_struct_signature ||
+                    !ASR::is_a<ASR::StructType_t>(*st->m_struct_signature)) {
+                continue;
+            }
+            ASR::StructType_t *got =
+                ASR::down_cast<ASR::StructType_t>(st->m_struct_signature);
+            if (want->n_data_member_types != got->n_data_member_types) {
+                continue;
+            }
+            bool match = true;
+            for (size_t i = 0; i < want->n_data_member_types; i++) {
+                if (!struct_member_types_compatible(
+                        want->m_data_member_types[i],
+                        got->m_data_member_types[i])) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) {
+                return st;
+            }
+        }
+        return nullptr;
+    }
+
     // `arr%comp` where arr is an array of structs: a strided whole-array member
     // view.  visit_StructInstanceMember builds a proper (strided) descriptor
     // for it, so an enclosing FixedSize->Descriptor cast must pass that
@@ -14251,6 +14320,7 @@ public:
         uint32_t elem_chars;
         uint32_t allocator;
         bool writeback;
+        int n_dims = 1;
     };
 
     struct BindCStructCfiArg {
@@ -14258,6 +14328,11 @@ public:
         uint32_t raw;
         ASR::Struct_t *st;
         bool writeback;
+        uint32_t allocator = 0;
+        uint32_t total = 0;
+        uint32_t storage_stride = 0;
+        uint32_t raw_stride = 0;
+        ASR::StructType_t *stt = nullptr;
     };
 
     bool fixed_string_scalar_member(ASR::Variable_t *member,
@@ -14272,21 +14347,133 @@ public:
         return get_fixed_string_len(member->m_type, len);
     }
 
+    bool fixed_string_scalar_type(ASR::ttype_t *type, int64_t &len) {
+        if (ASRUtils::is_allocatable(type) || ASRUtils::is_pointer(type)) {
+            return false;
+        }
+        type = ASRUtils::type_get_past_allocatable_pointer(type);
+        if (ASR::is_a<ASR::Array_t>(*type)) return false;
+        return get_fixed_string_len(type, len);
+    }
+
+    uint64_t align_to(uint64_t offset, uint64_t alignment) {
+        if (alignment <= 1) return offset;
+        return ((offset + alignment - 1) / alignment) * alignment;
+    }
+
+    uint64_t bindc_raw_member_alignment(ASR::Variable_t *member) {
+        int64_t len = 0;
+        if (fixed_string_scalar_member(member, len)) return 1;
+        ASR::ttype_t *type =
+            ASRUtils::type_get_past_allocatable_pointer(member->m_type);
+        type = ASRUtils::type_get_past_array(type);
+        if (ASR::is_a<ASR::Integer_t>(*type) ||
+                ASR::is_a<ASR::UnsignedInteger_t>(*type) ||
+                ASR::is_a<ASR::Real_t>(*type) ||
+                ASR::is_a<ASR::Logical_t>(*type)) {
+            int kind = ASRUtils::extract_kind_from_ttype_t(type);
+            return (uint64_t)(kind > 0 ? std::min(kind, 8) : 4);
+        }
+        if (ASR::is_a<ASR::Complex_t>(*type)) {
+            int kind = normalized_real_kind(type);
+            return (uint64_t)(kind > 0 ? std::min(kind, 8) : 8);
+        }
+        if (ASR::is_a<ASR::CPtr_t>(*type) ||
+                ASRUtils::is_pointer(member->m_type) ||
+                ASRUtils::is_allocatable(member->m_type)) {
+            return 8;
+        }
+        return std::min<uint64_t>(storage_size_for_variable(member), 8);
+    }
+
+    uint64_t bindc_raw_member_size(ASR::Variable_t *member,
+                                   bool *uses_raw_chars = nullptr) {
+        int64_t len = 0;
+        if (fixed_string_scalar_member(member, len)) {
+            if (uses_raw_chars) *uses_raw_chars = true;
+            return (uint64_t)(len > 0 ? len : 0);
+        }
+        ASR::Struct_t *member_struct =
+            struct_symbol_from_type_decl(member->m_type_declaration);
+        if (member_struct && !ASRUtils::is_pointer(member->m_type) &&
+                !ASRUtils::is_allocatable(member->m_type)) {
+            return bindc_raw_struct_size(member_struct, uses_raw_chars);
+        }
+        return storage_size_for_variable(member);
+    }
+
+    uint64_t bindc_raw_member_type_alignment(ASR::ttype_t *type) {
+        int64_t len = 0;
+        if (fixed_string_scalar_type(type, len)) return 1;
+        type = ASRUtils::type_get_past_allocatable_pointer(type);
+        type = ASRUtils::type_get_past_array(type);
+        if (ASR::is_a<ASR::Integer_t>(*type) ||
+                ASR::is_a<ASR::UnsignedInteger_t>(*type) ||
+                ASR::is_a<ASR::Real_t>(*type) ||
+                ASR::is_a<ASR::Logical_t>(*type)) {
+            int kind = ASRUtils::extract_kind_from_ttype_t(type);
+            return (uint64_t)(kind > 0 ? std::min(kind, 8) : 4);
+        }
+        if (ASR::is_a<ASR::Complex_t>(*type)) {
+            int kind = normalized_real_kind(type);
+            return (uint64_t)(kind > 0 ? std::min(kind, 8) : 8);
+        }
+        if (ASR::is_a<ASR::CPtr_t>(*type) ||
+                ASRUtils::is_pointer(type) ||
+                ASRUtils::is_allocatable(type)) {
+            return 8;
+        }
+        return std::min<uint64_t>(
+            storage_size_or_default(type, get_type(type)), 8);
+    }
+
+    uint64_t bindc_raw_member_type_size(ASR::ttype_t *type,
+                                        bool *uses_raw_chars = nullptr) {
+        int64_t len = 0;
+        if (fixed_string_scalar_type(type, len)) {
+            if (uses_raw_chars) *uses_raw_chars = true;
+            return (uint64_t)(len > 0 ? len : 0);
+        }
+        type = ASRUtils::type_get_past_allocatable_pointer(type);
+        type = ASRUtils::type_get_past_array(type);
+        if (ASR::is_a<ASR::StructType_t>(*type)) {
+            return bindc_raw_struct_type_size(
+                ASR::down_cast<ASR::StructType_t>(type), uses_raw_chars);
+        }
+        return storage_size_or_default(type, get_type(type));
+    }
+
+    uint64_t bindc_raw_struct_type_size(ASR::StructType_t *stt,
+                                        bool *uses_raw_chars = nullptr) {
+        if (uses_raw_chars) *uses_raw_chars = false;
+        uint64_t nbytes = 0;
+        uint64_t max_align = 1;
+        for (size_t i = 0; i < stt->n_data_member_types; i++) {
+            ASR::ttype_t *member_type = stt->m_data_member_types[i];
+            uint64_t align = bindc_raw_member_type_alignment(member_type);
+            max_align = std::max(max_align, align);
+            nbytes = align_to(nbytes, align);
+            nbytes += bindc_raw_member_type_size(
+                member_type, uses_raw_chars);
+        }
+        nbytes = align_to(nbytes, max_align);
+        return nbytes > 0 ? nbytes : 1;
+    }
+
     uint64_t bindc_raw_struct_size(ASR::Struct_t *st,
                                    bool *uses_raw_chars = nullptr) {
         if (uses_raw_chars) *uses_raw_chars = false;
         uint64_t nbytes = 0;
+        uint64_t max_align = 1;
         std::vector<ASR::Variable_t *> members;
         collect_struct_members_parent_first(st, members);
         for (ASR::Variable_t *member : members) {
-            int64_t len = 0;
-            if (fixed_string_scalar_member(member, len)) {
-                nbytes += (uint64_t)(len > 0 ? len : 0);
-                if (uses_raw_chars) *uses_raw_chars = true;
-            } else {
-                nbytes += storage_size_for_variable(member);
-            }
+            uint64_t align = bindc_raw_member_alignment(member);
+            max_align = std::max(max_align, align);
+            nbytes = align_to(nbytes, align);
+            nbytes += bindc_raw_member_size(member, uses_raw_chars);
         }
+        nbytes = align_to(nbytes, max_align);
         return nbytes > 0 ? nbytes : 1;
     }
 
@@ -14298,6 +14485,8 @@ public:
         uint64_t storage_off = 0;
         uint64_t raw_off = 0;
         for (ASR::Variable_t *member : members) {
+            raw_off = align_to(raw_off,
+                bindc_raw_member_alignment(member));
             lr_operand_desc_t storage_offset[1] = {
                 I((int64_t)storage_off, ty_i64)
             };
@@ -14322,13 +14511,110 @@ public:
                 }
                 raw_off += (uint64_t)len;
             } else {
-                uint64_t nbytes = storage_size_for_variable(member);
-                emit_memcpy_bytes(raw_to_storage ? storage_field : raw_field,
-                    raw_to_storage ? raw_field : storage_field, nbytes);
+                ASR::Struct_t *member_struct =
+                    struct_symbol_from_type_decl(member->m_type_declaration);
+                uint64_t nbytes = bindc_raw_member_size(member);
+                if (member_struct && !ASRUtils::is_pointer(member->m_type) &&
+                        !ASRUtils::is_allocatable(member->m_type)) {
+                    emit_bindc_raw_struct_copy(storage_field, raw_field,
+                        member_struct, raw_to_storage);
+                } else {
+                    emit_memcpy_bytes(
+                        raw_to_storage ? storage_field : raw_field,
+                        raw_to_storage ? raw_field : storage_field, nbytes);
+                }
                 raw_off += nbytes;
             }
             storage_off += storage_size_for_variable(member);
         }
+    }
+
+    void emit_bindc_raw_struct_type_copy(uint32_t storage, uint32_t raw,
+                                         ASR::StructType_t *stt,
+                                         bool raw_to_storage) {
+        uint64_t storage_off = 0;
+        uint64_t raw_off = 0;
+        for (size_t i = 0; i < stt->n_data_member_types; i++) {
+            ASR::ttype_t *member_type = stt->m_data_member_types[i];
+            raw_off = align_to(raw_off,
+                bindc_raw_member_type_alignment(member_type));
+            lr_operand_desc_t storage_offset[1] = {
+                I((int64_t)storage_off, ty_i64)
+            };
+            lr_operand_desc_t raw_offset[1] = {
+                I((int64_t)raw_off, ty_i64)
+            };
+            uint32_t storage_field = lr_emit_gep(s, ty_i8,
+                V(storage, ty_ptr), storage_offset, 1);
+            uint32_t raw_field = lr_emit_gep(s, ty_i8,
+                V(raw, ty_ptr), raw_offset, 1);
+            int64_t len = 0;
+            if (fixed_string_scalar_type(member_type, len)) {
+                uint32_t desc = lr_emit_load(s, ty_str_desc,
+                    V(storage_field, ty_ptr));
+                uint32_t fld0 = 0;
+                uint32_t data = lr_emit_extractvalue(s, ty_ptr,
+                    V(desc, ty_str_desc), &fld0, 1);
+                emit_memcpy_bytes(raw_to_storage ? data : raw_field,
+                    raw_to_storage ? raw_field : data, (uint64_t)len);
+                raw_off += (uint64_t)len;
+            } else {
+                ASR::ttype_t *core =
+                    ASRUtils::type_get_past_allocatable_pointer(member_type);
+                core = ASRUtils::type_get_past_array(core);
+                uint64_t nbytes = bindc_raw_member_type_size(member_type);
+                if (ASR::is_a<ASR::StructType_t>(*core)) {
+                    emit_bindc_raw_struct_type_copy(storage_field, raw_field,
+                        ASR::down_cast<ASR::StructType_t>(core),
+                        raw_to_storage);
+                } else {
+                    emit_memcpy_bytes(
+                        raw_to_storage ? storage_field : raw_field,
+                        raw_to_storage ? raw_field : storage_field, nbytes);
+                }
+                raw_off += nbytes;
+            }
+            storage_off += storage_size_or_default(
+                member_type, get_type(member_type));
+        }
+    }
+
+    void emit_bindc_raw_struct_array_copy(uint32_t storage, uint32_t raw,
+            ASR::Struct_t *st, uint32_t total, uint32_t storage_stride,
+            uint32_t raw_stride, bool raw_to_storage,
+            ASR::StructType_t *stt = nullptr) {
+        uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+        lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+
+        lr_error_t err;
+        uint32_t head_bb = lr_session_block(s);
+        uint32_t body_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_br(s, head_bb);
+
+        lr_session_set_block(s, head_bb, &err);
+        uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+        uint32_t more = lr_emit_icmp(s, LR_CMP_SLT,
+            V(idx, ty_i64), V(total, ty_i64));
+        lr_emit_condbr(s, V(more, ty_i1), body_bb, done_bb);
+
+        lr_session_set_block(s, body_bb, &err);
+        uint32_t storage_elem = emit_linear_elem_ptr(
+            storage, idx, storage_stride);
+        uint32_t raw_elem = emit_linear_elem_ptr(raw, idx, raw_stride);
+        if (st) {
+            emit_bindc_raw_struct_copy(storage_elem, raw_elem, st,
+                raw_to_storage);
+        } else if (stt) {
+            emit_bindc_raw_struct_type_copy(storage_elem, raw_elem, stt,
+                raw_to_storage);
+        }
+        uint32_t next = lr_emit_add(s, ty_i64,
+            V(idx, ty_i64), I(1, ty_i64));
+        lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+        lr_emit_br(s, head_bb);
+
+        lr_session_set_block(s, done_bb, &err);
     }
 
     bool is_raw_cchar_array_physical_type(
@@ -14514,11 +14800,43 @@ public:
             ASRUtils::type_get_past_allocatable_pointer(
                 actual_array->m_type));
         bool is_char_array = ASR::is_a<ASR::String_t>(*elem_type);
+        ASR::Struct_t *actual_struct = struct_symbol_for_concrete_expr(actual);
+        if (!actual_struct) {
+            actual_struct = struct_symbol_for_type(elem_type);
+        }
+        if (!actual_struct) {
+            actual_struct = struct_symbol_from_type_decl(
+                formal->m_type_declaration);
+        }
+        ASR::StructType_t *actual_struct_type =
+            (!actual_struct && ASR::is_a<ASR::StructType_t>(*elem_type))
+                ? ASR::down_cast<ASR::StructType_t>(elem_type) : nullptr;
+        bool uses_raw_chars = false;
+        uint64_t raw_struct_bytes = actual_struct
+            ? bindc_raw_struct_size(actual_struct, &uses_raw_chars)
+            : (actual_struct_type
+                ? bindc_raw_struct_type_size(actual_struct_type,
+                    &uses_raw_chars)
+                : 0);
+        bool use_raw_struct_array =
+            (actual_struct || actual_struct_type) && uses_raw_chars;
+        bool raw_struct_descriptor_bridge = false;
+        if (use_raw_struct_array &&
+                formal->m_intent == ASR::intentType::In &&
+                ASR::is_a<ASR::ArrayPhysicalCast_t>(*actual)) {
+            ASR::ArrayPhysicalCast_t *cast =
+                ASR::down_cast<ASR::ArrayPhysicalCast_t>(actual);
+            raw_struct_descriptor_bridge =
+                cast->m_old == ASR::array_physical_typeType::FixedSizeArray &&
+                cast->m_new == ASR::array_physical_typeType::DescriptorArray;
+        }
 
         int64_t cfi_header_bytes = 24;
         uint32_t cfi = emit_storage_alloca_nbytes(
             cfi_header_bytes + DESC_DIM_BYTES * (n_dims > 0 ? n_dims : 0));
-        int64_t elem_bytes_i64 = element_byte_size(actual_array->m_type);
+        int64_t elem_bytes_i64 = use_raw_struct_array
+            ? (int64_t)raw_struct_bytes
+            : element_byte_size(actual_array->m_type);
         uint32_t elem_bytes = emit_i64_const(elem_bytes_i64);
 
         bool actual_is_descriptor =
@@ -14537,6 +14855,7 @@ public:
             }
             uint32_t cfi_base;
             uint32_t cfi_elem_len;
+            bool use_packed_cfi_strides = is_char_array;
             if (is_char_array) {
                 uint32_t total = descriptor_array_element_count(
                     desc, n_dims);
@@ -14560,9 +14879,43 @@ public:
                 cfi_base = emit_call("_lfortran_malloc_alloc",
                     ty_ptr, malloc_args, 2);
                 emit_descriptor_chars_copy(desc, cfi_base, total,
-                    cfi_elem_len, false);
+                    cfi_elem_len, false, n_dims);
                 scratch.push_back({desc, cfi_base, total, cfi_elem_len,
-                    allocator, formal->m_intent != ASR::intentType::In});
+                    allocator, formal->m_intent != ASR::intentType::In,
+                    n_dims});
+            } else if (raw_struct_descriptor_bridge) {
+                uint32_t base = desc_base_addr(desc);
+                uint32_t offset = desc_load_i64(desc, 24);
+                lr_operand_desc_t off[1] = {V(offset, ty_i64)};
+                uint32_t storage_base = lr_emit_gep(s, ty_i8,
+                    V(base, ty_ptr), off, 1);
+                uint32_t total = descriptor_array_element_count(
+                    desc, n_dims);
+                uint32_t raw_bytes = lr_emit_mul(s, ty_i64,
+                    V(total, ty_i64), V(elem_bytes, ty_i64));
+                uint32_t allocator = emit_call(
+                    "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+                lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
+                declare_func("_lfortran_malloc_alloc", ty_ptr,
+                    malloc_params, 2, false);
+                lr_operand_desc_t malloc_args[] = {
+                    V(allocator, ty_ptr), V(raw_bytes, ty_i64)
+                };
+                uint32_t raw = emit_call("_lfortran_malloc_alloc",
+                    ty_ptr, malloc_args, 2);
+                uint32_t storage_stride = n_dims > 0
+                    ? desc_load_i64(desc,
+                        DESC_HEADER_BYTES + DESC_DIM_STRIDE)
+                    : desc_load_i64(desc, 8);
+                emit_bindc_raw_struct_array_copy(storage_base, raw,
+                    actual_struct, total, storage_stride, elem_bytes, false,
+                    actual_struct_type);
+                struct_scratch.push_back({storage_base, raw, actual_struct,
+                    false, allocator, total, storage_stride, elem_bytes,
+                    actual_struct_type});
+                cfi_base = raw;
+                cfi_elem_len = elem_bytes;
+                use_packed_cfi_strides = true;
             } else {
                 uint32_t base = desc_base_addr(desc);
                 if (type_is_unlimited_polymorphic_array(actual_type) ||
@@ -14587,7 +14940,7 @@ public:
                 uint32_t extent =
                     desc_load_i64(desc, src_off + DESC_DIM_EXTENT);
                 desc_store_i64(cfi, dst_off + DESC_DIM_EXTENT, extent);
-                if (is_char_array) {
+                if (use_packed_cfi_strides) {
                     desc_store_i64(cfi, dst_off + DESC_DIM_STRIDE,
                         cfi_stride);
                     cfi_stride = lr_emit_mul(s, ty_i64,
@@ -14602,10 +14955,42 @@ public:
             is_target = true;
             visit_expr(*actual);
             is_target = was_target;
-            desc_store_base(cfi, tmp);
-            desc_store_i64(cfi, 8, elem_bytes);
+            uint32_t cfi_base = tmp;
+            uint32_t cfi_elem_len = elem_bytes;
+            uint32_t total = emit_i64_const(1);
+            for (int d = 0; d < n_dims; d++) {
+                total = lr_emit_mul(s, ty_i64, V(total, ty_i64),
+                    V(emit_array_dim_extent_for_expr(actual,
+                        actual_array, (size_t)d), ty_i64));
+            }
+            if (use_raw_struct_array) {
+                uint32_t raw_bytes = lr_emit_mul(s, ty_i64,
+                    V(total, ty_i64), V(elem_bytes, ty_i64));
+                uint32_t allocator = emit_call(
+                    "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+                lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
+                declare_func("_lfortran_malloc_alloc", ty_ptr,
+                    malloc_params, 2, false);
+                lr_operand_desc_t malloc_args[] = {
+                    V(allocator, ty_ptr), V(raw_bytes, ty_i64)
+                };
+                uint32_t raw = emit_call("_lfortran_malloc_alloc",
+                    ty_ptr, malloc_args, 2);
+                uint32_t storage_stride = emit_i64_const(
+                    array_element_stride_bytes(actual, actual_array->m_type));
+                emit_bindc_raw_struct_array_copy(cfi_base, raw,
+                    actual_struct, total, storage_stride, elem_bytes, false,
+                    actual_struct_type);
+                struct_scratch.push_back({cfi_base, raw, actual_struct,
+                    formal->m_intent != ASR::intentType::In, allocator,
+                    total, storage_stride, elem_bytes, actual_struct_type});
+                cfi_base = raw;
+                cfi_elem_len = elem_bytes;
+            }
+            desc_store_base(cfi, cfi_base);
+            desc_store_i64(cfi, 8, cfi_elem_len);
 
-            uint32_t stride = elem_bytes;
+            uint32_t stride = cfi_elem_len;
             for (int d = 0; d < n_dims; d++) {
                 uint32_t lbound = emit_i64_const(1);
                 if (actual_array->m_dims[d].m_start) {
@@ -14869,9 +15254,9 @@ public:
     }
 
     void emit_descriptor_chars_copy(uint32_t desc, uint32_t raw,
-            uint32_t total, uint32_t elem_chars, bool raw_to_desc) {
+            uint32_t total, uint32_t elem_chars, bool raw_to_desc,
+            int n_dims = 1) {
         uint32_t base = desc_base_addr(desc);
-        uint32_t elem_stride = desc_load_i64(desc, 8);
         uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
         lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
 
@@ -14888,11 +15273,8 @@ public:
         lr_emit_condbr(s, V(more, ty_i1), body_bb, done_bb);
 
         lr_session_set_block(s, body_bb, &err);
-        uint32_t elem_off = lr_emit_mul(s, ty_i64,
-            V(idx, ty_i64), V(elem_stride, ty_i64));
-        lr_operand_desc_t elem_gep[1] = {V(elem_off, ty_i64)};
-        uint32_t elem_ptr = lr_emit_gep(s, ty_i8,
-            V(base, ty_ptr), elem_gep, 1);
+        uint32_t elem_ptr = emit_descriptor_element_ptr(
+            desc, base, idx, n_dims);
         uint32_t elem_desc = lr_emit_load(s, ty_str_desc,
             V(elem_ptr, ty_ptr));
         uint32_t fld0 = 0;
@@ -14987,6 +15369,14 @@ public:
                 uint32_t desc = emit_desc_alloca(1);
                 desc_store_base(desc, view.base);
                 desc_store_i64(desc, 8, view.elem_len);
+                desc_store_rank(desc, 1);
+                desc_store_i64(desc, 24, emit_i64_const(0));
+                desc_store_i64(desc, DESC_HEADER_BYTES + DESC_DIM_LBOUND,
+                    emit_i64_const(1));
+                desc_store_i64(desc, DESC_HEADER_BYTES + DESC_DIM_EXTENT,
+                    view.total);
+                desc_store_i64(desc, DESC_HEADER_BYTES + DESC_DIM_STRIDE,
+                    view.elem_len);
                 emit_descriptor_chars_copy(desc, raw, view.total,
                     elem_chars, false);
 
@@ -15023,10 +15413,12 @@ public:
         };
         uint32_t raw = emit_call("_lfortran_malloc_alloc",
             ty_ptr, malloc_args, 2);
-        emit_descriptor_chars_copy(desc, raw, total, elem_chars, false);
+        emit_descriptor_chars_copy(desc, raw, total, elem_chars, false,
+            (int)array->n_dims);
 
         bool writeback = formal->m_intent != ASR::intentType::In;
-        scratch.push_back({desc, raw, total, elem_chars, allocator, writeback});
+        scratch.push_back({desc, raw, total, elem_chars, allocator, writeback,
+            (int)array->n_dims});
         args.push_back(V(raw, ty_ptr));
         params.push_back(ty_ptr);
         return true;
@@ -15037,7 +15429,7 @@ public:
         for (BindCCharArrayArg &arg : scratch) {
             if (arg.writeback) {
                 emit_descriptor_chars_copy(arg.desc, arg.raw, arg.total,
-                    arg.elem_chars, true);
+                    arg.elem_chars, true, arg.n_dims);
             }
             emit_free_if_nonnull(arg.allocator, arg.raw);
         }
@@ -15047,7 +15439,22 @@ public:
             std::vector<BindCStructCfiArg> &scratch) {
         for (BindCStructCfiArg &arg : scratch) {
             if (arg.writeback) {
-                emit_bindc_raw_struct_copy(arg.storage, arg.raw, arg.st, true);
+                if (arg.total) {
+                    emit_bindc_raw_struct_array_copy(arg.storage, arg.raw,
+                        arg.st, arg.total, arg.storage_stride,
+                        arg.raw_stride, true, arg.stt);
+                } else {
+                    if (arg.st) {
+                        emit_bindc_raw_struct_copy(arg.storage, arg.raw,
+                            arg.st, true);
+                    } else if (arg.stt) {
+                        emit_bindc_raw_struct_type_copy(arg.storage, arg.raw,
+                            arg.stt, true);
+                    }
+                }
+            }
+            if (arg.allocator) {
+                emit_free_if_nonnull(arg.allocator, arg.raw);
             }
         }
     }
