@@ -7268,7 +7268,7 @@ public:
 
     void visit_ComplexConstant(const ASR::ComplexConstant_t &x) {
         lr_type_t *ct = get_type(x.m_type);
-        int kind = ASRUtils::extract_kind_from_ttype_t(x.m_type);
+        int kind = normalized_real_kind(x.m_type);
         lr_type_t *ft = (kind == 4) ? ty_f32 : ty_f64;
         uint32_t fld0 = 0, fld1 = 1;
         uint32_t c0 = lr_emit_insertvalue(s, ct,
@@ -7337,7 +7337,7 @@ public:
             return lr_emit_sitofp(s, dst_ft, V(value, it));
         }
         if (ASR::is_a<ASR::Real_t>(*src_type)) {
-            int64_t kind = ASRUtils::extract_kind_from_ttype_t(src_type);
+            int64_t kind = normalized_real_kind(src_type);
             lr_type_t *src_ft = (kind == 4) ? ty_f32 : ty_f64;
             if (src_ft == dst_ft) return value;
             return (dst_ft == ty_f64)
@@ -7345,6 +7345,69 @@ public:
                 : lr_emit_fptrunc(s, dst_ft, V(value, src_ft));
         }
         throw CodeGenError("liric: cmplx() argument type not supported");
+    }
+
+    uint32_t coerce_scalar_value_to_type(uint32_t value,
+            ASR::ttype_t *src_type, ASR::ttype_t *dst_type) {
+        src_type = ASRUtils::type_get_past_allocatable_pointer(src_type);
+        src_type = ASRUtils::type_get_past_array(src_type);
+        dst_type = ASRUtils::type_get_past_allocatable_pointer(dst_type);
+        dst_type = ASRUtils::type_get_past_array(dst_type);
+        lr_type_t *src_lr = get_type(src_type);
+        lr_type_t *dst_lr = get_type(dst_type);
+        if (src_lr == dst_lr) {
+            return value;
+        }
+        if (ASR::is_a<ASR::Integer_t>(*src_type) &&
+                ASR::is_a<ASR::Integer_t>(*dst_type)) {
+            return cast_int_value(value, src_lr, dst_lr);
+        }
+        if (ASR::is_a<ASR::Real_t>(*src_type) &&
+                ASR::is_a<ASR::Real_t>(*dst_type)) {
+            return dst_lr == ty_f64
+                ? lr_emit_fpext(s, dst_lr, V(value, src_lr))
+                : lr_emit_fptrunc(s, dst_lr, V(value, src_lr));
+        }
+        if (ASR::is_a<ASR::Integer_t>(*src_type) &&
+                ASR::is_a<ASR::Real_t>(*dst_type)) {
+            return lr_emit_sitofp(s, dst_lr, V(value, src_lr));
+        }
+        if (ASR::is_a<ASR::Real_t>(*src_type) &&
+                ASR::is_a<ASR::Integer_t>(*dst_type)) {
+            return lr_emit_fptosi(s, dst_lr, V(value, src_lr));
+        }
+        if (ASR::is_a<ASR::Complex_t>(*src_type) &&
+                ASR::is_a<ASR::Complex_t>(*dst_type)) {
+            int src_kind = normalized_real_kind(src_type);
+            int dst_kind = normalized_real_kind(dst_type);
+            lr_type_t *src_ft = src_kind == 4 ? ty_f32 : ty_f64;
+            lr_type_t *dst_ft = dst_kind == 4 ? ty_f32 : ty_f64;
+            uint32_t fld0 = 0, fld1 = 1;
+            uint32_t re = lr_emit_extractvalue(s, src_ft,
+                V(value, src_lr), &fld0, 1);
+            uint32_t im = lr_emit_extractvalue(s, src_ft,
+                V(value, src_lr), &fld1, 1);
+            if (src_ft != dst_ft) {
+                re = dst_ft == ty_f64
+                    ? lr_emit_fpext(s, dst_ft, V(re, src_ft))
+                    : lr_emit_fptrunc(s, dst_ft, V(re, src_ft));
+                im = dst_ft == ty_f64
+                    ? lr_emit_fpext(s, dst_ft, V(im, src_ft))
+                    : lr_emit_fptrunc(s, dst_ft, V(im, src_ft));
+            }
+            return emit_complex_value(dst_lr, dst_ft, re, im);
+        }
+        if ((ASR::is_a<ASR::Real_t>(*src_type) ||
+                ASR::is_a<ASR::Integer_t>(*src_type)) &&
+                ASR::is_a<ASR::Complex_t>(*dst_type)) {
+            int dst_kind = normalized_real_kind(dst_type);
+            lr_type_t *dst_ft = dst_kind == 4 ? ty_f32 : ty_f64;
+            uint32_t re = coerce_real_like_to_kind(value, src_type, dst_ft);
+            uint32_t im = lr_emit_fadd(s, dst_ft, F(0.0, dst_ft),
+                F(0.0, dst_ft));
+            return emit_complex_value(dst_lr, dst_ft, re, im);
+        }
+        throw CodeGenError("liric: unsupported scalar default conversion");
     }
 
     // real(z) / aimag(z): extract field 0/1 from the {f32,f32}/{f64,f64}
@@ -7419,7 +7482,7 @@ public:
     void visit_ComplexConstructor(const ASR::ComplexConstructor_t &x) {
         LIRIC_PASSTHROUGH(x)
         lr_type_t *ct = get_type(x.m_type);
-        int kind = ASRUtils::extract_kind_from_ttype_t(x.m_type);
+        int kind = normalized_real_kind(x.m_type);
         lr_type_t *ft = (kind == 4) ? ty_f32 : ty_f64;
         // Coerce each part to the result element kind: the parts may be a
         // different real kind or an integer (e.g. the generated cmplx_f32
@@ -7487,7 +7550,7 @@ public:
         visit_expr(*x.m_arg);
         uint32_t v = tmp;
         lr_type_t *ct = get_type(x.m_type);
-        int kind = ASRUtils::extract_kind_from_ttype_t(x.m_type);
+        int kind = normalized_real_kind(x.m_type);
         lr_type_t *ft = (kind == 4) ? ty_f32 : ty_f64;
         uint32_t fld0 = 0, fld1 = 1;
         uint32_t re = lr_emit_extractvalue(s, ft, V(v, ct), &fld0, 1);
@@ -12596,9 +12659,10 @@ public:
                     emit_string_assignment_to_desc_slot(field_ptr, tmp);
                 } else {
                     visit_expr(*member->m_value);
-                    lr_type_t *value_type =
-                        value_type_for_expr(member->m_value);
-                    lr_emit_store(s, V(tmp, value_type), V(field_ptr, ty_ptr));
+                    uint32_t value = coerce_scalar_value_to_type(tmp,
+                        ASRUtils::expr_type(member->m_value), member_type);
+                    lr_emit_store(s, V(value, get_type(member_type)),
+                        V(field_ptr, ty_ptr));
                 }
             }
             // Procedure-pointer component with a `=> target` default: the
@@ -17792,7 +17856,7 @@ public:
                 break;
             case ASR::cast_kindType::RealToComplex: {
                 // Pack real value into complex with 0.0 imaginary.
-                int64_t dst_kind = ASRUtils::extract_kind_from_ttype_t(x.m_type);
+                int64_t dst_kind = normalized_real_kind(x.m_type);
                 lr_type_t *dst_ft = (dst_kind == 4) ? ty_f32 : ty_f64;
                 uint32_t re = val;
                 if (src_t != dst_ft) {
@@ -17809,7 +17873,7 @@ public:
             }
             case ASR::cast_kindType::IntegerToComplex: {
                 // Convert integer to float then pack into complex.
-                int64_t dst_kind = ASRUtils::extract_kind_from_ttype_t(x.m_type);
+                int64_t dst_kind = normalized_real_kind(x.m_type);
                 lr_type_t *dst_ft = (dst_kind == 4) ? ty_f32 : ty_f64;
                 uint32_t re = lr_emit_sitofp(s, dst_ft, V(val, src_t));
                 uint32_t fld0 = 0, fld1 = 1;
@@ -17822,7 +17886,7 @@ public:
             case ASR::cast_kindType::ComplexToReal: {
                 // real(z) == ComplexRe(z): extract field 0; then adjust
                 // float width to the destination kind if it differs.
-                int64_t src_kind = ASRUtils::extract_kind_from_ttype_t(
+                int64_t src_kind = normalized_real_kind(
                     ASRUtils::expr_type(x.m_arg));
                 lr_type_t *src_ft = (src_kind == 4) ? ty_f32 : ty_f64;
                 uint32_t fld0 = 0;
@@ -17838,7 +17902,7 @@ public:
                 break;
             }
             case ASR::cast_kindType::ComplexToInteger: {
-                int64_t src_kind = ASRUtils::extract_kind_from_ttype_t(
+                int64_t src_kind = normalized_real_kind(
                     ASRUtils::expr_type(x.m_arg));
                 lr_type_t *src_ft = (src_kind == 4) ? ty_f32 : ty_f64;
                 uint32_t fld0 = 0;
@@ -17849,9 +17913,9 @@ public:
             }
             case ASR::cast_kindType::ComplexToComplex: {
                 if (src_t == dst_t) { tmp = val; break; }
-                int64_t src_kind = ASRUtils::extract_kind_from_ttype_t(
+                int64_t src_kind = normalized_real_kind(
                     ASRUtils::expr_type(x.m_arg));
-                int64_t dst_kind = ASRUtils::extract_kind_from_ttype_t(x.m_type);
+                int64_t dst_kind = normalized_real_kind(x.m_type);
                 lr_type_t *src_ft = (src_kind == 4) ? ty_f32 : ty_f64;
                 lr_type_t *dst_ft = (dst_kind == 4) ? ty_f32 : ty_f64;
                 uint32_t fld0 = 0, fld1 = 1;
@@ -18219,7 +18283,7 @@ public:
                     throw CodeGenError("liric: cmplx() expects an arg");
                 }
                 lr_type_t *ct = get_type(x.m_type);
-                int kind = ASRUtils::extract_kind_from_ttype_t(x.m_type);
+                int kind = normalized_real_kind(x.m_type);
                 lr_type_t *ft = (kind == 4) ? ty_f32 : ty_f64;
                 ASR::ttype_t *first_type =
                     ASRUtils::expr_type(x.m_args[0]);
@@ -18228,8 +18292,7 @@ public:
                 first_type = ASRUtils::type_get_past_array(first_type);
                 if (ASR::is_a<ASR::Complex_t>(*first_type)) {
                     visit_expr(*x.m_args[0]);
-                    int first_kind =
-                        ASRUtils::extract_kind_from_ttype_t(first_type);
+                    int first_kind = normalized_real_kind(first_type);
                     if (first_kind == kind) {
                         return;
                     }
