@@ -14335,6 +14335,12 @@ public:
         ASR::StructType_t *stt = nullptr;
     };
 
+    struct BindCScalarCfiArg {
+        uint32_t storage;
+        uint32_t cfi;
+        bool writeback;
+    };
+
     bool fixed_string_scalar_member(ASR::Variable_t *member,
                                     int64_t &len) {
         if (ASRUtils::is_allocatable(member->m_type) ||
@@ -15027,7 +15033,8 @@ public:
 
     bool prepare_bindc_cfi_scalar_arg(ASR::expr_t *actual,
             ASR::Variable_t *formal, std::vector<lr_operand_desc_t> &args,
-            std::vector<lr_type_t *> &params) {
+            std::vector<lr_type_t *> &params,
+            std::vector<BindCScalarCfiArg> &scratch) {
         if (ASRUtils::is_array(formal->m_type)) return false;
         if (!ASRUtils::is_allocatable(formal->m_type) &&
                 !ASRUtils::is_pointer(formal->m_type)) {
@@ -15045,9 +15052,16 @@ public:
         ASR::ttype_t *actual_core =
             ASRUtils::type_get_past_allocatable_pointer(actual_type);
         if (ASR::is_a<ASR::Array_t>(*actual_core)) return false;
+        ASR::ttype_t *actual_elem =
+            ASRUtils::type_get_past_array(actual_core);
+        bool actual_is_pointer_slot = !formal_is_char &&
+            (ASRUtils::is_allocatable(actual_type) ||
+             ASRUtils::is_pointer(actual_type)) &&
+            !ASR::is_a<ASR::String_t>(*actual_elem);
 
         uint32_t base;
         uint32_t elem_len;
+        uint32_t actual_storage = 0;
         if (formal_is_char) {
             visit_expr(*cchar_cast_source(actual));
             uint32_t desc = tmp;
@@ -15061,7 +15075,23 @@ public:
             is_target = true;
             visit_expr(*actual);
             is_target = was_target;
-            base = tmp;
+            actual_storage = tmp;
+            if (actual_is_pointer_slot) {
+                if (formal->m_intent == ASR::intentType::Out &&
+                        ASRUtils::is_allocatable(actual_type)) {
+                    uint32_t old_base = lr_emit_load(s, ty_ptr,
+                        V(actual_storage, ty_ptr));
+                    uint32_t allocator = emit_call(
+                        "_lfortran_get_default_allocator", ty_ptr,
+                        nullptr, 0);
+                    emit_free_if_nonnull(allocator, old_base);
+                    lr_emit_store(s, LR_NULL(ty_ptr),
+                        V(actual_storage, ty_ptr));
+                }
+                base = lr_emit_load(s, ty_ptr, V(actual_storage, ty_ptr));
+            } else {
+                base = actual_storage;
+            }
             elem_len = emit_i64_const(element_byte_size(actual_core));
         }
 
@@ -15075,6 +15105,10 @@ public:
         store_i8_at(cfi, 23, 0);
         args.push_back(V(cfi, ty_ptr));
         params.push_back(ty_ptr);
+        if (actual_is_pointer_slot &&
+                formal->m_intent != ASR::intentType::In) {
+            scratch.push_back({actual_storage, cfi, true});
+        }
         return true;
     }
 
@@ -15459,6 +15493,15 @@ public:
         }
     }
 
+    void finish_bindc_scalar_cfi_args(
+            std::vector<BindCScalarCfiArg> &scratch) {
+        for (BindCScalarCfiArg &arg : scratch) {
+            if (!arg.writeback) continue;
+            uint32_t base = desc_base_addr(arg.cfi);
+            lr_emit_store(s, V(base, ty_ptr), V(arg.storage, ty_ptr));
+        }
+    }
+
     void visit_SubroutineCall(const ASR::SubroutineCall_t &x) {
         ASR::Function_t *fn = resolve_to_function(x.m_name);
         ASR::symbol_t *raw =
@@ -15609,6 +15652,7 @@ public:
                 std::vector<lr_type_t *> params;
                 std::vector<BindCCharArrayArg> scratch;
                 std::vector<BindCStructCfiArg> struct_scratch;
+                std::vector<BindCScalarCfiArg> scalar_scratch;
                 for (size_t i = 0; i < x.n_args; i++) {
                     ASR::expr_t *actual = x.m_args[i].m_value;
                     if (!actual) {
@@ -15642,7 +15686,7 @@ public:
                         continue;
                     }
                     if (prepare_bindc_cfi_scalar_arg(actual, formal,
-                            cargs, params)) {
+                            cargs, params, scalar_scratch)) {
                         continue;
                     }
                     if (prepare_bindc_char_descriptor_arg(actual, formal,
@@ -15701,6 +15745,7 @@ public:
                 emit_call_void(cname.c_str(), cargs.data(), cargs.size());
                 finish_bindc_cchar_array_args(scratch);
                 finish_bindc_struct_cfi_args(struct_scratch);
+                finish_bindc_scalar_cfi_args(scalar_scratch);
                 return;
             }
         }
@@ -16164,6 +16209,7 @@ public:
                 std::vector<lr_type_t *> params;
                 std::vector<BindCCharArrayArg> scratch;
                 std::vector<BindCStructCfiArg> struct_scratch;
+                std::vector<BindCScalarCfiArg> scalar_scratch;
                 for (size_t i = 0; i < x.n_args; i++) {
                     ASR::expr_t *actual = x.m_args[i].m_value;
                     if (!actual) {
@@ -16195,7 +16241,7 @@ public:
                             continue;
                         }
                         if (prepare_bindc_cfi_scalar_arg(actual, formal,
-                                cargs, params)) {
+                                cargs, params, scalar_scratch)) {
                             continue;
                         }
                         if (prepare_bindc_char_descriptor_arg(actual, formal,
@@ -16231,6 +16277,7 @@ public:
                 tmp = function_return_abi_to_internal(call_value, x.m_type);
                 finish_bindc_cchar_array_args(scratch);
                 finish_bindc_struct_cfi_args(struct_scratch);
+                finish_bindc_scalar_cfi_args(scalar_scratch);
                 return;
             }
             if (cname == "_lfortran_get_command_argument_length") {
