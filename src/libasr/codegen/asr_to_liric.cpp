@@ -9136,6 +9136,22 @@ public:
         return desc;
     }
 
+    ASR::Struct_t *struct_from_class_alias_tag(ASR::expr_t *expr) {
+        expr = peel_class_narrowing_cast(expr);
+        if (!ASR::is_a<ASR::Var_t>(*expr)) return nullptr;
+        ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
+            ASR::down_cast<ASR::Var_t>(expr)->m_v);
+        if (!sym || !ASR::is_a<ASR::Variable_t>(*sym)) return nullptr;
+        auto it = class_alias_concrete_tag.find(get_hash((ASR::asr_t *)sym));
+        if (it == class_alias_concrete_tag.end()) return nullptr;
+        for (ASR::Struct_t *st : known_structs) {
+            if (struct_symbol_tag((ASR::symbol_t *)st) == it->second) {
+                return st;
+            }
+        }
+        return nullptr;
+    }
+
     // True when the call site needs us to wrap a concrete `type(U)` actual
     // into a `class(T)` formal: formal is a class type (not unlimited
     // polymorphic), and actual is a concrete derived-type (not a class).
@@ -9155,7 +9171,7 @@ public:
                 ASR::down_cast<ASR::Var_t>(base)->m_v);
             if (class_alias_concrete_tag.count(
                     get_hash((ASR::asr_t *)sym)) > 0) {
-                return struct_symbol_for_concrete_expr(actual) != nullptr;
+                return struct_from_class_alias_tag(actual) != nullptr;
             }
         }
         if (ASR::is_a<ASR::Cast_t>(*actual)) {
@@ -9251,7 +9267,10 @@ public:
     }
 
     uint32_t emit_heap_class_wrapper_for_concrete(ASR::expr_t *actual) {
-        ASR::Struct_t *st = struct_symbol_for_concrete_expr(actual);
+        ASR::Struct_t *st = struct_from_class_alias_tag(actual);
+        if (!st) {
+            st = struct_symbol_for_concrete_expr(actual);
+        }
         if (!st) {
             throw CodeGenError(
                 "liric: heap class wrapper cannot resolve concrete struct");
@@ -9384,7 +9403,10 @@ public:
                                              size_t formal_idx = 0,
                                              uint32_t *actual_ptr_out = nullptr,
                                              uint64_t *data_bytes_out = nullptr) {
-        ASR::Struct_t *st = struct_symbol_for_concrete_expr(actual);
+        ASR::Struct_t *st = struct_from_class_alias_tag(actual);
+        if (!st) {
+            st = struct_symbol_for_concrete_expr(actual);
+        }
         if (!st && fn) {
             ASR::Variable_t *formal = formal_arg_var(fn, formal_idx);
             if (formal) {
