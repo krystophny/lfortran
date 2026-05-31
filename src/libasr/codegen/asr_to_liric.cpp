@@ -16421,6 +16421,38 @@ public:
             }
         }
 
+        ASR::expr_t *source = nullptr;
+        ASR::Array_t *array = nullptr;
+        int64_t elem_chars_i64 = 0;
+        if (is_descriptor_to_cchar_array_cast(actual, &source, &array,
+                elem_chars_i64)) {
+            uint32_t desc = desc_ptr_of(source);
+            uint32_t total = descriptor_array_element_count(
+                desc, (int)array->n_dims);
+            uint32_t elem_chars = emit_i64_const(elem_chars_i64);
+            uint32_t raw_bytes = lr_emit_mul(s, ty_i64,
+                V(total, ty_i64), V(elem_chars, ty_i64));
+            uint32_t allocator = emit_call(
+                "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+            lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
+            declare_func("_lfortran_malloc_alloc", ty_ptr,
+                malloc_params, 2, false);
+            lr_operand_desc_t malloc_args[] = {
+                V(allocator, ty_ptr), V(raw_bytes, ty_i64)
+            };
+            uint32_t raw = emit_call("_lfortran_malloc_alloc",
+                ty_ptr, malloc_args, 2);
+            emit_descriptor_chars_copy(desc, raw, total, elem_chars, false,
+                (int)array->n_dims);
+
+            bool writeback = formal->m_intent != ASR::intentType::In;
+            scratch.push_back({desc, raw, total, elem_chars, allocator,
+                writeback, (int)array->n_dims});
+            args.push_back(V(raw, ty_ptr));
+            params.push_back(ty_ptr);
+            return true;
+        }
+
         ASR::ttype_t *actual_type =
             ASRUtils::type_get_past_allocatable_pointer(
                 ASRUtils::expr_type(actual));
@@ -16480,39 +16512,7 @@ public:
             }
         }
 
-        ASR::expr_t *source = nullptr;
-        ASR::Array_t *array = nullptr;
-        int64_t elem_chars_i64 = 0;
-        if (!is_descriptor_to_cchar_array_cast(actual, &source, &array,
-                elem_chars_i64)) {
-            return false;
-        }
-
-        uint32_t desc = desc_ptr_of(source);
-        uint32_t total = descriptor_array_element_count(
-            desc, (int)array->n_dims);
-        uint32_t elem_chars = emit_i64_const(elem_chars_i64);
-        uint32_t raw_bytes = lr_emit_mul(s, ty_i64,
-            V(total, ty_i64), V(elem_chars, ty_i64));
-        uint32_t allocator = emit_call(
-            "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
-        lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
-        declare_func("_lfortran_malloc_alloc", ty_ptr,
-            malloc_params, 2, false);
-        lr_operand_desc_t malloc_args[] = {
-            V(allocator, ty_ptr), V(raw_bytes, ty_i64)
-        };
-        uint32_t raw = emit_call("_lfortran_malloc_alloc",
-            ty_ptr, malloc_args, 2);
-        emit_descriptor_chars_copy(desc, raw, total, elem_chars, false,
-            (int)array->n_dims);
-
-        bool writeback = formal->m_intent != ASR::intentType::In;
-        scratch.push_back({desc, raw, total, elem_chars, allocator, writeback,
-            (int)array->n_dims});
-        args.push_back(V(raw, ty_ptr));
-        params.push_back(ty_ptr);
-        return true;
+        return false;
     }
 
     void finish_bindc_cchar_array_args(
