@@ -1831,6 +1831,13 @@ public:
                     (member_array->n_dims > 0 ? member_array->n_dims : 1);
                 continue;
             }
+            ASR::ttype_t *upoly_core =
+                ASRUtils::type_get_past_allocatable_pointer(member->m_type);
+            if (ASRUtils::is_unlimited_polymorphic_type(member->m_type) &&
+                    !ASR::is_a<ASR::Array_t>(*upoly_core)) {
+                nbytes += 16;
+                continue;
+            }
             ASR::Struct_t *member_struct =
                 struct_symbol_from_type_decl(member->m_type_declaration);
             if (member_struct) {
@@ -12379,7 +12386,7 @@ public:
                 continue;
             }
             ASR::ttype_t *core = ASRUtils::type_get_past_array(core_naked);
-                if (ASR::is_a<ASR::StructType_t>(*core)) {
+            if (ASR::is_a<ASR::StructType_t>(*core)) {
                 bool was_target = is_target;
                 is_target = true;
                 visit_expr(*arg.m_a);
@@ -12392,6 +12399,10 @@ public:
                         ASRUtils::get_struct_sym_from_struct_expr(arg.m_a));
                 }
                 ASR::Variable_t *target_var = var_from_expr(arg.m_a);
+                if (!st && target_var) {
+                    st = struct_symbol_from_type_decl(
+                        target_var->m_type_declaration);
+                }
                 if (st && ASRUtils::is_pointer(at)
                         && !ASRUtils::is_allocatable(at)
                         && ASRUtils::is_class_type(
