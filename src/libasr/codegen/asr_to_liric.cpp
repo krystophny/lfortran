@@ -1862,6 +1862,7 @@ public:
     // (allocatable class) source, which needs class_data_ptr handling.
     bool is_scalar_class_data_ptr_target(ASR::expr_t *target,
             ASR::expr_t *value) {
+        target = peel_class_narrowing_cast(target);
         if (!ASR::is_a<ASR::Var_t>(*target) &&
                 !ASR::is_a<ASR::StructInstanceMember_t>(*target)) {
             return false;
@@ -10485,9 +10486,11 @@ public:
                 rhs = tmp;
             }
             t = ty_ptr;
-            if (ASR::is_a<ASR::Var_t>(*x.m_target)) {
+            ASR::expr_t *target_base =
+                peel_class_narrowing_cast(x.m_target);
+            if (ASR::is_a<ASR::Var_t>(*target_base)) {
                 ASR::symbol_t *tsym = ASRUtils::symbol_get_past_external(
-                    ASR::down_cast<ASR::Var_t>(x.m_target)->m_v);
+                    ASR::down_cast<ASR::Var_t>(target_base)->m_v);
                 class_alias_data_ptr.insert(get_hash((ASR::asr_t *)tsym));
                 // Record the concrete target's dynamic type so a later select type
                 // / allocate(source=p) reads the right tag (the target has no
