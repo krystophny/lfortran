@@ -1858,7 +1858,9 @@ public:
 
     uint64_t storage_size_for_variable(ASR::Variable_t *v) {
         if (is_bindc_char_scalar_variable(v)) {
-            return 1;
+            int64_t len = 1;
+            get_fixed_string_len(v->m_type, len);
+            return len > 0 ? (uint64_t)len : 1;
         }
         ASR::ttype_t *upoly_core =
             ASRUtils::type_get_past_allocatable_pointer(v->m_type);
@@ -4879,6 +4881,32 @@ public:
             }
         }
         if (!target_is_array && expr_is_bindc_char_scalar(x.m_target)) {
+            int64_t target_len = 1;
+            get_fixed_string_len(target_type, target_len);
+            if (target_len > 1) {
+                bool was_target = is_target;
+                is_target = true;
+                visit_expr(*x.m_target);
+                is_target = was_target;
+                uint32_t target_ptr = tmp;
+                uint32_t src_data = 0, src_len = 0;
+                std::tie(src_data, src_len) =
+                    emit_string_data_len(x.m_value);
+                lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
+                declare_func("memset", ty_ptr, memset_params, 3, false);
+                lr_operand_desc_t memset_args[] = {
+                    V(target_ptr, ty_ptr), I(32, ty_i32),
+                    I(target_len, ty_i64)
+                };
+                emit_call("memset", ty_ptr, memset_args, 3);
+                uint32_t too_long = lr_emit_icmp(s, LR_CMP_SGT,
+                    V(src_len, ty_i64), I(target_len, ty_i64));
+                uint32_t copy_len = lr_emit_select(s, ty_i64,
+                    V(too_long, ty_i1), I(target_len, ty_i64),
+                    V(src_len, ty_i64));
+                emit_memcpy_dynamic(target_ptr, src_data, copy_len);
+                return;
+            }
             uint32_t rhs = emit_scalar_char_value(x.m_value);
             bool was_target = is_target;
             is_target = true;
@@ -7336,6 +7364,28 @@ public:
             visit_expr(*x.m_ptr);
             is_target = was_target;
             slot = tmp;
+        }
+        ASR::ttype_t *pointee_type =
+            ASRUtils::type_get_past_pointer(ASRUtils::expr_type(x.m_ptr));
+        ASR::ttype_t *pointee_core =
+            ASRUtils::type_get_past_array(pointee_type);
+        if (!ASR::is_a<ASR::Array_t>(*pointee_type) &&
+                ASR::is_a<ASR::String_t>(*pointee_core)) {
+            ASR::String_t *st = ASR::down_cast<ASR::String_t>(pointee_core);
+            uint32_t len_v = emit_i64_const(0);
+            int64_t len_const = 0;
+            if (st->m_len) {
+                len_v = ASRUtils::extract_value(st->m_len, len_const)
+                    ? emit_i64_const(len_const)
+                    : emit_expr_i64(st->m_len);
+            }
+            uint32_t fld0 = 0, fld1 = 1;
+            uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
+                LR_UNDEF(ty_str_desc), V(cptr, ty_ptr), &fld0, 1);
+            uint32_t desc = lr_emit_insertvalue(s, ty_str_desc,
+                V(d0, ty_str_desc), V(len_v, ty_i64), &fld1, 1);
+            lr_emit_store(s, V(desc, ty_str_desc), V(slot, ty_ptr));
+            return;
         }
         lr_emit_store(s, V(cptr, ty_ptr), V(slot, ty_ptr));
         // A scalar intrinsic pointer (EQUIVALENCE / c_f_pointer): the slot now
@@ -22092,8 +22142,8 @@ public:
     void visit_StringConstant(const ASR::StringConstant_t &x) {
         ASR::String_t *st = ASRUtils::get_string_type(x.m_type);
         int64_t len = -1;
-        ASRUtils::extract_value(st->m_len, len);
-        size_t src_len = x.m_s ? std::strlen(x.m_s) : 0;
+        bool have_len = ASRUtils::extract_value(st->m_len, len);
+        size_t src_len = (x.m_s && !have_len) ? std::strlen(x.m_s) : 0;
         if (len < 0) len = (int64_t)src_len;
         uint64_t storage_len = len > 0 ? (uint64_t)len : 1;
 
@@ -22101,12 +22151,11 @@ public:
         std::string data_name = "_lr_strdata_" + hash;
         std::string desc_name = "_lr_strdesc_" + hash;
 
-        // Materialize the literal: truncate or right-pad with spaces to len
+        // Materialize by declared length so embedded NUL bytes survive.
         std::string data;
-        if (src_len == 0 && len == 1) {
-            data.push_back('\0');
-        } else if (x.m_s) {
-            size_t take = std::min((size_t)storage_len, src_len);
+        if (x.m_s) {
+            size_t take = have_len ? (size_t)storage_len :
+                std::min((size_t)storage_len, src_len);
             data.assign(x.m_s, take);
         }
         if (data.size() < storage_len) {
