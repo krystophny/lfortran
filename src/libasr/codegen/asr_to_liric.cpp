@@ -4314,6 +4314,131 @@ public:
         lr_session_set_block(s, done_bb, &err);
     }
 
+    ASR::Struct_t *struct_symbol_for_array_element(ASR::expr_t *expr,
+                                                   ASR::Array_t *array_t) {
+        ASR::ttype_t *elem_type =
+            ASRUtils::type_get_past_allocatable_pointer(array_t->m_type);
+        elem_type = ASRUtils::type_get_past_array(elem_type);
+        if (!ASR::is_a<ASR::StructType_t>(*elem_type)) {
+            return nullptr;
+        }
+        ASR::Struct_t *st = struct_member_decl_symbol(expr);
+        if (!st) {
+            st = struct_symbol_for_concrete_expr(expr);
+        }
+        if (!st) {
+            st = struct_symbol_for_type(array_t->m_type);
+        }
+        if (!st) {
+            st = struct_symbol_for_type(elem_type);
+        }
+        return st;
+    }
+
+    void emit_descriptor_struct_array_assignment(uint32_t dst_desc,
+            uint32_t src_desc, ASR::Array_t *array_t, ASR::Struct_t *st) {
+        uint32_t src_base = desc_base_addr(src_desc);
+        uint32_t dst_base = desc_base_addr(dst_desc);
+        uint32_t has_src = lr_emit_icmp(s, LR_CMP_NE,
+            V(src_base, ty_ptr), LR_NULL(ty_ptr));
+        uint32_t has_dst = lr_emit_icmp(s, LR_CMP_NE,
+            V(dst_base, ty_ptr), LR_NULL(ty_ptr));
+        uint32_t can_copy = lr_emit_and(s, ty_i1,
+            V(has_src, ty_i1), V(has_dst, ty_i1));
+
+        lr_error_t err;
+        uint32_t loop_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(can_copy, ty_i1), loop_bb, done_bb);
+
+        lr_session_set_block(s, loop_bb, &err);
+        uint32_t total = descriptor_array_element_count(
+            src_desc, (int)array_t->n_dims);
+        uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+        lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+
+        uint32_t head = lr_session_block(s);
+        uint32_t body = lr_session_block(s);
+        lr_emit_br(s, head);
+
+        lr_session_set_block(s, head, &err);
+        uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+        uint32_t more = lr_emit_icmp(s, LR_CMP_SLT,
+            V(idx, ty_i64), V(total, ty_i64));
+        lr_emit_condbr(s, V(more, ty_i1), body, done_bb);
+
+        lr_session_set_block(s, body, &err);
+        uint32_t src_elem = emit_descriptor_element_ptr(
+            src_desc, src_base, idx, (int)array_t->n_dims);
+        uint32_t dst_elem = emit_descriptor_element_ptr(
+            dst_desc, dst_base, idx, (int)array_t->n_dims);
+        uint32_t src_copy = emit_struct_deep_copy_temp(src_elem, st);
+        std::unordered_set<uint64_t> active;
+        emit_struct_finalizers(dst_elem, st, active);
+        emit_struct_storage_assignment(dst_elem, src_copy, st);
+        uint32_t next = lr_emit_add(s, ty_i64,
+            V(idx, ty_i64), I(1, ty_i64));
+        lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+        lr_emit_br(s, head);
+
+        lr_session_set_block(s, done_bb, &err);
+    }
+
+    void emit_descriptor_struct_scalar_assignment(ASR::expr_t *target,
+            ASR::expr_t *value, ASR::Array_t *array_t, ASR::Struct_t *st) {
+        bool was_target = is_target;
+        is_target = true;
+        visit_expr(*value);
+        is_target = was_target;
+        uint32_t src = tmp;
+        if (is_scalar_struct_pointer_target(value)) {
+            src = lr_emit_load(s, ty_ptr, V(src, ty_ptr));
+        } else if (expr_is_allocatable_struct(value)) {
+            uint32_t raw = lr_emit_load(s, ty_ptr, V(src, ty_ptr));
+            src = class_data_ptr(raw);
+        }
+        uint32_t src_copy = emit_struct_deep_copy_temp(src, st);
+
+        uint32_t dst_desc = desc_ptr_of(target);
+        uint32_t dst_base = desc_base_addr(dst_desc);
+        uint32_t has_dst = lr_emit_icmp(s, LR_CMP_NE,
+            V(dst_base, ty_ptr), LR_NULL(ty_ptr));
+
+        lr_error_t err;
+        uint32_t loop_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(has_dst, ty_i1), loop_bb, done_bb);
+
+        lr_session_set_block(s, loop_bb, &err);
+        uint32_t total = descriptor_array_element_count(
+            dst_desc, (int)array_t->n_dims);
+        uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+        lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+
+        uint32_t head = lr_session_block(s);
+        uint32_t body = lr_session_block(s);
+        lr_emit_br(s, head);
+
+        lr_session_set_block(s, head, &err);
+        uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+        uint32_t more = lr_emit_icmp(s, LR_CMP_SLT,
+            V(idx, ty_i64), V(total, ty_i64));
+        lr_emit_condbr(s, V(more, ty_i1), body, done_bb);
+
+        lr_session_set_block(s, body, &err);
+        uint32_t dst_elem = emit_descriptor_element_ptr(
+            dst_desc, dst_base, idx, (int)array_t->n_dims);
+        std::unordered_set<uint64_t> active;
+        emit_struct_finalizers(dst_elem, st, active);
+        emit_struct_storage_assignment(dst_elem, src_copy, st);
+        uint32_t next = lr_emit_add(s, ty_i64,
+            V(idx, ty_i64), I(1, ty_i64));
+        lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+        lr_emit_br(s, head);
+
+        lr_session_set_block(s, done_bb, &err);
+    }
+
     uint32_t emit_descriptor_element_ptr(uint32_t desc, uint32_t base,
             uint32_t linear_idx, int n_dims) {
         uint32_t tmp_idx = linear_idx;
@@ -4785,37 +4910,55 @@ public:
         ASR::ttype_t *elem_type =
             ASRUtils::type_get_past_allocatable_pointer(array_t->m_type);
         elem_type = ASRUtils::type_get_past_array(elem_type);
+        ASR::Struct_t *elem_st = nullptr;
+        if (ASR::is_a<ASR::StructType_t>(*elem_type)) {
+            elem_st = struct_symbol_for_array_element(target, array_t);
+            if (!elem_st) {
+                elem_st = struct_symbol_for_array_element(value, array_t);
+            }
+            if (!elem_st) {
+                elem_st = struct_symbol_for_type(elem_type);
+            }
+        }
+        ASR::Array_t *value_array = nullptr;
+        bool value_is_array = expr_is_array(value, &value_array);
+        if (!value_is_array && elem_st) {
+            emit_descriptor_struct_scalar_assignment(target, value, array_t,
+                elem_st);
+            return;
+        }
         if (target_allocatable) {
             // A non-descriptor array value (reshape, array constructor, ...)
             // has no descriptor to desc_ptr_of; build a temporary descriptor
             // from its linear view and per-dim extents, then realloc-assign.
-            ASR::Array_t *va = nullptr;
-            if (expr_is_array(value, &va) && va->m_physical_type !=
+            if (value_is_array && value_array->m_physical_type !=
                     ASR::array_physical_typeType::DescriptorArray) {
-                ArrayLinearView vw = emit_array_linear_view(value, va);
-                int nd = (int)va->n_dims;
-                int64_t eb = element_byte_size(va->m_type);
+                ArrayLinearView vw = emit_array_linear_view(value,
+                    value_array);
+                int nd = (int)value_array->n_dims;
+                int64_t eb = element_byte_size(value_array->m_type);
                 // A reshape with a runtime shape has null result-type dim
                 // lengths; take the extents from its shape so the realloc
                 // target gets the full element count, not 1 per dim.
                 ASR::ArrayReshape_t *resh =
-                    reshape_with_runtime_shape(value, va);
+                    reshape_with_runtime_shape(value, value_array);
                 std::vector<uint32_t> resh_ext;
                 if (resh) {
-                    resh_ext = emit_reshape_extents(resh->m_shape, va);
+                    resh_ext = emit_reshape_extents(resh->m_shape,
+                        value_array);
                 }
                 uint32_t tmpdesc = emit_desc_alloca(nd);
                 desc_store_base(tmpdesc, vw.base);
                 desc_store_i64(tmpdesc, 8, emit_i64_const(eb));
                 desc_store_rank(tmpdesc, nd);
                 desc_store_i64(tmpdesc, 24,
-                    emit_string_array_len_hint(va->m_type));
+                    emit_string_array_len_hint(value_array->m_type));
                 uint32_t stride = emit_i64_const(eb);
                 for (int d = 0; d < nd; d++) {
                     uint32_t lb = resh ? emit_i64_const(1)
-                        : emit_array_dim_lbound(va, (size_t)d);
+                        : emit_array_dim_lbound(value_array, (size_t)d);
                     uint32_t ext = resh ? resh_ext[d]
-                        : emit_array_dim_extent(va, (size_t)d);
+                        : emit_array_dim_extent(value_array, (size_t)d);
                     int64_t bo = DESC_HEADER_BYTES + DESC_DIM_BYTES * d;
                     desc_store_i64(tmpdesc, bo + 0, lb);
                     desc_store_i64(tmpdesc, bo + 8, ext);
@@ -4828,7 +4971,7 @@ public:
                         desc_ptr_of(target), tmpdesc, array_t);
                 } else {
                     emit_allocatable_descriptor_array_assignment_from_desc(
-                        desc_ptr_of(target), tmpdesc, array_t);
+                        desc_ptr_of(target), tmpdesc, array_t, elem_st);
                 }
                 return;
             }
@@ -4839,13 +4982,11 @@ public:
                     dst_desc, src_desc, array_t);
             } else {
                 emit_allocatable_descriptor_array_assignment_from_desc(
-                    dst_desc, src_desc, array_t);
+                    dst_desc, src_desc, array_t, elem_st);
             }
             return;
         }
-        ASR::Array_t *value_array = nullptr;
-        if (expr_is_array(value, &value_array) &&
-                value_array->m_physical_type !=
+        if (value_is_array && value_array->m_physical_type !=
                     ASR::array_physical_typeType::DescriptorArray) {
             uint32_t dst_desc = desc_ptr_of(target);
             ArrayLinearView src = emit_array_linear_view(value, value_array);
@@ -4860,6 +5001,11 @@ public:
             src_desc, (int)array_t->n_dims);
         uint32_t elem_len = desc_load_i64(dst_desc, 8);
         if (!ASR::is_a<ASR::String_t>(*elem_type)) {
+            if (elem_st) {
+                emit_descriptor_struct_array_assignment(dst_desc, src_desc,
+                    array_t, elem_st);
+                return;
+            }
             emit_copy_descriptor_to_descriptor(
                 dst_desc, src_desc, array_t, elem_len);
             return;
@@ -19384,6 +19530,11 @@ public:
                 item.second);
             if (v->m_intent != ASR::intentType::Local ||
                     v->m_storage != ASR::storage_typeType::Default) {
+                continue;
+            }
+            ASR::ttype_t *vt =
+                ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+            if (ASR::is_a<ASR::Array_t>(*vt)) {
                 continue;
             }
             ASR::Struct_t *st = struct_symbol_from_type_decl(
