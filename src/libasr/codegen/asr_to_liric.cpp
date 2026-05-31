@@ -19357,9 +19357,8 @@ public:
     // derived type whose leaf members are all themselves supported.
     bool namelist_type_supported(ASR::ttype_t *vtype,
             ASR::symbol_t *type_decl) {
-        if (ASRUtils::is_allocatable(vtype)) {
-            return false;
-        }
+        bool alloc_or_ptr = ASRUtils::is_allocatable(vtype) ||
+            ASRUtils::is_pointer(vtype);
         ASR::ttype_t *vt =
             ASRUtils::type_get_past_allocatable_pointer(vtype);
         // A host-associated character namelist member reaches an internal
@@ -19383,9 +19382,25 @@ public:
             return true;
         }
         if (namelist_type_code(elem) < 0) return false;
+        if (!is_arr && ASRUtils::is_allocatable(vtype)) return false;
+        if (!is_arr && ASRUtils::is_pointer(vtype) &&
+                !ASR::is_a<ASR::String_t>(*elem)) {
+            return false;
+        }
         if (is_arr) {
             ASR::Array_t *arr = ASR::down_cast<ASR::Array_t>(vt);
+            bool descriptor_array =
+                arr->m_physical_type ==
+                    ASR::array_physical_typeType::DescriptorArray ||
+                arr->m_physical_type ==
+                    ASR::array_physical_typeType::AssumedRankArray;
             bool string_elem = ASR::is_a<ASR::String_t>(*elem);
+            if (descriptor_array && !string_elem) {
+                return true;
+            }
+            if (alloc_or_ptr && !descriptor_array) {
+                return false;
+            }
             if (string_elem) {
                 // Character arrays are bridged to the runtime's contiguous
                 // char* layout (gather on write, scatter back on read), so
@@ -19412,12 +19427,14 @@ public:
                     ASR::array_physical_typeType::SIMDArray) {
                 return false;
             }
-            for (size_t d = 0; d < arr->n_dims; d++) {
-                int64_t ext = 0;
-                if (!arr->m_dims[d].m_length ||
-                        !ASRUtils::extract_value(
-                            arr->m_dims[d].m_length, ext)) {
-                    return false;
+            if (!descriptor_array) {
+                for (size_t d = 0; d < arr->n_dims; d++) {
+                    int64_t ext = 0;
+                    if (!arr->m_dims[d].m_length ||
+                            !ASRUtils::extract_value(
+                                arr->m_dims[d].m_length, ext)) {
+                        return false;
+                    }
                 }
             }
         }
@@ -19514,6 +19531,13 @@ public:
             item.code = 6;
             item.elem_len = 1;
         }
+        ASR::Array_t *arr = is_arr ? ASR::down_cast<ASR::Array_t>(vt) :
+            nullptr;
+        bool descriptor_array = arr &&
+            (arr->m_physical_type ==
+                ASR::array_physical_typeType::DescriptorArray ||
+             arr->m_physical_type ==
+                ASR::array_physical_typeType::AssumedRankArray);
         if (ASR::is_a<ASR::String_t>(*elem) && is_arr) {
             // Character array: liric stores it as an array of 16-byte
             // {ptr,len} str_desc elements, but the runtime namelist code
@@ -19523,7 +19547,6 @@ public:
             int64_t clen = 0;
             ASR::String_t *st = ASR::down_cast<ASR::String_t>(elem);
             ASRUtils::extract_value(st->m_len, clen);
-            ASR::Array_t *arr = ASR::down_cast<ASR::Array_t>(vt);
             int64_t total = ASRUtils::get_fixed_size_of_array(
                 arr->m_dims, arr->n_dims);
             uint32_t buf = emit_storage_alloca_nbytes(
@@ -19563,7 +19586,6 @@ public:
             }
         }
         if (is_arr) {
-            ASR::Array_t *arr = ASR::down_cast<ASR::Array_t>(vt);
             item.rank = (int32_t)arr->n_dims;
             uint32_t shape_arr = emit_storage_alloca_nbytes(
                 (uint64_t)item.rank * 8);
@@ -19577,6 +19599,16 @@ public:
             }
             item.shape = shape_arr;
             item.shape_null = false;
+            if (descriptor_array) {
+                item.data = desc_base_addr(addr);
+                for (int d = 0; d < item.rank; d++) {
+                    lr_operand_desc_t off[1] = {I((int64_t)d * 8, ty_i64)};
+                    uint32_t ep = lr_emit_gep(s, ty_i8,
+                        V(shape_arr, ty_ptr), off, 1);
+                    lr_emit_store(s, V(desc_dim_extent(addr, d), ty_i64),
+                        V(ep, ty_ptr));
+                }
+            }
         }
         out.push_back(item);
     }
