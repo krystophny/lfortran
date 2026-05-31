@@ -21251,14 +21251,24 @@ public:
     }
 
     bool emit_internal_formatted_read(const ASR::FileRead_t &x) {
-        if (!x.m_unit || !x.m_fmt || x.n_values == 0 ||
-                expr_is_array(x.m_unit, nullptr)) {
+        if (!x.m_unit || !x.m_fmt || x.n_values == 0) {
             return false;
         }
-        ASR::ttype_t *unit_type = ASRUtils::expr_type(x.m_unit);
-        unit_type = ASRUtils::type_get_past_allocatable_pointer(unit_type);
-        unit_type = ASRUtils::type_get_past_array(unit_type);
-        if (!ASR::is_a<ASR::String_t>(*unit_type)) {
+        ASR::ttype_t *unit_full =
+            ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(x.m_unit));
+        ASR::ttype_t *unit_type = ASRUtils::type_get_past_array(unit_full);
+        bool unit_is_string_array = false;
+        int64_t elem_len_c = 0, n_elems = 0;
+        if (ASR::is_a<ASR::Array_t>(*unit_full) &&
+                ASR::is_a<ASR::String_t>(*unit_type)) {
+            ASR::String_t *st = ASR::down_cast<ASR::String_t>(unit_type);
+            ASR::Array_t *arr = ASR::down_cast<ASR::Array_t>(unit_full);
+            unit_is_string_array = st->m_len &&
+                ASRUtils::extract_value(st->m_len, elem_len_c) &&
+                (n_elems = ASRUtils::get_fixed_size_of_array(
+                    arr->m_dims, arr->n_dims)) > 0;
+        } else if (!ASR::is_a<ASR::String_t>(*unit_type)) {
             return false;
         }
 
@@ -21269,13 +21279,36 @@ public:
             no_args += n;
         }
 
-        visit_expr(*x.m_unit);
-        uint32_t unit_desc = tmp;
-        uint32_t fld0 = 0, fld1 = 1;
-        uint32_t data = lr_emit_extractvalue(s, ty_ptr,
-            V(unit_desc, ty_str_desc), &fld0, 1);
-        uint32_t len = lr_emit_extractvalue(s, ty_i64,
-            V(unit_desc, ty_str_desc), &fld1, 1);
+        uint32_t data = 0;
+        uint32_t len = 0;
+        if (unit_is_string_array) {
+            bool wt = is_target;
+            is_target = true;
+            visit_expr(*x.m_unit);
+            is_target = wt;
+            uint32_t ubase = tmp;
+            data = emit_storage_alloca_nbytes(
+                (uint64_t)n_elems * (uint64_t)elem_len_c);
+            for (int64_t i = 0; i < n_elems; i++) {
+                lr_operand_desc_t doff[1] = {I(i * 16, ty_i64)};
+                uint32_t dptr = lr_emit_gep(s, ty_i8,
+                    V(ubase, ty_ptr), doff, 1);
+                uint32_t edata = lr_emit_load(s, ty_ptr, V(dptr, ty_ptr));
+                lr_operand_desc_t boff[1] = {I(i * elem_len_c, ty_i64)};
+                uint32_t bdst = lr_emit_gep(s, ty_i8,
+                    V(data, ty_ptr), boff, 1);
+                emit_memcpy_bytes(bdst, edata, (uint64_t)elem_len_c);
+            }
+            len = emit_i64_const(elem_len_c);
+        } else {
+            visit_expr(*x.m_unit);
+            uint32_t unit_desc = tmp;
+            uint32_t fld0 = 0, fld1 = 1;
+            data = lr_emit_extractvalue(s, ty_ptr,
+                V(unit_desc, ty_str_desc), &fld0, 1);
+            len = lr_emit_extractvalue(s, ty_i64,
+                V(unit_desc, ty_str_desc), &fld1, 1);
+        }
 
         uint32_t fmt_len = 0;
         uint32_t fmt = emit_optional_string_ptr(x.m_fmt, fmt_len);
@@ -21290,6 +21323,9 @@ public:
         std::vector<lr_operand_desc_t> call_args;
         call_args.push_back(V(data, ty_ptr));
         call_args.push_back(V(len, ty_i64));
+        if (unit_is_string_array) {
+            call_args.push_back(I(n_elems, ty_i64));
+        }
         call_args.push_back(iostat ? V(iostat, ty_ptr) : LR_NULL(ty_ptr));
         call_args.push_back(chunk ? V(chunk, ty_ptr) : LR_NULL(ty_ptr));
         call_args.push_back(advance ? V(advance, ty_ptr) : LR_NULL(ty_ptr));
@@ -21306,15 +21342,22 @@ public:
             }
         }
 
-        lr_type_t *params[] = {
+        lr_type_t *scalar_params[] = {
             ty_ptr, ty_i64, ty_ptr, ty_ptr, ty_ptr, ty_i64,
             ty_ptr, ty_i64, ty_i32, ty_ptr, ty_i64
         };
-        declare_func("_lfortran_string_formatted_read", ty_void,
-            params, 11, true);
+        lr_type_t *array_params[] = {
+            ty_ptr, ty_i64, ty_i64, ty_ptr, ty_ptr, ty_ptr, ty_i64,
+            ty_ptr, ty_i64, ty_i32, ty_ptr, ty_i64
+        };
+        const char *read_name = unit_is_string_array
+            ? "_lfortran_string_array_formatted_read"
+            : "_lfortran_string_formatted_read";
+        declare_func(read_name, ty_void,
+            unit_is_string_array ? array_params : scalar_params,
+            unit_is_string_array ? 12 : 11, true);
 
-        uint32_t sym = lr_session_intern(s,
-            "_lfortran_string_formatted_read");
+        uint32_t sym = lr_session_intern(s, read_name);
         lr_inst_desc_t d;
         memset(&d, 0, sizeof(d));
         std::vector<lr_operand_desc_t> ops(1 + call_args.size());
@@ -21328,7 +21371,7 @@ public:
         d.num_operands = ops.size();
         d.call_external_abi = true;
         d.call_vararg = true;
-        d.call_fixed_args = 11;
+        d.call_fixed_args = unit_is_string_array ? 12 : 11;
         lr_session_emit(s, &d, nullptr);
         return true;
     }
