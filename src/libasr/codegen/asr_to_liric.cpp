@@ -21305,9 +21305,56 @@ public:
             return false;
         }
 
-        int64_t no_args = 0;
+        ASR::expr_t **values = x.m_values;
+        size_t n_values = x.n_values;
+        std::vector<ASR::expr_t *> expanded_values;
+        bool has_implied_do = false;
         for (size_t i = 0; i < x.n_values; i++) {
-            int64_t n = formatted_read_arg_count(x.m_values[i]);
+            ASR::expr_t *value = x.m_values[i];
+            if (ASR::is_a<ASR::ImpliedDoLoop_t>(*value)) {
+                has_implied_do = true;
+                ASR::ImpliedDoLoop_t *idl =
+                    ASR::down_cast<ASR::ImpliedDoLoop_t>(value);
+                if (idl->n_values != 1 ||
+                        !ASR::is_a<ASR::ArrayItem_t>(*idl->m_values[0])) {
+                    return false;
+                }
+                ASR::ArrayItem_t *item =
+                    ASR::down_cast<ASR::ArrayItem_t>(idl->m_values[0]);
+                if (item->n_args != 1) {
+                    return false;
+                }
+                expanded_values.push_back(item->m_v);
+            } else {
+                expanded_values.push_back(value);
+            }
+        }
+        if (has_implied_do) {
+            for (size_t i = 0; i < x.n_values; i++) {
+                if (!ASR::is_a<ASR::ImpliedDoLoop_t>(*x.m_values[i])) {
+                    continue;
+                }
+                ASR::ImpliedDoLoop_t *idl =
+                    ASR::down_cast<ASR::ImpliedDoLoop_t>(x.m_values[i]);
+                uint32_t end = emit_expr_i64(idl->m_end);
+                uint32_t step = idl->m_increment
+                    ? emit_expr_i64(idl->m_increment)
+                    : emit_i64_const(1);
+                uint32_t final_val = lr_emit_add(s, ty_i64,
+                    V(end, ty_i64), V(step, ty_i64));
+                lr_type_t *loop_lr = value_type_for_expr(idl->m_var);
+                final_val = cast_int_value(final_val, ty_i64, loop_lr);
+                uint32_t loop_ptr = emit_target_ptr(idl->m_var);
+                lr_emit_store(s, V(final_val, loop_lr),
+                    V(loop_ptr, ty_ptr));
+            }
+            values = expanded_values.data();
+            n_values = expanded_values.size();
+        }
+
+        int64_t no_args = 0;
+        for (size_t i = 0; i < n_values; i++) {
+            int64_t n = formatted_read_arg_count(values[i]);
             if (n < 0) return false;
             no_args += n;
         }
@@ -21369,8 +21416,8 @@ public:
         call_args.push_back(pad ? V(pad, ty_ptr) : LR_NULL(ty_ptr));
         call_args.push_back(pad ? V(pad_len, ty_i64) : I(0, ty_i64));
 
-        for (size_t i = 0; i < x.n_values; i++) {
-            if (!append_formatted_read_arg(call_args, x.m_values[i])) {
+        for (size_t i = 0; i < n_values; i++) {
+            if (!append_formatted_read_arg(call_args, values[i])) {
                 return false;
             }
         }
