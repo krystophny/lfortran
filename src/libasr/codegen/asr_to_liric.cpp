@@ -193,6 +193,7 @@ public:
     // the target's static struct tag, so select type / allocate(source=p) see
     // the right dynamic type even though there is no header to read it from.
     std::unordered_map<uint64_t, int64_t> class_alias_concrete_tag;
+    std::unordered_map<uint64_t, uint32_t> class_alias_runtime_tag_slot;
     // For `character(expr), allocatable :: v` where expr is a runtime
     // (non-constant) ExpressionLength: maps v's hash to an i64 slot holding
     // the length evaluated once at the variable's declaration (procedure
@@ -9799,6 +9800,30 @@ public:
             is_target = false;
             rhs = lr_emit_load(s, ty_poly_desc, V(tmp, ty_ptr));
             t = ty_poly_desc;
+        } else if (ASR::is_a<ASR::Var_t>(*x.m_target) &&
+                is_scalar_class_pointer_type(x.m_target) &&
+                ASRUtils::is_unlimited_polymorphic_type(
+                    ASRUtils::expr_type(x.m_value)) &&
+                !ASR::is_a<ASR::Array_t>(
+                    *ASRUtils::type_get_past_allocatable_pointer(
+                        ASRUtils::expr_type(x.m_value)))) {
+            is_target = true;
+            visit_expr(*x.m_value);
+            is_target = false;
+            uint32_t desc = lr_emit_load(s, ty_poly_desc, V(tmp, ty_ptr));
+            uint32_t f0 = 0, f1 = 1;
+            rhs = lr_emit_extractvalue(s, ty_ptr,
+                V(desc, ty_poly_desc), &f0, 1);
+            uint32_t tag = lr_emit_extractvalue(s, ty_i64,
+                V(desc, ty_poly_desc), &f1, 1);
+            t = ty_ptr;
+            ASR::symbol_t *tsym = ASRUtils::symbol_get_past_external(
+                ASR::down_cast<ASR::Var_t>(x.m_target)->m_v);
+            uint64_t th = get_hash((ASR::asr_t *)tsym);
+            class_alias_data_ptr.insert(th);
+            uint32_t tag_slot = lr_emit_alloca(s, ty_i64);
+            lr_emit_store(s, V(tag, ty_i64), V(tag_slot, ty_ptr));
+            class_alias_runtime_tag_slot[th] = tag_slot;
         } else if (ASRUtils::is_unlimited_polymorphic_type(
                     ASRUtils::expr_type(x.m_target)) &&
                 !ASR::is_a<ASR::Array_t>(
@@ -15845,6 +15870,7 @@ public:
                 // so an external C/Fortran routine reads the character bytes
                 // rather than the descriptor.
                 if (fn && function_is_interface(fn) && !fn_is_bindc &&
+                        !is_tbp_call_symbol(x.m_name) &&
                         formal_v && !formal_v->m_value_attr &&
                         formal_v->m_intent != ASR::intentType::Out &&
                         formal_v->m_intent != ASR::intentType::ReturnVar &&
@@ -16426,6 +16452,7 @@ public:
                 // so an external C/Fortran routine reads the character bytes
                 // rather than the descriptor.
                 if (fn && function_is_interface(fn) && !fn_is_bindc &&
+                        !is_tbp_call_symbol(x.m_name) &&
                         formal_v && !formal_v->m_value_attr &&
                         formal_v->m_intent != ASR::intentType::Out &&
                         formal_v->m_intent != ASR::intentType::ReturnVar &&
@@ -17394,8 +17421,13 @@ public:
         if (ASR::is_a<ASR::Var_t>(*arg)) {
             ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
                 ASR::down_cast<ASR::Var_t>(arg)->m_v);
+            uint64_t h = get_hash((ASR::asr_t *)sym);
+            auto rit = class_alias_runtime_tag_slot.find(h);
+            if (rit != class_alias_runtime_tag_slot.end()) {
+                return lr_emit_load(s, ty_i64, V(rit->second, ty_ptr));
+            }
             auto it = class_alias_concrete_tag.find(
-                get_hash((ASR::asr_t *)sym));
+                h);
             if (it != class_alias_concrete_tag.end()) {
                 return emit_i64_const(it->second);
             }
