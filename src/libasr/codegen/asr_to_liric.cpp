@@ -8986,6 +8986,28 @@ public:
         return storage;
     }
 
+    bool optional_array_item_actual(ASR::expr_t *arg) {
+        arg = peel_array_physical_casts(arg);
+        if (!ASR::is_a<ASR::ArrayItem_t>(*arg)) {
+            return false;
+        }
+        ASR::ArrayItem_t *item = ASR::down_cast<ASR::ArrayItem_t>(arg);
+        return optional_array_dummy_from_expr(item->m_v);
+    }
+
+    uint32_t emit_optional_array_item_actual(ASR::expr_t *arg) {
+        bool was_target = is_target;
+        is_target = true;
+        visit_expr(*arg);
+        is_target = was_target;
+        uint32_t elem_ptr = tmp;
+        uint32_t present = lr_emit_icmp(s, LR_CMP_NE,
+            V(elem_ptr, ty_ptr), LR_NULL(ty_ptr));
+        uint32_t absent_ptr = lr_emit_alloca(s, value_type_for_expr(arg));
+        return lr_emit_select(s, ty_ptr, V(present, ty_i1),
+            V(elem_ptr, ty_ptr), V(absent_ptr, ty_ptr));
+    }
+
     uint32_t emit_optional_actual_pointer(ASR::Function_t *fn,
             size_t formal_idx, ASR::expr_t *arg) {
         bool was_target = is_target;
@@ -17177,6 +17199,14 @@ public:
                         arg)) {
                     args.push_back(V(emit_optional_array_dummy_raw_actual(arg),
                         ty_ptr));
+                } else if ((!fn_ftype || !fn_ftype->m_elemental) &&
+                        formal_is_optional(fn, i) &&
+                        optional_array_item_actual(arg) &&
+                        !(formal_v && (ASRUtils::is_allocatable(
+                                formal_v->m_type) ||
+                            ASRUtils::is_pointer(formal_v->m_type)))) {
+                    args.push_back(V(emit_optional_array_item_actual(arg),
+                        ty_ptr));
                 } else if (formal_is_optional(fn, i) &&
                         (ASRUtils::is_allocatable(ASRUtils::expr_type(arg)) ||
                          ASRUtils::is_pointer(ASRUtils::expr_type(arg))) &&
@@ -17786,6 +17816,14 @@ public:
                 } else if (optional_array_dummy_for_raw_formal(formal_fn, i,
                         arg)) {
                     args.push_back(V(emit_optional_array_dummy_raw_actual(arg),
+                        ty_ptr));
+                } else if ((!fn_ftype || !fn_ftype->m_elemental) &&
+                        formal_is_optional(fn, i) &&
+                        optional_array_item_actual(arg) &&
+                        !(formal_v && (ASRUtils::is_allocatable(
+                                formal_v->m_type) ||
+                            ASRUtils::is_pointer(formal_v->m_type)))) {
+                    args.push_back(V(emit_optional_array_item_actual(arg),
                         ty_ptr));
                 } else if (formal_is_optional(fn, i) &&
                         (ASRUtils::is_allocatable(ASRUtils::expr_type(arg)) ||
