@@ -1881,7 +1881,10 @@ public:
             return false;
         }
         if (!ASRUtils::is_class_type(ASRUtils::extract_type(tt))) {
-            return false;
+            ASR::Struct_t *st = struct_symbol_for_concrete_expr(target);
+            if (!st || !st->m_is_abstract) {
+                return false;
+            }
         }
         ASR::ttype_t *core =
             ASRUtils::type_get_past_allocatable_pointer(tt);
@@ -3173,6 +3176,47 @@ public:
             ASR::down_cast<ASR::Var_t>(arg)->m_v);
         return class_alias_concrete_tag.count(
             get_hash((ASR::asr_t *)sym)) > 0;
+    }
+
+    bool captured_abstract_class_ptr_actual(ASR::Function_t *fn, size_t i,
+            ASR::expr_t *arg) {
+        ASR::Variable_t *formal = formal_arg_var(fn, i);
+        if (!formal || ASRUtils::is_pointer(formal->m_type) ||
+                ASRUtils::is_allocatable(formal->m_type) ||
+                !ASRUtils::is_class_type(
+                    ASRUtils::extract_type(formal->m_type))) {
+            return false;
+        }
+        ASR::expr_t *base = peel_class_narrowing_cast(arg);
+        if (!ASR::is_a<ASR::Var_t>(*base)) return false;
+        ASR::symbol_t *before =
+            ASR::down_cast<ASR::Var_t>(base)->m_v;
+        ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(before);
+        if (!ASR::is_a<ASR::Variable_t>(*sym)) return false;
+        ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(sym);
+        if (!ASRUtils::is_pointer(v->m_type) ||
+                ASRUtils::is_allocatable(v->m_type)) {
+            return false;
+        }
+        ASR::ttype_t *core = ASRUtils::type_get_past_pointer(v->m_type);
+        core = ASRUtils::type_get_past_array(core);
+        if (!ASR::is_a<ASR::StructType_t>(*core)) return false;
+        ASR::Struct_t *st = struct_symbol_from_type_decl(
+            v->m_type_declaration);
+        if (!st || !st->m_is_abstract) return false;
+        uint64_t h = get_hash((ASR::asr_t *)v);
+        if (lr_globals.count(h) == 0) return false;
+        std::string gname = module_variable_global_name(before, v);
+        return gname.rfind(
+            "_lr_mod___lcompilers_created__nested_context__", 0) == 0;
+    }
+
+    uint32_t emit_captured_class_data_ptr(ASR::expr_t *arg) {
+        bool was_target = is_target;
+        is_target = true;
+        visit_expr(*arg);
+        is_target = was_target;
+        return lr_emit_load(s, ty_ptr, V(tmp, ty_ptr));
     }
 
     bool class_wrap_needs_writeback(ASR::Variable_t *formal,
@@ -16904,6 +16948,10 @@ public:
                         ty_ptr));
                 } else if (formal_is_unlimited_polymorphic(fn, i)) {
                     args.push_back(V(emit_polymorphic_actual(arg), ty_ptr));
+                } else if (captured_abstract_class_ptr_actual(formal_fn, i,
+                        arg)) {
+                    args.push_back(V(emit_captured_class_data_ptr(arg),
+                        ty_ptr));
                 } else if (needs_class_pointer_alias_formal_wrap(formal_fn, i,
                         arg, x.m_dt, x.m_name)) {
                     args.push_back(V(emit_class_pointer_alias_formal_slot(arg),
@@ -17510,6 +17558,10 @@ public:
                         ty_ptr));
                 } else if (formal_is_unlimited_polymorphic(fn, i)) {
                     args.push_back(V(emit_polymorphic_actual(arg), ty_ptr));
+                } else if (captured_abstract_class_ptr_actual(formal_fn, i,
+                        arg)) {
+                    args.push_back(V(emit_captured_class_data_ptr(arg),
+                        ty_ptr));
                 } else if (needs_class_pointer_alias_formal_wrap(formal_fn, i,
                         arg, x.m_dt, x.m_name)) {
                     args.push_back(V(emit_class_pointer_alias_formal_slot(arg),
