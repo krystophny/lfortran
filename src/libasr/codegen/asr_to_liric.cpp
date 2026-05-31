@@ -3141,6 +3141,13 @@ public:
             get_hash((ASR::asr_t *)sym)) > 0;
     }
 
+    bool class_wrap_needs_writeback(ASR::Variable_t *formal,
+            ASR::symbol_t *call_sym, ASR::expr_t *dt, ASR::expr_t *arg) {
+        if (!expr_is_storage_reference(arg)) return false;
+        return (formal && formal->m_intent != ASR::intentType::In) ||
+            is_tbp_pass_object_actual(call_sym, dt, arg);
+    }
+
     uint32_t emit_class_pointer_alias_formal_slot(ASR::expr_t *arg) {
         ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
             ASR::down_cast<ASR::Var_t>(arg)->m_v);
@@ -16537,8 +16544,8 @@ public:
                     uint32_t data_ptr = emit_class_wrapper_for_concrete(
                         arg, fn, i, &actual_ptr, &data_bytes);
                     args.push_back(V(data_ptr, ty_ptr));
-                    if (formal_v && formal_v->m_intent != ASR::intentType::In &&
-                            expr_is_storage_reference(arg)) {
+                    if (class_wrap_needs_writeback(formal_v, x.m_name,
+                            x.m_dt, arg)) {
                         class_writebacks.push_back(
                             {actual_ptr, data_ptr, data_bytes});
                     }
@@ -17138,8 +17145,8 @@ public:
                     uint32_t data_ptr = emit_class_wrapper_for_concrete(
                         arg, fn, i, &actual_ptr, &data_bytes);
                     args.push_back(V(data_ptr, ty_ptr));
-                    if (formal_v && formal_v->m_intent != ASR::intentType::In &&
-                            expr_is_storage_reference(arg)) {
+                    if (class_wrap_needs_writeback(formal_v, x.m_name,
+                            x.m_dt, arg)) {
                         class_writebacks.push_back(
                             {actual_ptr, data_ptr, data_bytes});
                     }
