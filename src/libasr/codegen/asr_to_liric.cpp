@@ -10623,17 +10623,54 @@ public:
             if (ASR::is_a<ASR::Var_t>(*target_base)) {
                 ASR::symbol_t *tsym = ASRUtils::symbol_get_past_external(
                     ASR::down_cast<ASR::Var_t>(target_base)->m_v);
-                class_alias_data_ptr.insert(get_hash((ASR::asr_t *)tsym));
-                // Record the concrete target's dynamic type so a later select type
-                // / allocate(source=p) reads the right tag (the target has no
-                // runtime class header to read it from).
+                uint64_t th = get_hash((ASR::asr_t *)tsym);
+                class_alias_data_ptr.insert(th);
+                class_alias_concrete_tag.erase(th);
+                class_alias_runtime_tag_slot.erase(th);
                 if (ASRUtils::is_class_type(ASRUtils::extract_type(
                         ASRUtils::expr_type(x.m_target)))) {
-                    ASR::Struct_t *vst =
-                        struct_symbol_for_concrete_expr(x.m_value);
-                    if (vst) {
-                        class_alias_concrete_tag[get_hash((ASR::asr_t *)tsym)] =
-                            struct_symbol_tag((ASR::symbol_t *)vst);
+                    bool recorded_tag = false;
+                    ASR::expr_t *value_base =
+                        peel_class_narrowing_cast(x.m_value);
+                    if (ASR::is_a<ASR::Var_t>(*value_base)) {
+                        ASR::symbol_t *vsym =
+                            ASRUtils::symbol_get_past_external(
+                                ASR::down_cast<ASR::Var_t>(
+                                    value_base)->m_v);
+                        uint64_t vh = get_hash((ASR::asr_t *)vsym);
+                        auto runtime_it =
+                            class_alias_runtime_tag_slot.find(vh);
+                        auto concrete_it =
+                            class_alias_concrete_tag.find(vh);
+                        if (runtime_it !=
+                                class_alias_runtime_tag_slot.end()) {
+                            class_alias_runtime_tag_slot[th] =
+                                runtime_it->second;
+                            recorded_tag = true;
+                        } else if (concrete_it !=
+                                class_alias_concrete_tag.end()) {
+                            class_alias_concrete_tag[th] =
+                                concrete_it->second;
+                            recorded_tag = true;
+                        }
+                    }
+                    if (!recorded_tag && ASRUtils::is_class_type(
+                            ASRUtils::extract_type(
+                                ASRUtils::expr_type(x.m_value)))) {
+                        uint32_t tag_slot = lr_emit_alloca(s, ty_i64);
+                        lr_emit_store(s,
+                            V(load_object_type_tag(rhs), ty_i64),
+                            V(tag_slot, ty_ptr));
+                        class_alias_runtime_tag_slot[th] = tag_slot;
+                        recorded_tag = true;
+                    }
+                    if (!recorded_tag) {
+                        ASR::Struct_t *vst =
+                            struct_symbol_for_concrete_expr(x.m_value);
+                        if (vst) {
+                            class_alias_concrete_tag[th] =
+                                struct_symbol_tag((ASR::symbol_t *)vst);
+                        }
                     }
                 }
             }
