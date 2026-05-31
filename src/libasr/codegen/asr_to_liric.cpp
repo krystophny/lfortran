@@ -1675,6 +1675,24 @@ public:
             ASR::is_a<ASR::StructType_t>(*pcore);
     }
 
+    bool is_scalar_class_pointer_type(ASR::expr_t *expr) {
+        if (!ASR::is_a<ASR::Var_t>(*expr) &&
+                !ASR::is_a<ASR::StructInstanceMember_t>(*expr)) {
+            return false;
+        }
+        ASR::ttype_t *type = ASRUtils::expr_type(expr);
+        if (!ASRUtils::is_pointer(type) || ASRUtils::is_allocatable(type)) {
+            return false;
+        }
+        if (!ASRUtils::is_class_type(ASRUtils::extract_type(type))) {
+            return false;
+        }
+        ASR::ttype_t *core =
+            ASRUtils::type_get_past_allocatable_pointer(type);
+        return !ASR::is_a<ASR::Array_t>(*core) &&
+            ASR::is_a<ASR::StructType_t>(*core);
+    }
+
     // A scalar class-typed pointer Var that, by the rules above, would be
     // skipped by is_scalar_struct_pointer_* (class exclusion) but actually
     // holds a headerless data pointer recorded at its pointer-associate.
@@ -8374,6 +8392,7 @@ public:
                                       ASR::expr_t *actual) {
         ASR::Variable_t *formal = formal_arg_var(fn, i);
         if (!formal) return false;
+        if (ASRUtils::is_pointer(formal->m_type)) return false;
         if (ASR::is_a<ASR::Cast_t>(*actual)) {
             ASR::Cast_t *cast = ASR::down_cast<ASR::Cast_t>(actual);
             if (cast->m_kind == ASR::cast_kindType::ClassToStruct ||
@@ -22816,6 +22835,9 @@ public:
             // p%c where p is a scalar struct pointer (var or component): load
             // the target's address from p's slot so the member aliases the
             // pointee.
+            v_ptr = lr_emit_load(s, ty_ptr, V(v_ptr, ty_ptr));
+        } else if (is_scalar_class_pointer_type(
+                const_cast<ASR::expr_t *>(x.m_v))) {
             v_ptr = lr_emit_load(s, ty_ptr, V(v_ptr, ty_ptr));
         } else if (is_class_data_ptr_alias(const_cast<ASR::expr_t *>(x.m_v))) {
             // p%c where p is a scalar class pointer recorded as holding a
