@@ -8568,6 +8568,19 @@ public:
             }
             return;
         }
+        if (ASRUtils::is_pointer(v->m_type) &&
+                ASR::is_a<ASR::PointerNullConstant_t>(*v->m_value) &&
+                ASR::is_a<ASR::String_t>(*vt) &&
+                ASR::down_cast<ASR::String_t>(vt)->m_physical_type ==
+                    ASR::DescriptorString) {
+            uint32_t f0 = 0, f1 = 1;
+            uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
+                LR_UNDEF(ty_str_desc), LR_NULL(ty_ptr), &f0, 1);
+            uint32_t d1 = lr_emit_insertvalue(s, ty_str_desc,
+                V(d0, ty_str_desc), I(0, ty_i64), &f1, 1);
+            lr_emit_store(s, V(d1, ty_str_desc), V(slot, ty_ptr));
+            return;
+        }
         // Fixed-length string: initialize_local_string_descriptor already
         // set up {buffer, declared_len}.  The initializer constant may be
         // shorter (character(8) :: s = 'abcd'); copy its content padded into
