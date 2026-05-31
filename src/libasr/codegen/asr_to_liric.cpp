@@ -7441,6 +7441,9 @@ public:
         is_target = true;
         visit_expr(*x.m_arg);
         is_target = was_target;
+        if (expr_is_indirect_scalar_pointer(x.m_arg)) {
+            return;
+        }
         // tmp is now a ty_ptr to the slot holding the pointer value;
         // load it to materialize the c_ptr.
         tmp = lr_emit_load(s, ty_ptr, V(tmp, ty_ptr));
@@ -9592,6 +9595,7 @@ public:
             }
         }
         uint32_t rhs = 0;
+        uint32_t dst = 0;
         lr_type_t *t = nullptr;
         if (ASRUtils::is_unlimited_polymorphic_type(
                 ASRUtils::expr_type(x.m_target)) &&
@@ -9722,10 +9726,14 @@ public:
             rhs = tmp;
             t = ty_ptr;
             if (ASR::is_a<ASR::Var_t>(*x.m_target)) {
-                mark_indirect_scalar = true;
-                indirect_scalar_hash = get_hash((ASR::asr_t *)
-                    ASRUtils::symbol_get_past_external(
-                        ASR::down_cast<ASR::Var_t>(x.m_target)->m_v));
+                ASR::symbol_t *tsym = ASRUtils::symbol_get_past_external(
+                    ASR::down_cast<ASR::Var_t>(x.m_target)->m_v);
+                if (ASR::is_a<ASR::Variable_t>(*tsym)) {
+                    dst = emit_variable_address(
+                        ASR::down_cast<ASR::Variable_t>(tsym));
+                    mark_indirect_scalar = true;
+                    indirect_scalar_hash = get_hash((ASR::asr_t *)tsym);
+                }
             }
         } else if (is_scalar_intrinsic_pointer_target(x.m_target) &&
                 ASRUtils::is_pointer(ASRUtils::expr_type(x.m_value))) {
@@ -9740,10 +9748,14 @@ public:
             }
             t = ty_ptr;
             if (ASR::is_a<ASR::Var_t>(*x.m_target)) {
-                mark_indirect_scalar = true;
-                indirect_scalar_hash = get_hash((ASR::asr_t *)
-                    ASRUtils::symbol_get_past_external(
-                        ASR::down_cast<ASR::Var_t>(x.m_target)->m_v));
+                ASR::symbol_t *tsym = ASRUtils::symbol_get_past_external(
+                    ASR::down_cast<ASR::Var_t>(x.m_target)->m_v);
+                if (ASR::is_a<ASR::Variable_t>(*tsym)) {
+                    dst = emit_variable_address(
+                        ASR::down_cast<ASR::Variable_t>(tsym));
+                    mark_indirect_scalar = true;
+                    indirect_scalar_hash = get_hash((ASR::asr_t *)tsym);
+                }
             }
         } else if (ASRUtils::is_unlimited_polymorphic_type(
                     ASRUtils::expr_type(x.m_target)) &&
@@ -9791,7 +9803,6 @@ public:
             rhs = tmp;
             t = value_type_for_expr(x.m_value);
         }
-        uint32_t dst = 0;
         if (value_is_descriptor_pointer &&
                 ASR::is_a<ASR::Var_t>(*x.m_target)) {
             ASR::Var_t *target = ASR::down_cast<ASR::Var_t>(x.m_target);
