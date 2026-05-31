@@ -9463,7 +9463,9 @@ public:
                     ASR::down_cast<ASR::Variable_t>(sym);
                 uint64_t h = get_hash((ASR::asr_t *)target_var);
                 if (type_is_unlimited_polymorphic_array(
-                        ASRUtils::expr_type(x.m_value))) {
+                        ASRUtils::expr_type(x.m_target)) &&
+                        type_is_unlimited_polymorphic_array(
+                            ASRUtils::expr_type(x.m_value))) {
                     class_desc_aliases.insert(h);
                 } else {
                     class_desc_aliases.erase(h);
@@ -9501,7 +9503,24 @@ public:
         }
         uint32_t rhs = 0;
         lr_type_t *t = nullptr;
-        if (value_is_descriptor_pointer) {
+        if (ASRUtils::is_unlimited_polymorphic_type(
+                ASRUtils::expr_type(x.m_target)) &&
+                !ASR::is_a<ASR::Array_t>(
+                    *ASRUtils::type_get_past_allocatable_pointer(
+                        ASRUtils::expr_type(x.m_target))) &&
+                type_is_unlimited_polymorphic_array(
+                    ASRUtils::expr_type(x.m_value))) {
+            uint32_t src_desc = desc_ptr_of(x.m_value);
+            uint32_t data = desc_base_addr(src_desc);
+            uint32_t tag = desc_load_i64(src_desc, 24);
+            uint32_t f0 = 0, f1 = 1;
+            uint32_t d0 = lr_emit_insertvalue(s, ty_poly_desc,
+                LR_UNDEF(ty_poly_desc), V(data, ty_ptr), &f0, 1);
+            uint32_t d1 = lr_emit_insertvalue(s, ty_poly_desc,
+                V(d0, ty_poly_desc), V(tag, ty_i64), &f1, 1);
+            rhs = d1;
+            t = ty_poly_desc;
+        } else if (value_is_descriptor_pointer) {
             rhs = desc_ptr_of(x.m_value);
             t = ty_ptr;
         } else if (is_scalar_struct_pointer_target(x.m_target)) {
@@ -16157,6 +16176,18 @@ public:
                 throw CodeGenError(
                     "liric: ClassToIntrinsic expects class(*) input");
             }
+            auto intrinsic_dst_type = [&]() {
+                ASR::ttype_t *dst = x.m_type;
+                while (ASR::is_a<ASR::Pointer_t>(*dst) ||
+                        ASR::is_a<ASR::Allocatable_t>(*dst)) {
+                    if (ASR::is_a<ASR::Pointer_t>(*dst)) {
+                        dst = ASR::down_cast<ASR::Pointer_t>(dst)->m_type;
+                    } else {
+                        dst = ASR::down_cast<ASR::Allocatable_t>(dst)->m_type;
+                    }
+                }
+                return dst;
+            };
             bool was_target = is_target;
             is_target = true;
             visit_expr(*x.m_arg);
@@ -16176,21 +16207,18 @@ public:
                             tmp = data;
                             return;
                         }
-                        lr_type_t *dst_t = get_type(x.m_type);
+                        lr_type_t *dst_t = get_type(intrinsic_dst_type());
                         tmp = lr_emit_load(s, dst_t, V(data, ty_ptr));
                         return;
                     }
                 }
             }
-            uint32_t desc = lr_emit_load(s, ty_poly_desc, V(tmp, ty_ptr));
-            uint32_t fld0 = 0;
-            uint32_t data = lr_emit_extractvalue(s, ty_ptr,
-                V(desc, ty_poly_desc), &fld0, 1);
+            uint32_t data = lr_emit_load(s, ty_ptr, V(tmp, ty_ptr));
             if (is_target) {
                 tmp = data;
                 return;
             }
-            lr_type_t *dst_t = get_type(x.m_type);
+            lr_type_t *dst_t = get_type(intrinsic_dst_type());
             tmp = lr_emit_load(s, dst_t, V(data, ty_ptr));
             return;
         }
@@ -18178,6 +18206,15 @@ public:
             if (ASR::is_a<ASR::StructType_t>(*at)) {
                 arg_slots.push_back(emit_formatted_struct_arg_ptr(
                     sf.m_args[i], ASRUtils::expr_type(sf.m_args[i])));
+            } else if (ASR::is_a<ASR::Cast_t>(*sf.m_args[i]) &&
+                    ASR::down_cast<ASR::Cast_t>(
+                        sf.m_args[i])->m_kind ==
+                        ASR::cast_kindType::ClassToIntrinsic) {
+                bool was_target = is_target;
+                is_target = true;
+                visit_expr(*sf.m_args[i]);
+                is_target = was_target;
+                arg_slots.push_back(tmp);
             } else {
                 visit_expr(*sf.m_args[i]);
                 lr_type_t *lr_t = value_type_for_expr(sf.m_args[i]);
