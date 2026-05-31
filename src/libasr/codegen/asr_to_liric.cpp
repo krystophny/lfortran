@@ -16624,7 +16624,7 @@ public:
                     visit_expr(*arg);
                     is_target = was_target;
                     uint32_t arg_ptr = tmp;
-                    ASR::Variable_t *formal = formal_arg_var(fn, i);
+                    ASR::Variable_t *formal = formal_v;
                     if (expr_is_allocatable_struct(arg) &&
                             !(formal && ASRUtils::is_allocatable(
                                 formal->m_type))) {
@@ -17213,7 +17213,7 @@ public:
                     visit_expr(*arg);
                     is_target = was_target;
                     uint32_t arg_ptr = tmp;
-                    ASR::Variable_t *formal = formal_arg_var(fn, i);
+                    ASR::Variable_t *formal = formal_v;
                     if (expr_is_allocatable_struct(arg) &&
                             !(formal && ASRUtils::is_allocatable(
                                 formal->m_type))) {
