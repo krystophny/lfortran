@@ -19418,7 +19418,11 @@ public:
                         arr->m_physical_type !=
                         ASR::array_physical_typeType::SIMDArray &&
                         arr->m_physical_type !=
-                        ASR::array_physical_typeType::PointerArray) {
+                        ASR::array_physical_typeType::PointerArray &&
+                        arr->m_physical_type !=
+                        ASR::array_physical_typeType::DescriptorArray &&
+                        arr->m_physical_type !=
+                        ASR::array_physical_typeType::AssumedRankArray) {
                     return false;
                 }
             } else if (arr->m_physical_type !=
@@ -19482,10 +19486,49 @@ public:
     struct NmlCharArrayCopyback {
         uint32_t desc_base;   // str_desc array base (16-byte elements)
         uint32_t buf;         // contiguous char buffer
-        int64_t total;        // element count
+        uint32_t total;       // i64 element count
         int64_t elem_len;     // per-element char length
     };
     std::vector<NmlCharArrayCopyback> nml_pending_copybacks;
+
+    void emit_namelist_char_array_copy(uint32_t desc_base, uint32_t buf,
+            uint32_t total, int64_t elem_len, bool to_buffer) {
+        uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+        lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+        lr_error_t err;
+        uint32_t head = lr_session_block(s);
+        uint32_t body = lr_session_block(s);
+        uint32_t done = lr_session_block(s);
+        lr_emit_br(s, head);
+
+        lr_session_set_block(s, head, &err);
+        uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+        uint32_t more = lr_emit_icmp(s, LR_CMP_SLT,
+            V(idx, ty_i64), V(total, ty_i64));
+        lr_emit_condbr(s, V(more, ty_i1), body, done);
+
+        lr_session_set_block(s, body, &err);
+        uint32_t desc_off = lr_emit_mul(s, ty_i64,
+            V(idx, ty_i64), I(16, ty_i64));
+        lr_operand_desc_t doff[1] = {V(desc_off, ty_i64)};
+        uint32_t dptr = lr_emit_gep(s, ty_i8, V(desc_base, ty_ptr), doff, 1);
+        uint32_t edesc = lr_emit_load(s, ty_str_desc, V(dptr, ty_ptr));
+        uint32_t fld0 = 0;
+        uint32_t edata = lr_emit_extractvalue(s, ty_ptr,
+            V(edesc, ty_str_desc), &fld0, 1);
+        uint32_t buf_off = lr_emit_mul(s, ty_i64,
+            V(idx, ty_i64), I(elem_len, ty_i64));
+        lr_operand_desc_t boff[1] = {V(buf_off, ty_i64)};
+        uint32_t bptr = lr_emit_gep(s, ty_i8, V(buf, ty_ptr), boff, 1);
+        emit_memcpy_bytes(to_buffer ? bptr : edata,
+            to_buffer ? edata : bptr, (uint64_t)elem_len);
+        uint32_t next = lr_emit_add(s, ty_i64,
+            V(idx, ty_i64), I(1, ty_i64));
+        lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+        lr_emit_br(s, head);
+
+        lr_session_set_block(s, done, &err);
+    }
 
     // Append leaf namelist items reachable from storage at `addr`.  A
     // derived-type scalar recurses into its members (names become
@@ -19547,23 +19590,28 @@ public:
             int64_t clen = 0;
             ASR::String_t *st = ASR::down_cast<ASR::String_t>(elem);
             ASRUtils::extract_value(st->m_len, clen);
-            int64_t total = ASRUtils::get_fixed_size_of_array(
-                arr->m_dims, arr->n_dims);
-            uint32_t buf = emit_storage_alloca_nbytes(
-                (uint64_t)total * (uint64_t)clen);
-            for (int64_t j = 0; j < total; j++) {
-                lr_operand_desc_t doff[1] = {I(j * 16, ty_i64)};
-                uint32_t dptr = lr_emit_gep(s, ty_i8, V(addr, ty_ptr),
-                    doff, 1);
-                uint32_t edata = lr_emit_load(s, ty_ptr, V(dptr, ty_ptr));
-                lr_operand_desc_t boff[1] = {I(j * clen, ty_i64)};
-                uint32_t bdst = lr_emit_gep(s, ty_i8, V(buf, ty_ptr),
-                    boff, 1);
-                emit_memcpy_bytes(bdst, edata, (uint64_t)clen);
+            uint32_t desc_base = descriptor_array ? desc_base_addr(addr) :
+                addr;
+            uint32_t total_v;
+            uint32_t buf;
+            if (descriptor_array) {
+                total_v = descriptor_array_element_count(
+                    addr, (int)arr->n_dims);
+                uint32_t bytes = lr_emit_mul(s, ty_i64,
+                    V(total_v, ty_i64), I(clen, ty_i64));
+                buf = emit_malloc_bytes(bytes);
+            } else {
+                int64_t total = ASRUtils::get_fixed_size_of_array(
+                    arr->m_dims, arr->n_dims);
+                total_v = emit_i64_const(total);
+                buf = emit_storage_alloca_nbytes(
+                    (uint64_t)total * (uint64_t)clen);
             }
+            emit_namelist_char_array_copy(
+                desc_base, buf, total_v, clen, true);
             item.data = buf;
             item.elem_len = clen;
-            nml_pending_copybacks.push_back({addr, buf, total, clen});
+            nml_pending_copybacks.push_back({desc_base, buf, total_v, clen});
         } else if (ASR::is_a<ASR::String_t>(*elem)) {
             // Scalar character: slot holds a {data_ptr,len} descriptor.
             item.data = lr_emit_load(s, ty_ptr, V(addr, ty_ptr));
@@ -19590,23 +19638,23 @@ public:
             uint32_t shape_arr = emit_storage_alloca_nbytes(
                 (uint64_t)item.rank * 8);
             for (int d = 0; d < item.rank; d++) {
-                int64_t ext = 0;
-                ASRUtils::extract_value(arr->m_dims[d].m_length, ext);
                 lr_operand_desc_t off[1] = {I((int64_t)d * 8, ty_i64)};
                 uint32_t ep = lr_emit_gep(s, ty_i8,
                     V(shape_arr, ty_ptr), off, 1);
-                lr_emit_store(s, I(ext, ty_i64), V(ep, ty_ptr));
+                if (descriptor_array) {
+                    lr_emit_store(s, V(desc_dim_extent(addr, d), ty_i64),
+                        V(ep, ty_ptr));
+                } else {
+                    int64_t ext = 0;
+                    ASRUtils::extract_value(arr->m_dims[d].m_length, ext);
+                    lr_emit_store(s, I(ext, ty_i64), V(ep, ty_ptr));
+                }
             }
             item.shape = shape_arr;
             item.shape_null = false;
             if (descriptor_array) {
-                item.data = desc_base_addr(addr);
-                for (int d = 0; d < item.rank; d++) {
-                    lr_operand_desc_t off[1] = {I((int64_t)d * 8, ty_i64)};
-                    uint32_t ep = lr_emit_gep(s, ty_i8,
-                        V(shape_arr, ty_ptr), off, 1);
-                    lr_emit_store(s, V(desc_dim_extent(addr, d), ty_i64),
-                        V(ep, ty_ptr));
+                if (!ASR::is_a<ASR::String_t>(*elem)) {
+                    item.data = desc_base_addr(addr);
                 }
             }
         }
@@ -19618,16 +19666,8 @@ public:
     // namelist READ; a no-op when no char arrays were bridged.
     void emit_namelist_char_copybacks() {
         for (const NmlCharArrayCopyback &cb : nml_pending_copybacks) {
-            for (int64_t j = 0; j < cb.total; j++) {
-                lr_operand_desc_t doff[1] = {I(j * 16, ty_i64)};
-                uint32_t dptr = lr_emit_gep(s, ty_i8, V(cb.desc_base, ty_ptr),
-                    doff, 1);
-                uint32_t edata = lr_emit_load(s, ty_ptr, V(dptr, ty_ptr));
-                lr_operand_desc_t boff[1] = {I(j * cb.elem_len, ty_i64)};
-                uint32_t bsrc = lr_emit_gep(s, ty_i8, V(cb.buf, ty_ptr),
-                    boff, 1);
-                emit_memcpy_bytes(edata, bsrc, (uint64_t)cb.elem_len);
-            }
+            emit_namelist_char_array_copy(cb.desc_base, cb.buf, cb.total,
+                cb.elem_len, false);
         }
         nml_pending_copybacks.clear();
     }
