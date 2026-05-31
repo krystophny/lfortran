@@ -13668,6 +13668,14 @@ public:
         return ftype->m_deftype == ASR::deftypeType::Interface;
     }
 
+    bool function_is_module_procedure_interface(ASR::Function_t *fn) {
+        if (!fn || !fn->m_function_signature) return false;
+        ASR::FunctionType_t *ftype =
+            ASR::down_cast<ASR::FunctionType_t>(fn->m_function_signature);
+        return ftype->m_deftype == ASR::deftypeType::Interface &&
+            ftype->m_module;
+    }
+
     uint32_t interface_function_param(ASR::Function_t *fn) {
         if (!function_is_interface(fn)) return UINT32_MAX;
         auto it = lr_symtab.find(get_hash((ASR::asr_t *)fn));
@@ -13884,7 +13892,11 @@ public:
     void emit_vtable_method(uint32_t raw_data,
                             const std::string &method_name,
                             ASR::Function_t *target) {
-        if (!target || function_is_interface(target)) return;
+        if (!target) return;
+        if (function_is_interface(target) &&
+                !function_is_module_procedure_interface(target)) {
+            return;
+        }
         int64_t off = 8 + (int64_t)method_slot(method_name) * 8;
         lr_operand_desc_t method_off[1] = {I(off, ty_i64)};
         uint32_t slot_ptr = lr_emit_gep(s, ty_i8,
