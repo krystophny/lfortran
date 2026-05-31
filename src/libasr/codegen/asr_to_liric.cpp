@@ -2483,11 +2483,9 @@ public:
         uint32_t bytes = lr_emit_mul(s, ty_i64, V(total, ty_i64),
             I(element_byte_size(array_t->m_type), ty_i64));
         uint32_t data = emit_malloc_bytes(bytes);
-        // Do NOT zero-initialize: Fortran leaves local/automatic arrays
-        // undefined (the LLVM backend does not zero them either), and an
-        // unconditional memset over the full extent hangs for arrays with
-        // a huge declared size that are only queried via size() and never
-        // touched (e.g. INTEGER,DIMENSION(huge_var) :: a; print*,size(a)).
+        initialize_runtime_array_elements(data, total, array_t, v);
+        // Do NOT zero-initialize plain intrinsic arrays: Fortran leaves them
+        // undefined, and huge arrays may be queried only through size().
         uint32_t slot = lr_emit_alloca(s, ty_ptr);
         lr_emit_store(s, V(data, ty_ptr), V(slot, ty_ptr));
         runtime_pointer_arrays.insert(v_hash);
@@ -13347,6 +13345,59 @@ public:
         return false;
     }
 
+    void initialize_runtime_array_elements(uint32_t data, uint32_t total_rt,
+            ASR::Array_t *array_t, ASR::Variable_t *var) {
+        ASR::ttype_t *elem_type =
+            ASRUtils::type_get_past_allocatable_pointer(array_t->m_type);
+        elem_type = ASRUtils::type_get_past_array(elem_type);
+        if (ASR::is_a<ASR::String_t>(*elem_type)) {
+            emit_string_array_element_buffers(data, total_rt, array_t->m_type);
+            return;
+        }
+        if (!ASR::is_a<ASR::StructType_t>(*elem_type)) {
+            return;
+        }
+        ASR::Struct_t *st = struct_symbol_from_type_decl(
+            var->m_type_declaration);
+        if (!st) {
+            st = struct_symbol_for_type(elem_type);
+        }
+        if (!st || !struct_storage_needs_initialization(st)) {
+            return;
+        }
+
+        uint32_t stride = emit_i64_const((int64_t)
+            element_byte_size(array_t->m_type));
+        uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+        lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+
+        lr_error_t err;
+        uint32_t head_bb = lr_session_block(s);
+        uint32_t body_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_br(s, head_bb);
+
+        lr_session_set_block(s, head_bb, &err);
+        uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+        uint32_t more = lr_emit_icmp(s, LR_CMP_SLT,
+            V(idx, ty_i64), V(total_rt, ty_i64));
+        lr_emit_condbr(s, V(more, ty_i1), body_bb, done_bb);
+
+        lr_session_set_block(s, body_bb, &err);
+        uint32_t byte_off = lr_emit_mul(s, ty_i64,
+            V(idx, ty_i64), V(stride, ty_i64));
+        lr_operand_desc_t off[1] = {V(byte_off, ty_i64)};
+        uint32_t elem_ptr = lr_emit_gep(s, ty_i8,
+            V(data, ty_ptr), off, 1);
+        initialize_struct_storage(st, elem_ptr);
+        uint32_t next = lr_emit_add(s, ty_i64,
+            V(idx, ty_i64), I(1, ty_i64));
+        lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+        lr_emit_br(s, head_bb);
+
+        lr_session_set_block(s, done_bb, &err);
+    }
+
     void initialize_struct_variable_storage(uint32_t slot,
                                             ASR::Variable_t *var) {
         ASR::ttype_t *type =
@@ -15465,11 +15516,16 @@ public:
     }
 
     uint64_t method_slot(const std::string &name) const {
-        uint64_t h = 1469598103934665603ULL;
+        uint64_t h = 1469598103934665603ULL ^ 74ULL;
         for (unsigned char c : name) {
             h ^= c;
             h *= 1099511628211ULL;
         }
+        h ^= h >> 33;
+        h *= 0xff51afd7ed558ccdULL;
+        h ^= h >> 33;
+        h *= 0xc4ceb9fe1a85ec53ULL;
+        h ^= h >> 33;
         return h % (uint64_t)class_vtable_slots();
     }
 
@@ -19623,6 +19679,9 @@ public:
                 item.second);
             if (v->m_intent != ASR::intentType::Local ||
                     v->m_storage != ASR::storage_typeType::Default) {
+                continue;
+            }
+            if (ASRUtils::is_pointer(v->m_type)) {
                 continue;
             }
             ASR::ttype_t *vt =
