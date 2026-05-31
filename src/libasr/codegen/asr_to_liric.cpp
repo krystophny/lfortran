@@ -8269,6 +8269,21 @@ public:
                     return struct_symbol_tag((ASR::symbol_t *)st);
                 }
             }
+        } else if (ASR::is_a<ASR::ArrayItem_t>(*actual)) {
+            ASR::symbol_t *sym =
+                ASRUtils::get_struct_sym_from_struct_expr(actual);
+            ASR::Struct_t *st = struct_symbol_from_type_decl(sym);
+            if (st) {
+                return struct_symbol_tag((ASR::symbol_t *)st);
+            }
+            ASR::ArrayItem_t *item = ASR::down_cast<ASR::ArrayItem_t>(actual);
+            ASR::Variable_t *v = var_from_expr(item->m_v);
+            if (v) {
+                st = struct_symbol_from_type_decl(v->m_type_declaration);
+                if (st) {
+                    return struct_symbol_tag((ASR::symbol_t *)st);
+                }
+            }
         }
         return polymorphic_type_tag(ASRUtils::expr_type(actual));
     }
