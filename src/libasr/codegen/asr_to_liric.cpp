@@ -27,6 +27,8 @@
 #include <unordered_set>
 #include <vector>
 
+extern std::string lcompilers_unique_ID_separate_compilation;
+
 namespace LCompilers {
 
 namespace {
@@ -13569,6 +13571,27 @@ public:
 
     std::unordered_map<uint64_t, std::string> callable_name_cache;
 
+    std::string intrinsic_runtime_proc_name(const std::string &module_name,
+                                            const std::string &name) {
+        if (module_name.rfind("lfortran_intrinsic", 0) != 0) {
+            return name;
+        }
+        std::string prefix = module_name + "_";
+        if (name.rfind(prefix, 0) != 0) {
+            return name;
+        }
+        std::string proc_name = name.substr(prefix.size());
+        if (!lcompilers_unique_ID_separate_compilation.empty()) {
+            std::string suffix = "_" + lcompilers_unique_ID_separate_compilation;
+            if (proc_name.size() > suffix.size() &&
+                    proc_name.compare(proc_name.size() - suffix.size(),
+                        suffix.size(), suffix) == 0) {
+                proc_name.resize(proc_name.size() - suffix.size());
+            }
+        }
+        return proc_name;
+    }
+
     // Resolve a symbol to the underlying Function, following
     // ExternalSymbol, StructMethodDeclaration, and GenericProcedure
     // links.
@@ -14128,6 +14151,7 @@ public:
                             module_name = cur->m_name;
                         }
                     }
+                    base = intrinsic_runtime_proc_name(module_name, base);
                     base = std::string(module_name) + "__" + base;
                     break;
                 }
@@ -15492,6 +15516,106 @@ public:
         return lr_emit_sext(s, ty_i32, V(tmp, t));
     }
 
+    bool integer_constant_value(ASR::expr_t *expr, int64_t &value) {
+        if (!expr) return false;
+        if (ASR::is_a<ASR::IntegerConstant_t>(*expr)) {
+            value = ASR::down_cast<ASR::IntegerConstant_t>(expr)->m_n;
+            return true;
+        }
+        if (ASR::is_a<ASR::Var_t>(*expr)) {
+            ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
+                ASR::down_cast<ASR::Var_t>(expr)->m_v);
+            if (sym && ASR::is_a<ASR::Variable_t>(*sym)) {
+                return integer_constant_value(
+                    ASR::down_cast<ASR::Variable_t>(sym)->m_value, value);
+            }
+        }
+        if (ASR::is_a<ASR::StructConstant_t>(*expr)) {
+            ASR::StructConstant_t *c =
+                ASR::down_cast<ASR::StructConstant_t>(expr);
+            return c->n_args > 0 &&
+                integer_constant_value(c->m_args[0].m_value, value);
+        }
+        if (ASR::is_a<ASR::StructConstructor_t>(*expr)) {
+            ASR::StructConstructor_t *c =
+                ASR::down_cast<ASR::StructConstructor_t>(expr);
+            return c->n_args > 0 &&
+                integer_constant_value(c->m_args[0].m_value, value);
+        }
+        return false;
+    }
+
+    bool ieee_value_bits(int64_t cls, int64_t kind, uint64_t &bits) {
+        if (kind == 4) {
+            switch (cls) {
+                case 1: bits = 0x7FA00000ULL; return true;
+                case 2: bits = 0x7FC00000ULL; return true;
+                case 3: bits = 0xFF800000ULL; return true;
+                case 4: bits = 0xBF800000ULL; return true;
+                case 5: bits = 0x80000001ULL; return true;
+                case 6: bits = 0x80000000ULL; return true;
+                case 7: bits = 0x00000000ULL; return true;
+                case 8: bits = 0x00000001ULL; return true;
+                case 9: bits = 0x3F800000ULL; return true;
+                case 10: bits = 0x7F800000ULL; return true;
+                default: return false;
+            }
+        }
+        if (kind == 8) {
+            switch (cls) {
+                case 1: bits = 0x7FF4000000000000ULL; return true;
+                case 2: bits = 0x7FF8000000000000ULL; return true;
+                case 3: bits = 0xFFF0000000000000ULL; return true;
+                case 4: bits = 0xBFF0000000000000ULL; return true;
+                case 5: bits = 0x8000000000000001ULL; return true;
+                case 6: bits = 0x8000000000000000ULL; return true;
+                case 7: bits = 0x0000000000000000ULL; return true;
+                case 8: bits = 0x0000000000000001ULL; return true;
+                case 9: bits = 0x3FF0000000000000ULL; return true;
+                case 10: bits = 0x7FF0000000000000ULL; return true;
+                default: return false;
+            }
+        }
+        return false;
+    }
+
+    uint32_t emit_real_from_bits(uint64_t bits, int64_t kind) {
+        if (kind == 4) {
+            uint32_t slot = emit_temp_slot(ty_i32);
+            lr_emit_store(s, I((int64_t)(uint32_t)bits, ty_i32),
+                V(slot, ty_ptr));
+            return lr_emit_load(s, ty_f32, V(slot, ty_ptr));
+        }
+        int64_t signed_bits = 0;
+        std::memcpy(&signed_bits, &bits, sizeof(bits));
+        uint32_t slot = emit_temp_slot(ty_i64);
+        lr_emit_store(s, I(signed_bits, ty_i64), V(slot, ty_ptr));
+        return lr_emit_load(s, ty_f64, V(slot, ty_ptr));
+    }
+
+    bool emit_ieee_value_call(const ASR::FunctionCall_t &x,
+                              const std::string &name) {
+        if (name != "lfortran_intrinsic_ieee_arithmetic__spieee_value" &&
+                name != "lfortran_intrinsic_ieee_arithmetic__dpieee_value") {
+            return false;
+        }
+        if (x.n_args != 2 || !x.m_args[1].m_value) return false;
+        ASR::ttype_t *type = ASRUtils::type_get_past_allocatable_pointer(
+            x.m_type);
+        if (!ASRUtils::is_real(*type)) return false;
+        int64_t kind = ASRUtils::extract_kind_from_ttype_t(type);
+        int64_t cls = 0;
+        if (!integer_constant_value(x.m_args[1].m_value, cls)) return false;
+        uint64_t bits = 0;
+        if (!ieee_value_bits(cls, kind, bits)) {
+            if (!x.m_args[0].m_value) return false;
+            visit_expr(*x.m_args[0].m_value);
+            return true;
+        }
+        tmp = emit_real_from_bits(bits, kind);
+        return true;
+    }
+
     // --- FunctionCall ---
 
     void visit_FunctionCall(const ASR::FunctionCall_t &x) {
@@ -15519,6 +15643,7 @@ public:
                 std::string(ext->m_original_name) == "compiler_version";
         }
         std::string resolved_name = fn ? callable_name(fn) : "";
+        if (emit_ieee_value_call(x, resolved_name)) return;
         if (is_iso_compiler_version ||
                 (fn && std::string(fn->m_name) == "compiler_version") ||
                 (fn && std::string(fn->m_name) ==
