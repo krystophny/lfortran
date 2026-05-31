@@ -21114,6 +21114,34 @@ public:
         internal_write_chunk_desc(dst_desc, data, len);
     }
 
+    void internal_write_allocatable_chunk(uint32_t dst_desc_ptr,
+                                          uint32_t data, uint32_t len) {
+        uint32_t fld0 = 0;
+        uint32_t dst_desc = lr_emit_load(s, ty_str_desc,
+            V(dst_desc_ptr, ty_ptr));
+        uint32_t dst_data = lr_emit_extractvalue(s, ty_ptr,
+            V(dst_desc, ty_str_desc), &fld0, 1);
+        uint32_t needs_alloc = lr_emit_icmp(s, LR_CMP_EQ,
+            V(dst_data, ty_ptr), LR_NULL(ty_ptr));
+
+        lr_error_t err;
+        uint32_t alloc_bb = lr_session_block(s);
+        uint32_t chunk_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(needs_alloc, ty_i1), alloc_bb, chunk_bb);
+
+        lr_session_set_block(s, alloc_bb, &err);
+        uint32_t src_desc = emit_string_desc(data, len);
+        emit_allocatable_string_assignment(dst_desc_ptr, src_desc);
+        lr_emit_br(s, done_bb);
+
+        lr_session_set_block(s, chunk_bb, &err);
+        internal_write_chunk_desc(dst_desc, data, len);
+        lr_emit_br(s, done_bb);
+
+        lr_session_set_block(s, done_bb, &err);
+    }
+
     // Internal write to a CHARACTER ARRAY unit: the formatted output is a set
     // of records separated by '\n' (one per format reversion); distribute each
     // record into a successive array element, blank-padded to its length.  The
@@ -21854,10 +21882,8 @@ public:
                     internal_write_chunk_desc(internal_unit_desc,
                         formatted.data, formatted.len);
                 } else if (internal_unit_is_allocatable) {
-                    uint32_t desc = emit_string_desc(
+                    internal_write_allocatable_chunk(internal_unit_desc_ptr,
                         formatted.data, formatted.len);
-                    emit_allocatable_string_assignment(
-                        internal_unit_desc_ptr, desc);
                 } else {
                     internal_write_chunk(internal_unit_desc_ptr,
                         formatted.data, formatted.len);
@@ -22083,9 +22109,8 @@ public:
                 if (internal_unit_is_value) {
                     internal_write_chunk_desc(internal_unit_desc, data, len);
                 } else if (internal_unit_is_allocatable) {
-                    uint32_t desc = emit_string_desc(data, len);
-                    emit_allocatable_string_assignment(
-                        internal_unit_desc_ptr, desc);
+                    internal_write_allocatable_chunk(
+                        internal_unit_desc_ptr, data, len);
                 } else {
                     internal_write_chunk(internal_unit_desc_ptr, data, len);
                 }
