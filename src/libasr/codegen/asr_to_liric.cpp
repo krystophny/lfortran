@@ -11945,15 +11945,37 @@ public:
             if (total <= 0) {
                 return;
             }
-            uint64_t stride = element_byte_size(array_t->m_type);
-            for (int64_t i = 0; i < total; i++) {
-                lr_operand_desc_t off[1] = {
-                    I((int64_t)(i * stride), ty_i64)
-                };
-                uint32_t elem_ptr = lr_emit_gep(s, ty_i8,
-                    V(slot, ty_ptr), off, 1);
-                initialize_struct_storage(st, elem_ptr);
-            }
+            uint32_t stride = emit_i64_const((int64_t)
+                element_byte_size(array_t->m_type));
+            uint32_t total_rt = emit_i64_const(total);
+            uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+            lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+
+            lr_error_t err;
+            uint32_t head_bb = lr_session_block(s);
+            uint32_t body_bb = lr_session_block(s);
+            uint32_t done_bb = lr_session_block(s);
+            lr_emit_br(s, head_bb);
+
+            lr_session_set_block(s, head_bb, &err);
+            uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+            uint32_t more = lr_emit_icmp(s, LR_CMP_SLT,
+                V(idx, ty_i64), V(total_rt, ty_i64));
+            lr_emit_condbr(s, V(more, ty_i1), body_bb, done_bb);
+
+            lr_session_set_block(s, body_bb, &err);
+            uint32_t byte_off = lr_emit_mul(s, ty_i64,
+                V(idx, ty_i64), V(stride, ty_i64));
+            lr_operand_desc_t off[1] = {V(byte_off, ty_i64)};
+            uint32_t elem_ptr = lr_emit_gep(s, ty_i8,
+                V(slot, ty_ptr), off, 1);
+            initialize_struct_storage(st, elem_ptr);
+            uint32_t next = lr_emit_add(s, ty_i64,
+                V(idx, ty_i64), I(1, ty_i64));
+            lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+            lr_emit_br(s, head_bb);
+
+            lr_session_set_block(s, done_bb, &err);
             return;
         }
         type = ASRUtils::type_get_past_array(type);
