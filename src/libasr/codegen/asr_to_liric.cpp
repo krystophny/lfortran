@@ -14767,6 +14767,30 @@ public:
             ftype->m_module;
     }
 
+    bool bindc_interface_has_local_implementation(ASR::Function_t *fn) {
+        if (!function_is_interface(fn)) return false;
+        SymbolTable *scope = fn->m_symtab ? fn->m_symtab->parent : nullptr;
+        while (scope && scope->parent) scope = scope->parent;
+        if (!scope) return false;
+        ASR::symbol_t *impl = scope->get_symbol(fn->m_name);
+        if (!impl || impl == (ASR::symbol_t *)fn) return false;
+        impl = ASRUtils::symbol_get_past_external(impl);
+        if (!ASR::is_a<ASR::Function_t>(*impl)) return false;
+        ASR::Function_t *impl_fn = ASR::down_cast<ASR::Function_t>(impl);
+        if (!impl_fn->m_function_signature) return false;
+        ASR::FunctionType_t *ftype =
+            ASR::down_cast<ASR::FunctionType_t>(
+                impl_fn->m_function_signature);
+        return ftype->m_abi == ASR::abiType::BindC &&
+            ftype->m_deftype == ASR::deftypeType::Implementation;
+    }
+
+    bool bindc_call_uses_cfi_char_descriptor(ASR::Function_t *fn) {
+        if (!function_is_interface(fn)) return false;
+        if (function_is_module_procedure_interface(fn)) return false;
+        return !bindc_interface_has_local_implementation(fn);
+    }
+
     uint32_t interface_function_param(ASR::Function_t *fn) {
         if (!function_is_interface(fn)) return UINT32_MAX;
         auto it = lr_symtab.find(get_hash((ASR::asr_t *)fn));
@@ -16091,7 +16115,8 @@ public:
     bool prepare_bindc_cfi_scalar_arg(ASR::expr_t *actual,
             ASR::Variable_t *formal, std::vector<lr_operand_desc_t> &args,
             std::vector<lr_type_t *> &params,
-            std::vector<BindCScalarCfiArg> &scratch) {
+            std::vector<BindCScalarCfiArg> &scratch,
+            bool include_char_alloc = false) {
         if (ASRUtils::is_array(formal->m_type)) return false;
         if (!ASRUtils::is_allocatable(formal->m_type) &&
                 !ASRUtils::is_pointer(formal->m_type)) {
@@ -16101,7 +16126,8 @@ public:
             ASRUtils::type_get_past_allocatable_pointer(formal->m_type);
         bool formal_is_char = ASR::is_a<ASR::String_t>(*formal_core);
         if (formal_is_char && (ASRUtils::is_allocatable(formal->m_type) ||
-                ASRUtils::is_pointer(formal->m_type))) {
+                ASRUtils::is_pointer(formal->m_type)) &&
+                !include_char_alloc) {
             return false;
         }
 
@@ -16713,6 +16739,8 @@ public:
                 std::vector<BindCCharArrayArg> scratch;
                 std::vector<BindCStructCfiArg> struct_scratch;
                 std::vector<BindCScalarCfiArg> scalar_scratch;
+                bool cfi_char_desc =
+                    bindc_call_uses_cfi_char_descriptor(fn);
                 for (size_t i = 0; i < x.n_args; i++) {
                     ASR::expr_t *actual = x.m_args[i].m_value;
                     if (!actual) {
@@ -16746,7 +16774,7 @@ public:
                         continue;
                     }
                     if (prepare_bindc_cfi_scalar_arg(actual, formal,
-                            cargs, params, scalar_scratch)) {
+                            cargs, params, scalar_scratch, cfi_char_desc)) {
                         continue;
                     }
                     if (prepare_bindc_char_descriptor_arg(actual, formal,
@@ -17292,6 +17320,8 @@ public:
                 std::vector<BindCCharArrayArg> scratch;
                 std::vector<BindCStructCfiArg> struct_scratch;
                 std::vector<BindCScalarCfiArg> scalar_scratch;
+                bool cfi_char_desc =
+                    bindc_call_uses_cfi_char_descriptor(fn);
                 for (size_t i = 0; i < x.n_args; i++) {
                     ASR::expr_t *actual = x.m_args[i].m_value;
                     if (!actual) {
@@ -17323,7 +17353,8 @@ public:
                             continue;
                         }
                         if (prepare_bindc_cfi_scalar_arg(actual, formal,
-                                cargs, params, scalar_scratch)) {
+                                cargs, params, scalar_scratch,
+                                cfi_char_desc)) {
                             continue;
                         }
                         if (prepare_bindc_char_descriptor_arg(actual, formal,
