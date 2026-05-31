@@ -23269,6 +23269,15 @@ public:
         return true;
     }
 
+    uint32_t emit_file_read_scalar_target_ptr(ASR::expr_t *target) {
+        uint32_t ptr = emit_target_ptr(target);
+        ASR::ttype_t *target_type = ASRUtils::expr_type(target);
+        if (is_allocatable_intrinsic_scalar_type(target_type)) {
+            return ensure_allocatable_scalar_data(ptr, target_type);
+        }
+        return ptr;
+    }
+
     bool emit_external_file_read_value(ASR::expr_t *target, uint32_t unit,
             uint32_t iostat) {
         ASR::ttype_t *type = ASRUtils::expr_type(target);
@@ -23280,7 +23289,7 @@ public:
         type = ASRUtils::type_get_past_array(type);
         if (ASR::is_a<ASR::Integer_t>(*type)) {
             int kind = ASRUtils::extract_kind_from_ttype_t(type);
-            uint32_t ptr = emit_target_ptr(target);
+            uint32_t ptr = emit_file_read_scalar_target_ptr(target);
             const char *name = nullptr;
             if (kind == 2) name = "_lfortran_read_int16";
             else if (kind == 4) name = "_lfortran_read_int32";
@@ -23297,7 +23306,7 @@ public:
         }
         if (ASR::is_a<ASR::Real_t>(*type)) {
             int kind = ASRUtils::extract_kind_from_ttype_t(type);
-            uint32_t ptr = emit_target_ptr(target);
+            uint32_t ptr = emit_file_read_scalar_target_ptr(target);
             const char *name = nullptr;
             if (kind == 4) name = "_lfortran_read_float";
             else if (kind == 8) name = "_lfortran_read_double";
@@ -23319,7 +23328,7 @@ public:
                 ? "_lfortran_read_array_complex_float"
                 : (kind == 8) ? "_lfortran_read_array_complex_double" : nullptr;
             if (!name) return false;
-            uint32_t ptr = emit_target_ptr(target);
+            uint32_t ptr = emit_file_read_scalar_target_ptr(target);
             lr_type_t *p[] = {ty_ptr, ty_i32, ty_i32, ty_i32, ty_ptr};
             declare_func(name, ty_void, p, 5, false);
             lr_operand_desc_t args[] = {
@@ -23330,7 +23339,7 @@ public:
             return true;
         }
         if (ASR::is_a<ASR::Logical_t>(*type)) {
-            uint32_t ptr = emit_target_ptr(target);
+            uint32_t ptr = emit_file_read_scalar_target_ptr(target);
             lr_type_t *p[] = {ty_ptr, ty_i32, ty_ptr};
             declare_func("_lfortran_read_logical", ty_void, p, 3, false);
             lr_operand_desc_t args[] = {
