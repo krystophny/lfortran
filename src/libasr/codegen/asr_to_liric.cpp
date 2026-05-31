@@ -16844,7 +16844,9 @@ public:
                 // data pointer (str_desc field 0), matching the LLVM backend,
                 // so an external C/Fortran routine reads the character bytes
                 // rather than the descriptor.
-                if (fn && function_is_interface(fn) && !fn_is_bindc &&
+                if (fn && function_is_interface(fn) &&
+                        !function_is_module_procedure_interface(fn) &&
+                        !fn_is_bindc &&
                         !is_tbp_call_symbol(x.m_name) &&
                         formal_v && !formal_v->m_value_attr &&
                         formal_v->m_intent != ASR::intentType::Out &&
@@ -17445,7 +17447,9 @@ public:
                 // data pointer (str_desc field 0), matching the LLVM backend,
                 // so an external C/Fortran routine reads the character bytes
                 // rather than the descriptor.
-                if (fn && function_is_interface(fn) && !fn_is_bindc &&
+                if (fn && function_is_interface(fn) &&
+                        !function_is_module_procedure_interface(fn) &&
+                        !fn_is_bindc &&
                         !is_tbp_call_symbol(x.m_name) &&
                         formal_v && !formal_v->m_value_attr &&
                         formal_v->m_intent != ASR::intentType::Out &&
