@@ -1425,6 +1425,7 @@ public:
         if (ASR::is_a<ASR::Array_t>(*pointee)) return nullptr;
         pointee = ASRUtils::type_get_past_array(pointee);
         if (ASR::is_a<ASR::String_t>(*pointee) ||
+                ASR::is_a<ASR::FunctionType_t>(*pointee) ||
                 ASR::is_a<ASR::StructType_t>(*pointee)) {
             return nullptr;
         }
