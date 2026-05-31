@@ -12021,7 +12021,24 @@ public:
             ASR::ttype_t *naked =
                 ASRUtils::type_get_past_allocatable_pointer(m->m_type);
             ASR::ttype_t *core = ASRUtils::type_get_past_array(naked);
-            if (ASR::is_a<ASR::String_t>(*core) &&
+            ASR::Array_t *array_t = nullptr;
+            if (is_descriptor_array_type(m->m_type, &array_t) &&
+                    ASRUtils::is_allocatable(m->m_type)) {
+                lr_operand_desc_t o[1] = {I((int64_t)off, ty_i64)};
+                uint32_t dst_field = lr_emit_gep(s, ty_i8,
+                    V(dst_data, ty_ptr), o, 1);
+                uint32_t src_field = lr_emit_gep(s, ty_i8,
+                    V(src_data, ty_ptr), o, 1);
+                ASR::ttype_t *elem = ASRUtils::type_get_past_array(
+                    ASRUtils::type_get_past_allocatable_pointer(
+                        array_t->m_type));
+                ASR::Struct_t *elem_st = ASR::is_a<ASR::StructType_t>(*elem)
+                    ? struct_symbol_from_type_decl(m->m_type_declaration)
+                    : nullptr;
+                desc_store_null_base(dst_field);
+                emit_allocatable_descriptor_array_assignment_from_desc(
+                    dst_field, src_field, array_t, elem_st);
+            } else if (ASR::is_a<ASR::String_t>(*core) &&
                     !ASR::is_a<ASR::Array_t>(*naked)) {
                 lr_operand_desc_t o[1] = {I((int64_t)off, ty_i64)};
                 uint32_t dst_field = lr_emit_gep(s, ty_i8,
