@@ -11154,9 +11154,7 @@ public:
                 else if (ASRUtils::extract_value(start, formal_lb)) {
                     use_formal_lb = true;
                 } else {
-                    visit_expr(*start);
-                    lr_type_t *lt = get_type(ASRUtils::expr_type(start));
-                    formal_lb_v = cast_int_value(tmp, lt, ty_i64);
+                    formal_lb_v = emit_i64_expr(start);
                     has_formal_lb_v = true;
                     use_formal_lb = true;
                 }
