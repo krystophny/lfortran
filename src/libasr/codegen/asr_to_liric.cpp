@@ -14348,6 +14348,39 @@ public:
         return true;
     }
 
+    bool prepare_bindc_cchar_scalar_arg(ASR::expr_t *actual,
+            ASR::Variable_t *formal, std::vector<lr_operand_desc_t> &args,
+            std::vector<lr_type_t *> &params) {
+        if (!is_bindc_char_scalar_variable(formal) ||
+                formal->m_value_attr ||
+                formal->m_intent == ASR::intentType::ReturnVar) {
+            return false;
+        }
+        ASR::ttype_t *formal_core =
+            ASRUtils::type_get_past_allocatable_pointer(formal->m_type);
+        formal_core = ASRUtils::type_get_past_array(formal_core);
+        ASR::String_t *formal_str =
+            ASR::down_cast<ASR::String_t>(formal_core);
+        if (formal_str->m_physical_type !=
+                ASR::string_physical_typeType::CChar) {
+            return false;
+        }
+        ASR::ttype_t *actual_type =
+            ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(actual));
+        if (ASR::is_a<ASR::Array_t>(*actual_type) ||
+                !ASR::is_a<ASR::String_t>(
+                    *ASRUtils::type_get_past_array(actual_type))) {
+            return false;
+        }
+        uint32_t data = expr_is_cchar_string_cast(actual)
+            ? emit_cchar_data_ptr(actual)
+            : emit_string_data_len(actual).first;
+        args.push_back(V(data, ty_ptr));
+        params.push_back(ty_ptr);
+        return true;
+    }
+
     bool bindc_formal_is_cfi_array(ASR::Variable_t *formal,
             ASR::Array_t **array_type = nullptr) {
         ASR::ttype_t *type =
@@ -14539,6 +14572,46 @@ public:
             args.push_back(V(emit_string_data_len(actual).first, ty_ptr));
             params.push_back(ty_ptr);
             return true;
+        }
+
+        ASR::Array_t *actual_array = nullptr;
+        int64_t actual_elem_chars_i64 = 0;
+        if (ASR::is_a<ASR::Array_t>(*actual_type)) {
+            actual_array = ASR::down_cast<ASR::Array_t>(actual_type);
+            ASR::ttype_t *actual_elem =
+                ASRUtils::type_get_past_array(actual_array->m_type);
+            if (ASR::is_a<ASR::String_t>(*actual_elem) &&
+                    !is_cchar_string_type(actual_elem) &&
+                    get_fixed_string_len(actual_array->m_type,
+                        actual_elem_chars_i64)) {
+                ArrayLinearView view =
+                    emit_array_linear_view(actual, actual_array);
+                uint32_t elem_chars = emit_i64_const(actual_elem_chars_i64);
+                uint32_t raw_bytes = lr_emit_mul(s, ty_i64,
+                    V(view.total, ty_i64), V(elem_chars, ty_i64));
+                uint32_t allocator = emit_call(
+                    "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+                lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
+                declare_func("_lfortran_malloc_alloc", ty_ptr,
+                    malloc_params, 2, false);
+                lr_operand_desc_t malloc_args[] = {
+                    V(allocator, ty_ptr), V(raw_bytes, ty_i64)
+                };
+                uint32_t raw = emit_call("_lfortran_malloc_alloc",
+                    ty_ptr, malloc_args, 2);
+                uint32_t desc = emit_desc_alloca(1);
+                desc_store_base(desc, view.base);
+                desc_store_i64(desc, 8, view.elem_len);
+                emit_descriptor_chars_copy(desc, raw, view.total,
+                    elem_chars, false);
+
+                bool writeback = formal->m_intent != ASR::intentType::In;
+                scratch.push_back({desc, raw, view.total, elem_chars,
+                    allocator, writeback});
+                args.push_back(V(raw, ty_ptr));
+                params.push_back(ty_ptr);
+                return true;
+            }
         }
 
         ASR::expr_t *source = nullptr;
@@ -14766,6 +14839,10 @@ public:
                     }
                     if (prepare_bindc_cchar_array_arg(actual, formal,
                             cargs, params, scratch)) {
+                        continue;
+                    }
+                    if (prepare_bindc_cchar_scalar_arg(actual, formal,
+                            cargs, params)) {
                         continue;
                     }
                     if (prepare_bindc_cfi_array_arg(actual, formal,
@@ -15214,6 +15291,10 @@ public:
                     } else {
                         if (prepare_bindc_cchar_array_arg(actual, formal,
                                 cargs, params, scratch)) {
+                            continue;
+                        }
+                        if (prepare_bindc_cchar_scalar_arg(actual, formal,
+                                cargs, params)) {
                             continue;
                         }
                         if (prepare_bindc_cfi_array_arg(actual, formal,
