@@ -7080,6 +7080,9 @@ public:
             slot = emit_storage_alloca_for_var(v);
         }
         lr_symtab[h] = slot;
+        if (needs_static_storage) {
+            initialize_save_procedure_pointer_once(v, slot);
+        }
         // Capture the declared length of `character(expr), allocatable :: v`
         // where expr is a runtime (non-constant) ExpressionLength.  The
         // length is evaluated once on procedure entry; later assignments use
@@ -9391,6 +9394,39 @@ public:
         visit_expr(*v->m_value);
         lr_type_t *t = value_type_for_expr(v->m_value);
         lr_emit_store(s, V(tmp, t), V(slot, ty_ptr));
+    }
+
+    void initialize_save_procedure_pointer_once(ASR::Variable_t *v,
+                                                uint32_t slot) {
+        ASR::ttype_t *vt =
+            ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+        if (!ASR::is_a<ASR::FunctionType_t>(*vt) || !v->m_symbolic_value) {
+            return;
+        }
+        uint64_t h = get_hash((ASR::asr_t *)v);
+        uint8_t init = 0;
+        std::string gname = std::string("_lr_save_init_")
+            + std::to_string(h) + "_" + v->m_name;
+        lr_session_global(s, gname.c_str(),
+            lr_type_array_s(s, ty_i8, 1), false, &init, 1);
+        uint32_t sym = lr_session_intern(s, gname.c_str());
+        lr_operand_desc_t no_off[1] = {I(0, ty_i64)};
+        uint32_t guard = lr_emit_gep(s, ty_i8,
+            LR_GLOBAL(sym, ty_ptr), no_off, 1);
+        uint32_t ready = lr_emit_load(s, ty_i8, V(guard, ty_ptr));
+        uint32_t needs_init = lr_emit_icmp(s, LR_CMP_EQ,
+            V(ready, ty_i8), I(0, ty_i8));
+        uint32_t init_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(needs_init, ty_i1), init_bb, done_bb);
+
+        lr_error_t err;
+        lr_session_set_block(s, init_bb, &err);
+        visit_expr(*v->m_symbolic_value);
+        lr_emit_store(s, V(tmp, ty_ptr), V(slot, ty_ptr));
+        lr_emit_store(s, I(1, ty_i8), V(guard, ty_ptr));
+        lr_emit_br(s, done_bb);
+        lr_session_set_block(s, done_bb, &err);
     }
 
     void initialize_local_array_constant(ASR::Array_t *array_t,
