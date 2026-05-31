@@ -2066,6 +2066,19 @@ public:
             ASRUtils::type_get_past_allocatable_pointer(v->m_type);
         if (ASR::is_a<ASR::Array_t>(*core)) {
             ASR::Array_t *array_t = ASR::down_cast<ASR::Array_t>(core);
+            uint64_t h = get_hash((ASR::asr_t *)v);
+            if (!ASRUtils::is_pointer(v->m_type) &&
+                    !ASRUtils::is_allocatable(v->m_type) &&
+                    cptr_raw_char_arrays.count(h)) {
+                int64_t chars = 0;
+                int64_t total = ASRUtils::get_fixed_size_of_array(
+                    array_t->m_dims, array_t->n_dims);
+                if (total > 0 &&
+                        get_fixed_string_len(array_t->m_type, chars) &&
+                        chars > 0) {
+                    return (uint64_t)total * (uint64_t)chars;
+                }
+            }
             ASR::Struct_t *st = struct_symbol_from_type_decl(
                 v->m_type_declaration);
             int64_t total = 1;
@@ -3482,12 +3495,9 @@ public:
 
     // --- Assignment ---
 
-    void emit_string_copy_padded(uint32_t dst_desc, uint32_t src_desc) {
+    void emit_string_copy_padded_to_data(uint32_t dst_data,
+            uint32_t dst_len, uint32_t src_desc) {
         uint32_t fld0 = 0, fld1 = 1;
-        uint32_t dst_data = lr_emit_extractvalue(s, ty_ptr,
-            V(dst_desc, ty_str_desc), &fld0, 1);
-        uint32_t dst_len = lr_emit_extractvalue(s, ty_i64,
-            V(dst_desc, ty_str_desc), &fld1, 1);
         uint32_t src_data = lr_emit_extractvalue(s, ty_ptr,
             V(src_desc, ty_str_desc), &fld0, 1);
         uint32_t src_len = lr_emit_extractvalue(s, ty_i64,
@@ -3516,6 +3526,15 @@ public:
             V(pad_ptr, ty_ptr), I(' ', ty_i32), V(pad_len, ty_i64)
         };
         emit_call("memset", ty_ptr, memset_args, 3);
+    }
+
+    void emit_string_copy_padded(uint32_t dst_desc, uint32_t src_desc) {
+        uint32_t fld0 = 0, fld1 = 1;
+        uint32_t dst_data = lr_emit_extractvalue(s, ty_ptr,
+            V(dst_desc, ty_str_desc), &fld0, 1);
+        uint32_t dst_len = lr_emit_extractvalue(s, ty_i64,
+            V(dst_desc, ty_str_desc), &fld1, 1);
+        emit_string_copy_padded_to_data(dst_data, dst_len, src_desc);
     }
 
     bool is_string_section_target(ASR::expr_t *target) {
@@ -5033,6 +5052,54 @@ public:
                 }
                 return value;
             };
+            auto emit_raw_char_array_broadcast_assignment = [&]() {
+                ASR::Array_t *raw_array = nullptr;
+                if (!is_cptr_raw_char_array_expr(
+                        x.m_target, &raw_array)) {
+                    return false;
+                }
+                ASR::expr_t *rhs_value = unwrapped_array_value();
+                if (!ASR::is_a<ASR::ArrayBroadcast_t>(*rhs_value)) {
+                    return false;
+                }
+                ASR::ArrayBroadcast_t *broadcast =
+                    ASR::down_cast<ASR::ArrayBroadcast_t>(rhs_value);
+                ASR::expr_t *scalar = broadcast->m_value
+                    ? broadcast->m_value : broadcast->m_array;
+                visit_expr(*scalar);
+                uint32_t rhs = tmp;
+                ArrayLinearView dst = emit_array_linear_view(
+                    x.m_target, raw_array);
+
+                uint32_t idx_ptr = lr_emit_alloca(s, ty_i64);
+                lr_emit_store(s, I(0, ty_i64), V(idx_ptr, ty_ptr));
+                lr_error_t err;
+                uint32_t head = lr_session_block(s);
+                uint32_t body = lr_session_block(s);
+                uint32_t done = lr_session_block(s);
+                lr_emit_br(s, head);
+
+                lr_session_set_block(s, head, &err);
+                uint32_t idx = lr_emit_load(s, ty_i64, V(idx_ptr, ty_ptr));
+                uint32_t more = lr_emit_icmp(s, LR_CMP_SLT,
+                    V(idx, ty_i64), V(dst.total, ty_i64));
+                lr_emit_condbr(s, V(more, ty_i1), body, done);
+
+                lr_session_set_block(s, body, &err);
+                uint32_t dst_elem = emit_linear_elem_ptr(
+                    dst.base, idx, dst.elem_len);
+                emit_string_copy_padded_to_data(dst_elem, dst.elem_len, rhs);
+                uint32_t next = lr_emit_add(s, ty_i64,
+                    V(idx, ty_i64), I(1, ty_i64));
+                lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
+                lr_emit_br(s, head);
+
+                lr_session_set_block(s, done, &err);
+                return true;
+            };
+            if (emit_raw_char_array_broadcast_assignment()) {
+                return;
+            }
             auto emit_array_broadcast_assignment = [&]() {
                 ASR::expr_t *rhs_value = unwrapped_array_value();
                 if (!ASR::is_a<ASR::ArrayBroadcast_t>(*rhs_value)) {
@@ -5323,6 +5390,20 @@ public:
                 uint32_t z1 = lr_emit_insertvalue(s, ty_str_desc,
                     V(z0, ty_str_desc), I(0, ty_i64), &fld1, 1);
                 lr_emit_store(s, V(z1, ty_str_desc), V(src_ptr, ty_ptr));
+                return;
+            }
+            ASR::Array_t *raw_item_array = nullptr;
+            if (is_cptr_raw_char_array_item(
+                    x.m_target, &raw_item_array)) {
+                visit_expr(*x.m_value);
+                uint32_t rhs = tmp;
+                bool was_target = is_target;
+                is_target = true;
+                visit_expr(*x.m_target);
+                is_target = was_target;
+                uint32_t dst = tmp;
+                uint32_t len = raw_char_array_elem_len(raw_item_array);
+                emit_string_copy_padded_to_data(dst, len, rhs);
                 return;
             }
             if (is_string_section_target(x.m_target)) {
@@ -7704,6 +7785,11 @@ public:
                     return;
                 }
             }
+            if (ASR::is_a<ASR::ArrayItem_t>(*gp->m_arg) &&
+                    is_cptr_raw_char_array_item(gp->m_arg)) {
+                visit_expr(*x.m_arg);
+                return;
+            }
             if (ASR::is_a<ASR::Var_t>(*gp->m_arg)) {
                 ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
                     ASR::down_cast<ASR::Var_t>(gp->m_arg)->m_v);
@@ -7809,9 +7895,10 @@ public:
             is_target = was_target;
             uint32_t desc = tmp;
             desc_store_base(desc, cptr);
-            desc_store_i64(desc, 8, emit_i64_const(1));
+            uint32_t char_len = raw_char_array_elem_len(fptr_arr);
+            desc_store_i64(desc, 8, char_len);
             desc_store_rank(desc, rank);
-            desc_store_i64(desc, 24, emit_i64_const(1));
+            desc_store_i64(desc, 24, char_len);
             ArrayLinearView shape_view{}, lb_view{};
             bool have_shape = false, have_lb = false;
             ASR::Array_t *tmp_arr = nullptr;
@@ -7826,7 +7913,7 @@ public:
                 lb_view = emit_array_linear_view(x.m_lower_bounds, tmp_arr);
                 have_lb = true;
             }
-            uint32_t stride = emit_i64_const(1);
+            uint32_t stride = char_len;
             for (int d = 0; d < rank; d++) {
                 uint32_t extent = x.m_shape
                     ? cptr_shape_elem_i64(x.m_shape, shape_view, have_shape, d)
@@ -8392,20 +8479,38 @@ public:
                     formal->m_type));
     }
 
-    bool is_cptr_raw_char_array_item(ASR::expr_t *expr) {
-        if (!ASR::is_a<ASR::ArrayItem_t>(*expr)) return false;
-        ASR::ArrayItem_t *item = ASR::down_cast<ASR::ArrayItem_t>(expr);
-        ASR::Variable_t *owner = var_from_expr(item->m_v);
+    uint32_t raw_char_array_elem_len(ASR::Array_t *array_t) {
+        uint32_t len = emit_string_array_len_hint(array_t->m_type);
+        uint32_t positive = lr_emit_icmp(s, LR_CMP_SGT,
+            V(len, ty_i64), I(0, ty_i64));
+        return lr_emit_select(s, ty_i64, V(positive, ty_i1),
+            V(len, ty_i64), I(1, ty_i64));
+    }
+
+    bool is_cptr_raw_char_array_expr(ASR::expr_t *expr,
+            ASR::Array_t **array_out = nullptr) {
+        ASR::Variable_t *owner = var_from_expr(expr);
         if (!owner || cptr_raw_char_arrays.count(
                 get_hash((ASR::asr_t *)owner)) == 0) {
             return false;
         }
         ASR::ttype_t *owner_type =
-            ASRUtils::type_get_past_allocatable_pointer(
-                ASRUtils::expr_type(item->m_v));
+            ASRUtils::type_get_past_allocatable_pointer(owner->m_type);
         if (!ASR::is_a<ASR::Array_t>(*owner_type)) return false;
-        return ASR::is_a<ASR::String_t>(
-            *ASRUtils::type_get_past_array(owner_type));
+        ASR::Array_t *array = ASR::down_cast<ASR::Array_t>(owner_type);
+        if (!ASR::is_a<ASR::String_t>(
+                *ASRUtils::type_get_past_array(array->m_type))) {
+            return false;
+        }
+        if (array_out) *array_out = array;
+        return true;
+    }
+
+    bool is_cptr_raw_char_array_item(ASR::expr_t *expr,
+            ASR::Array_t **array_out = nullptr) {
+        if (!ASR::is_a<ASR::ArrayItem_t>(*expr)) return false;
+        ASR::ArrayItem_t *item = ASR::down_cast<ASR::ArrayItem_t>(expr);
+        return is_cptr_raw_char_array_expr(item->m_v, array_out);
     }
 
     uint32_t emit_cptr_raw_char_array_item_desc_slot(ASR::expr_t *expr) {
@@ -9445,6 +9550,30 @@ public:
         }
     }
 
+    void mark_raw_char_array_expr(ASR::expr_t *expr) {
+        while (expr && (ASR::is_a<ASR::PointerToCPtr_t>(*expr) ||
+                ASR::is_a<ASR::GetPointer_t>(*expr))) {
+            if (ASR::is_a<ASR::PointerToCPtr_t>(*expr)) {
+                expr = ASR::down_cast<ASR::PointerToCPtr_t>(expr)->m_arg;
+            } else {
+                expr = ASR::down_cast<ASR::GetPointer_t>(expr)->m_arg;
+            }
+        }
+        if (expr && ASR::is_a<ASR::ArrayItem_t>(*expr)) {
+            expr = ASR::down_cast<ASR::ArrayItem_t>(expr)->m_v;
+        }
+        ASR::Variable_t *v = expr ? var_from_expr(expr) : nullptr;
+        if (!v) return;
+        ASR::ttype_t *type =
+            ASRUtils::type_get_past_allocatable_pointer(v->m_type);
+        if (!ASR::is_a<ASR::Array_t>(*type)) return;
+        ASR::Array_t *array = ASR::down_cast<ASR::Array_t>(type);
+        if (ASR::is_a<ASR::String_t>(
+                *ASRUtils::type_get_past_array(array->m_type))) {
+            cptr_raw_char_arrays.insert(get_hash((ASR::asr_t *)v));
+        }
+    }
+
     void prescan_stmt_list_for_descriptor_slot_temps(
             ASR::stmt_t **body, size_t n_body) {
         for (size_t i = 0; i < n_body; i++) {
@@ -9458,6 +9587,20 @@ public:
             case ASR::stmtType::Associate: {
                 ASR::Associate_t *as = ASR::down_cast<ASR::Associate_t>(stmt);
                 mark_descriptor_slot_call_temp(as->m_target, as->m_value);
+                break;
+            }
+            case ASR::stmtType::CPtrToPointer: {
+                ASR::CPtrToPointer_t *cp =
+                    ASR::down_cast<ASR::CPtrToPointer_t>(stmt);
+                ASR::ttype_t *fptr =
+                    ASRUtils::type_get_past_pointer(
+                        ASRUtils::expr_type(cp->m_ptr));
+                if (ASR::is_a<ASR::Array_t>(*fptr) &&
+                        ASRUtils::is_character(
+                            *ASRUtils::type_get_past_array(fptr))) {
+                    mark_raw_char_array_expr(cp->m_ptr);
+                    mark_raw_char_array_expr(cp->m_cptr);
+                }
                 break;
             }
             case ASR::stmtType::If: {
@@ -10572,14 +10715,21 @@ public:
                     V(length_prod, ty_i64), V(length, ty_i64));
             }
 
+            ASR::Variable_t *holder_var = var_from_expr(x.m_v);
+            bool raw_char_elem = holder_var &&
+                cptr_raw_char_arrays.count(
+                    get_hash((ASR::asr_t *)holder_var)) &&
+                ASR::is_a<ASR::String_t>(
+                    *ASRUtils::type_get_past_array(array_t->m_type));
+            uint32_t elem_stride = raw_char_elem
+                ? raw_char_array_elem_len(array_t)
+                : emit_i64_const(array_element_stride_bytes(
+                    x.m_v, array_t->m_type));
             uint32_t byte_off = lr_emit_mul(s, ty_i64,
-                V(lin, ty_i64),
-                I(array_element_stride_bytes(x.m_v, array_t->m_type),
-                    ty_i64));
+                V(lin, ty_i64), V(elem_stride, ty_i64));
             lr_operand_desc_t gep_idx[1] = {V(byte_off, ty_i64)};
             uint32_t elem_ptr = lr_emit_gep(s, ty_i8,
                 V(base, ty_ptr), gep_idx, 1);
-            ASR::Variable_t *holder_var = var_from_expr(x.m_v);
             if (holder_var && holder_var->m_presence ==
                     ASR::presenceType::Optional &&
                     (array_t->m_physical_type ==
@@ -10594,6 +10744,12 @@ public:
 
             if (is_target) {
                 tmp = elem_ptr;
+            } else if (raw_char_elem) {
+                uint32_t f0 = 0, f1 = 1;
+                uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
+                    LR_UNDEF(ty_str_desc), V(elem_ptr, ty_ptr), &f0, 1);
+                tmp = lr_emit_insertvalue(s, ty_str_desc,
+                    V(d0, ty_str_desc), V(elem_stride, ty_i64), &f1, 1);
             } else {
                 tmp = lr_emit_load(s, elem_type, V(elem_ptr, ty_ptr));
             }
@@ -12109,6 +12265,7 @@ public:
         ASR::ttype_t *t =
             ASRUtils::type_get_past_allocatable_pointer(v->m_type);
         if (!ASR::is_a<ASR::Array_t>(*t)) return;
+        if (cptr_raw_char_arrays.count(get_hash((ASR::asr_t *)v))) return;
         ASR::Array_t *arr = ASR::down_cast<ASR::Array_t>(t);
         if (arr->m_physical_type ==
                 ASR::array_physical_typeType::DescriptorArray) {
@@ -19776,9 +19933,16 @@ public:
         } else {
             total = emit_runtime_array_total_for_expr(expr, array_t);
         }
-        return {base, total,
-            emit_i64_const(element_byte_size(array_t->m_type)),
-            emit_i64_const(1)};
+        uint32_t elem_len =
+            emit_i64_const(element_byte_size(array_t->m_type));
+        ASR::Variable_t *owner = var_from_expr(expr);
+        if (owner && cptr_raw_char_arrays.count(
+                get_hash((ASR::asr_t *)owner)) &&
+                ASR::is_a<ASR::String_t>(
+                    *ASRUtils::type_get_past_array(array_t->m_type))) {
+            elem_len = raw_char_array_elem_len(array_t);
+        }
+        return {base, total, elem_len, emit_i64_const(1)};
     }
 
     // Read dim d's value (extent or lower bound) from a CPtrToPointer shape /
