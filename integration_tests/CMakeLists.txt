@@ -1031,6 +1031,7 @@ RUN(NAME pointer_14 LABELS gfortran llvm)
 RUN(NAME pointer_15 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME pointer_16 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME pointer_17 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
+RUN(NAME pointer_18 LABELS gfortran llvm)
 
 RUN(NAME array_section_is_non_allocatable LABELS gfortran llvm llvm_wasm llvm_wasm_emcc fortran)
 RUN(NAME array_indices_array_section LABELS gfortran llvm llvm_wasm llvm_wasm_emcc fortran)
@@ -4211,6 +4212,7 @@ RUN(NAME elemental_20 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME elemental_21 LABELS gfortran llvm)
 RUN(NAME elemental_22 LABELS gfortran llvm)
 RUN(NAME elemental_23 LABELS gfortran llvm EXTRA_ARGS --realloc-lhs-arrays)
+RUN(NAME elemental_char_array_arg_01 LABELS gfortran llvm)
 
 RUN(NAME types_21 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc fortran)
 RUN(NAME types_22 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc fortran)
@@ -4226,7 +4228,13 @@ RUN(NAME module_function_without_nopass LABELS gfortran llvm llvm_wasm llvm_wasm
 
 RUN(NAME polymorphic_arguments_01 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME polymorphic_arguments_02 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
+RUN(NAME class_tbp_vtable_collision_01 LABELS gfortran llvm)
+RUN(NAME parent_component_class_operator_01 LABELS gfortran llvm)
+RUN(NAME parent_component_select_operator_01 LABELS gfortran llvm)
 RUN(NAME allocatable_polymorphic_mold_01 LABELS gfortran llvm fortran)
+RUN(NAME allocatable_polymorphic_mold_02 LABELS gfortran llvm
+    EXTRAFILES allocatable_polymorphic_mold_02_base.f90
+        allocatable_polymorphic_mold_02_child.f90)
 RUN(NAME allocatable_polymorphic_assign_01 LABELS gfortran llvm)
 RUN(NAME allocatable_polymorphic_assign_02 LABELS gfortran llvm EXTRA_ARGS --realloc-lhs-arrays)
 RUN(NAME allocatable_dummy_descriptor_01 LABELS gfortran llvm)
