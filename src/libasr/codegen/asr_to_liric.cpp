@@ -23144,7 +23144,6 @@ public:
                 return;
             }
             if (external_integer_write) {
-                scratch_io_append(formatted.data, formatted.len);
                 uint32_t end_data = 0, end_len = 0;
                 std::tie(end_data, end_len) = file_write_end_data_len(x.m_end);
                 if (x.m_rec) {
@@ -23154,9 +23153,7 @@ public:
                         external_iostat);
                 }
                 file_write_runtime_record(external_unit, external_iostat,
-                    scratch_io_data_ptr(),
-                    lr_emit_load(s, ty_i64, V(scratch_io_len_ptr(), ty_ptr)),
-                    end_data, end_len);
+                    formatted.data, formatted.len, end_data, end_len);
                 return;
             }
             file_write_emit_string(formatted.data, formatted.len);
