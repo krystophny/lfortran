@@ -3363,6 +3363,22 @@ public:
             }
         }
 
+        if (is_target && !is_array &&
+                v->m_storage == ASR::storage_typeType::Parameter &&
+                v->m_value && ASR::is_a<ASR::Integer_t>(*vt)) {
+            visit_expr(*v->m_value);
+            lr_type_t *t = get_type(vt);
+            uint32_t slot = emit_temp_slot(t);
+            lr_emit_store(s, V(tmp, t), V(slot, ty_ptr));
+            tmp = slot;
+            return;
+        } else if (!is_target && !is_array &&
+                v->m_storage == ASR::storage_typeType::Parameter &&
+                v->m_value) {
+            visit_expr(*v->m_value);
+            return;
+        }
+
         auto local_it = lr_symtab.find(h);
         if (local_it != lr_symtab.end()) {
             uint32_t slot = local_it->second;
@@ -3513,19 +3529,6 @@ public:
                 lr_type_t *t = load_type_for_var(v);
                 tmp = lr_emit_load(s, t, LR_GLOBAL(sym, ty_ptr));
             }
-            return;
-        }
-        // Parameter scalars with a compile-time m_value (e.g. enum
-        // constants accessed via host association from a contained
-        // subroutine) reach here as ExternalSymbols whose underlying
-        // Variable_t has no allocated storage in either lr_symtab or
-        // lr_globals.  Falling through to the placeholder-global path
-        // would create a zero-initialised .bss slot and the caller
-        // would read 0.  Inline the value instead.
-        if (!is_target && !is_array &&
-                v->m_storage == ASR::storage_typeType::Parameter &&
-                v->m_value) {
-            visit_expr(*v->m_value);
             return;
         }
         // Derived-type parameter whose address is requested (e.g. a named
