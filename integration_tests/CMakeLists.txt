@@ -2608,6 +2608,8 @@ RUN(NAME realloc_lhs_23 LABELS gfortran llvm
     EXTRA_ARGS --realloc-lhs-arrays)
 RUN(NAME realloc_lhs_24 LABELS gfortran llvm
     EXTRA_ARGS --realloc-lhs-arrays)
+RUN(NAME realloc_lhs_25 LABELS gfortran llvm
+    EXTRA_ARGS --realloc-lhs-arrays)
 RUN(NAME realloc_lhs_char_array_constructor_01 LABELS gfortran llvm
     EXTRA_ARGS --realloc-lhs-arrays)
 RUN(NAME allocatable_string_empty_cli_append_01 LABELS gfortran llvm

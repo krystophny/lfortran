@@ -4050,6 +4050,50 @@ public:
         lr_emit_store(s, V(d1, ty_str_desc), V(dst_ptr, ty_ptr));
     }
 
+    void emit_copy_string_to_uninit_desc_with_len(uint32_t dst_ptr,
+            uint32_t src_desc, uint32_t dst_len) {
+        uint32_t fld0 = 0, fld1 = 1;
+        uint32_t src_data = lr_emit_extractvalue(s, ty_ptr,
+            V(src_desc, ty_str_desc), &fld0, 1);
+        uint32_t src_len = lr_emit_extractvalue(s, ty_i64,
+            V(src_desc, ty_str_desc), &fld1, 1);
+        uint32_t allocator = emit_call(
+            "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
+        lr_type_t *malloc_params[] = {ty_ptr, ty_i64};
+        declare_func("_lfortran_string_malloc_alloc", ty_ptr,
+            malloc_params, 2, false);
+        uint32_t nonzero_len = lr_emit_select(s, ty_i64,
+            V(lr_emit_icmp(s, LR_CMP_SGT,
+                V(dst_len, ty_i64), I(0, ty_i64)), ty_i1),
+            V(dst_len, ty_i64), I(1, ty_i64));
+        lr_operand_desc_t malloc_args[] = {
+            V(allocator, ty_ptr), V(nonzero_len, ty_i64)
+        };
+        uint32_t data = emit_call("_lfortran_string_malloc_alloc",
+            ty_ptr, malloc_args, 2);
+        lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
+        declare_func("memset", ty_ptr, memset_params, 3, false);
+        lr_operand_desc_t memset_args[] = {
+            V(data, ty_ptr), I(' ', ty_i32), V(nonzero_len, ty_i64)
+        };
+        emit_call("memset", ty_ptr, memset_args, 3);
+        uint32_t src_smaller = lr_emit_icmp(s, LR_CMP_SLT,
+            V(src_len, ty_i64), V(dst_len, ty_i64));
+        uint32_t copy_len = lr_emit_select(s, ty_i64,
+            V(src_smaller, ty_i1), V(src_len, ty_i64), V(dst_len, ty_i64));
+        lr_type_t *memcpy_params[] = {ty_ptr, ty_ptr, ty_i64};
+        declare_func("memcpy", ty_ptr, memcpy_params, 3, false);
+        lr_operand_desc_t memcpy_args[] = {
+            V(data, ty_ptr), V(src_data, ty_ptr), V(copy_len, ty_i64)
+        };
+        emit_call("memcpy", ty_ptr, memcpy_args, 3);
+        uint32_t d0 = lr_emit_insertvalue(s, ty_str_desc,
+            LR_UNDEF(ty_str_desc), V(data, ty_ptr), &fld0, 1);
+        uint32_t d1 = lr_emit_insertvalue(s, ty_str_desc,
+            V(d0, ty_str_desc), V(dst_len, ty_i64), &fld1, 1);
+        lr_emit_store(s, V(d1, ty_str_desc), V(dst_ptr, ty_ptr));
+    }
+
     uint32_t clone_string_desc(uint32_t src_desc) {
         uint32_t slot = emit_temp_slot(ty_str_desc);
         emit_copy_string_to_uninit_desc(slot, src_desc);
@@ -4074,6 +4118,34 @@ public:
         lr_error_t err;
         lr_session_set_block(s, alloc_bb, &err);
         emit_copy_string_to_uninit_desc(dst_ptr, src_desc);
+        lr_emit_br(s, done_bb);
+
+        lr_session_set_block(s, copy_bb, &err);
+        emit_string_copy_padded(old_desc, src_desc);
+        lr_emit_br(s, done_bb);
+
+        lr_session_set_block(s, done_bb, &err);
+    }
+
+    void emit_string_assignment_to_desc_slot_with_len(uint32_t dst_ptr,
+            uint32_t src_desc, uint32_t target_len) {
+        uint32_t fld0 = 0;
+        uint32_t old_desc = lr_emit_load(s, ty_str_desc,
+            V(dst_ptr, ty_ptr));
+        uint32_t old_data = lr_emit_extractvalue(s, ty_ptr,
+            V(old_desc, ty_str_desc), &fld0, 1);
+        uint32_t data_null = lr_emit_icmp(s, LR_CMP_EQ,
+            V(old_data, ty_ptr), LR_NULL(ty_ptr));
+
+        uint32_t alloc_bb = lr_session_block(s);
+        uint32_t copy_bb = lr_session_block(s);
+        uint32_t done_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(data_null, ty_i1), alloc_bb, copy_bb);
+
+        lr_error_t err;
+        lr_session_set_block(s, alloc_bb, &err);
+        emit_copy_string_to_uninit_desc_with_len(dst_ptr, src_desc,
+            target_len);
         lr_emit_br(s, done_bb);
 
         lr_session_set_block(s, copy_bb, &err);
@@ -4602,8 +4674,15 @@ public:
         lr_session_set_block(s, alloc_bb, &err);
         uint32_t total = descriptor_array_element_count(src_desc, n_dims);
         uint32_t elem_len = desc_load_i64(src_desc, 8);
-        uint32_t char_len = emit_descriptor_string_array_len(
+        uint32_t src_char_len = emit_descriptor_string_array_len(
             src_desc, array_t);
+        uint32_t target_char_len = emit_string_array_len_hint(
+            array_t->m_type);
+        uint32_t has_target_char_len = lr_emit_icmp(s, LR_CMP_SGT,
+            V(target_char_len, ty_i64), I(0, ty_i64));
+        uint32_t char_len = lr_emit_select(s, ty_i64,
+            V(has_target_char_len, ty_i1),
+            V(target_char_len, ty_i64), V(src_char_len, ty_i64));
         uint32_t has_elements = lr_emit_icmp(s, LR_CMP_SGT,
             V(total, ty_i64), I(0, ty_i64));
         uint32_t alloc_elems = lr_emit_select(s, ty_i64,
@@ -4651,8 +4730,8 @@ public:
         uint32_t dst_elem = emit_linear_elem_ptr(new_base, idx, elem_len);
         uint32_t src_value = lr_emit_load(s, ty_str_desc,
             V(src_elem, ty_ptr));
-        emit_init_string_desc_slot_with_len(dst_elem, char_len);
-        emit_string_assignment_to_desc_slot(dst_elem, src_value);
+        emit_copy_string_to_uninit_desc_with_len(dst_elem, src_value,
+            char_len);
         uint32_t next = lr_emit_add(s, ty_i64,
             V(idx, ty_i64), I(1, ty_i64));
         lr_emit_store(s, V(next, ty_i64), V(idx_ptr, ty_ptr));
@@ -5351,6 +5430,28 @@ public:
             uint32_t dst, uint32_t rhs) {
         ASR::ArrayItem_t *item = nullptr;
         if (!array_item_is_created_string_temp(target, &item)) {
+            if (ASR::is_a<ASR::ArrayItem_t>(*target)) {
+                item = ASR::down_cast<ASR::ArrayItem_t>(target);
+                ASR::ttype_t *owner_type =
+                    ASRUtils::type_get_past_allocatable_pointer(
+                        ASRUtils::expr_type(item->m_v));
+                if (ASR::is_a<ASR::Array_t>(*owner_type)) {
+                    ASR::Array_t *owner_array =
+                        ASR::down_cast<ASR::Array_t>(owner_type);
+                    uint32_t runtime_len = emit_string_array_len(
+                        item->m_v, owner_array);
+                    uint32_t hint_len = emit_string_array_len_hint(
+                        owner_array->m_type);
+                    uint32_t has_hint = lr_emit_icmp(s, LR_CMP_SGT,
+                        V(hint_len, ty_i64), I(0, ty_i64));
+                    uint32_t target_len = lr_emit_select(s, ty_i64,
+                        V(has_hint, ty_i1), V(hint_len, ty_i64),
+                        V(runtime_len, ty_i64));
+                    emit_string_assignment_to_desc_slot_with_len(
+                        dst, rhs, target_len);
+                    return;
+                }
+            }
             emit_string_assignment_to_desc_slot(dst, rhs);
             return;
         }
