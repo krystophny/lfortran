@@ -6247,7 +6247,7 @@ _lfortran_open(int32_t unit_num,
     char* pad_c = to_c_string((const fchar*)pad, pad_len);
 
     _lfortran_inquire(
-        (const fchar*)f_name, f_name_len, file_exists, -1, NULL, NULL, NULL,
+        (const fchar*)f_name_c, f_name_len, file_exists, -1, NULL, NULL, NULL,
         NULL, 0, NULL, 0, NULL, 0, NULL, 0, NULL, 0, NULL, 0, NULL, 0, NULL,
         NULL, 0, NULL, 0, NULL, 0, NULL, 0, NULL, 0, NULL, NULL, NULL, 0, NULL, 0, NULL, 0,
         NULL, 0, NULL, 0, NULL, 0, NULL, 0, NULL, NULL, 0, NULL, 0, NULL, 0, NULL, 0);

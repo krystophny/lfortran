@@ -2839,6 +2839,7 @@ RUN(NAME string_112 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME string_113 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME string_114 LABELS gfortran llvm)
 RUN(NAME string_115 LABELS gfortran llvm)
+RUN(NAME string_116 LABELS gfortran llvm EXTRA_ARGS --realloc-lhs-arrays)
 
 RUN(NAME substring_read LABELS gfortran llvm)
 
@@ -3161,6 +3162,8 @@ RUN(NAME class_146 LABELS gfortran llvm)
 RUN(NAME class_147 LABELS gfortran llvm)
 RUN(NAME class_148 LABELS gfortran llvm)
 RUN(NAME class_149 LABELS gfortran llvm)
+RUN(NAME class_150 LABELS gfortran llvm EXTRAFILES class_150a.f90 class_150b.f90)
+RUN(NAME class_151 LABELS gfortran llvm EXTRAFILES class_151a.f90 class_151b.f90)
 
 RUN(NAME class_procedure_args_01 LABELS gfortran llvm)
 RUN(NAME class_vtable_collision_01 LABELS gfortran llvm)

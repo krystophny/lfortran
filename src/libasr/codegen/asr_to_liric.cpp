@@ -237,6 +237,7 @@ public:
     std::vector<uint32_t> loop_end_stack;
     uint32_t scratch_io_data_sym;
     uint32_t scratch_io_len_sym;
+    uint32_t scratch_io_cap_sym;
 
     // Cached types
     lr_type_t *ty_void, *ty_i1, *ty_i8, *ty_i16, *ty_i32, *ty_i64;
@@ -251,7 +252,7 @@ public:
                       CompilerOptions &co_, diag::Diagnostics &d)
         : s(session), tmp(0), is_target(false), proc_return(0),
           al(al_), co(co_), diag(d), scratch_io_data_sym(0),
-          scratch_io_len_sym(0)
+          scratch_io_len_sym(0), scratch_io_cap_sym(0)
     {
         ty_void = lr_type_void_s(s);
         ty_i1   = lr_type_i1_s(s);
@@ -3746,36 +3747,10 @@ public:
         uint32_t allocator = emit_call(
             "_lfortran_get_default_allocator", ty_ptr, nullptr, 0);
 
-        uint32_t old_is_null = lr_emit_icmp(s, LR_CMP_EQ,
-            V(old_data, ty_ptr), LR_NULL(ty_ptr));
-        uint32_t old_is_src = lr_emit_icmp(s, LR_CMP_EQ,
-            V(old_data, ty_ptr), V(src_data, ty_ptr));
-        uint32_t keep_old = lr_emit_or(s, ty_i1,
-            V(old_is_null, ty_i1), V(old_is_src, ty_i1));
-        uint32_t should_free = lr_emit_icmp(s, LR_CMP_EQ,
-            V(keep_old, ty_i1), I(0, ty_i1));
         uint32_t src_is_empty = lr_emit_icmp(s, LR_CMP_EQ,
             V(src_len, ty_i64), I(0, ty_i64));
-        if (fixed_len < 0 && fixed_len_vreg == UINT32_MAX) {
-            uint32_t src_not_empty = lr_emit_icmp(s, LR_CMP_EQ,
-                V(src_is_empty, ty_i1), I(0, ty_i1));
-            should_free = lr_emit_and(s, ty_i1,
-                V(should_free, ty_i1), V(src_not_empty, ty_i1));
-        }
-
-        uint32_t free_bb = lr_session_block(s);
-        uint32_t alloc_bb = lr_session_block(s);
-        lr_emit_condbr(s, V(should_free, ty_i1), free_bb, alloc_bb);
 
         lr_error_t err;
-        lr_session_set_block(s, free_bb, &err);
-        lr_operand_desc_t free_args[] = {
-            V(allocator, ty_ptr), V(old_data, ty_ptr)
-        };
-        emit_call_void("_lfortran_free_alloc", free_args, 2);
-        lr_emit_br(s, alloc_bb);
-
-        lr_session_set_block(s, alloc_bb, &err);
         if (fixed_len >= 0 || fixed_len_vreg != UINT32_MAX) {
             // Explicit-length allocatable (character(n), allocatable): the
             // target length is fixed by its declaration, so allocate exactly
@@ -3833,6 +3808,7 @@ public:
             uint32_t fd1 = lr_emit_insertvalue(s, ty_str_desc,
                 V(fd0, ty_str_desc), V(flen_v, ty_i64), &fld1, 1);
             lr_emit_store(s, V(fd1, ty_str_desc), V(dst_ptr, ty_ptr));
+            emit_free_if_nonnull(allocator, old_data);
             return;
         }
         uint32_t empty_bb = lr_session_block(s);
@@ -3891,6 +3867,7 @@ public:
         uint32_t d1 = lr_emit_insertvalue(s, ty_str_desc,
             V(d0, ty_str_desc), V(src_len, ty_i64), &fld1, 1);
         lr_emit_store(s, V(d1, ty_str_desc), V(dst_ptr, ty_ptr));
+        emit_free_if_nonnull(allocator, old_data);
         lr_emit_br(s, done_bb);
 
         lr_session_set_block(s, done_bb, &err);
@@ -14107,7 +14084,8 @@ public:
     bool emit_mold_struct_allocation(uint32_t slot,
                                      ASR::Struct_t *declared,
                                      ASR::expr_t *mold,
-                                     ASR::Variable_t *target_var) {
+                                     ASR::Variable_t *target_var,
+                                     bool copy_source = true) {
         if (!mold) {
             return false;
         }
@@ -14218,31 +14196,54 @@ public:
 
             lr_session_set_block(s, then_bb, &err);
             emit_allocatable_struct_allocation(slot, candidate, target_var);
-            emit_struct_source_copy(class_data_ptr(lr_emit_load(s, ty_ptr, V(slot, ty_ptr))), mold_data, candidate);
+            if (copy_source) {
+                emit_struct_source_copy(class_data_ptr(
+                    lr_emit_load(s, ty_ptr, V(slot, ty_ptr))),
+                    mold_data, candidate);
+            }
             lr_emit_br(s, done_bb);
 
             lr_session_set_block(s, next_bb, &err);
         }
-        if (declared && declared->m_is_abstract && have_mold_raw) {
+        if (have_mold_raw) {
             uint32_t data_bytes = load_raw_object_data_size(mold_raw);
+            uint32_t no_data_or_mold = copy_source
+                ? lr_emit_icmp(s, LR_CMP_SLE,
+                    V(data_bytes, ty_i64), I(1, ty_i64))
+                : lr_emit_add(s, ty_i1, I(1, ty_i1), I(0, ty_i1));
+            uint32_t raw_bb = lr_session_block(s);
+            uint32_t fallback_bb = lr_session_block(s);
+            lr_emit_condbr(s, V(no_data_or_mold, ty_i1), raw_bb,
+                fallback_bb);
+
+            lr_session_set_block(s, raw_bb, &err);
             uint32_t raw_bytes = lr_emit_add(s, ty_i64,
                 V(data_bytes, ty_i64), I(class_header_bytes(), ty_i64));
             uint32_t raw = emit_malloc_bytes(raw_bytes);
-            lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
-            declare_func("memset", ty_ptr, memset_params, 3, false);
-            lr_operand_desc_t memset_args[] = {
-                V(raw, ty_ptr), I(0, ty_i32), V(raw_bytes, ty_i64)
-            };
-            emit_call("memset", ty_ptr, memset_args, 3);
-            emit_memcpy_bytes(raw, mold_raw, (uint64_t)class_header_bytes());
+            if (copy_source) {
+                emit_memcpy_dynamic(raw, mold_raw, raw_bytes);
+            } else {
+                emit_memcpy_bytes(raw, mold_raw, class_header_bytes());
+                uint32_t data = class_data_ptr(raw);
+                lr_type_t *memset_params[] = {ty_ptr, ty_i32, ty_i64};
+                declare_func("memset", ty_ptr, memset_params, 3, false);
+                lr_operand_desc_t memset_args[] = {
+                    V(data, ty_ptr), I(0, ty_i32), V(data_bytes, ty_i64)
+                };
+                emit_call("memset", ty_ptr, memset_args, 3);
+            }
             lr_emit_store(s, V(raw, ty_ptr), V(slot, ty_ptr));
             lr_emit_br(s, done_bb);
-            lr_session_set_block(s, done_bb, &err);
-            return true;
+
+            lr_session_set_block(s, fallback_bb, &err);
         }
         if (declared && !declared->m_is_abstract) {
             emit_allocatable_struct_allocation(slot, declared, target_var);
-            emit_struct_source_copy(class_data_ptr(lr_emit_load(s, ty_ptr, V(slot, ty_ptr))), mold_data, declared);
+            if (copy_source) {
+                emit_struct_source_copy(class_data_ptr(
+                    lr_emit_load(s, ty_ptr, V(slot, ty_ptr))),
+                    mold_data, declared);
+            }
         }
         lr_emit_br(s, done_bb);
         lr_session_set_block(s, done_bb, &err);
@@ -14595,7 +14596,8 @@ public:
                 }
                 if (!arg.m_sym_subclass && x.m_source &&
                         emit_mold_struct_allocation(
-                            slot, st, x.m_source, target_var)) {
+                            slot, st, x.m_source, target_var,
+                            arg.m_type == nullptr)) {
                     continue;
                 }
                 emit_allocatable_struct_allocation(slot, st, target_var);
@@ -20892,19 +20894,22 @@ public:
         return {data, emit_i64_const(1)};
     }
 
-    uint32_t scratch_io_data_ptr() {
+    uint32_t scratch_io_data_slot() {
         if (!scratch_io_data_sym) {
-            std::vector<uint8_t> zeros(4096, 0);
-            const char *name = "_lr_scratch_unit_data";
+            void *zero = nullptr;
+            const char *name = "_lr_scratch_unit_data_ptr";
             // Weak: emitted by every object that uses scratch I/O; coalesce.
-            lr_session_global_weak(s, name,
-                lr_type_array_s(s, ty_i8, zeros.size()),
-                false, zeros.data(), zeros.size());
+            lr_session_global_weak(s, name, ty_ptr, false, &zero,
+                sizeof(zero));
             scratch_io_data_sym = lr_session_intern(s, name);
         }
         lr_operand_desc_t off[1] = {I(0, ty_i64)};
         return lr_emit_gep(s, ty_i8, LR_GLOBAL(scratch_io_data_sym, ty_ptr),
             off, 1);
+    }
+
+    uint32_t scratch_io_data_ptr() {
+        return lr_emit_load(s, ty_ptr, V(scratch_io_data_slot(), ty_ptr));
     }
 
     uint32_t scratch_io_len_ptr() {
@@ -20920,26 +20925,88 @@ public:
             off, 1);
     }
 
+    uint32_t scratch_io_cap_ptr() {
+        if (!scratch_io_cap_sym) {
+            int64_t zero = 0;
+            const char *name = "_lr_scratch_unit_cap";
+            // Weak: emitted by every object that uses scratch I/O; coalesce.
+            lr_session_global_weak(s, name, ty_i64, false, &zero,
+                sizeof(zero));
+            scratch_io_cap_sym = lr_session_intern(s, name);
+        }
+        lr_operand_desc_t off[1] = {I(0, ty_i64)};
+        return lr_emit_gep(s, ty_i8, LR_GLOBAL(scratch_io_cap_sym, ty_ptr),
+            off, 1);
+    }
+
     void scratch_io_clear() {
         lr_emit_store(s, I(0, ty_i64), V(scratch_io_len_ptr(), ty_ptr));
+        scratch_io_ensure_capacity(emit_i64_const(1));
+    }
+
+    void scratch_io_ensure_capacity(uint32_t needed) {
+        uint32_t cap_ptr = scratch_io_cap_ptr();
+        uint32_t data_slot = scratch_io_data_slot();
+        uint32_t old_cap = lr_emit_load(s, ty_i64, V(cap_ptr, ty_ptr));
+        uint32_t enough = lr_emit_icmp(s, LR_CMP_SGE,
+            V(old_cap, ty_i64), V(needed, ty_i64));
+
+        lr_error_t err;
+        uint32_t done_bb = lr_session_block(s);
+        uint32_t grow_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(enough, ty_i1), done_bb, grow_bb);
+
+        lr_session_set_block(s, grow_bb, &err);
+        uint32_t doubled = lr_emit_mul(s, ty_i64,
+            V(old_cap, ty_i64), I(2, ty_i64));
+        uint32_t initial = lr_emit_select(s, ty_i64,
+            V(lr_emit_icmp(s, LR_CMP_SGT, V(old_cap, ty_i64),
+                I(0, ty_i64)), ty_i1),
+            V(doubled, ty_i64), I(4096, ty_i64));
+        uint32_t too_small = lr_emit_icmp(s, LR_CMP_SLT,
+            V(initial, ty_i64), V(needed, ty_i64));
+        uint32_t new_cap = lr_emit_select(s, ty_i64, V(too_small, ty_i1),
+            V(needed, ty_i64), V(initial, ty_i64));
+        uint32_t old_data = lr_emit_load(s, ty_ptr, V(data_slot, ty_ptr));
+        uint32_t new_data = emit_malloc_bytes(new_cap);
+        uint32_t old_len = lr_emit_load(s, ty_i64,
+            V(scratch_io_len_ptr(), ty_ptr));
+        uint32_t has_old = lr_emit_icmp(s, LR_CMP_NE,
+            V(old_data, ty_ptr), LR_NULL(ty_ptr));
+        uint32_t copy_bb = lr_session_block(s);
+        uint32_t store_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(has_old, ty_i1), copy_bb, store_bb);
+
+        lr_session_set_block(s, copy_bb, &err);
+        emit_memcpy_dynamic(new_data, old_data, old_len);
+        uint32_t allocator = emit_call("_lfortran_get_default_allocator",
+            ty_ptr, nullptr, 0);
+        emit_free_if_nonnull(allocator, old_data);
+        lr_emit_br(s, store_bb);
+
+        lr_session_set_block(s, store_bb, &err);
+        lr_emit_store(s, V(new_data, ty_ptr), V(data_slot, ty_ptr));
+        lr_emit_store(s, V(new_cap, ty_i64), V(cap_ptr, ty_ptr));
+        lr_emit_br(s, done_bb);
+
+        lr_session_set_block(s, done_bb, &err);
     }
 
     void scratch_io_append(uint32_t data, uint32_t len) {
         uint32_t len_ptr = scratch_io_len_ptr();
         uint32_t old_len = lr_emit_load(s, ty_i64, V(len_ptr, ty_ptr));
-        uint32_t room = lr_emit_sub(s, ty_i64, I(4095, ty_i64),
-            V(old_len, ty_i64));
-        uint32_t fits = lr_emit_icmp(s, LR_CMP_SLT,
-            V(len, ty_i64), V(room, ty_i64));
-        uint32_t copy_len = lr_emit_select(s, ty_i64,
-            V(fits, ty_i1), V(len, ty_i64), V(room, ty_i64));
+        uint32_t needed = lr_emit_add(s, ty_i64,
+            V(old_len, ty_i64), V(len, ty_i64));
+        uint32_t cap_needed = lr_emit_select(s, ty_i64,
+            V(lr_emit_icmp(s, LR_CMP_SGT, V(needed, ty_i64),
+                I(0, ty_i64)), ty_i1),
+            V(needed, ty_i64), I(1, ty_i64));
+        scratch_io_ensure_capacity(cap_needed);
         lr_operand_desc_t off[1] = {V(old_len, ty_i64)};
         uint32_t dst = lr_emit_gep(s, ty_i8, V(scratch_io_data_ptr(), ty_ptr),
             off, 1);
-        emit_memcpy_dynamic(dst, data, copy_len);
-        uint32_t new_len = lr_emit_add(s, ty_i64,
-            V(old_len, ty_i64), V(copy_len, ty_i64));
-        lr_emit_store(s, V(new_len, ty_i64), V(len_ptr, ty_ptr));
+        emit_memcpy_dynamic(dst, data, len);
+        lr_emit_store(s, V(needed, ty_i64), V(len_ptr, ty_ptr));
     }
 
     // Declare/intern a private c-string and return its symbol id for

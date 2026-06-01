@@ -12,7 +12,7 @@ end do
 
 open(newunit=unit, form='formatted', status='scratch', action='readwrite', &
     recl=1073741824)
-write(unit, *) text
+call write_text(unit, text)
 rewind(unit)
 
 nlines = 0
@@ -28,5 +28,14 @@ if (nlines /= 221) then
     print *, nlines
     error stop
 end if
+
+contains
+
+subroutine write_text(unit, text)
+    integer, intent(in) :: unit
+    character(*), intent(in) :: text
+
+    write(unit, *) text
+end subroutine
 
 end program file_73
