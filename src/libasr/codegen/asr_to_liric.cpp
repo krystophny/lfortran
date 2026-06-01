@@ -3723,14 +3723,18 @@ public:
             V(old_data, ty_ptr), LR_NULL(ty_ptr));
         uint32_t old_is_src = lr_emit_icmp(s, LR_CMP_EQ,
             V(old_data, ty_ptr), V(src_data, ty_ptr));
-        uint32_t old_is_empty = lr_emit_icmp(s, LR_CMP_EQ,
-            V(old_len, ty_i64), I(0, ty_i64));
         uint32_t keep_old = lr_emit_or(s, ty_i1,
             V(old_is_null, ty_i1), V(old_is_src, ty_i1));
-        keep_old = lr_emit_or(s, ty_i1,
-            V(keep_old, ty_i1), V(old_is_empty, ty_i1));
         uint32_t should_free = lr_emit_icmp(s, LR_CMP_EQ,
             V(keep_old, ty_i1), I(0, ty_i1));
+        uint32_t src_is_empty = lr_emit_icmp(s, LR_CMP_EQ,
+            V(src_len, ty_i64), I(0, ty_i64));
+        if (fixed_len < 0 && fixed_len_vreg == UINT32_MAX) {
+            uint32_t src_not_empty = lr_emit_icmp(s, LR_CMP_EQ,
+                V(src_is_empty, ty_i1), I(0, ty_i1));
+            should_free = lr_emit_and(s, ty_i1,
+                V(should_free, ty_i1), V(src_not_empty, ty_i1));
+        }
 
         uint32_t free_bb = lr_session_block(s);
         uint32_t alloc_bb = lr_session_block(s);
@@ -3804,16 +3808,35 @@ public:
             lr_emit_store(s, V(fd1, ty_str_desc), V(dst_ptr, ty_ptr));
             return;
         }
-        uint32_t src_is_empty = lr_emit_icmp(s, LR_CMP_EQ,
-            V(src_len, ty_i64), I(0, ty_i64));
         uint32_t empty_bb = lr_session_block(s);
         uint32_t copy_bb = lr_session_block(s);
         uint32_t done_bb = lr_session_block(s);
         lr_emit_condbr(s, V(src_is_empty, ty_i1), empty_bb, copy_bb);
 
         lr_session_set_block(s, empty_bb, &err);
+        uint32_t old_not_null = lr_emit_icmp(s, LR_CMP_NE,
+            V(old_data, ty_ptr), LR_NULL(ty_ptr));
+        uint32_t old_has_len = lr_emit_icmp(s, LR_CMP_SGT,
+            V(old_len, ty_i64), I(0, ty_i64));
+        uint32_t clear_old = lr_emit_and(s, ty_i1,
+            V(old_not_null, ty_i1), V(old_has_len, ty_i1));
+        uint32_t clear_old_bb = lr_session_block(s);
+        uint32_t store_empty_bb = lr_session_block(s);
+        lr_emit_condbr(s, V(clear_old, ty_i1), clear_old_bb,
+            store_empty_bb);
+
+        lr_session_set_block(s, clear_old_bb, &err);
+        lr_type_t *empty_memset_params[] = {ty_ptr, ty_i32, ty_i64};
+        declare_func("memset", ty_ptr, empty_memset_params, 3, false);
+        lr_operand_desc_t empty_memset_args[] = {
+            V(old_data, ty_ptr), I(' ', ty_i32), V(old_len, ty_i64)
+        };
+        emit_call("memset", ty_ptr, empty_memset_args, 3);
+        lr_emit_br(s, store_empty_bb);
+
+        lr_session_set_block(s, store_empty_bb, &err);
         uint32_t empty_d0 = lr_emit_insertvalue(s, ty_str_desc,
-            LR_UNDEF(ty_str_desc), LR_NULL(ty_ptr), &fld0, 1);
+            LR_UNDEF(ty_str_desc), V(old_data, ty_ptr), &fld0, 1);
         uint32_t empty_d1 = lr_emit_insertvalue(s, ty_str_desc,
             V(empty_d0, ty_str_desc), I(0, ty_i64), &fld1, 1);
         lr_emit_store(s, V(empty_d1, ty_str_desc), V(dst_ptr, ty_ptr));
