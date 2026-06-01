@@ -1032,6 +1032,7 @@ RUN(NAME pointer_15 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME pointer_16 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME pointer_17 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc)
 RUN(NAME pointer_18 LABELS gfortran llvm)
+RUN(NAME pointer_19 LABELS gfortran llvm)
 
 RUN(NAME array_section_is_non_allocatable LABELS gfortran llvm llvm_wasm llvm_wasm_emcc fortran)
 RUN(NAME array_indices_array_section LABELS gfortran llvm llvm_wasm llvm_wasm_emcc fortran)
@@ -2692,6 +2693,7 @@ RUN(NAME associate_51 LABELS gfortran llvm)
 
 RUN(NAME associate_52 LABELS gfortran llvm)
 RUN(NAME associate_53 LABELS gfortran llvm)
+RUN(NAME associate_54 LABELS gfortran llvm)
 
 RUN(NAME attr_dim_01 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc fortran)
 RUN(NAME attr_dim_02 LABELS gfortran llvm llvm_wasm llvm_wasm_emcc fortran)

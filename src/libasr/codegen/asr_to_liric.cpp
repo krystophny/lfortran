@@ -3150,6 +3150,27 @@ public:
             get_hash((ASR::asr_t *)sym)) > 0;
     }
 
+    bool indirect_scalar_pointer_slot(ASR::expr_t *expr, uint32_t &slot) {
+        if (!expr_is_indirect_scalar_pointer(expr)) return false;
+        ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
+            ASR::down_cast<ASR::Var_t>(expr)->m_v);
+        ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(sym);
+        uint64_t h = get_hash((ASR::asr_t *)v);
+        auto local_it = lr_symtab.find(h);
+        if (local_it != lr_symtab.end()) {
+            slot = local_it->second;
+            return true;
+        }
+        auto global_it = lr_globals.find(h);
+        if (global_it != lr_globals.end()) {
+            lr_operand_desc_t no_off[1] = {I(0, ty_i64)};
+            slot = lr_emit_gep(s, ty_i8,
+                LR_GLOBAL(global_it->second, ty_ptr), no_off, 1);
+            return true;
+        }
+        return false;
+    }
+
     // A class-pointer actual whose slot holds a class object's data pointer
     // (recorded at its pointer-associate, e.g. a nested-vars-captured class
     // dummy `p => o`), being passed to a class formal: forward the stored data
@@ -3401,8 +3422,8 @@ public:
                 tmp = lr_emit_load(s, ty_ptr, V(slot, ty_ptr));
                 return;
             }
-            if (!is_target && !is_array &&
-                    is_scalar_intrinsic_pointer_type(v->m_type)) {
+            if (!is_array && is_scalar_intrinsic_pointer_type(v->m_type) &&
+                    (indirect_scalar_pointers.count(h) > 0 || !is_target)) {
                 tmp = load_indirect_scalar_pointer(
                     lr_emit_load(s, ty_ptr, V(slot, ty_ptr)), v);
                 return;
@@ -3516,8 +3537,8 @@ public:
                     }
                 }
             }
-            if (!is_target && !is_array &&
-                    is_scalar_intrinsic_pointer_type(v->m_type)) {
+            if (!is_array && is_scalar_intrinsic_pointer_type(v->m_type) &&
+                    (indirect_scalar_pointers.count(h) > 0 || !is_target)) {
                 tmp = load_indirect_scalar_pointer(
                     lr_emit_load(s, ty_ptr, LR_GLOBAL(sym, ty_ptr)), v);
                 return;
@@ -9051,6 +9072,20 @@ public:
             return nullptr;
         }
         return ASR::down_cast<ASR::Variable_t>(sym);
+    }
+
+    bool should_mark_indirect_scalar_pointer_actual(ASR::Variable_t *formal,
+            ASR::expr_t *actual, uint64_t &actual_hash) {
+        if (!formal || formal->m_intent == ASR::intentType::In ||
+                !is_scalar_intrinsic_pointer_type(formal->m_type) ||
+                !is_scalar_intrinsic_pointer_var(actual)) {
+            return false;
+        }
+        ASR::symbol_t *sym = ASRUtils::symbol_get_past_external(
+            ASR::down_cast<ASR::Var_t>(actual)->m_v);
+        if (!ASR::is_a<ASR::Variable_t>(*sym)) return false;
+        actual_hash = get_hash((ASR::asr_t *)sym);
+        return true;
     }
 
     bool is_string_formal(ASR::Variable_t *formal) {
@@ -17929,11 +17964,23 @@ public:
                 emit_memcpy_bytes(w.dst, w.src, w.nbytes);
             }
         };
+        std::vector<uint64_t> indirect_scalar_pointer_actuals;
+        auto mark_indirect_scalar_pointer_actuals = [&]() {
+            for (uint64_t h : indirect_scalar_pointer_actuals) {
+                indirect_scalar_pointers.insert(h);
+            }
+        };
         std::vector<lr_operand_desc_t> args;
         for (size_t i = 0; i < x.n_args; i++) {
             if (x.m_args[i].m_value) {
                 ASR::expr_t *arg = x.m_args[i].m_value;
                 ASR::Variable_t *formal_v = formal_arg_var(formal_fn, i);
+                uint64_t indirect_scalar_pointer_hash = 0;
+                if (should_mark_indirect_scalar_pointer_actual(formal_v,
+                        arg, indirect_scalar_pointer_hash)) {
+                    indirect_scalar_pointer_actuals.push_back(
+                        indirect_scalar_pointer_hash);
+                }
                 if (formal_v && formal_v->m_value_attr &&
                         (!fn_is_bindc || is_proc_ptr)) {
                     visit_expr(*arg);
@@ -18045,6 +18092,14 @@ public:
                     args.push_back(V(
                         emit_cptr_raw_char_array_item_desc_slot(arg),
                         ty_ptr));
+                } else if (formal_v && ASRUtils::is_pointer(formal_v->m_type) &&
+                        expr_is_indirect_scalar_pointer(arg)) {
+                    uint32_t slot = 0;
+                    if (!indirect_scalar_pointer_slot(arg, slot)) {
+                        throw CodeGenError(
+                            "liric: cannot resolve scalar pointer slot");
+                    }
+                    args.push_back(V(slot, ty_ptr));
                 } else if (formal_expects_unbounded_array_data(
                         formal_fn, i, arg)) {
                     bool was_target = is_target;
@@ -18178,6 +18233,7 @@ public:
                 : proc_pointer_callee(v);
             lr_emit_call_void(s, V(fptr, ty_ptr),
                               args.data(), args.size());
+            mark_indirect_scalar_pointer_actuals();
             emit_class_writebacks();
             return;
         }
@@ -18185,6 +18241,7 @@ public:
         if (interface_fptr != UINT32_MAX) {
             lr_emit_call_void(s, V(interface_fptr, ty_ptr),
                               args.data(), args.size());
+            mark_indirect_scalar_pointer_actuals();
             emit_class_writebacks();
             return;
         }
@@ -18201,6 +18258,7 @@ public:
         if (!static_override && fn && dt_needs_dynamic_dispatch(x.m_dt) &&
                 emit_dynamic_subroutine_dispatch(fn, x.m_name,
                 dynamic_method_name(x.m_name, fn), args, x.m_dt)) {
+            mark_indirect_scalar_pointer_actuals();
             emit_class_writebacks();
             return;
         }
@@ -18211,6 +18269,7 @@ public:
                 dynamic_method_name(x.m_name, fn), data_ptr);
             lr_emit_call_void(s, V(fptr, ty_ptr),
                 args.data(), args.size());
+            mark_indirect_scalar_pointer_actuals();
             emit_class_writebacks();
             return;
         }
@@ -18226,6 +18285,7 @@ public:
                 dynamic_method_name(x.m_name, fn), data_ptr);
             lr_emit_call_void(s, V(fptr, ty_ptr),
                 args.data(), args.size());
+            mark_indirect_scalar_pointer_actuals();
             emit_class_writebacks();
             return;
         }
@@ -18233,6 +18293,7 @@ public:
         uint32_t sym = lr_session_intern(s, callable_name(fn).c_str());
         lr_emit_call_void(s, LR_GLOBAL(sym, ty_ptr),
                           args.data(), args.size());
+        mark_indirect_scalar_pointer_actuals();
         emit_class_writebacks();
     }
 
@@ -18932,6 +18993,14 @@ public:
                     args.push_back(V(
                         emit_cptr_raw_char_array_item_desc_slot(arg),
                         ty_ptr));
+                } else if (formal_v && ASRUtils::is_pointer(formal_v->m_type) &&
+                        expr_is_indirect_scalar_pointer(arg)) {
+                    uint32_t slot = 0;
+                    if (!indirect_scalar_pointer_slot(arg, slot)) {
+                        throw CodeGenError(
+                            "liric: cannot resolve scalar pointer slot");
+                    }
+                    args.push_back(V(slot, ty_ptr));
                 } else if (formal_expects_unbounded_array_data(
                         formal_fn, i, arg)) {
                     bool was_target = is_target;
