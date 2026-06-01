@@ -17112,7 +17112,7 @@ public:
             emit_descriptor_chars_copy(desc, raw, total, elem_chars, false,
                 (int)array->n_dims);
 
-            bool writeback = formal->m_intent != ASR::intentType::In;
+            bool writeback = true;
             scratch.push_back({desc, raw, total, elem_chars, allocator,
                 writeback, (int)array->n_dims});
             args.push_back(V(raw, ty_ptr));
@@ -17170,7 +17170,7 @@ public:
                 emit_descriptor_chars_copy(desc, raw, view.total,
                     elem_chars, false);
 
-                bool writeback = formal->m_intent != ASR::intentType::In;
+                bool writeback = true;
                 scratch.push_back({desc, raw, view.total, elem_chars,
                     allocator, writeback});
                 args.push_back(V(raw, ty_ptr));
