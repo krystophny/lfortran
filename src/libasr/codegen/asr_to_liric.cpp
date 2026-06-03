@@ -3322,7 +3322,17 @@ public:
         (void)call_sym;
         (void)dt;
         if (!expr_is_storage_reference(arg)) return false;
-        return formal && formal->m_intent != ASR::intentType::In;
+        // A concrete actual passed to a class formal is wrapped by copying
+        // its data inline (the vtable layout requires the data contiguous
+        // after the header, so the wrapper cannot alias the actual storage).
+        // Write the wrapper data back afterwards so that mutations performed
+        // through the dummy reach the actual, matching the by-reference
+        // behaviour of the LLVM backend.  This also covers intent(in) dummies
+        // that forward their allocatable components to an intent(inout)
+        // type-bound procedure (e.g. a container's push_back/resize); for a
+        // conforming intent(in) dummy the data is unchanged, so the write-back
+        // restores identical bytes.
+        return formal != nullptr;
     }
 
     uint32_t emit_class_pointer_alias_formal_slot(ASR::expr_t *arg) {
