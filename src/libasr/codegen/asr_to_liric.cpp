@@ -245,7 +245,7 @@ public:
 
     // Cached types
     lr_type_t *ty_void, *ty_i1, *ty_i8, *ty_i16, *ty_i32, *ty_i64;
-    lr_type_t *ty_f32, *ty_f64, *ty_ptr;
+    lr_type_t *ty_f32, *ty_f64, *ty_f128, *ty_ptr;
     lr_type_t *ty_c32, *ty_c64, *ty_vc32, *ty_vc64;
     lr_type_t *ty_str_desc;     // Fortran string descriptor: {i8*, i64}
     lr_type_t *ty_list_desc;    // list descriptor: {data*, len, cap}
@@ -266,6 +266,7 @@ public:
         ty_i64  = lr_type_i64_s(s);
         ty_f32  = lr_type_f32_s(s);
         ty_f64  = lr_type_f64_s(s);
+        ty_f128 = lr_type_f128_s(s);
         ty_ptr  = lr_type_ptr_s(s);
         {
             lr_type_t *fields[2] = {ty_f32, ty_f32};
@@ -396,6 +397,7 @@ public:
                 switch (kind) {
                     case 4: return ty_f32;
                     case 8: return ty_f64;
+                    case 16: return ty_f128;
                     default: throw CodeGenError("liric: unsupported real kind");
                 }
             }
@@ -616,6 +618,53 @@ public:
         lr_session_emit(s, &d, nullptr);
     }
 
+    // --- real(16) / binary128 (ty_f128) ----------------------------------
+    // f128 values flow as 16-byte SSA values (the backend load/stores them by
+    // size).  Operations call liric's own dependency-free soft-float runtime
+    // (lr_f128_*), passing the 16-byte operands and result by pointer.
+    bool is_f128_type(ASR::ttype_t *t) {
+        ASR::ttype_t *b = ASRUtils::type_get_past_allocatable_pointer(t);
+        b = ASRUtils::type_get_past_array(b);
+        return ASR::is_a<ASR::Real_t>(*b) &&
+            ASRUtils::extract_kind_from_ttype_t(b) == 16;
+    }
+    // Spill an f128 SSA value into a fresh 16-byte slot, returning its pointer.
+    uint32_t f128_spill(uint32_t val) {
+        uint32_t slot = lr_emit_alloca(s, ty_f128);
+        lr_emit_store(s, V(val, ty_f128), V(slot, ty_ptr));
+        return slot;
+    }
+    // r = fn(a, b) for binary128 binary ops; a,b,result passed by pointer.
+    uint32_t f128_binop_call(const char *fn, uint32_t a, uint32_t b) {
+        uint32_t ap = f128_spill(a), bp = f128_spill(b);
+        uint32_t rp = lr_emit_alloca(s, ty_f128);
+        lr_operand_desc_t args[3] = {V(rp, ty_ptr), V(ap, ty_ptr), V(bp, ty_ptr)};
+        emit_call_void(fn, args, 3);
+        return lr_emit_load(s, ty_f128, V(rp, ty_ptr));
+    }
+    // r = fn(a) for unary binary128 ops (neg, abs, sqrt).
+    uint32_t f128_unop_call(const char *fn, uint32_t a) {
+        uint32_t ap = f128_spill(a);
+        uint32_t rp = lr_emit_alloca(s, ty_f128);
+        lr_operand_desc_t args[2] = {V(rp, ty_ptr), V(ap, ty_ptr)};
+        emit_call_void(fn, args, 2);
+        return lr_emit_load(s, ty_f128, V(rp, ty_ptr));
+    }
+    // Integer comparison result (i32) of two f128 values, then narrow to i1.
+    uint32_t f128_cmp_call(const char *fn, uint32_t a, uint32_t b) {
+        uint32_t ap = f128_spill(a), bp = f128_spill(b);
+        lr_operand_desc_t args[2] = {V(ap, ty_ptr), V(bp, ty_ptr)};
+        uint32_t res = emit_call(fn, ty_i32, args, 2);
+        return lr_emit_icmp(s, LR_CMP_NE, V(res, ty_i32), I(0, ty_i32));
+    }
+    // Build an f128 SSA value from a double constant.
+    uint32_t f128_from_f64_const(double d) {
+        uint32_t rp = lr_emit_alloca(s, ty_f128);
+        lr_operand_desc_t args[2] = {V(rp, ty_ptr), F(d, ty_f64)};
+        emit_call_void("lr_f128_from_f64", args, 2);
+        return lr_emit_load(s, ty_f128, V(rp, ty_ptr));
+    }
+
     // --- Integer Pow: unroll only for small compile-time exponents ---
 
     uint32_t emit_int_pow(uint32_t l, uint32_t r, lr_type_t *t,
@@ -797,6 +846,19 @@ public:
         if (ASR::is_a<ASR::Array_t>(*res_type)) {
             emit_array_binop_real(x, ASR::down_cast<ASR::Array_t>(res_type));
             return;
+        }
+        if (is_f128_type(res_type)) {
+            LIRIC_PASSTHROUGH(x)
+            visit_expr(*x.m_left); uint32_t l = tmp;
+            visit_expr(*x.m_right); uint32_t r = tmp;
+            switch (x.m_op) {
+                case ASR::binopType::Add: tmp = f128_binop_call("lr_f128_add", l, r); return;
+                case ASR::binopType::Sub: tmp = f128_binop_call("lr_f128_sub", l, r); return;
+                case ASR::binopType::Mul: tmp = f128_binop_call("lr_f128_mul", l, r); return;
+                case ASR::binopType::Div: tmp = f128_binop_call("lr_f128_div", l, r); return;
+                case ASR::binopType::Pow: tmp = f128_binop_call("lr_f128_pow", l, r); return;
+                default: throw CodeGenError("liric: unsupported real(16) binop");
+            }
         }
         if (x.m_op != ASR::binopType::Pow) {
             LIRIC_BINOP_REAL(x);
@@ -1043,6 +1105,23 @@ public:
         tmp = lr_emit_icmp(s, p, V(l, t), V(r, t));
     }
     void visit_RealCompare(const ASR::RealCompare_t &x) {
+        if (is_f128_type(ASRUtils::expr_type(x.m_left))) {
+            LIRIC_PASSTHROUGH(x)
+            visit_expr(*x.m_left); uint32_t l = tmp;
+            visit_expr(*x.m_right); uint32_t r = tmp;
+            const char *fn = nullptr;
+            switch (x.m_op) {
+                case ASR::cmpopType::Eq:    fn = "lr_f128_eq"; break;
+                case ASR::cmpopType::NotEq: fn = "lr_f128_ne"; break;
+                case ASR::cmpopType::Lt:    fn = "lr_f128_lt"; break;
+                case ASR::cmpopType::LtE:   fn = "lr_f128_le"; break;
+                case ASR::cmpopType::Gt:    fn = "lr_f128_gt"; break;
+                case ASR::cmpopType::GtE:   fn = "lr_f128_ge"; break;
+                default: throw CodeGenError("liric: unsupported real(16) compare");
+            }
+            tmp = f128_cmp_call(fn, l, r);
+            return;
+        }
         LIRIC_CMP_REAL(x);
     }
 
@@ -1050,6 +1129,21 @@ public:
 
     void visit_RealConstant(const ASR::RealConstant_t &x) {
         lr_type_t *t = get_type(x.m_type);
+        if (t == ty_f128) {
+            // real(16): m_r is a pointer-encoded payload, not a double.  The
+            // full binary128 value is 16 bytes; materialize them directly.
+            const uint8_t *bytes = ASRUtils::real_constant_get_r16_bytes(&x);
+            uint64_t lo, hi;
+            std::memcpy(&lo, bytes, 8);
+            std::memcpy(&hi, bytes + 8, 8);
+            uint32_t slot = lr_emit_alloca(s, ty_f128);
+            lr_emit_store(s, I((int64_t)lo, ty_i64), V(slot, ty_ptr));
+            lr_operand_desc_t off8[1] = {I(8, ty_i64)};
+            uint32_t hp = lr_emit_gep(s, ty_i8, V(slot, ty_ptr), off8, 1);
+            lr_emit_store(s, I((int64_t)hi, ty_i64), V(hp, ty_ptr));
+            tmp = lr_emit_load(s, ty_f128, V(slot, ty_ptr));
+            return;
+        }
         // Materialize via fsub(imm, 0.0) so liric sees a concrete vreg.
         // fsub preserves the sign of imm including -0.0, while
         // fadd(-0.0, 0.0) collapses to +0.0 per IEEE 754 and breaks
@@ -2253,6 +2347,12 @@ public:
                 std::memcpy(bytes.data(), &f, 4);
             } else if (kind == 8) {
                 std::memcpy(bytes.data(), &rv, 8);
+            } else if (kind == 16) {
+                // real(16): m_r is a pointer-encoded payload; the value is the
+                // 16-byte binary128 representation.
+                std::memcpy(bytes.data(),
+                    ASRUtils::real_constant_get_r16_bytes(
+                        ASR::down_cast<ASR::RealConstant_t>(expr)), 16);
             } else {
                 return false;
             }
@@ -19363,6 +19463,42 @@ public:
         lr_type_t *src_t = value_type_for_expr(x.m_arg);
         lr_type_t *dst_t = get_type(x.m_type);
 
+        // real(16)/binary128 casts route through liric's soft-float runtime.
+        if (dst_t == ty_f128 && src_t != ty_f128) {
+            uint32_t rp = lr_emit_alloca(s, ty_f128);
+            if (src_t == ty_f64) {
+                lr_operand_desc_t a[2] = {V(rp, ty_ptr), V(val, ty_f64)};
+                emit_call_void("lr_f128_from_f64", a, 2);
+            } else if (src_t == ty_f32) {
+                lr_operand_desc_t a[2] = {V(rp, ty_ptr), V(val, ty_f32)};
+                emit_call_void("lr_f128_from_f32", a, 2);
+            } else if (lr_type_width(s, src_t) == 64) {
+                lr_operand_desc_t a[2] = {V(rp, ty_ptr), V(val, ty_i64)};
+                emit_call_void("lr_f128_from_i64", a, 2);
+            } else {
+                uint32_t iv = (src_t == ty_i32) ? val
+                    : lr_emit_sext(s, ty_i32, V(val, src_t));
+                lr_operand_desc_t a[2] = {V(rp, ty_ptr), V(iv, ty_i32)};
+                emit_call_void("lr_f128_from_i32", a, 2);
+            }
+            tmp = lr_emit_load(s, ty_f128, V(rp, ty_ptr));
+            return;
+        }
+        if (src_t == ty_f128 && dst_t != ty_f128) {
+            uint32_t ap = f128_spill(val);
+            lr_operand_desc_t a[1] = {V(ap, ty_ptr)};
+            if (dst_t == ty_f64)      tmp = emit_call("lr_f128_to_f64", ty_f64, a, 1);
+            else if (dst_t == ty_f32) tmp = emit_call("lr_f128_to_f32", ty_f32, a, 1);
+            else if (lr_type_width(s, dst_t) == 64)
+                                      tmp = emit_call("lr_f128_to_i64", ty_i64, a, 1);
+            else {
+                uint32_t iv = emit_call("lr_f128_to_i32", ty_i32, a, 1);
+                tmp = (dst_t == ty_i32) ? iv
+                    : lr_emit_trunc(s, dst_t, V(iv, ty_i32));
+            }
+            return;
+        }
+
         switch (x.m_kind) {
             case ASR::cast_kindType::IntegerToReal:
                 tmp = lr_emit_sitofp(s, dst_t, V(val, src_t));
@@ -19901,6 +20037,10 @@ public:
                     tmp = lr_emit_select(s, t,
                         V(lt0, ty_i1), V(neg, t), V(v, t));
                 } else if (ASR::is_a<ASR::Real_t>(*vt)) {
+                    if (t == ty_f128) {
+                        tmp = f128_unop_call("lr_f128_abs", v);
+                        return;
+                    }
                     uint32_t neg = lr_emit_fneg(s, t, V(v, t));
                     uint32_t lt0 = lr_emit_fcmp(s, LR_FCMP_OLT,
                         V(v, t), F(0.0, t));
@@ -20097,6 +20237,7 @@ public:
         uint32_t v = tmp;
         int64_t kind = ASRUtils::extract_kind_from_ttype_t(
             ASRUtils::expr_type(x.m_arg));
+        if (kind == 16) { tmp = f128_unop_call("lr_f128_sqrt", v); return; }
         lr_type_t *ft = (kind == 4) ? ty_f32 : ty_f64;
         const char *fn = (kind == 4) ? "sqrtf" : "sqrt";
         lr_type_t *params[] = {ft};

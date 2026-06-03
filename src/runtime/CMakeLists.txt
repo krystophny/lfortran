@@ -64,8 +64,20 @@ add_dependencies(omp_lib lfortran_intrinsic_iso_c_binding)
 if(LIRIC_RUNTIME)
   set(LIRIC_FORTRAN_RT_EMPTY "${CMAKE_BINARY_DIR}/liric_runtime_fortran_empty.c")
   file(WRITE "${LIRIC_FORTRAN_RT_EMPTY}" "/* placeholder for object-only archive */\n")
+  # liric's own real(16)/binary128 soft-float runtime.  The source lives in
+  # liric (dependency-free, uint64-based); the liric backend lowers f128 ops
+  # to calls into these lr_f128_* symbols, so they must be linked into every
+  # liric-compiled program.  Bundle the object into the liric runtime archive.
+  set(LIRIC_F128_SRC "${LIRIC_ROOT}/src/lr_float128.c")
+  if(EXISTS "${LIRIC_F128_SRC}")
+    add_library(liric_softfloat OBJECT "${LIRIC_F128_SRC}")
+    set(LIRIC_F128_OBJ $<TARGET_OBJECTS:liric_softfloat>)
+  else()
+    set(LIRIC_F128_OBJ "")
+  endif()
   add_library(lfortran_runtime_fortran STATIC
     "${LIRIC_FORTRAN_RT_EMPTY}"
+    ${LIRIC_F128_OBJ}
     $<TARGET_OBJECTS:lfortran_intrinsic_iso_fortran_env>
     $<TARGET_OBJECTS:lfortran_intrinsic_custom>
     $<TARGET_OBJECTS:lfortran_intrinsic_ieee_arithmetic>
