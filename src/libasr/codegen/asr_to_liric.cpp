@@ -164,6 +164,10 @@ public:
     lr_session_t *s;
     uint32_t tmp;               // current expression result vreg
     bool is_target;             // true when visiting assignment LHS
+    // Function whose body is currently being emitted.  Used to resolve
+    // ASR::FunctionParam (a reference to the n-th formal argument that
+    // survives in a result-type length/bound spec) to that argument.
+    const ASR::Function_t *current_asr_function_ = nullptr;
     bool force_array_section_descriptor = false;
     uint32_t proc_return;       // return block for current function
     // OPEN-time connection modes for the formatted write currently being
@@ -2735,6 +2739,9 @@ public:
             return;
         }
 
+        const ASR::Function_t *prev_asr_function = current_asr_function_;
+        current_asr_function_ = &x;
+
         lr_type_t *ret_type = ty_void;
         bool uses_sret = false;
         bool complex_abi_return = false;
@@ -3097,6 +3104,28 @@ public:
         for (ASR::Function_t *nested : nested_functions) {
             visit_Function(*nested);
         }
+
+        current_asr_function_ = prev_asr_function;
+    }
+
+    // A FunctionParam(n) is a reference to the n-th formal argument that
+    // survives in a result-type length/bound specification (e.g. an
+    // elemental `character(len=len(xx)) :: yy(size(xx))` result used inside
+    // an array constructor, which the declaration-spec passes do not always
+    // fold away).  Inside the owning function's body it resolves to that
+    // argument; if a concrete value was attached, use it directly.
+    void visit_FunctionParam(const ASR::FunctionParam_t &x) {
+        if (x.m_value) {
+            visit_expr(*x.m_value);
+            return;
+        }
+        if (current_asr_function_ &&
+                (size_t)x.m_param_number < current_asr_function_->n_args) {
+            visit_expr(*current_asr_function_->m_args[x.m_param_number]);
+            return;
+        }
+        throw CodeGenError(
+            "liric: FunctionParam without a resolvable argument context");
     }
 
     std::string module_variable_global_name(ASR::symbol_t *symbol,
