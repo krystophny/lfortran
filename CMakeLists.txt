@@ -349,21 +349,33 @@ endfunction()
 # Liric backend (independent of LLVM -- both can be ON)
 set(WITH_LIRIC no CACHE BOOL "Build with liric backend")
 set(LIRIC_ROOT "" CACHE PATH "Path to liric source or install directory")
+set(LIRIC_LIB "" CACHE FILEPATH "Explicit path to liric static library")
+set(LIRIC_REQUIRE_REAL_LLVM_LINK OFF CACHE BOOL
+    "Link real LLVM C library for liric LLVM backend symbols")
 if (WITH_LIRIC)
     find_path(LIRIC_INCLUDE_DIR liric/liric_session.h
         PATHS "${LIRIC_ROOT}/include" "${LIRIC_ROOT}/../include")
-    find_library(LIRIC_LIBRARY liric
-        PATHS "${LIRIC_ROOT}/build" "${LIRIC_ROOT}/lib" "${LIRIC_ROOT}"
-        NO_DEFAULT_PATH)
+    if (LIRIC_LIB AND EXISTS "${LIRIC_LIB}")
+        set(LIRIC_LIBRARY "${LIRIC_LIB}")
+    else()
+        find_library(LIRIC_LIBRARY liric liric_nollvm
+            PATHS "${LIRIC_ROOT}/build" "${LIRIC_ROOT}/lib" "${LIRIC_ROOT}"
+            NO_DEFAULT_PATH)
+    endif()
     if (NOT LIRIC_INCLUDE_DIR OR NOT LIRIC_LIBRARY)
         message(FATAL_ERROR "liric not found. Set LIRIC_ROOT.")
     endif()
     message(STATUS "Using liric: ${LIRIC_LIBRARY}")
+    set(_liric_link_libs "${LIRIC_LIBRARY}")
+    if (LIRIC_REQUIRE_REAL_LLVM_LINK AND _lfortran_liric_llvm_c_lib)
+        list(APPEND _liric_link_libs "${_lfortran_liric_llvm_c_lib}")
+        message(STATUS "Liric real LLVM link: ${_lfortran_liric_llvm_c_lib}")
+    endif()
     add_library(p::liric INTERFACE IMPORTED)
     set_property(TARGET p::liric PROPERTY
         INTERFACE_INCLUDE_DIRECTORIES "${LIRIC_INCLUDE_DIR}")
     set_property(TARGET p::liric PROPERTY
-        INTERFACE_LINK_LIBRARIES "${LIRIC_LIBRARY}")
+        INTERFACE_LINK_LIBRARIES "${_liric_link_libs}")
     set_property(TARGET p::liric PROPERTY
         INTERFACE_LINK_OPTIONS "$<$<PLATFORM_ID:Linux>:-no-pie>")
     set(HAVE_LFORTRAN_LIRIC yes)
