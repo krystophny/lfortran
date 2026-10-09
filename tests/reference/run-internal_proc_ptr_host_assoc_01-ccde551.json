@@ -1,0 +1,13 @@
+{
+    "basename": "run-internal_proc_ptr_host_assoc_01-ccde551",
+    "cmd": "lfortran --no-color {infile}",
+    "infile": "tests/internal_proc_ptr_host_assoc_01.f90",
+    "infile_hash": "f6c4a5880149ba0c279dfee31938afe71a82652589b903ec311eaa51",
+    "outfile": null,
+    "outfile_hash": null,
+    "stdout": "run-internal_proc_ptr_host_assoc_01-ccde551.stdout",
+    "stdout_hash": "1e5fdcc51a3afd018d2014ea68c8167b79dc4ac523f38248258ca939",
+    "stderr": null,
+    "stderr_hash": null,
+    "returncode": 0
+}
