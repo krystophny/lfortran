@@ -1,0 +1,13 @@
+{
+    "basename": "run-internal_proc_arg_01-c207cb7",
+    "cmd": "lfortran --no-color {infile}",
+    "infile": "tests/internal_proc_arg_01.f90",
+    "infile_hash": "a3016ad462824d6d4732f0c3ea35c2dd18e0142e664f6ac826a2f508",
+    "outfile": null,
+    "outfile_hash": null,
+    "stdout": "run-internal_proc_arg_01-c207cb7.stdout",
+    "stdout_hash": "1e5fdcc51a3afd018d2014ea68c8167b79dc4ac523f38248258ca939",
+    "stderr": null,
+    "stderr_hash": null,
+    "returncode": 0
+}
