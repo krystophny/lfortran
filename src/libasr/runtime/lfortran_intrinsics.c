@@ -8218,7 +8218,8 @@ _lfortran_open(int32_t unit_num,
                 exit(1);
             }
         }
-        access_mode = "r+";
+        // A READ connection must not ask for write permission.
+        access_mode = streql(action_c, "read") ? "r" : "r+";
     } else if (streql(status_c, "new")) {
         if (*file_exists) {
             if (iostat != NULL) {
@@ -8245,7 +8246,9 @@ _lfortran_open(int32_t unit_num,
                 fclose(fd);
             }
         }
-        access_mode = "r+";
+        // Only a file that was already there is kept read-only by a READ
+        // connection; one created here still has to be writable.
+        access_mode = (streql(action_c, "read") && *file_exists) ? "r" : "r+";
     } else {
         if (iostat != NULL) {
             *iostat = 5002;
@@ -8261,6 +8264,11 @@ _lfortran_open(int32_t unit_num,
             exit(1);
         }
     }
+
+    // Without an explicit ACTION the mode is processor dependent, so a
+    // read-write open that the OS refuses falls back to read-only.
+    bool read_only_fallback = !ini_action && access_mode != NULL
+        && strcmp(access_mode, "r+") == 0;
 
     bool unit_file_bin;
     int access_id;
@@ -8446,6 +8454,12 @@ _lfortran_open(int32_t unit_num,
             return (int64_t) already_open;
         }
         FILE* fd = fopen(f_name_c, access_mode);
+        if (!fd && read_only_fallback && errno == EACCES) {
+            fd = fopen(f_name_c, "r");
+            if (fd != NULL) {
+                write_access = false;
+            }
+        }
         if (!fd) {
             if (iostat == NULL) {
                 printf("Runtime error: Error in opening the file!\n");
