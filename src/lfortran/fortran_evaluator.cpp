@@ -9,6 +9,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <type_traits>
+#include <vector>
 #include <cerrno>
 #include <exception>
 #ifndef __EMSCRIPTEN__
@@ -48,6 +49,8 @@
 #include <lfortran/ast.h>
 #include <libasr/asr.h>
 #include <libasr/asr_utils.h>
+#include <libasr/asr_walk_visitor.h>
+#include <libasr/pass/intrinsic_subroutines.h>
 #include <lfortran/semantics/ast_to_asr.h>
 #include <lfortran/parser/parser.h>
 #include <lfortran/parser/preprocessor.h>
@@ -525,6 +528,13 @@ FortranEvaluator::evaluate(
 {
 #ifdef HAVE_LFORTRAN_LLVM
     EvalResult result;
+
+    if (compiler_options.interactive) {
+        // A cell reports what it declared, read and wrote. Cleared up front so
+        // that a cell failing to parse, analyse or build leaves nothing behind
+        // rather than the names of the cell before it.
+        last_cell_symbols = {};
+    }
 
     // Src -> AST
     Result<LFortran::AST::TranslationUnit_t*> res = get_ast2(code_orig, lm, diagnostics);
@@ -1441,12 +1451,394 @@ FortranEvaluator::copy_cell_chain(SymbolTable* chain, const Location& loc)
     return copy_cell_scope(chain, parent, loc);
 }
 
+namespace
+{
+
+    // The name a reference reaches, and the TranslationUnit scope that holds it.
+    // A cell names a symbol of an earlier cell through the chained scopes, so
+    // the scope where a symbol was declared says whether this cell declares it
+    // or reads it from a cell before it. A symbol nested in a module, a
+    // procedure or a construct is reached by the name declared at the top of
+    // that TranslationUnit, which is the name the cell depends on: a call to a
+    // module's procedure is a use of the module.
+    static bool referred_name(const ASR::symbol_t* sym,
+                              std::string& name,
+                              const SymbolTable*& scope)
+    {
+        if (sym == nullptr)
+            return false;
+        // An import is a window onto another cell's module, so what the cell
+        // depends on is the module the import was made from.
+        if (ASR::is_a<ASR::ExternalSymbol_t>(*sym)) {
+            sym = ASR::down_cast<ASR::ExternalSymbol_t>(sym)->m_external;
+            if (sym == nullptr)
+                return false;
+        }
+        const ASR::symbol_t* top = sym;
+        const SymbolTable* s = ASRUtils::symbol_parent_symtab(sym);
+        while (s != nullptr && !ASRUtils::is_tu_scope(s)) {
+            if (s->asr_owner == nullptr || !ASR::is_a<ASR::symbol_t>(*s->asr_owner)) {
+                return false;
+            }
+            top = ASR::down_cast<ASR::symbol_t>(s->asr_owner);
+            s = ASRUtils::symbol_parent_symtab(top);
+        }
+        if (s == nullptr)
+            return false;
+        name = ASRUtils::symbol_name(top);
+        scope = s;
+        return true;
+    }
+
+    // The variable a write goes through: `a(2)%b` and `cast(a)` are both written
+    // through `a`, and anything else is not a variable this cell can write.
+    static const ASR::symbol_t* written_base(const ASR::expr_t* e)
+    {
+        while (e != nullptr) {
+            switch (e->type) {
+                case ASR::exprType::Var:
+                    return ASR::down_cast<ASR::Var_t>(e)->m_v;
+                case ASR::exprType::ArrayItem:
+                    e = ASR::down_cast<ASR::ArrayItem_t>(e)->m_v;
+                    break;
+                case ASR::exprType::ArraySection:
+                    e = ASR::down_cast<ASR::ArraySection_t>(e)->m_v;
+                    break;
+                case ASR::exprType::StructInstanceMember:
+                    e = ASR::down_cast<ASR::StructInstanceMember_t>(e)->m_v;
+                    break;
+                case ASR::exprType::CoarrayRef:
+                    e = ASR::down_cast<ASR::CoarrayRef_t>(e)->m_var;
+                    break;
+                case ASR::exprType::Cast:
+                    e = ASR::down_cast<ASR::Cast_t>(e)->m_arg;
+                    break;
+                case ASR::exprType::ArrayPhysicalCast:
+                    e = ASR::down_cast<ASR::ArrayPhysicalCast_t>(e)->m_arg;
+                    break;
+                case ASR::exprType::StringPhysicalCast:
+                    e = ASR::down_cast<ASR::StringPhysicalCast_t>(e)->m_arg;
+                    break;
+                case ASR::exprType::FunctionPointerCast:
+                    e = ASR::down_cast<ASR::FunctionPointerCast_t>(e)->m_arg;
+                    break;
+                case ASR::exprType::PointerToCPtr:
+                    e = ASR::down_cast<ASR::PointerToCPtr_t>(e)->m_arg;
+                    break;
+                case ASR::exprType::GetPointer:
+                    e = ASR::down_cast<ASR::GetPointer_t>(e)->m_arg;
+                    break;
+                default:
+                    return nullptr;
+            }
+        }
+        return nullptr;
+    }
+
+    // The actual arguments of a call to `callee` that the callee writes back,
+    // which is every argument whose dummy is intent(out) or intent(inout).
+    // Arguments are matched by position; a call whose arguments are not all
+    // there, or that is not to a procedure with a visible body, gives none.
+    static void written_args(const ASR::symbol_t* callee,
+                             const ASR::call_arg_t* args,
+                             size_t n_args,
+                             std::vector<const ASR::expr_t*>& out)
+    {
+        callee = ASRUtils::symbol_get_past_external(callee);
+        if (callee == nullptr || !ASR::is_a<ASR::Function_t>(*callee))
+            return;
+        const ASR::Function_t& fn = *ASR::down_cast<ASR::Function_t>(callee);
+        if (fn.n_args != n_args)
+            return;
+        for (size_t i = 0; i < n_args; i++) {
+            if (args[i].m_value == nullptr || fn.m_args[i] == nullptr
+                || !ASR::is_a<ASR::Var_t>(*fn.m_args[i])) {
+                continue;
+            }
+            const ASR::symbol_t* dummy
+                = ASRUtils::symbol_get_past_external(ASR::down_cast<ASR::Var_t>(fn.m_args[i])->m_v);
+            if (dummy == nullptr || !ASR::is_a<ASR::Variable_t>(*dummy))
+                continue;
+            ASR::intentType intent = ASR::down_cast<ASR::Variable_t>(dummy)->m_intent;
+            if (intent == ASR::intentType::Out || intent == ASR::intentType::InOut) {
+                out.push_back(args[i].m_value);
+            }
+        }
+    }
+
+    class CellSymbolVisitor : public ASR::BaseWalkVisitor<CellSymbolVisitor>
+    {
+    public:
+        const SymbolTable* cell;
+        std::set<std::string> uses, assigns;
+
+        explicit CellSymbolVisitor(const SymbolTable* cell_scope)
+            : cell(cell_scope)
+        {
+        }
+
+        // A reference to a name an earlier cell declared.
+        void use(const ASR::symbol_t* sym)
+        {
+            std::string name;
+            const SymbolTable* scope = nullptr;
+            if (referred_name(sym, name, scope) && scope != cell) {
+                uses.insert(name);
+            }
+        }
+
+        // A write to a name an earlier cell declared.
+        void assign(const ASR::expr_t* target)
+        {
+            std::string name;
+            const SymbolTable* scope = nullptr;
+            if (referred_name(written_base(target), name, scope) && scope != cell) {
+                assigns.insert(name);
+            }
+        }
+
+        void visit_Var(const ASR::Var_t& x)
+        {
+            use(x.m_v);
+        }
+
+        void visit_Variable(const ASR::Variable_t& x)
+        {
+            use(x.m_type_declaration);
+            BaseWalkVisitor::visit_Variable(x);
+        }
+
+        void visit_ExternalSymbol(const ASR::ExternalSymbol_t& x)
+        {
+            use(x.m_external);
+        }
+
+        // A module read from a modfile, or an intrinsic one, is not this cell's
+        // code, and every name inside it was declared elsewhere; walking it
+        // would only cost time.
+        void visit_Module(const ASR::Module_t& x)
+        {
+            if (x.m_loaded_from_mod || x.m_intrinsic)
+                return;
+            BaseWalkVisitor::visit_Module(x);
+        }
+
+        void visit_FunctionCall(const ASR::FunctionCall_t& x)
+        {
+            use(x.m_name);
+            use(x.m_original_name);
+            std::vector<const ASR::expr_t*> out;
+            written_args(x.m_name, x.m_args, x.n_args, out);
+            for (const ASR::expr_t* e : out)
+                assign(e);
+            BaseWalkVisitor::visit_FunctionCall(x);
+        }
+
+        void visit_SubroutineCall(const ASR::SubroutineCall_t& x)
+        {
+            use(x.m_name);
+            use(x.m_original_name);
+            std::vector<const ASR::expr_t*> out;
+            written_args(x.m_name, x.m_args, x.n_args, out);
+            for (const ASR::expr_t* e : out)
+                assign(e);
+            BaseWalkVisitor::visit_SubroutineCall(x);
+        }
+
+        void visit_Assignment(const ASR::Assignment_t& x)
+        {
+            assign(x.m_target);
+            BaseWalkVisitor::visit_Assignment(x);
+        }
+
+        // `p => v` writes p; v is read, and the walk covers it.
+        void visit_Associate(const ASR::Associate_t& x)
+        {
+            assign(x.m_target);
+            BaseWalkVisitor::visit_Associate(x);
+        }
+
+        // Inside `associate(q => n) ... end associate`, q is an alias of n and
+        // the block writes n through it, so the selector is written even though
+        // no assignment names it. A plain `p => v` is not this case: there the
+        // statement writes only p.
+        void visit_AssociateBlock(const ASR::AssociateBlock_t& x)
+        {
+            for (size_t i = 0; i < x.n_body; i++) {
+                if (ASR::is_a<ASR::Associate_t>(*x.m_body[i])) {
+                    assign(ASR::down_cast<ASR::Associate_t>(x.m_body[i])->m_value);
+                }
+            }
+            BaseWalkVisitor::visit_AssociateBlock(x);
+        }
+
+        void visit_CPtrToPointer(const ASR::CPtrToPointer_t& x)
+        {
+            assign(x.m_ptr);
+            BaseWalkVisitor::visit_CPtrToPointer(x);
+        }
+
+        void visit_Allocate(const ASR::Allocate_t& x)
+        {
+            for (size_t i = 0; i < x.n_args; i++)
+                assign(x.m_args[i].m_a);
+            if (x.m_stat)
+                assign(x.m_stat);
+            if (x.m_errmsg)
+                assign(x.m_errmsg);
+            BaseWalkVisitor::visit_Allocate(x);
+        }
+
+        void visit_ReAlloc(const ASR::ReAlloc_t& x)
+        {
+            for (size_t i = 0; i < x.n_args; i++)
+                assign(x.m_args[i].m_a);
+            BaseWalkVisitor::visit_ReAlloc(x);
+        }
+
+        void visit_ExplicitDeallocate(const ASR::ExplicitDeallocate_t& x)
+        {
+            for (size_t i = 0; i < x.n_vars; i++)
+                assign(x.m_vars[i]);
+            if (x.m_stat)
+                assign(x.m_stat);
+            if (x.m_errmsg)
+                assign(x.m_errmsg);
+            BaseWalkVisitor::visit_ExplicitDeallocate(x);
+        }
+
+        void visit_ImplicitDeallocate(const ASR::ImplicitDeallocate_t& x)
+        {
+            for (size_t i = 0; i < x.n_vars; i++)
+                assign(x.m_vars[i]);
+            BaseWalkVisitor::visit_ImplicitDeallocate(x);
+        }
+
+        void visit_Nullify(const ASR::Nullify_t& x)
+        {
+            for (size_t i = 0; i < x.n_vars; i++)
+                assign(x.m_vars[i]);
+            BaseWalkVisitor::visit_Nullify(x);
+        }
+
+        // What a READ puts into its list, its iostat and its iomsg.
+        void visit_FileRead(const ASR::FileRead_t& x)
+        {
+            for (size_t i = 0; i < x.n_values; i++)
+                assign(x.m_values[i]);
+            if (x.m_iomsg)
+                assign(x.m_iomsg);
+            if (x.m_iostat)
+                assign(x.m_iostat);
+            BaseWalkVisitor::visit_FileRead(x);
+        }
+
+        void visit_DoLoop(const ASR::DoLoop_t& x)
+        {
+            if (x.m_head.m_v)
+                assign(x.m_head.m_v);
+            BaseWalkVisitor::visit_DoLoop(x);
+        }
+
+        void visit_DoConcurrentLoop(const ASR::DoConcurrentLoop_t& x)
+        {
+            for (size_t i = 0; i < x.n_head; i++) {
+                if (x.m_head[i].m_v)
+                    assign(x.m_head[i].m_v);
+            }
+            BaseWalkVisitor::visit_DoConcurrentLoop(x);
+        }
+
+        void visit_ForAllSingle(const ASR::ForAllSingle_t& x)
+        {
+            if (x.m_head.m_v)
+                assign(x.m_head.m_v);
+            BaseWalkVisitor::visit_ForAllSingle(x);
+        }
+
+        // random_number fills every argument and move_alloc empties its source,
+        // so both write everything they are given. Other impure intrinsics take
+        // their input only.
+        void visit_IntrinsicImpureSubroutine(const ASR::IntrinsicImpureSubroutine_t& x)
+        {
+            using ASRUtils::IntrinsicImpureSubroutines;
+            if (x.m_sub_intrinsic_id
+                    == static_cast<int64_t>(IntrinsicImpureSubroutines::RandomNumber)
+                || x.m_sub_intrinsic_id
+                       == static_cast<int64_t>(IntrinsicImpureSubroutines::MoveAlloc)) {
+                for (size_t i = 0; i < x.n_args; i++)
+                    assign(x.m_args[i]);
+            }
+            BaseWalkVisitor::visit_IntrinsicImpureSubroutine(x);
+        }
+    };
+
+}  // namespace
+
+FortranEvaluator::CellSymbols
+FortranEvaluator::analyze_cell(ASR::TranslationUnit_t& asr)
+{
+    CellSymbols symbols;
+    SymbolTable* cell = asr.m_symtab;
+    for (auto& item : cell->get_scope()) {
+        const ASR::symbol_t* sym = item.second;
+        switch (sym->type) {
+            case ASR::symbolType::Variable:
+            case ASR::symbolType::Function:
+            case ASR::symbolType::Struct:
+            case ASR::symbolType::Enum:
+            case ASR::symbolType::Union:
+            case ASR::symbolType::GenericProcedure:
+            case ASR::symbolType::CustomOperator:
+            case ASR::symbolType::Requirement:
+            case ASR::symbolType::Template:
+                symbols.defines.insert(item.first);
+                break;
+            case ASR::symbolType::Module: {
+                const ASR::Module_t& m = *ASR::down_cast<ASR::Module_t>(sym);
+                // A module read from a modfile or an intrinsic one is not
+                // declared here; it is what this cell uses.
+                if (!m.m_loaded_from_mod && !m.m_intrinsic) {
+                    symbols.defines.insert(item.first);
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    CellSymbolVisitor visitor(cell);
+    // A cell's own statements are in m_items, which the walk of a
+    // TranslationUnit does not cover.
+    for (size_t i = 0; i < asr.n_items; i++) {
+        ASR::asr_t* item = asr.m_items[i];
+        if (ASR::is_a<ASR::stmt_t>(*item)) {
+            visitor.visit_stmt(*ASR::down_cast<ASR::stmt_t>(item));
+        } else if (ASR::is_a<ASR::expr_t>(*item)) {
+            visitor.visit_expr(*ASR::down_cast<ASR::expr_t>(item));
+        }
+    }
+    for (auto& item : cell->get_scope()) {
+        visitor.visit_symbol(*item.second);
+    }
+    symbols.uses = std::move(visitor.uses);
+    symbols.assigns = std::move(visitor.assigns);
+    return symbols;
+}
+
 Result<ASR::TranslationUnit_t*>
 FortranEvaluator::get_asr3(LFortran::AST::TranslationUnit_t& ast,
                            diag::Diagnostics& diagnostics,
                            LCompilers::LocationManager& lm)
 {
     ASR::TranslationUnit_t* asr;
+    if (compiler_options.interactive) {
+        // Every path that analyses a cell comes through here, including the
+        // ones that do not start in evaluate(), so a cell that fails leaves
+        // nothing behind for a caller that reads the sets anyway.
+        last_cell_symbols = {};
+    }
     // AST -> ASR
     //
     // Each interactive evaluation gets its own TranslationUnit, whose scope is
@@ -1489,6 +1881,9 @@ FortranEvaluator::get_asr3(LFortran::AST::TranslationUnit_t& ast,
         return res.error;
     }
     if (compiler_options.interactive) {
+        // What this cell declares, reads and writes, recorded while the ASR
+        // is still the cell's own and before the cell is committed.
+        last_cell_symbols = analyze_cell(*asr);
         // The next cell is parented to a snapshot of this one, not to the tree
         // about to be handed to the passes.
         symbol_table = snapshot_cell_scope(*asr);

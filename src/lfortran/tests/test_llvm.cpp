@@ -4524,3 +4524,298 @@ allocate(character(n+1) :: s, t)
         CHECK(r.result.i32 == 2);
     }
 }
+
+TEST_CASE("FortranEvaluator cell symbols: variable")
+{
+    CompilerOptions cu;
+    cu.interactive = true;
+    cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
+    FortranEvaluator e(cu);
+    REQUIRE(e.evaluate2("integer :: x").ok);
+    FortranEvaluator::CellSymbols cs = e.cell_symbols();
+    CHECK(cs.defines.count("x") == 1);
+    CHECK(cs.uses.empty());
+    CHECK(cs.assigns.empty());
+
+    REQUIRE(e.evaluate2("x = 1").ok);
+    cs = e.cell_symbols();
+    CHECK(cs.defines.count("x") == 0);
+    CHECK(cs.uses.count("x") == 1);
+    CHECK(cs.assigns.count("x") == 1);
+
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("x + 1");
+    REQUIRE(r.ok);
+    CHECK(r.result.i32 == 2);
+    cs = e.cell_symbols();
+    CHECK(cs.uses.count("x") == 1);
+    CHECK(cs.assigns.count("x") == 0);
+}
+
+TEST_CASE("FortranEvaluator cell symbols: function via call")
+{
+    CompilerOptions cu;
+    cu.interactive = true;
+    cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
+    FortranEvaluator e(cu);
+    REQUIRE(e.evaluate2(R"(integer function f(x)
+integer :: x
+f = x + 1
+end function
+)")
+                .ok);
+    FortranEvaluator::CellSymbols cs = e.cell_symbols();
+    CHECK(cs.defines.count("f") == 1);
+
+    REQUIRE(e.evaluate2("integer :: y").ok);
+    REQUIRE(e.evaluate2("y = f(3)").ok);
+    cs = e.cell_symbols();
+    CHECK(cs.defines.count("f") == 0);
+    CHECK(cs.uses.count("f") == 1);
+    CHECK(cs.uses.count("y") == 1);
+    CHECK(cs.assigns.count("y") == 1);
+}
+
+TEST_CASE("FortranEvaluator cell symbols: module via use")
+{
+    CompilerOptions cu;
+    cu.interactive = true;
+    cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
+    FortranEvaluator e(cu);
+    REQUIRE(e.evaluate2(R"(module mcellsym
+implicit none
+contains
+subroutine say(i)
+integer, intent(in) :: i
+end subroutine
+subroutine bump(v)
+integer, intent(inout) :: v
+v = v + 1
+end subroutine
+end module
+integer :: k
+k = 3
+)")
+                .ok);
+    FortranEvaluator::CellSymbols cs = e.cell_symbols();
+    CHECK(cs.defines.count("mcellsym") == 1);
+    CHECK(cs.defines.count("k") == 1);
+
+    REQUIRE(e.evaluate2("use mcellsym\n").ok);
+    cs = e.cell_symbols();
+    CHECK(cs.defines.count("mcellsym") == 0);
+    CHECK(cs.uses.count("mcellsym") == 1);
+
+    REQUIRE(e.evaluate2("call say(k)").ok);
+    cs = e.cell_symbols();
+    CHECK(cs.uses.count("mcellsym") == 1);
+    CHECK(cs.uses.count("k") == 1);
+    // intent(in) is read, not written.
+    CHECK(cs.assigns.count("k") == 0);
+
+    REQUIRE(e.evaluate2("call bump(k)").ok);
+    cs = e.cell_symbols();
+    CHECK(cs.uses.count("mcellsym") == 1);
+    CHECK(cs.assigns.count("k") == 1);
+}
+
+TEST_CASE("FortranEvaluator cell symbols: derived type")
+{
+    CompilerOptions cu;
+    cu.interactive = true;
+    cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
+    FortranEvaluator e(cu);
+    REQUIRE(e.evaluate2(R"(type :: point
+integer :: x
+end type
+)")
+                .ok);
+    FortranEvaluator::CellSymbols cs = e.cell_symbols();
+    CHECK(cs.defines.count("point") == 1);
+
+    REQUIRE(e.evaluate2("type(point) :: p").ok);
+    cs = e.cell_symbols();
+    CHECK(cs.defines.count("p") == 1);
+    CHECK(cs.defines.count("point") == 0);
+    CHECK(cs.uses.count("point") == 1);
+
+    REQUIRE(e.evaluate2("p%x = 2").ok);
+    cs = e.cell_symbols();
+    CHECK(cs.uses.count("p") == 1);
+    CHECK(cs.assigns.count("p") == 1);
+}
+
+TEST_CASE("FortranEvaluator cell symbols: intent(inout) actual")
+{
+    CompilerOptions cu;
+    cu.interactive = true;
+    cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
+    FortranEvaluator e(cu);
+    REQUIRE(e.evaluate2(R"(subroutine bump(v)
+integer, intent(inout) :: v
+v = v + 1
+end subroutine
+integer :: n
+n = 1
+)")
+                .ok);
+    FortranEvaluator::CellSymbols cs = e.cell_symbols();
+    CHECK(cs.defines.count("bump") == 1);
+    CHECK(cs.defines.count("n") == 1);
+
+    REQUIRE(e.evaluate2("call bump(n)").ok);
+    cs = e.cell_symbols();
+    CHECK(cs.uses.count("bump") == 1);
+    CHECK(cs.uses.count("n") == 1);
+    CHECK(cs.assigns.count("n") == 1);
+
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("n");
+    REQUIRE(r.ok);
+    CHECK(r.result.i32 == 2);
+}
+
+TEST_CASE("FortranEvaluator cell symbols: random_number(x)")
+{
+    CompilerOptions cu;
+    cu.interactive = true;
+    cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
+    FortranEvaluator e(cu);
+    REQUIRE(e.evaluate2("real :: r").ok);
+    FortranEvaluator::CellSymbols cs = e.cell_symbols();
+    CHECK(cs.defines.count("r") == 1);
+
+    REQUIRE(e.evaluate2("call random_number(r)").ok);
+    cs = e.cell_symbols();
+    CHECK(cs.defines.count("r") == 0);
+    CHECK(cs.uses.count("r") == 1);
+    CHECK(cs.assigns.count("r") == 1);
+}
+
+TEST_CASE("FortranEvaluator cell symbols: modfile module is not a define")
+{
+    const char* modsrc = R"(module mcellsmod
+implicit none
+contains
+subroutine say(i)
+integer, intent(in) :: i
+end subroutine
+end module
+)";
+    {
+        Allocator al(1024 * 1024);
+        LCompilers::diag::Diagnostics diagnostics;
+        CompilerOptions co;
+        LCompilers::LocationManager lm;
+        LCompilers::LocationManager::FileLocations fl;
+        fl.in_filename = "mcellsmod.f90";
+        lm.files.push_back(fl);
+        lm.file_ends.push_back(LCompilers::LFortran::source_offset(std::strlen(modsrc)));
+        LCompilers::LFortran::AST::TranslationUnit_t* ast
+            = TRY(LCompilers::LFortran::parse(al, modsrc, diagnostics, co));
+        LCompilers::ASR::TranslationUnit_t* asr
+            = TRY(LCompilers::LFortran::ast_to_asr(al, *ast, diagnostics, nullptr, false, co, lm));
+        std::ofstream out("mcellsmod.mod", std::ios::binary);
+        out << LCompilers::save_modfile(*asr, lm);
+    }
+
+    CompilerOptions cu;
+    cu.interactive = true;
+    cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
+    FortranEvaluator e(cu);
+    REQUIRE(e.evaluate2("use mcellsmod\ncall say(3)").ok);
+    FortranEvaluator::CellSymbols cs = e.cell_symbols();
+    // The cell reaches the module through a modfile, so it uses it rather
+    // than declaring it.
+    CHECK(cs.defines.count("mcellsmod") == 0);
+    CHECK(cs.uses.count("mcellsmod") == 0);
+
+    // A module this cell declares itself is a define, so the check above is
+    // about the modfile and not about modules in general.
+    REQUIRE(e.evaluate2(R"(module mcelllocal
+implicit none
+contains
+subroutine say2(i)
+integer, intent(in) :: i
+end subroutine
+end module
+)")
+                .ok);
+    CHECK(e.cell_symbols().defines.count("mcelllocal") == 1);
+    std::remove("mcellsmod.mod");
+}
+
+TEST_CASE("FortranEvaluator cell symbols: a failed cell declares nothing")
+{
+    CompilerOptions cu;
+    cu.interactive = true;
+    cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
+    FortranEvaluator e(cu);
+    REQUIRE(e.evaluate2("integer :: good").ok);
+    CHECK(e.cell_symbols().defines.count("good") == 1);
+    // A cell that never reaches ASR must not leave the previous cell's names.
+    CHECK_FALSE(e.evaluate2("integer :: ").ok);
+    CHECK(e.cell_symbols().defines.empty());
+    CHECK(e.cell_symbols().uses.empty());
+    CHECK(e.cell_symbols().assigns.empty());
+    // The next good cell reports itself again.
+    REQUIRE(e.evaluate2("good = 2").ok);
+    CHECK(e.cell_symbols().uses.count("good") == 1);
+    CHECK(e.cell_symbols().assigns.count("good") == 1);
+    CHECK(e.cell_symbols().defines.empty());
+}
+
+TEST_CASE("FortranEvaluator cell symbols: a redeclaration is still a define")
+{
+    CompilerOptions cu;
+    cu.interactive = true;
+    cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
+    FortranEvaluator e(cu);
+    REQUIRE(e.evaluate2("integer :: r").ok);
+    CHECK(e.cell_symbols().defines == std::set<std::string>{ "r" });
+    REQUIRE(e.evaluate2("r = 1").ok);
+    CHECK(e.cell_symbols().uses == std::set<std::string>{ "r" });
+    CHECK(e.cell_symbols().assigns == std::set<std::string>{ "r" });
+    // The second cell declares the same name. It is reported as a define of
+    // this cell, which is how the caller learns the two cells collide; who
+    // wins is the caller's decision, not the analysis'.
+    REQUIRE(e.evaluate2("integer :: r").ok);
+    CHECK(e.cell_symbols().defines == std::set<std::string>{ "r" });
+    CHECK(e.cell_symbols().uses.empty());
+    CHECK(e.cell_symbols().assigns.empty());
+}
+
+TEST_CASE("FortranEvaluator cell symbols: associate writes through the alias")
+{
+    CompilerOptions cu;
+    cu.interactive = true;
+    cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
+    FortranEvaluator e(cu);
+    REQUIRE(e.evaluate2("integer :: n").ok);
+    // q is an alias of n and the block writes n through it, so n is written
+    // even though no assignment names it.
+    REQUIRE(e.evaluate2("associate(q => n)\nq = 7\nend associate").ok);
+    CHECK(e.cell_symbols().uses == std::set<std::string>{ "n" });
+    CHECK(e.cell_symbols().assigns == std::set<std::string>{ "n" });
+    // A plain pointer association writes only the pointer, not the target.
+    REQUIRE(e.evaluate2("integer, target :: t").ok);
+    REQUIRE(e.evaluate2("integer, pointer :: pp").ok);
+    REQUIRE(e.evaluate2("pp => t").ok);
+    CHECK(e.cell_symbols().assigns == std::set<std::string>{ "pp" });
+    CHECK(e.cell_symbols().uses.count("t") == 1);
+}
+
+TEST_CASE("FortranEvaluator cell symbols: both spellings of a name agree")
+{
+    CompilerOptions cu;
+    cu.interactive = true;
+    cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
+    FortranEvaluator e(cu);
+    REQUIRE(e.evaluate2("integer :: MixedCase").ok);
+    // Whatever case the symbol table stores, the two spellings of the same
+    // Fortran name must agree, or a later cell looks like a fresh use.
+    const std::set<std::string> d = e.cell_symbols().defines;
+    REQUIRE(d.size() == 1);
+    const std::string declared = *d.begin();
+    REQUIRE(e.evaluate2("mixedcase = 1").ok);
+    CHECK(e.cell_symbols().uses.count(declared) == 1);
+    CHECK(e.cell_symbols().assigns.count(declared) == 1);
+}

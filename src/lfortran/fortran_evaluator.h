@@ -88,6 +88,27 @@ public:
         std::string text() const;
     };
 
+    // What one cell declares, reads and writes, so that a frontend can say
+    // which cell a name came from and which cells a change to it affects.
+    // A name is the top-level name it is reached by: a cell that calls a
+    // module's procedure uses the module, not the procedure.
+    struct CellSymbols {
+        // Names this cell declares.
+        std::set<std::string> defines;
+        // Names of earlier cells this cell reads, written to included.
+        std::set<std::string> uses;
+        // Names of earlier cells this cell writes.
+        std::set<std::string> assigns;
+    };
+
+    // The names of the cell last evaluated in interactive mode. Empty before
+    // the first such cell, and for a cell that failed to parse, analyse or
+    // build, which declares nothing and reaches nothing.
+    const CellSymbols& cell_symbols() const
+    {
+        return last_cell_symbols;
+    }
+
     // Where an executed cell's display data and clear_output() calls go
     // (the lfortran_display module). Unset hooks ignore them.
     struct CellIO {
@@ -255,6 +276,7 @@ private:
     std::unique_ptr<WasmLFortranExecutor> wasm_exec;
 #endif
     SymbolTable* symbol_table;
+    CellSymbols last_cell_symbols;
     // Keyed by the committed cell scope so inspection's scope restoration
     // also restores the implicit typing policy.
     std::map<SymbolTable*, std::map<std::string, ASR::ttype_t*>> cell_implicit_types;
@@ -266,6 +288,11 @@ private:
     std::vector<uint32_t> cell_ends;
     // Where the cell being compiled starts.
     uint32_t cell_start = 0;
+
+    // The names one cell declares, reads and writes. `asr` is a cell's ASR
+    // before the passes have run, so what it holds is what the cell itself
+    // says; the run wrapper the passes add is not there yet.
+    static CellSymbols analyze_cell(ASR::TranslationUnit_t& asr);
 
     // Puts the chain of cells, this one last, into `lm` and returns the
     // position this cell starts at.
