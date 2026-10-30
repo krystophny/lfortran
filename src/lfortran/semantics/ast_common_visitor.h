@@ -27714,7 +27714,9 @@ public:
             ASR::expr_t *expr = nullptr;
             if (!is_nil) {
                 this->visit_expr(*kwargs[i].m_value);
-                expr = ASRUtils::EXPR(tmp);
+                // A `select rank` selector is passed with the rank of its
+                // branch, which makes it a scalar in `rank (0)`.
+                expr = cast_assumed_rank_selector(ASRUtils::EXPR(tmp));
             }
             std::string name = to_lower(kwargs[i].m_arg);
             auto search = std::find(fn_args2.begin(), fn_args2.end(), name);
