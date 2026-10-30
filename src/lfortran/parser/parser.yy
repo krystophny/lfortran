@@ -14,7 +14,7 @@ see the documentation in that script for details and motivation.
 %param {LCompilers::LFortran::Parser &p}
 %locations
 %glr-parser
-%expect    189 // shift/reduce conflicts
+%expect    193 // shift/reduce conflicts
 %expect-rr 189 // reduce/reduce conflicts
 
 // Uncomment this to get verbose error messages
@@ -483,6 +483,7 @@ void yyerror(YYLTYPE *yyloc, LCompilers::LFortran::Parser &p,
 %type <ast> interactive_statement1
 %type <ast> single_line_statement
 %type <ast> other_single_line_statement
+%type <ast> io_statement
 %type <ast> multi_line_statement
 %type <ast> multi_line_statement0
 %type <ast> assign_statement
@@ -664,12 +665,15 @@ script_unit
     | union_type_decl
     | enum_decl
     | interactive_statement %dprec 7
-    // expr sep outranks a statement, so a bare allocate(a) would be a call.
-    // These two are the statement. A call in an expression (y = allocate(n))
-    // is still an expression. Do not keep sep on the node: a blank line would
-    // become trivia, and the previous AST left that separator off.
+    // expr sep outranks a statement, so a bare allocate(a) or open(u) would be
+    // a call. These are the statements. A call in an expression
+    // (y = allocate(n)) is still an expression. Do not keep sep on the node: a
+    // blank line would become trivia, and the previous AST left that separator
+    // off. The I/O statements share one rule: as ten separate units each one
+    // multiplies the conflicts against expr.
     | allocate_statement sep %dprec 9
     | deallocate_statement sep %dprec 9
+    | io_statement sep %dprec 9
     | expr sep           %dprec 8
     | KW_END_PROGRAM sep { $$ = SYMBOL($1, @$); }
     | TK_LABEL KW_END sep { $$ = LABELED_END($1, $2, @$); }
@@ -1860,11 +1864,26 @@ single_line_statement
     | other_single_line_statement
     ;
 
+// I/O statements, shared by a program body and by an interactive cell, where
+// they have to outrank the expr that reads them as a call to `open`.
+io_statement
+    : open_statement
+    | close_statement
+    | rewind_statement
+    | backspace_statement
+    | endfile_statement
+    | flush_statement
+    | inquire_statement
+    | nullify_statement
+    | read_statement
+    | write_statement
+    ;
+
 other_single_line_statement
     : assign_statement
+    | io_statement
     | assignment_statement
     | associate_statement
-    | close_statement
     | continue_statement
     | cycle_statement
     | entry_statement
@@ -1872,7 +1891,6 @@ other_single_line_statement
     | event_post_statement
     | event_wait_statement
     | exit_statement
-    | flush_statement
     | forall_statement_single
     | format_statement
     | data_statement
@@ -1880,17 +1898,10 @@ other_single_line_statement
     | goto_statement
     | if_statement_single
     | include_statement
-    | inquire_statement
-    | nullify_statement
-    | open_statement
     | pause_statement
     | pragma_statement
     | print_statement
-    | read_statement
     | return_statement
-    | rewind_statement
-    | backspace_statement
-    | endfile_statement
     | stop_statement
     | subroutine_call
     | sync_all_statement
@@ -1898,7 +1909,6 @@ other_single_line_statement
     | sync_memory_statement
     | sync_team_statement
     | where_statement_single
-    | write_statement
     ;
 
 multi_line_statement
