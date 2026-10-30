@@ -1400,7 +1400,9 @@ namespace ExecuteCommandLine {
                 ASR::intentType::In, nullptr, ASR::abiType::BindC, true);
             args_1.push_back(al, str_arg);
 
-            ASR::expr_t *len_arg = b.Variable(fn_symtab_1, "n", ASRUtils::TYPE(ASR::make_Integer_t(al, loc, 4)),
+            // The C prototype takes int64_t; a narrower kind mismatches the
+            // wasm32 signature and the call traps.
+            ASR::expr_t *len_arg = b.Variable(fn_symtab_1, "n", ASRUtils::TYPE(ASR::make_Integer_t(al, loc, 8)),
                     ASR::intentType::In, nullptr, ASR::abiType::BindC, true);
             args_1.push_back(al, len_arg);
         }
@@ -1420,7 +1422,7 @@ namespace ExecuteCommandLine {
         // Push the arguments to call_args vector, the string and its length
         {
             call_args.push_back(al, create_string_physical_cast(al, args[0], ASR::CChar));
-            call_args.push_back(al, b.StringLen(args[0]));
+            call_args.push_back(al, EXPR(ASR::make_StringLen_t(al, loc, args[0], int64, nullptr)));
         }
 
         optional_arg_index = 2;
@@ -1952,7 +1954,9 @@ namespace System {
                 ASR::intentType::In, nullptr, ASR::abiType::BindC, true);
             args_1.push_back(al, str_arg);
 
-            ASR::expr_t *len_arg = b.Variable(fn_symtab_1, "n", ASRUtils::TYPE(ASR::make_Integer_t(al, loc, 4)),
+            // The C prototype takes int64_t; a narrower kind mismatches the
+            // wasm32 signature and the call traps.
+            ASR::expr_t *len_arg = b.Variable(fn_symtab_1, "n", ASRUtils::TYPE(ASR::make_Integer_t(al, loc, 8)),
                     ASR::intentType::In, nullptr, ASR::abiType::BindC, true);
             args_1.push_back(al, len_arg);
         }
@@ -1971,7 +1975,7 @@ namespace System {
 
         {
             call_args.push_back(al, create_string_physical_cast(al, args[0], ASR::CChar));
-            call_args.push_back(al, b.StringLen(args[0]));
+            call_args.push_back(al, EXPR(ASR::make_StringLen_t(al, loc, args[0], int64, nullptr)));
         }
 
         body.push_back(al, b.Assignment(declare("_lcompilers_exit_status", ret_type, Local), b.Call(s, call_args, ret_type)));
