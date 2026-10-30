@@ -17,7 +17,8 @@
 #include <libasr/pass/pass_manager.h>
 #include <libasr/utils.h>
 
-namespace LCompilers {
+namespace LCompilers
+{
 
 class LLVMModule;
 class MLIRModule;
@@ -47,17 +48,30 @@ public:
 
     struct EvalResult {
         enum {
-            integer4, integer8, real4, real8, complex4, complex8, boolean,
-            character, statement, none
-        } type = none;
+            integer4,
+            integer8,
+            real4,
+            real8,
+            complex4,
+            complex8,
+            boolean,
+            character,
+            statement,
+            none
+        } type
+            = none;
         union {
             bool b;
             int32_t i32;
             int64_t i64;
             float f32;
             double f64;
-            struct {float re, im;} c32;
-            struct {double re, im;} c64;
+            struct {
+                float re, im;
+            } c32;
+            struct {
+                double re, im;
+            } c64;
         };
         std::string str;
         std::string ast;
@@ -65,7 +79,10 @@ public:
         std::string llvm_ir;
 
         // False for statements and empty cells, which have no value.
-        bool has_value() const { return type != statement && type != none; }
+        bool has_value() const
+        {
+            return type != statement && type != none;
+        }
         // The Fortran type and the text the prompt and kernels show.
         std::string type_name() const;
         std::string text() const;
@@ -74,19 +91,19 @@ public:
     // Where an executed cell's display data and clear_output() calls go
     // (the lfortran_display module). Unset hooks ignore them.
     struct CellIO {
-        std::function<void(const std::string &mime, const std::string &data)> display;
+        std::function<void(const std::string& mime, const std::string& data)> display;
         std::function<void()> clear_output;
         // Supplies the records a READ from stdin consumes: returns 0 with
         // `record` set (without a newline), -1 at end of file, or > 0 if no
         // input is available. Unset, the cell reads the process's stdin.
-        std::function<int(std::string &record)> input;
+        std::function<int(std::string& record)> input;
         // Receives what the cell writes to stdout (stream 1) and stderr
         // (stream 2). Set, both are captured while the cell runs and passed
         // here incrementally on native builds, before each display,
         // clear_output and input, and when the cell ends. All callbacks run
         // on the execute() caller. WASM currently drains only at these
         // barriers. Unset, the cell writes to the process's stdout and stderr.
-        std::function<void(int stream, const std::string &text)> output;
+        std::function<void(int stream, const std::string& text)> output;
         // Make bounded, nonblocking transport progress on the caller after
         // each capture pump, even when no new output was captured.
         std::function<void()> progress_output;
@@ -97,10 +114,10 @@ public:
 
     struct CellResult {
         bool ok = false;
-        bool inspection = false; // a %%show* cell
-        EvalResult value{};      // `none` for a %%show* cell
-        std::string output;      // the text a %%show* cell shows
-        std::string diagnostics; // rendered warnings and errors
+        bool inspection = false;  // a %%show* cell
+        EvalResult value{};       // `none` for a %%show* cell
+        std::string output;       // the text a %%show* cell shows
+        std::string diagnostics;  // rendered warnings and errors
         // If !ok: the error's name and message (the rendered diagnostics of
         // a CompilerError) and, for an internal compiler error, the stack
         // trace (empty without stacktrace support).
@@ -118,87 +135,109 @@ public:
     // becomes the error. `compiler_options.interactive` must be set. Only one
     // cell may run at a time in a process, as the display hooks are
     // process-wide.
-    CellResult execute(const std::string &code, bool verbose = false,
-        const CellIO &io = {});
+    CellResult execute(const std::string& code, bool verbose = false, const CellIO& io = {});
 
     // Evaluates `code`.
     // If `verbose=true`, it saves ast, asr and llvm_ir in Result.
-    Result<EvalResult> evaluate(const std::string &code, bool verbose,
-        LocationManager &lm, LCompilers::PassManager& pass_manager,
-        diag::Diagnostics &diagnostics);
-    Result<EvalResult> evaluate2(const std::string &code);
+    Result<EvalResult> evaluate(const std::string& code,
+                                bool verbose,
+                                LocationManager& lm,
+                                LCompilers::PassManager& pass_manager,
+                                diag::Diagnostics& diagnostics);
+    Result<EvalResult> evaluate2(const std::string& code);
 
-    Result<std::string> get_ast(const std::string &code,
-        LocationManager &lm, diag::Diagnostics &diagnostics);
-    Result<LCompilers::LFortran::AST::TranslationUnit_t*> get_ast2(
-        const std::string &code, LocationManager &lm,
-        diag::Diagnostics &diagnostics);
-    Result<std::string> get_asr(const std::string &code,
-        LocationManager &lm, diag::Diagnostics &diagnostics);
+    Result<std::string> get_ast(const std::string& code,
+                                LocationManager& lm,
+                                diag::Diagnostics& diagnostics);
+    Result<LCompilers::LFortran::AST::TranslationUnit_t*> get_ast2(const std::string& code,
+                                                                   LocationManager& lm,
+                                                                   diag::Diagnostics& diagnostics);
+    Result<std::string> get_asr(const std::string& code,
+                                LocationManager& lm,
+                                diag::Diagnostics& diagnostics);
     ASR::asr_t* handle_lookup_name(LCompilers::ASR::TranslationUnit_t* tu, uint32_t pos);
-    Result<ASR::TranslationUnit_t*> get_asr2(const std::string &code,
-        LocationManager &lm, diag::Diagnostics &diagnostics);
-    Result<ASR::TranslationUnit_t*> get_asr3(
-        LCompilers::LFortran::AST::TranslationUnit_t &ast,
-        diag::Diagnostics &diagnostics, LCompilers::LocationManager &lm);
+    Result<ASR::TranslationUnit_t*> get_asr2(const std::string& code,
+                                             LocationManager& lm,
+                                             diag::Diagnostics& diagnostics);
+    Result<ASR::TranslationUnit_t*> get_asr3(LCompilers::LFortran::AST::TranslationUnit_t& ast,
+                                             diag::Diagnostics& diagnostics,
+                                             LCompilers::LocationManager& lm);
     // Copy of a cell's symbols, taken before the ASR passes rewrite them, to
     // serve as the parent scope of the next cell.
-    SymbolTable* snapshot_cell_scope(ASR::TranslationUnit_t &asr);
-    SymbolTable* copy_cell_scope(SymbolTable *scope, SymbolTable *parent,
-        const Location &loc);
-    SymbolTable* copy_cell_chain(SymbolTable *chain, const Location &loc);
+    SymbolTable* snapshot_cell_scope(ASR::TranslationUnit_t& asr);
+    SymbolTable* copy_cell_scope(SymbolTable* scope, SymbolTable* parent, const Location& loc);
+    SymbolTable* copy_cell_chain(SymbolTable* chain, const Location& loc);
 #ifdef HAVE_LFORTRAN_LLVM
     // Turn definitions the JIT already holds into declarations.
-    void drop_redefinitions(LLVMModule &m);
+    void drop_redefinitions(LLVMModule& m);
 #endif
-    Result<std::string> get_llvm(const std::string &code,
-        LocationManager &lm, LCompilers::PassManager& pass_manager,
-        diag::Diagnostics &diagnostics);
-    Result<std::unique_ptr<LLVMModule>> get_llvm2(const std::string &code,
-        LocationManager &lm, LCompilers::PassManager& pass_manager,
-        diag::Diagnostics &diagnostics);
-    Result<std::unique_ptr<LLVMModule>> get_llvm3(ASR::TranslationUnit_t &asr,
-        LCompilers::PassManager& pass_manager,
-        diag::Diagnostics &diagnostics, LocationManager &lm, const std::string &infile,
-        int64_t* time_opt);
-    Result<std::string> get_asm(const std::string &code,
-        LocationManager &lm,
-        LCompilers::PassManager& pass_manager,
-        diag::Diagnostics &diagnostics);
-    Result<Vec<uint8_t>> get_wasm(const std::string &code, LocationManager &lm,
-        diag::Diagnostics &diagnostics);
-    Result<std::string> get_wat(const std::string &code, LocationManager &lm,
-        diag::Diagnostics &diagnostics);
-    Result<std::string> get_cpp(const std::string &code, LocationManager &lm,
-        diag::Diagnostics &diagnostics, int64_t default_lower_bound);
-    Result<std::string> get_cpp2(ASR::TranslationUnit_t &asr,
-        diag::Diagnostics &diagnostics, int64_t default_lower_bound);
-    Result<std::string> get_c(const std::string &code, LocationManager &lm,
-        diag::Diagnostics &diagnostics, int64_t default_lower_bound);
-    Result<std::string> get_c2(ASR::TranslationUnit_t &asr,
-        diag::Diagnostics &diagnostics, int64_t default_lower_bound);
-    Result<std::string> get_c3(ASR::TranslationUnit_t &asr,
-        diag::Diagnostics &diagnostics, LCompilers::PassManager& pass_manager,
-        int64_t default_lower_bound);
+    Result<std::string> get_llvm(const std::string& code,
+                                 LocationManager& lm,
+                                 LCompilers::PassManager& pass_manager,
+                                 diag::Diagnostics& diagnostics);
+    Result<std::unique_ptr<LLVMModule>> get_llvm2(const std::string& code,
+                                                  LocationManager& lm,
+                                                  LCompilers::PassManager& pass_manager,
+                                                  diag::Diagnostics& diagnostics);
+    Result<std::unique_ptr<LLVMModule>> get_llvm3(ASR::TranslationUnit_t& asr,
+                                                  LCompilers::PassManager& pass_manager,
+                                                  diag::Diagnostics& diagnostics,
+                                                  LocationManager& lm,
+                                                  const std::string& infile,
+                                                  int64_t* time_opt);
+    Result<std::string> get_asm(const std::string& code,
+                                LocationManager& lm,
+                                LCompilers::PassManager& pass_manager,
+                                diag::Diagnostics& diagnostics);
+    Result<Vec<uint8_t>> get_wasm(const std::string& code,
+                                  LocationManager& lm,
+                                  diag::Diagnostics& diagnostics);
+    Result<std::string> get_wat(const std::string& code,
+                                LocationManager& lm,
+                                diag::Diagnostics& diagnostics);
+    Result<std::string> get_cpp(const std::string& code,
+                                LocationManager& lm,
+                                diag::Diagnostics& diagnostics,
+                                int64_t default_lower_bound);
+    Result<std::string> get_cpp2(ASR::TranslationUnit_t& asr,
+                                 diag::Diagnostics& diagnostics,
+                                 int64_t default_lower_bound);
+    Result<std::string> get_c(const std::string& code,
+                              LocationManager& lm,
+                              diag::Diagnostics& diagnostics,
+                              int64_t default_lower_bound);
+    Result<std::string> get_c2(ASR::TranslationUnit_t& asr,
+                               diag::Diagnostics& diagnostics,
+                               int64_t default_lower_bound);
+    Result<std::string> get_c3(ASR::TranslationUnit_t& asr,
+                               diag::Diagnostics& diagnostics,
+                               LCompilers::PassManager& pass_manager,
+                               int64_t default_lower_bound);
     // GPU kernel source for the backend selected by --gpu, with no host-side
     // kernel-registration shim, so that external toolchains can consume it.
-    Result<std::string> get_gpu_kernel_source(ASR::TranslationUnit_t &asr,
-        diag::Diagnostics &diagnostics, LCompilers::PassManager& pass_manager);
-    Result<std::string> get_julia(const std::string &code,
-        LocationManager &lm, diag::Diagnostics &diagnostics);
-    Result<std::unique_ptr<MLIRModule>> get_mlir(
-        ASR::asr_t &asr, diag::Diagnostics &diagnostics);
-    Result<std::string> get_fortran(const std::string &code,
-        LocationManager &lm, diag::Diagnostics &diagnostics,
-        LCompilers::PassManager& pass_manager);
-    Result<std::string> get_fmt(const std::string &code, LocationManager &lm,
-        diag::Diagnostics &diagnostics);
-    Allocator &get_al() { return al; };
+    Result<std::string> get_gpu_kernel_source(ASR::TranslationUnit_t& asr,
+                                              diag::Diagnostics& diagnostics,
+                                              LCompilers::PassManager& pass_manager);
+    Result<std::string> get_julia(const std::string& code,
+                                  LocationManager& lm,
+                                  diag::Diagnostics& diagnostics);
+    Result<std::unique_ptr<MLIRModule>> get_mlir(ASR::asr_t& asr, diag::Diagnostics& diagnostics);
+    Result<std::string> get_fortran(const std::string& code,
+                                    LocationManager& lm,
+                                    diag::Diagnostics& diagnostics,
+                                    LCompilers::PassManager& pass_manager);
+    Result<std::string> get_fmt(const std::string& code,
+                                LocationManager& lm,
+                                diag::Diagnostics& diagnostics);
+    Allocator& get_al()
+    {
+        return al;
+    };
 #ifdef HAVE_LFORTRAN_LLVM
-    LLVMEvaluator &get_llvm_evaluator();
+    LLVMEvaluator& get_llvm_evaluator();
 #endif
 #ifdef __EMSCRIPTEN__
-    WasmLFortranExecutor &get_wasm_executor();
+    WasmLFortranExecutor& get_wasm_executor();
 #endif
 
 private:
@@ -215,7 +254,7 @@ private:
 #ifdef __EMSCRIPTEN__
     std::unique_ptr<WasmLFortranExecutor> wasm_exec;
 #endif
-    SymbolTable *symbol_table;
+    SymbolTable* symbol_table;
     // Keyed by the committed cell scope so inspection's scope restoration
     // also restores the implicit typing policy.
     std::map<SymbolTable*, std::map<std::string, ASR::ttype_t*>> cell_implicit_types;
@@ -230,11 +269,11 @@ private:
 
     // Puts the chain of cells, this one last, into `lm` and returns the
     // position this cell starts at.
-    uint32_t open_cell(const std::string &code, LocationManager &lm);
+    uint32_t open_cell(const std::string& code, LocationManager& lm);
     // Moves this cell's intervals to where the cell starts and records it.
-    void close_cell(const std::string &code, LocationManager &lm);
+    void close_cell(const std::string& code, LocationManager& lm);
 };
 
-} // namespace LCompilers
+}  // namespace LCompilers
 
-#endif // LFORTRAN_FORTRAN_EVALUATOR_H
+#endif  // LFORTRAN_FORTRAN_EVALUATOR_H

@@ -45,15 +45,16 @@
 #include <llvm/ADT/Triple.h>
 #endif
 
-using LCompilers::TRY;
-using LCompilers::FortranEvaluator;
 using LCompilers::CompilerOptions;
+using LCompilers::FortranEvaluator;
+using LCompilers::TRY;
 
 // Raw LLVMEvaluator tests use ORC JIT which is not available under Emscripten;
 // FortranEvaluator tests below are WASM-compatible via WasmLFortranExecutor dispatch.
 #ifndef __EMSCRIPTEN__
 
-TEST_CASE("LLVM target configuration") {
+TEST_CASE("LLVM target configuration")
+{
     CompilerOptions default_options;
     LCompilers::LLVMTargetConfig default_config
         = LCompilers::resolve_llvm_target_config(default_options);
@@ -63,8 +64,7 @@ TEST_CASE("LLVM target configuration") {
 
     CompilerOptions fast_options;
     fast_options.po.fast = true;
-    LCompilers::LLVMTargetConfig fast_config
-        = LCompilers::resolve_llvm_target_config(fast_options);
+    LCompilers::LLVMTargetConfig fast_config = LCompilers::resolve_llvm_target_config(fast_options);
     CHECK(fast_config.host_target);
     CHECK(fast_config.emit_cpu_attribute);
     CHECK(!fast_config.cpu.empty());
@@ -80,24 +80,21 @@ TEST_CASE("LLVM target configuration") {
 
     CompilerOptions tune_options;
     tune_options.mtune = "generic";
-    LCompilers::LLVMTargetConfig tune_config
-        = LCompilers::resolve_llvm_target_config(tune_options);
+    LCompilers::LLVMTargetConfig tune_config = LCompilers::resolve_llvm_target_config(tune_options);
     CHECK(tune_config.cpu == "generic");
     CHECK(tune_config.tune_cpu == "generic");
     CHECK(!tune_config.emit_cpu_attribute);
 
     llvm::LLVMContext context;
     llvm::Module module("target_options", context);
-    llvm::FunctionType *function_type = llvm::FunctionType::get(
-        llvm::Type::getVoidTy(context), false);
-    llvm::Function *function = llvm::Function::Create(function_type,
-        llvm::Function::ExternalLinkage, "f", &module);
-    llvm::BasicBlock *entry = llvm::BasicBlock::Create(
-        context, "entry", function);
+    llvm::FunctionType* function_type
+        = llvm::FunctionType::get(llvm::Type::getVoidTy(context), false);
+    llvm::Function* function
+        = llvm::Function::Create(function_type, llvm::Function::ExternalLinkage, "f", &module);
+    llvm::BasicBlock* entry = llvm::BasicBlock::Create(context, "entry", function);
     llvm::ReturnInst::Create(context, entry);
     generic_config.apply_target_attributes(module);
-    CHECK(function->getFnAttribute("target-cpu").getValueAsString()
-        == "generic");
+    CHECK(function->getFnAttribute("target-cpu").getValueAsString() == "generic");
 
     llvm::Triple triple(default_config.triple);
     CompilerOptions march_options;
@@ -138,11 +135,9 @@ TEST_CASE("LLVM target configuration") {
         CHECK(!march_config.features.empty());
 
         LCompilers::LLVMTargetConfig cpu_and_march_config
-            = LCompilers::resolve_llvm_target_config(
-                cpu_and_march_options);
+            = LCompilers::resolve_llvm_target_config(cpu_and_march_options);
         CHECK(cpu_and_march_config.cpu == "generic");
-        CHECK(cpu_and_march_config.tune_cpu
-            == cpu_and_march_options.mcpu);
+        CHECK(cpu_and_march_config.tune_cpu == cpu_and_march_options.mcpu);
         CHECK(!cpu_and_march_config.features.empty());
     }
 
@@ -152,27 +147,24 @@ TEST_CASE("LLVM target configuration") {
     // tables accept, so this used to abort the compilation.
     CompilerOptions native_march_options;
     native_march_options.march = "native";
-    CHECK_NOTHROW(
-        LCompilers::resolve_llvm_target_config(native_march_options));
+    CHECK_NOTHROW(LCompilers::resolve_llvm_target_config(native_march_options));
 
     CompilerOptions native_mcpu_options;
     native_mcpu_options.mcpu = "native";
-    CHECK_NOTHROW(
-        LCompilers::resolve_llvm_target_config(native_mcpu_options));
+    CHECK_NOTHROW(LCompilers::resolve_llvm_target_config(native_mcpu_options));
 
     CompilerOptions native_mtune_options;
     native_mtune_options.mtune = "native";
-    CHECK_NOTHROW(
-        LCompilers::resolve_llvm_target_config(native_mtune_options));
+    CHECK_NOTHROW(LCompilers::resolve_llvm_target_config(native_mtune_options));
 
     CompilerOptions invalid_cpu_options;
     invalid_cpu_options.mcpu = "not-a-real-cpu";
-    CHECK_THROWS_AS(
-        LCompilers::resolve_llvm_target_config(invalid_cpu_options),
-        LCompilers::LCompilersException);
+    CHECK_THROWS_AS(LCompilers::resolve_llvm_target_config(invalid_cpu_options),
+                    LCompilers::LCompilersException);
 }
 
-TEST_CASE("LLVM code generation optimization level") {
+TEST_CASE("LLVM code generation optimization level")
+{
     // Like clang and flang, the default mode generates machine code at -O0
     // and `--fast` at -O3.
 #if LLVM_VERSION_MAJOR >= 18
@@ -182,40 +174,37 @@ TEST_CASE("LLVM code generation optimization level") {
 #endif
     CompilerOptions default_options;
     LCompilers::LLVMEvaluator default_evaluator(default_options);
-    CHECK(default_evaluator.get_target_machine().getOptLevel()
-        == CodeGenOptLevel::None);
+    CHECK(default_evaluator.get_target_machine().getOptLevel() == CodeGenOptLevel::None);
 
     CompilerOptions fast_options;
     fast_options.po.fast = true;
     LCompilers::LLVMEvaluator fast_evaluator(fast_options);
-    CHECK(fast_evaluator.get_target_machine().getOptLevel()
-        == CodeGenOptLevel::Aggressive);
+    CHECK(fast_evaluator.get_target_machine().getOptLevel() == CodeGenOptLevel::Aggressive);
 
 #ifdef HAVE_TARGET_WASM
     // WebAssembly needs register coloring to keep functions within the
     // engines' limit on the number of locals.
     LCompilers::LLVMEvaluator wasm_evaluator("wasm32-unknown-wasi");
-    CHECK(wasm_evaluator.get_target_machine().getOptLevel()
-        == CodeGenOptLevel::Default);
+    CHECK(wasm_evaluator.get_target_machine().getOptLevel() == CodeGenOptLevel::Default);
 #endif
 
 #ifdef HAVE_TARGET_AARCH64
     // At -O0 LLVM selects GlobalISel on AArch64, whose compile time is
     // quadratic in the size of a basic block; the default mode uses FastISel
     // as on x86-64.
-    for (const std::string triple: {"aarch64-unknown-linux-gnu",
-            "arm64-apple-macosx11.0.0"}) {
+    for (const std::string triple : { "aarch64-unknown-linux-gnu", "arm64-apple-macosx11.0.0" }) {
         LCompilers::LLVMEvaluator aarch64_evaluator(triple);
-        const llvm::TargetMachine &tm = aarch64_evaluator.get_target_machine();
+        const llvm::TargetMachine& tm = aarch64_evaluator.get_target_machine();
         CHECK(tm.getOptLevel() == CodeGenOptLevel::None);
         CHECK(!tm.Options.EnableGlobalISel);
     }
 #endif
 }
 
-TEST_CASE("llvm 1") {
-    //std::cout << "LLVM Version:" << std::endl;
-    //LFortran::LLVMEvaluator::print_version_message();
+TEST_CASE("llvm 1")
+{
+    // std::cout << "LLVM Version:" << std::endl;
+    // LFortran::LLVMEvaluator::print_version_message();
 
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
@@ -226,22 +215,23 @@ define i64 @f1()
     )""");
     CHECK(e.execfn<int64_t>("f1") == 4);
     e.add_module("");
-//    CHECK(e.execfn<int64_t>("f1") == 4);
+    //    CHECK(e.execfn<int64_t>("f1") == 4);
 
-/*
-    e.add_module(R"""(
-define i64 @f1()
+    /*
+        e.add_module(R"""(
+    define i64 @f1()
+    {
+        ret i64 5
+    }
+        )""");
+        CHECK(e.execfn<int64_t>("f1") == 5);
+        e.add_module("");
+        CHECK(e.execfn<int64_t>("f1") == 5);
+    */
+}
+
+TEST_CASE("llvm 1 fail")
 {
-    ret i64 5
-}
-    )""");
-    CHECK(e.execfn<int64_t>("f1") == 5);
-    e.add_module("");
-    CHECK(e.execfn<int64_t>("f1") == 5);
-*/
-}
-
-TEST_CASE("llvm 1 fail") {
     LCompilers::LLVMEvaluator e;
     CHECK_THROWS_AS(e.add_module(R"""(
 define i64 @f1()
@@ -249,18 +239,21 @@ define i64 @f1()
     ; FAIL: "=x" is incorrect syntax
     %1 =x alloca i64
 }
-        )"""), LCompilers::LCompilersException);
+        )"""),
+                    LCompilers::LCompilersException);
     CHECK_THROWS_WITH(e.add_module(R"""(
 define i64 @f1()
 {
     ; FAIL: "=x" is incorrect syntax
     %1 =x alloca i64
 }
-        )"""), "parse_module(): Invalid LLVM IR");
+        )"""),
+                      "parse_module(): Invalid LLVM IR");
 }
 
 
-TEST_CASE("llvm 2") {
+TEST_CASE("llvm 2")
+{
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 @count = global i64 0
@@ -292,10 +285,12 @@ define i64 @f3()
     %1 = load i64, i64* @count
     ret i64 %1
 }
-        )"""), LCompilers::LCompilersException);
+        )"""),
+                    LCompilers::LCompilersException);
 }
 
-TEST_CASE("llvm 3") {
+TEST_CASE("llvm 3")
+{
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 @count = global i64 5
@@ -320,125 +315,127 @@ define void @inc()
     )""");
     CHECK(e.execfn<int64_t>("f1") == 5);
 
-//    e.execfn<void>("inc");
-//    CHECK(e.execfn<int64_t>("f1") == 6);
-/*    e.execfn<void>("inc");
-    CHECK(e.execfn<int64_t>("f1") == 7);
-    */
-/*
-    e.add_module(R"""(
-@count = external global i64
-
-define void @inc2()
-{
-    %1 = load i64, i64* @count
-    %2 = add i64 %1, 2
-    store i64 %2, i64* @count
-    ret void
-}
-    )""");
-    CHECK(e.execfn<int64_t>("f1") == 7);
-    e.execfn<void>("inc2");
-    CHECK(e.execfn<int64_t>("f1") == 9);
-    e.execfn<void>("inc2");
-    CHECK(e.execfn<int64_t>("f1") == 11);
-    e.execfn<void>("inc2");
-    CHECK(e.execfn<int64_t>("f1") == 13);
-
-    // Test that we can have another independent LLVMEvaluator and use both at
-    // the same time:
-    LFortran::LLVMEvaluator e2;
-    e2.add_module(R"""(
-@count = global i64 5
-
-define i64 @f1()
-{
-    %1 = load i64, i64* @count
-    ret i64 %1
-}
-
-define void @inc()
-{
-    %1 = load i64, i64* @count
-    %2 = add i64 %1, 1
-    store i64 %2, i64* @count
-    ret void
-}
-    )""");
-
-    CHECK(e2.execfn<int64_t>("f1") == 5);
-    e2.execfn<void>("inc");
-    CHECK(e2.execfn<int64_t>("f1") == 6);
-    e2.execfn<void>("inc");
-    CHECK(e2.execfn<int64_t>("f1") == 7);
-
-    CHECK(e.execfn<int64_t>("f1") == 12);
-    e2.execfn<void>("inc");
-    CHECK(e2.execfn<int64_t>("f1") == 8);
-    CHECK(e.execfn<int64_t>("f1") == 12);
-    e.execfn<void>("inc2");
-    CHECK(e2.execfn<int64_t>("f1") == 8);
-    CHECK(e.execfn<int64_t>("f1") == 14);
-*/
-}
-
-TEST_CASE("llvm 4") {
-    LCompilers::LLVMEvaluator e;
-    e.add_module(R"""(
-@count = global i64 5
-
-define i64 @f1()
-{
-    %1 = load i64, i64* @count
-    ret i64 %1
-}
-
-define void @inc()
-{
-    %1 = load i64, i64* @count
-    %2 = add i64 %1, 1
-    store i64 %2, i64* @count
-    ret void
-}
-)""");
-    CHECK(e.execfn<int64_t>("f1") == 5);
-/*    e.execfn<void>("inc");
-    CHECK(e.execfn<int64_t>("f1") == 6);
-    e.execfn<void>("inc");
-    CHECK(e.execfn<int64_t>("f1") == 7);
-    */
-/*
-    e.add_module(R"""(
-declare void @inc()
-
-define void @inc2()
-{
-    call void @inc()
-    call void @inc()
-    ret void
-}
-)""");
-    CHECK(e.execfn<int64_t>("f1") == 7);
-    e.execfn<void>("inc2");
-    CHECK(e.execfn<int64_t>("f1") == 9);
-    e.execfn<void>("inc");
-    CHECK(e.execfn<int64_t>("f1") == 10);
-    e.execfn<void>("inc2");
-    CHECK(e.execfn<int64_t>("f1") == 12);
-
-    CHECK_THROWS_AS(e.add_module(R"""(
-define void @inc2()
-{
-    ; FAIL: @inc is not defined
-    call void @inc()
-    call void @inc()
-    ret void
-}
-        )"""), LFortran::LCompilersException);
+    //    e.execfn<void>("inc");
+    //    CHECK(e.execfn<int64_t>("f1") == 6);
+    /*    e.execfn<void>("inc");
+        CHECK(e.execfn<int64_t>("f1") == 7);
         */
+    /*
+        e.add_module(R"""(
+    @count = external global i64
+
+    define void @inc2()
+    {
+        %1 = load i64, i64* @count
+        %2 = add i64 %1, 2
+        store i64 %2, i64* @count
+        ret void
+    }
+        )""");
+        CHECK(e.execfn<int64_t>("f1") == 7);
+        e.execfn<void>("inc2");
+        CHECK(e.execfn<int64_t>("f1") == 9);
+        e.execfn<void>("inc2");
+        CHECK(e.execfn<int64_t>("f1") == 11);
+        e.execfn<void>("inc2");
+        CHECK(e.execfn<int64_t>("f1") == 13);
+
+        // Test that we can have another independent LLVMEvaluator and use both at
+        // the same time:
+        LFortran::LLVMEvaluator e2;
+        e2.add_module(R"""(
+    @count = global i64 5
+
+    define i64 @f1()
+    {
+        %1 = load i64, i64* @count
+        ret i64 %1
+    }
+
+    define void @inc()
+    {
+        %1 = load i64, i64* @count
+        %2 = add i64 %1, 1
+        store i64 %2, i64* @count
+        ret void
+    }
+        )""");
+
+        CHECK(e2.execfn<int64_t>("f1") == 5);
+        e2.execfn<void>("inc");
+        CHECK(e2.execfn<int64_t>("f1") == 6);
+        e2.execfn<void>("inc");
+        CHECK(e2.execfn<int64_t>("f1") == 7);
+
+        CHECK(e.execfn<int64_t>("f1") == 12);
+        e2.execfn<void>("inc");
+        CHECK(e2.execfn<int64_t>("f1") == 8);
+        CHECK(e.execfn<int64_t>("f1") == 12);
+        e.execfn<void>("inc2");
+        CHECK(e2.execfn<int64_t>("f1") == 8);
+        CHECK(e.execfn<int64_t>("f1") == 14);
+    */
 }
 
-TEST_CASE("llvm array 1") {
+TEST_CASE("llvm 4")
+{
+    LCompilers::LLVMEvaluator e;
+    e.add_module(R"""(
+@count = global i64 5
+
+define i64 @f1()
+{
+    %1 = load i64, i64* @count
+    ret i64 %1
+}
+
+define void @inc()
+{
+    %1 = load i64, i64* @count
+    %2 = add i64 %1, 1
+    store i64 %2, i64* @count
+    ret void
+}
+)""");
+    CHECK(e.execfn<int64_t>("f1") == 5);
+    /*    e.execfn<void>("inc");
+        CHECK(e.execfn<int64_t>("f1") == 6);
+        e.execfn<void>("inc");
+        CHECK(e.execfn<int64_t>("f1") == 7);
+        */
+    /*
+        e.add_module(R"""(
+    declare void @inc()
+
+    define void @inc2()
+    {
+        call void @inc()
+        call void @inc()
+        ret void
+    }
+    )""");
+        CHECK(e.execfn<int64_t>("f1") == 7);
+        e.execfn<void>("inc2");
+        CHECK(e.execfn<int64_t>("f1") == 9);
+        e.execfn<void>("inc");
+        CHECK(e.execfn<int64_t>("f1") == 10);
+        e.execfn<void>("inc2");
+        CHECK(e.execfn<int64_t>("f1") == 12);
+
+        CHECK_THROWS_AS(e.add_module(R"""(
+    define void @inc2()
+    {
+        ; FAIL: @inc is not defined
+        call void @inc()
+        call void @inc()
+        ret void
+    }
+            )"""), LFortran::LCompilersException);
+            */
+}
+
+TEST_CASE("llvm array 1")
+{
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 ; Sum the three elements in %a
@@ -480,7 +477,8 @@ define i64 @f()
     CHECK(e.execfn<int64_t>("f") == 6);
 }
 
-TEST_CASE("llvm array 2") {
+TEST_CASE("llvm array 2")
+{
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 %array = type {i64, [3 x i64]}
@@ -522,20 +520,24 @@ define i64 @f()
     ret i64 %r
 }
     )""");
-    //CHECK(e.execfn<int64_t>("f") == 6);
+    // CHECK(e.execfn<int64_t>("f") == 6);
 }
 
-int f(int a, int b) {
-    return a+b;
+int
+f(int a, int b)
+{
+    return a + b;
 }
 
-TEST_CASE("llvm callback 0") {
+TEST_CASE("llvm callback 0")
+{
     LCompilers::LLVMEvaluator e;
-    std::string addr = std::to_string((int64_t)f);
+    std::string addr = std::to_string((int64_t) f);
     e.add_module(R"""(
 define i64 @addrcaller(i64 %a, i64 %b)
 {
-    %f = inttoptr i64 )""" + addr + R"""( to i64 (i64, i64)*
+    %f = inttoptr i64 )"""
+                 + addr + R"""( to i64 (i64, i64)*
     %r = call i64 %f(i64 %a, i64 %b)
     ret i64 %r
 }
@@ -550,28 +552,33 @@ define i64 @f1()
 }
 
 
-TEST_CASE("ASR -> LLVM 1") {
+TEST_CASE("ASR -> LLVM 1")
+{
     std::string source = R"(function f()
 integer :: f
 f = 5
 end function)";
 
     // Src -> AST
-    Allocator al(4*1024);
+    Allocator al(4 * 1024);
     LCompilers::diag::Diagnostics diagnostics;
     CompilerOptions compiler_options;
     compiler_options.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
-    LCompilers::LFortran::AST::TranslationUnit_t* tu = TRY(LCompilers::LFortran::parse(al, source,
-        diagnostics, compiler_options));
+    LCompilers::LFortran::AST::TranslationUnit_t* tu
+        = TRY(LCompilers::LFortran::parse(al, source, diagnostics, compiler_options));
     LCompilers::LFortran::AST::ast_t* ast = tu->m_items[0];
-    CHECK(LCompilers::LFortran::pickle(*ast) == "(Function f [] [] () () () [(Declaration (AttrType TypeInteger [] () () None) [] [(f [] [] () () None ())] ()) (Assignment 0 f 5 ())] [] [])");
+    CHECK(
+        LCompilers::LFortran::pickle(*ast)
+        == "(Function f [] [] () () () [(Declaration (AttrType TypeInteger [] () () None) [] [(f [] [] () () None ())] ()) (Assignment 0 f 5 ())] [] [])");
 
     // AST -> ASR
     LCompilers::SymbolTable::reset_global_counter();
     LCompilers::LocationManager lm;
-    LCompilers::ASR::TranslationUnit_t* asr = TRY(LCompilers::LFortran::ast_to_asr(al, *tu,
-        diagnostics, nullptr, false, compiler_options, lm));
-    CHECK(LCompilers::pickle(*asr) == "(TranslationUnit (SymbolTable 1 {f: (Function (SymbolTable 2 {f: (Variable 2 f [] ReturnVar () () Default (Integer 4) () Source Public Required .false. .false. .false. () .false. .false. .false. NotMethod () [] ())}) f (FunctionType [] (Integer 4) Source Implementation () .false. .false. .false. .false. .false. [] .false. Host) [] [] [(Assignment (Var 2 f) (IntegerConstant 5 (Integer 4) Decimal) () .false. .false. .false. .false.)] (Var 2 f) Public .true. .true. ())}) [] ())");
+    LCompilers::ASR::TranslationUnit_t* asr = TRY(LCompilers::LFortran::ast_to_asr(
+        al, *tu, diagnostics, nullptr, false, compiler_options, lm));
+    CHECK(
+        LCompilers::pickle(*asr)
+        == "(TranslationUnit (SymbolTable 1 {f: (Function (SymbolTable 2 {f: (Variable 2 f [] ReturnVar () () Default (Integer 4) () Source Public Required .false. .false. .false. () .false. .false. .false. NotMethod () [] ())}) f (FunctionType [] (Integer 4) Source Implementation () .false. .false. .false. .false. .false. [] .false. Host) [] [] [(Assignment (Var 2 f) (IntegerConstant 5 (Integer 4) Decimal) () .false. .false. .false. .false.)] (Var 2 f) Public .true. .true. ())}) [] ())");
 
     // ASR -> LLVM
     LCompilers::LLVMEvaluator e;
@@ -580,98 +587,110 @@ end function)";
     CompilerOptions co;
     co.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     co.platform = LCompilers::get_platform();
-    LCompilers::Result<std::unique_ptr<LCompilers::LLVMModule>>
-        res = LCompilers::asr_to_llvm(*asr, diagnostics, e.get_context(),
-            e.get_target_config(), al, lpm, co, "f", "", "", lm);
+    LCompilers::Result<std::unique_ptr<LCompilers::LLVMModule>> res = LCompilers::asr_to_llvm(
+        *asr, diagnostics, e.get_context(), e.get_target_config(), al, lpm, co, "f", "", "", lm);
     REQUIRE(res.ok);
     std::unique_ptr<LCompilers::LLVMModule> m = std::move(res.result);
-    //std::cout << "Module:" << std::endl;
-    //std::cout << m->str() << std::endl;
+    // std::cout << "Module:" << std::endl;
+    // std::cout << m->str() << std::endl;
 
     // LLVM -> Machine code -> Execution
     e.add_module(std::move(m));
     CHECK(e.execfn<int32_t>("f") == 5);
 }
 
-TEST_CASE("ASR -> LLVM 2") {
+TEST_CASE("ASR -> LLVM 2")
+{
     std::string source = R"(function f()
 integer :: f
 f = 4
 end function)";
 
     // Src -> AST
-    Allocator al(4*1024);
+    Allocator al(4 * 1024);
     LCompilers::diag::Diagnostics diagnostics;
     CompilerOptions compiler_options;
     compiler_options.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
-    LCompilers::LFortran::AST::TranslationUnit_t* tu = TRY(LCompilers::LFortran::parse(al, source,
-        diagnostics, compiler_options));
+    LCompilers::LFortran::AST::TranslationUnit_t* tu
+        = TRY(LCompilers::LFortran::parse(al, source, diagnostics, compiler_options));
     LCompilers::LFortran::AST::ast_t* ast = tu->m_items[0];
-    CHECK(LCompilers::LFortran::pickle(*ast) == "(Function f [] [] () () () [(Declaration (AttrType TypeInteger [] () () None) [] [(f [] [] () () None ())] ()) (Assignment 0 f 4 ())] [] [])");
+    CHECK(
+        LCompilers::LFortran::pickle(*ast)
+        == "(Function f [] [] () () () [(Declaration (AttrType TypeInteger [] () () None) [] [(f [] [] () () None ())] ()) (Assignment 0 f 4 ())] [] [])");
 
     // AST -> ASR
     LCompilers::LocationManager lm;
-    LCompilers::ASR::TranslationUnit_t* asr = TRY(LCompilers::LFortran::ast_to_asr(al, *tu,
-        diagnostics, nullptr, false, compiler_options, lm));
-    CHECK(LCompilers::pickle(*asr) == "(TranslationUnit (SymbolTable 3 {f: (Function (SymbolTable 4 {f: (Variable 4 f [] ReturnVar () () Default (Integer 4) () Source Public Required .false. .false. .false. () .false. .false. .false. NotMethod () [] ())}) f (FunctionType [] (Integer 4) Source Implementation () .false. .false. .false. .false. .false. [] .false. Host) [] [] [(Assignment (Var 4 f) (IntegerConstant 4 (Integer 4) Decimal) () .false. .false. .false. .false.)] (Var 4 f) Public .true. .true. ())}) [] ())");
+    LCompilers::ASR::TranslationUnit_t* asr = TRY(LCompilers::LFortran::ast_to_asr(
+        al, *tu, diagnostics, nullptr, false, compiler_options, lm));
+    CHECK(
+        LCompilers::pickle(*asr)
+        == "(TranslationUnit (SymbolTable 3 {f: (Function (SymbolTable 4 {f: (Variable 4 f [] ReturnVar () () Default (Integer 4) () Source Public Required .false. .false. .false. () .false. .false. .false. NotMethod () [] ())}) f (FunctionType [] (Integer 4) Source Implementation () .false. .false. .false. .false. .false. [] .false. Host) [] [] [(Assignment (Var 4 f) (IntegerConstant 4 (Integer 4) Decimal) () .false. .false. .false. .false.)] (Var 4 f) Public .true. .true. ())}) [] ())");
     // ASR -> LLVM
     LCompilers::LLVMEvaluator e;
     LCompilers::PassManager lpm;
     lpm.use_default_passes();
-    LCompilers::Result<std::unique_ptr<LCompilers::LLVMModule>>
-        res = LCompilers::asr_to_llvm(*asr, diagnostics, e.get_context(),
-            e.get_target_config(), al, lpm, compiler_options, "f", "", "",
-            lm);
+    LCompilers::Result<std::unique_ptr<LCompilers::LLVMModule>> res
+        = LCompilers::asr_to_llvm(*asr,
+                                  diagnostics,
+                                  e.get_context(),
+                                  e.get_target_config(),
+                                  al,
+                                  lpm,
+                                  compiler_options,
+                                  "f",
+                                  "",
+                                  "",
+                                  lm);
     REQUIRE(res.ok);
     std::unique_ptr<LCompilers::LLVMModule> m = std::move(res.result);
-    //std::cout << "Module:" << std::endl;
-    //std::cout << m->str() << std::endl;
+    // std::cout << "Module:" << std::endl;
+    // std::cout << m->str() << std::endl;
 
     // LLVM -> Machine code -> Execution
     e.add_module(std::move(m));
     CHECK(e.execfn<int32_t>("f") == 4);
 }
 
-namespace {
+namespace
+{
 
 // Compiles `source` with the LLVM backend, with --fast if `fast`, and calls
 // `inspect` with each of the given procedures and its LLVM definition, before
 // any LLVM pass runs. Each procedure is given as {name, end of the name of its
 // LLVM definition}.
-void inspect_definitions(const std::string &source, bool fast,
-        const std::vector<std::pair<std::string, std::string>> &procedures,
-        const std::function<void(const std::string &, llvm::Function &)>
-            &inspect) {
-    Allocator al(64*1024);
+void
+inspect_definitions(const std::string& source,
+                    bool fast,
+                    const std::vector<std::pair<std::string, std::string>>& procedures,
+                    const std::function<void(const std::string&, llvm::Function&)>& inspect)
+{
+    Allocator al(64 * 1024);
     LCompilers::diag::Diagnostics diagnostics;
     CompilerOptions co;
     co.po.runtime_library_dir = LFORTRAN_BUILD_RUNTIME_DIR;
     co.platform = LCompilers::get_platform();
     co.po.fast = fast;
-    LCompilers::LFortran::AST::TranslationUnit_t* tu = TRY(
-        LCompilers::LFortran::parse(al, source, diagnostics, co));
+    LCompilers::LFortran::AST::TranslationUnit_t* tu
+        = TRY(LCompilers::LFortran::parse(al, source, diagnostics, co));
     LCompilers::LocationManager lm;
     LCompilers::LocationManager::FileLocations file;
     file.in_filename = "inspect.f90";
     lm.files.push_back(file);
     lm.file_ends.push_back(LCompilers::LFortran::source_offset(source.size()));
-    LCompilers::ASR::TranslationUnit_t* asr = TRY(
-        LCompilers::LFortran::ast_to_asr(al, *tu, diagnostics, nullptr, false,
-            co, lm));
+    LCompilers::ASR::TranslationUnit_t* asr
+        = TRY(LCompilers::LFortran::ast_to_asr(al, *tu, diagnostics, nullptr, false, co, lm));
     LCompilers::LLVMEvaluator e;
     LCompilers::PassManager lpm;
     lpm.use_default_passes();
-    LCompilers::Result<std::unique_ptr<LCompilers::LLVMModule>>
-        res = LCompilers::asr_to_llvm(*asr, diagnostics, e.get_context(),
-            e.get_target_config(), al, lpm, co, "", "", "", lm);
+    LCompilers::Result<std::unique_ptr<LCompilers::LLVMModule>> res = LCompilers::asr_to_llvm(
+        *asr, diagnostics, e.get_context(), e.get_target_config(), al, lpm, co, "", "", "", lm);
     REQUIRE(res.ok);
-    for (const auto &[procedure, suffix]: procedures) {
-        llvm::Function *fn = nullptr;
-        for (llvm::Function &f: *res.result->m_m) {
+    for (const auto& [procedure, suffix] : procedures) {
+        llvm::Function* fn = nullptr;
+        for (llvm::Function& f : *res.result->m_m) {
             std::string name = f.getName().str();
-            if (!f.isDeclaration() && name.size() >= suffix.size() &&
-                    name.compare(name.size() - suffix.size(),
-                        suffix.size(), suffix) == 0) {
+            if (!f.isDeclaration() && name.size() >= suffix.size()
+                && name.compare(name.size() - suffix.size(), suffix.size(), suffix) == 0) {
                 fn = &f;
             }
         }
@@ -682,12 +701,15 @@ void inspect_definitions(const std::string &source, bool fast,
 
 // The dummy arguments, as "procedure:argument ...", whose parameters the LLVM
 // backend marks noalias when it compiles `source`.
-std::string noalias_parameters(const std::string &source, bool fast,
-        const std::vector<std::pair<std::string, std::string>> &procedures) {
+std::string
+noalias_parameters(const std::string& source,
+                   bool fast,
+                   const std::vector<std::pair<std::string, std::string>>& procedures)
+{
     std::string result;
-    inspect_definitions(source, fast, procedures,
-        [&](const std::string &procedure, llvm::Function &fn) {
-            for (llvm::Argument &arg: fn.args()) {
+    inspect_definitions(
+        source, fast, procedures, [&](const std::string& procedure, llvm::Function& fn) {
+            for (llvm::Argument& arg : fn.args()) {
                 if (arg.hasNoAliasAttr()) {
                     result += procedure + ":" + arg.getName().str() + " ";
                 }
@@ -699,26 +721,26 @@ std::string noalias_parameters(const std::string &source, bool fast,
 // The kinds of loads and stores with TBAA metadata in the LLVM definitions
 // of `procedures`, as sorted "procedure:load|store pointer|<type>:<TBAA
 // type>; ...".
-std::string tbaa_accesses(const std::string &source, bool fast,
-        const std::vector<std::pair<std::string, std::string>> &procedures) {
+std::string
+tbaa_accesses(const std::string& source,
+              bool fast,
+              const std::vector<std::pair<std::string, std::string>>& procedures)
+{
     std::set<std::string> result;
-    inspect_definitions(source, fast, procedures,
-        [&](const std::string &procedure, llvm::Function &fn) {
-            for (llvm::BasicBlock &bb: fn) {
-                for (llvm::Instruction &inst: bb) {
-                    llvm::MDNode *tag = inst.getMetadata(
-                        llvm::LLVMContext::MD_tbaa);
+    inspect_definitions(
+        source, fast, procedures, [&](const std::string& procedure, llvm::Function& fn) {
+            for (llvm::BasicBlock& bb : fn) {
+                for (llvm::Instruction& inst : bb) {
+                    llvm::MDNode* tag = inst.getMetadata(llvm::LLVMContext::MD_tbaa);
                     if (tag == nullptr) {
                         continue;
                     }
-                    llvm::Type *type = nullptr;
+                    llvm::Type* type = nullptr;
                     std::string access;
-                    if (llvm::LoadInst *load =
-                            llvm::dyn_cast<llvm::LoadInst>(&inst)) {
+                    if (llvm::LoadInst* load = llvm::dyn_cast<llvm::LoadInst>(&inst)) {
                         type = load->getType();
                         access = "load";
-                    } else if (llvm::StoreInst *store =
-                            llvm::dyn_cast<llvm::StoreInst>(&inst)) {
+                    } else if (llvm::StoreInst* store = llvm::dyn_cast<llvm::StoreInst>(&inst)) {
                         type = store->getValueOperand()->getType();
                         access = "store";
                     }
@@ -730,20 +752,19 @@ std::string tbaa_accesses(const std::string &source, bool fast,
                         type->print(os);
                         os.flush();
                     }
-                    llvm::MDNode *access_type = llvm::cast<llvm::MDNode>(
-                        tag->getOperand(1));
-                    llvm::MDNode *root = llvm::cast<llvm::MDNode>(
-                        access_type->getOperand(1));
-                    REQUIRE(llvm::cast<llvm::MDString>(root->getOperand(0))
-                        ->getString() == "LFortran TBAA");
-                    result.insert(procedure + ":" + access + " " + type_name
-                        + ":" + llvm::cast<llvm::MDString>(
-                            access_type->getOperand(0))->getString().str());
+                    llvm::MDNode* access_type = llvm::cast<llvm::MDNode>(tag->getOperand(1));
+                    llvm::MDNode* root = llvm::cast<llvm::MDNode>(access_type->getOperand(1));
+                    REQUIRE(llvm::cast<llvm::MDString>(root->getOperand(0))->getString()
+                            == "LFortran TBAA");
+                    result.insert(procedure + ":" + access + " " + type_name + ":"
+                                  + llvm::cast<llvm::MDString>(access_type->getOperand(0))
+                                        ->getString()
+                                        .str());
                 }
             }
         });
     std::string joined;
-    for (const std::string &access: result) {
+    for (const std::string& access : result) {
         joined += access + "; ";
     }
     return joined;
@@ -751,7 +772,8 @@ std::string tbaa_accesses(const std::string &source, bool fast,
 
 }
 
-TEST_CASE("LLVM noalias dummy arguments under --fast") {
+TEST_CASE("LLVM noalias dummy arguments under --fast")
+{
     std::string source = R"(module noalias_ir_m
 use iso_c_binding, only: c_ptr, c_f_pointer
 implicit none
@@ -864,44 +886,44 @@ end subroutine
 
 end module
 )";
-    std::vector<std::pair<std::string, std::string>> procedures = {
-        {"plain", "_m_plain"},
-        {"assumed", "_m_assumed_real____0_real____1"},
-        {"attributes", "_m_attributes"},
-        {"last_inout", "_m_last_inout"},
-        {"cptr", "_m_cptr"},
-        {"scoped_async", "_m_scoped_async"},
-        {"scoped_volatile", "_m_scoped_volatile"},
-        {"scoped_contained", "_m_scoped_contained"},
-        {"shadow", "_m_shadow"},
-        {"f", "_m_f"},
-        {"self_first", "_m_self_first"},
-        {"bits", "_m_bits"},
-        {"mvbits", "_lcompilers_mvbits_integer"},
-        {"bind_c", "bind_c"}};
-    std::string expected =
-        "plain:y plain:x plain:n plain:s "
-        // pass_array_by_data passes the data and the extents of x and y.
-        "assumed:x assumed:__1x assumed:y assumed:__1y "
-        "assumed:str "
-        // Not POINTER p, TARGET tg, VOLATILE v, ASYNCHRONOUS as or VALUE k.
-        "attributes:r "
-        "last_inout:x last_inout:y "
-        // C addresses may designate the same storage. Scoped attributes
-        // exclude a, but a locally redeclared name does not affect its host.
-        "cptr:r shadow:a "
-        // Not res, the function result.
-        "f:x "
-        "self_first:self self_first:i self_first:v "
-        "bits:i bits:j "
-        // Not FROM and TO of MVBITS, which can be the same variable; nor
-        // the dummy argument of the bind(c) procedure.
-        "mvbits:frompos mvbits:len mvbits:topos ";
+    std::vector<std::pair<std::string, std::string>> procedures
+        = { { "plain", "_m_plain" },
+            { "assumed", "_m_assumed_real____0_real____1" },
+            { "attributes", "_m_attributes" },
+            { "last_inout", "_m_last_inout" },
+            { "cptr", "_m_cptr" },
+            { "scoped_async", "_m_scoped_async" },
+            { "scoped_volatile", "_m_scoped_volatile" },
+            { "scoped_contained", "_m_scoped_contained" },
+            { "shadow", "_m_shadow" },
+            { "f", "_m_f" },
+            { "self_first", "_m_self_first" },
+            { "bits", "_m_bits" },
+            { "mvbits", "_lcompilers_mvbits_integer" },
+            { "bind_c", "bind_c" } };
+    std::string expected = "plain:y plain:x plain:n plain:s "
+                           // pass_array_by_data passes the data and the extents of x and y.
+                           "assumed:x assumed:__1x assumed:y assumed:__1y "
+                           "assumed:str "
+                           // Not POINTER p, TARGET tg, VOLATILE v, ASYNCHRONOUS as or VALUE k.
+                           "attributes:r "
+                           "last_inout:x last_inout:y "
+                           // C addresses may designate the same storage. Scoped attributes
+                           // exclude a, but a locally redeclared name does not affect its host.
+                           "cptr:r shadow:a "
+                           // Not res, the function result.
+                           "f:x "
+                           "self_first:self self_first:i self_first:v "
+                           "bits:i bits:j "
+                           // Not FROM and TO of MVBITS, which can be the same variable; nor
+                           // the dummy argument of the bind(c) procedure.
+                           "mvbits:frompos mvbits:len mvbits:topos ";
     CHECK(noalias_parameters(source, true, procedures) == expected);
     CHECK(noalias_parameters(source, false, procedures).empty());
 }
 
-TEST_CASE("LLVM TBAA metadata under --fast") {
+TEST_CASE("LLVM TBAA metadata under --fast")
+{
     std::string source = R"(module tbaa_ir_m
 implicit none
 type :: layer_t
@@ -938,11 +960,12 @@ end subroutine
 
 end module
 )";
-    std::vector<std::pair<std::string, std::string>> procedures = {
-        // pass_array_by_data passes the data and the extent of x.
-        {"forward", "_m_forward_real____1"},
-        {"pun", "_m_pun"},
-        {"bind_c", "bind_c"}};
+    std::vector<std::pair<std::string, std::string>> procedures
+        = { // pass_array_by_data passes the data and the extent of x.
+            { "forward", "_m_forward_real____1" },
+            { "pun", "_m_pun" },
+            { "bind_c", "bind_c" }
+          };
     // Nothing in the bind(c) procedure.
     std::string expected =
         // Elements of self%out and self%w.
@@ -962,7 +985,8 @@ end module
     CHECK(tbaa_accesses(source, false, procedures).empty());
 }
 
-TEST_CASE("LLVM static SAVE initialization with VOLATILE in a BLOCK") {
+TEST_CASE("LLVM static SAVE initialization with VOLATILE in a BLOCK")
+{
     std::string source = R"(module saved_volatile_m
 implicit none
 contains
@@ -977,30 +1001,32 @@ subroutine accumulate(result)
 end subroutine
 end module
 )";
-    for (bool fast: {false, true}) {
-        inspect_definitions(source, fast, {{"accumulate", "_m_accumulate"}},
-            [&](const std::string &, llvm::Function &fn) {
+    for (bool fast : { false, true }) {
+        inspect_definitions(
+            source,
+            fast,
+            { { "accumulate", "_m_accumulate" } },
+            [&](const std::string&, llvm::Function& fn) {
                 unsigned saved_stores = 0;
                 unsigned saved_loads = 0;
-                for (llvm::BasicBlock &block: fn) {
-                    for (llvm::Instruction &inst: block) {
-                        if (auto *store = llvm::dyn_cast<llvm::StoreInst>(&inst)) {
-                            auto *global = llvm::dyn_cast<llvm::GlobalVariable>(
-                                store->getPointerOperand());
-                            if (!global) continue;
-                            auto *initial = llvm::dyn_cast<llvm::ConstantInt>(
-                                global->getInitializer());
+                for (llvm::BasicBlock& block : fn) {
+                    for (llvm::Instruction& inst : block) {
+                        if (auto* store = llvm::dyn_cast<llvm::StoreInst>(&inst)) {
+                            auto* global
+                                = llvm::dyn_cast<llvm::GlobalVariable>(store->getPointerOperand());
+                            if (!global)
+                                continue;
+                            auto* initial
+                                = llvm::dyn_cast<llvm::ConstantInt>(global->getInitializer());
                             REQUIRE(initial != nullptr);
                             CHECK(initial->getSExtValue() == 7);
                             CHECK(!llvm::isa<llvm::Constant>(store->getValueOperand()));
-                            CHECK(store->getMetadata(llvm::LLVMContext::MD_tbaa)
-                                == nullptr);
+                            CHECK(store->getMetadata(llvm::LLVMContext::MD_tbaa) == nullptr);
                             saved_stores++;
-                        } else if (auto *load = llvm::dyn_cast<llvm::LoadInst>(&inst)) {
-                            if (!llvm::isa<llvm::GlobalVariable>(
-                                    load->getPointerOperand())) continue;
-                            CHECK(load->getMetadata(llvm::LLVMContext::MD_tbaa)
-                                == nullptr);
+                        } else if (auto* load = llvm::dyn_cast<llvm::LoadInst>(&inst)) {
+                            if (!llvm::isa<llvm::GlobalVariable>(load->getPointerOperand()))
+                                continue;
+                            CHECK(load->getMetadata(llvm::LLVMContext::MD_tbaa) == nullptr);
                             saved_loads++;
                         }
                     }
@@ -1014,24 +1040,27 @@ end module
 // The runtime allocation functions whose declarations in the module of the
 // LLVM definition of `procedure` have a noalias return value, as
 // "name name ...".
-std::string noalias_allocators(const std::string &source, bool fast,
-        const std::pair<std::string, std::string> &procedure) {
+std::string
+noalias_allocators(const std::string& source,
+                   bool fast,
+                   const std::pair<std::string, std::string>& procedure)
+{
     std::string result;
-    inspect_definitions(source, fast, {procedure},
-        [&](const std::string &, llvm::Function &fn) {
-            for (const char *name: {"_lfortran_malloc_alloc",
-                    "_lfortran_realloc_alloc",
-                    "_lfortran_get_default_allocator"}) {
-                llvm::Function *f = fn.getParent()->getFunction(name);
-                if (f != nullptr && f->returnDoesNotAlias()) {
-                    result += std::string(name) + " ";
-                }
+    inspect_definitions(source, fast, { procedure }, [&](const std::string&, llvm::Function& fn) {
+        for (const char* name : { "_lfortran_malloc_alloc",
+                                  "_lfortran_realloc_alloc",
+                                  "_lfortran_get_default_allocator" }) {
+            llvm::Function* f = fn.getParent()->getFunction(name);
+            if (f != nullptr && f->returnDoesNotAlias()) {
+                result += std::string(name) + " ";
             }
-        });
+        }
+    });
     return result;
 }
 
-TEST_CASE("LLVM TBAA of local arrays and noalias allocations under --fast") {
+TEST_CASE("LLVM TBAA of local arrays and noalias allocations under --fast")
+{
     std::string source = R"(module tbaa_local_ir_m
 use iso_c_binding, only: c_loc, c_ptr
 implicit none
@@ -1147,83 +1176,91 @@ end subroutine
 
 end module
 )";
-    std::vector<std::pair<std::string, std::string>> procedures = {
-        {"automatic", "_m_automatic"},
-        {"fixed", "_m_fixed"},
-        {"equivalenced", "_m_equivalenced"},
-        {"in_common", "_m_in_common"},
-        {"address_taken", "_m_address_taken"},
-        {"bind_c", "bind_c"},
-        {"volatile_local", "_m_volatile_local"},
-        {"asynchronous_local", "_m_asynchronous_local"},
-        {"saved_local", "_m_saved_local"}};
+    std::vector<std::pair<std::string, std::string>> procedures
+        = { { "automatic", "_m_automatic" },
+            { "fixed", "_m_fixed" },
+            { "equivalenced", "_m_equivalenced" },
+            { "in_common", "_m_in_common" },
+            { "address_taken", "_m_address_taken" },
+            { "bind_c", "bind_c" },
+            { "volatile_local", "_m_volatile_local" },
+            { "asynchronous_local", "_m_asynchronous_local" },
+            { "saved_local", "_m_saved_local" } };
     // The elements of the automatic array a and of the fixed-size array k
     // are data. The elements of an array of EQUIVALENCE (k, the storage of
     // r), of a common block or whose address C_LOC takes are not tagged,
     // nor is anything in a bind(c) procedure. In equivalenced only the
     // setup of the descriptor of r, a pointer to k, and its independent
     // local shape array are tagged.
-    std::string expected =
-        "automatic:load float:data; "
-        "automatic:store float:data; "
-        "equivalenced:store i32:data; "
-        "equivalenced:store i64:descriptor; "
-        "equivalenced:store i8:descriptor; "
-        "equivalenced:store pointer:descriptor; "
-        "fixed:load i32:data; "
-        "fixed:store i32:data; ";
+    std::string expected = "automatic:load float:data; "
+                           "automatic:store float:data; "
+                           "equivalenced:store i32:data; "
+                           "equivalenced:store i64:descriptor; "
+                           "equivalenced:store i8:descriptor; "
+                           "equivalenced:store pointer:descriptor; "
+                           "fixed:load i32:data; "
+                           "fixed:store i32:data; ";
     std::string expected_shape_load = expected;
     expected_shape_load.insert(expected_shape_load.find("equivalenced:store"),
-        "equivalenced:load i32:data; ");
+                               "equivalenced:load i32:data; ");
     std::string accesses = tbaa_accesses(source, true, procedures);
     CHECK((accesses == expected || accesses == expected_shape_load));
     CHECK(tbaa_accesses(source, false, procedures).empty());
     // EQUIVALENCE also creates an independent local shape array [8].
     // With opaque pointers its extent load needs no bitcast and may have
     // data TBAA. Check storage provenance, not a procedure-wide load type.
-    for (bool fast: {false, true}) {
-        inspect_definitions(source, fast, {{"equivalenced", "_m_equivalenced"}},
-            [&](const std::string &, llvm::Function &fn) {
+    for (bool fast : { false, true }) {
+        inspect_definitions(
+            source,
+            fast,
+            { { "equivalenced", "_m_equivalenced" } },
+            [&](const std::string&, llvm::Function& fn) {
                 unsigned aliased_loads = 0, aliased_stores = 0;
                 unsigned shape_loads = 0, shape_stores = 0;
-                for (llvm::BasicBlock &block: fn) {
-                    for (llvm::Instruction &inst: block) {
-                        llvm::Value *ptr = nullptr;
-                        auto *load = llvm::dyn_cast<llvm::LoadInst>(&inst);
-                        auto *store = llvm::dyn_cast<llvm::StoreInst>(&inst);
-                        if (load) ptr = load->getPointerOperand();
-                        if (store) ptr = store->getPointerOperand();
-                        if (!ptr) continue;
-                        llvm::MDNode *tag = inst.getMetadata(
-                            llvm::LLVMContext::MD_tbaa);
-                        if (!fast) CHECK(tag == nullptr);
+                for (llvm::BasicBlock& block : fn) {
+                    for (llvm::Instruction& inst : block) {
+                        llvm::Value* ptr = nullptr;
+                        auto* load = llvm::dyn_cast<llvm::LoadInst>(&inst);
+                        auto* store = llvm::dyn_cast<llvm::StoreInst>(&inst);
+                        if (load)
+                            ptr = load->getPointerOperand();
+                        if (store)
+                            ptr = store->getPointerOperand();
+                        if (!ptr)
+                            continue;
+                        llvm::MDNode* tag = inst.getMetadata(llvm::LLVMContext::MD_tbaa);
+                        if (!fast)
+                            CHECK(tag == nullptr);
                         ptr = ptr->stripPointerCasts();
-                        while (auto *gep =
-                                llvm::dyn_cast<llvm::GetElementPtrInst>(ptr)) {
+                        while (auto* gep = llvm::dyn_cast<llvm::GetElementPtrInst>(ptr)) {
                             ptr = gep->getPointerOperand()->stripPointerCasts();
                         }
-                        auto *storage = llvm::dyn_cast<llvm::AllocaInst>(ptr);
+                        auto* storage = llvm::dyn_cast<llvm::AllocaInst>(ptr);
                         if (tag && load && load->getType()->isIntegerTy(32)) {
                             REQUIRE(storage != nullptr);
-                            CHECK(storage->getAllocatedType() ==
-                                llvm::ArrayType::get(load->getType(), 1));
+                            CHECK(storage->getAllocatedType()
+                                  == llvm::ArrayType::get(load->getType(), 1));
                         }
-                        if (!storage) continue;
-                        auto *array = llvm::dyn_cast<llvm::ArrayType>(
-                            storage->getAllocatedType());
-                        if (!array) continue;
+                        if (!storage)
+                            continue;
+                        auto* array = llvm::dyn_cast<llvm::ArrayType>(storage->getAllocatedType());
+                        if (!array)
+                            continue;
                         REQUIRE(array->getElementType()->isIntegerTy(32));
                         if (storage->getName() == "k") {
                             CHECK(array->getNumElements() == 8);
                             CHECK(tag == nullptr);
-                            if (load) aliased_loads++;
-                            if (store) aliased_stores++;
+                            if (load)
+                                aliased_loads++;
+                            if (store)
+                                aliased_stores++;
                         } else {
                             REQUIRE(array->getNumElements() == 1);
-                            if (load) shape_loads++;
+                            if (load)
+                                shape_loads++;
                             if (store) {
-                                auto *extent = llvm::dyn_cast<llvm::ConstantInt>(
-                                    store->getValueOperand());
+                                auto* extent
+                                    = llvm::dyn_cast<llvm::ConstantInt>(store->getValueOperand());
                                 REQUIRE(extent != nullptr);
                                 CHECK(extent->getSExtValue() == 8);
                                 CHECK((tag != nullptr) == fast);
@@ -1240,20 +1277,19 @@ end module
     }
     // The storage of an automatic array comes from _lfortran_malloc_alloc,
     // which returns fresh memory; realloc may return its argument.
-    CHECK(noalias_allocators(source, true, procedures[0]) ==
-        "_lfortran_malloc_alloc ");
+    CHECK(noalias_allocators(source, true, procedures[0]) == "_lfortran_malloc_alloc ");
     CHECK(noalias_allocators(source, false, procedures[0]).empty());
 }
 
-#endif // __EMSCRIPTEN__
+#endif  // __EMSCRIPTEN__
 
-TEST_CASE("FortranEvaluator 1") {
+TEST_CASE("FortranEvaluator 1")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2("integer :: i");
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("integer :: i");
     CHECK(r.ok);
     CHECK(r.result.type == FortranEvaluator::EvalResult::none);
     r = e.evaluate2("i = 5");
@@ -1265,13 +1301,13 @@ TEST_CASE("FortranEvaluator 1") {
     CHECK(r.result.i32 == 5);
 }
 
-TEST_CASE("FortranEvaluator 2") {
+TEST_CASE("FortranEvaluator 2")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2(R"(real :: r
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2(R"(real :: r
 r = 3
 r
 )");
@@ -1280,7 +1316,8 @@ r
     CHECK(r.result.f32 == 3);
 }
 
-TEST_CASE("FortranEvaluator character result") {
+TEST_CASE("FortranEvaluator character result")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -1291,34 +1328,33 @@ TEST_CASE("FortranEvaluator character result") {
     CHECK(r.result.str == "hello");
 }
 
-TEST_CASE("FortranEvaluator character function across cells") {
+TEST_CASE("FortranEvaluator character function across cells")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2(
-        "module display_result\n"
-        "contains\n"
-        "function wrap(data) result(result)\n"
-        "character(len=*), intent(in) :: data\n"
-        "character(len=:), allocatable :: result\n"
-        "result = \"[\" // data // \"]\"\n"
-        "end function\n"
-        "end module\n");
+    LCompilers::Result<FortranEvaluator::EvalResult> r
+        = e.evaluate2("module display_result\n"
+                      "contains\n"
+                      "function wrap(data) result(result)\n"
+                      "character(len=*), intent(in) :: data\n"
+                      "character(len=:), allocatable :: result\n"
+                      "result = \"[\" // data // \"]\"\n"
+                      "end function\n"
+                      "end module\n");
     REQUIRE(r.ok);
 
-    r = e.evaluate2(
-        "use display_result\n"
-        "wrap(\"hello\")");
+    r = e.evaluate2("use display_result\n"
+                    "wrap(\"hello\")");
     REQUIRE(r.ok);
     CHECK(r.result.type == FortranEvaluator::EvalResult::character);
     CHECK(r.result.str == "[hello]");
 
     // A later cell must still see the clean function signature, not the
     // subroutine produced by the character-return lowering pass.
-    r = e.evaluate2(
-        "use display_result\n"
-        "wrap(\"second cell\")");
+    r = e.evaluate2("use display_result\n"
+                    "wrap(\"second cell\")");
     REQUIRE(r.ok);
     CHECK(r.result.str == "[second cell]");
 
@@ -1328,7 +1364,8 @@ TEST_CASE("FortranEvaluator character function across cells") {
     CHECK(r.result.str == "[third cell]");
 }
 
-TEST_CASE("FortranEvaluator 3") {
+TEST_CASE("FortranEvaluator 3")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -1339,14 +1376,14 @@ do i = 1, 5
     j = j + i
 end do
 )");
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2("j");
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("j");
     CHECK(r.ok);
     CHECK(r.result.type == FortranEvaluator::EvalResult::integer4);
     CHECK(r.result.i32 == 15);
 }
 
-TEST_CASE("FortranEvaluator 4") {
+TEST_CASE("FortranEvaluator 4")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -1357,31 +1394,31 @@ integer, intent(in) :: i, j
 fn = i + j
 end function
 )");
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2("fn(2, 3)");
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("fn(2, 3)");
     CHECK(r.ok);
     CHECK(r.result.type == FortranEvaluator::EvalResult::integer4);
     CHECK(r.result.i32 == 5);
 
-/*
-    e.evaluate2(R"(
-integer function fn(i, j)
-integer, intent(in) :: i, j
-fn = i - j
-end function
-)");
-    r = e.evaluate2("fn(2, 3)");
-    CHECK(r.ok);
-    CHECK(r.result.type == FortranEvaluator::EvalResult::integer4);
-    CHECK(r.result.i32 == -1);
-*/
+    /*
+        e.evaluate2(R"(
+    integer function fn(i, j)
+    integer, intent(in) :: i, j
+    fn = i - j
+    end function
+    )");
+        r = e.evaluate2("fn(2, 3)");
+        CHECK(r.ok);
+        CHECK(r.result.type == FortranEvaluator::EvalResult::integer4);
+        CHECK(r.result.i32 == -1);
+    */
 }
 
 // FortranEvaluator 5 uses "fn_sub" (not "fn") to avoid an RTLD_GLOBAL collision
 // with FortranEvaluator 4's "fn" function: Emscripten side-module instantiation
 // fails with a LinkError if two WASM modules export the same name with different
 // function signatures.
-TEST_CASE("FortranEvaluator 5") {
+TEST_CASE("FortranEvaluator 5")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -1395,29 +1432,29 @@ end subroutine
 )");
     e.evaluate2("integer :: r");
     e.evaluate2("call fn_sub(2, 3, r)");
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2("r");
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("r");
     CHECK(r.ok);
     CHECK(r.result.type == FortranEvaluator::EvalResult::integer4);
     CHECK(r.result.i32 == 5);
 
-/*
-    e.evaluate2(R"(
-integer subroutine fn(i, j, r)
-integer, intent(in) :: i, j
-integer, intent(out) :: r
-r = i - j
-end subroutine
-)");
-    e.evaluate2("call fn(2, 3, r)");
-    r = e.evaluate2("r");
-    CHECK(r.ok);
-    CHECK(r.result.type == FortranEvaluator::EvalResult::integer4);
-    CHECK(r.result.i32 == -1);
-    */
+    /*
+        e.evaluate2(R"(
+    integer subroutine fn(i, j, r)
+    integer, intent(in) :: i, j
+    integer, intent(out) :: r
+    r = i - j
+    end subroutine
+    )");
+        e.evaluate2("call fn(2, 3, r)");
+        r = e.evaluate2("r");
+        CHECK(r.ok);
+        CHECK(r.result.type == FortranEvaluator::EvalResult::integer4);
+        CHECK(r.result.i32 == -1);
+        */
 }
 
-TEST_CASE("FortranEvaluator 6") {
+TEST_CASE("FortranEvaluator 6")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -1433,8 +1470,8 @@ TEST_CASE("FortranEvaluator 6") {
     }
     LCompilers::diag::Diagnostics diagnostics;
 
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate("$", false, lm, lpm, diagnostics);
+    LCompilers::Result<FortranEvaluator::EvalResult> r
+        = e.evaluate("$", false, lm, lpm, diagnostics);
     CHECK(!r.ok);
     REQUIRE(diagnostics.diagnostics.size() >= 1);
     CHECK(diagnostics.diagnostics[0].stage == LCompilers::diag::Stage::Tokenizer);
@@ -1453,14 +1490,14 @@ TEST_CASE("FortranEvaluator 6") {
     diagnostics.diagnostics.clear();
 }
 
-TEST_CASE("FortranEvaluator 6 importing modules") {
+TEST_CASE("FortranEvaluator 6 importing modules")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
 
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2(R"(module funcmod
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2(R"(module funcmod
     implicit none
 
     contains
@@ -1486,18 +1523,19 @@ end module funcmod)");
     r = e.evaluate2("add(2.0, 5.0)");
     CHECK(r.ok);
     CHECK(r.result.type == FortranEvaluator::EvalResult::real4);
-    CHECK(std::abs(r.result.f32 - 7.0) <= 1e-8 );
+    CHECK(std::abs(r.result.f32 - 7.0) <= 1e-8);
 
     r = e.evaluate2("subtract(2.0, 5.0)");
     CHECK(r.ok);
     CHECK(r.result.type == FortranEvaluator::EvalResult::real4);
-    CHECK(std::abs(r.result.f32 - (-3.0)) <= 1e-8 );
+    CHECK(std::abs(r.result.f32 - (-3.0)) <= 1e-8);
 }
 
 #ifndef __EMSCRIPTEN__
 
 // Tests passing the complex struct by reference
-TEST_CASE("llvm complex type") {
+TEST_CASE("llvm complex type")
+{
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 %complex = type { float, float }
@@ -1533,7 +1571,8 @@ define float @f()
 }
 
 // Tests passing the complex struct by value
-TEST_CASE("llvm complex type value") {
+TEST_CASE("llvm complex type value")
+{
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 %complex = type { float, float }
@@ -1568,11 +1607,12 @@ define float @f()
     ret float %r
 }
     )""");
-//    CHECK(std::abs(e.execfn<float>("f") - 8) < 1e-6);
+    //    CHECK(std::abs(e.execfn<float>("f") - 8) < 1e-6);
 }
 
 // Tests passing boolean by reference
-TEST_CASE("llvm boolean type") {
+TEST_CASE("llvm boolean type")
+{
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 
@@ -1602,7 +1642,8 @@ define i1 @b()
 }
 
 // Tests passing boolean by value
-TEST_CASE("llvm boolean type") {
+TEST_CASE("llvm boolean type")
+{
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 
@@ -1632,7 +1673,8 @@ define i1 @b()
 }
 
 // Tests pointers
-TEST_CASE("llvm pointers 1") {
+TEST_CASE("llvm pointers 1")
+{
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 @r = global i64 0
@@ -1651,11 +1693,12 @@ define i64 @f()
     )""");
     int64_t r = e.execfn<int64_t>("f");
     CHECK(r != 8);
-    int64_t *p = (int64_t*)r;
+    int64_t* p = (int64_t*) r;
     CHECK(*p == 8);
 }
 
-TEST_CASE("llvm pointers 2") {
+TEST_CASE("llvm pointers 2")
+{
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 @r = global float 0.0
@@ -1670,11 +1713,12 @@ define i64 @f()
 }
     )""");
     int64_t r = e.execfn<int64_t>("f");
-    float *p = (float *)r;
+    float* p = (float*) r;
     CHECK(std::abs(*p - 8) < 1e-6);
 }
 
-TEST_CASE("llvm pointers 3") {
+TEST_CASE("llvm pointers 3")
+{
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 ; Takes a variable and returns a pointer to it
@@ -1714,7 +1758,8 @@ define float @f()
     CHECK(std::abs(r - 8) < 1e-6);
 }
 
-TEST_CASE("llvm pointers 4") {
+TEST_CASE("llvm pointers 4")
+{
     LCompilers::LLVMEvaluator e;
     e.add_module(R"""(
 ; Takes a variable and returns a pointer to it
@@ -1751,15 +1796,15 @@ define float @f()
     CHECK(std::abs(r - 8) < 1e-6);
 }
 
-#endif // __EMSCRIPTEN__
+#endif  // __EMSCRIPTEN__
 
-TEST_CASE("FortranEvaluator 7") {
+TEST_CASE("FortranEvaluator 7")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2("integer :: i = 5");
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("integer :: i = 5");
     CHECK(r.ok);
     CHECK(r.result.type == FortranEvaluator::EvalResult::none);
     r = e.evaluate2("i");
@@ -1768,13 +1813,13 @@ TEST_CASE("FortranEvaluator 7") {
     CHECK(r.result.i32 == 5);
 }
 
-TEST_CASE("FortranEvaluator 8") {
+TEST_CASE("FortranEvaluator 8")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2("real :: a = 3.5");
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("real :: a = 3.5");
     CHECK(r.ok);
     CHECK(r.result.type == FortranEvaluator::EvalResult::none);
     r = e.evaluate2("a");
@@ -1786,13 +1831,13 @@ TEST_CASE("FortranEvaluator 8") {
 // "ad" avoids an RTLD_GLOBAL collision with FortranEvaluator 8's "a" (float):
 // both tests are in the same process and RTLD_GLOBAL uses first-defined-wins,
 // so GOT.mem.a set by the f32 test would shadow the f64 global here.
-TEST_CASE("FortranEvaluator 8 double") {
+TEST_CASE("FortranEvaluator 8 double")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2("real(8) :: ad = 3.5");
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("real(8) :: ad = 3.5");
     CHECK(r.ok);
     CHECK(r.result.type == FortranEvaluator::EvalResult::none);
     r = e.evaluate2("ad");
@@ -1801,15 +1846,15 @@ TEST_CASE("FortranEvaluator 8 double") {
     CHECK(r.result.f64 == 3.5);
 }
 
-TEST_CASE("FortranEvaluator 9 single complex") {
+TEST_CASE("FortranEvaluator 9 single complex")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
-    if (cu.platform == LCompilers::Platform::Linux ||
-            cu.platform == LCompilers::Platform::Windows) {
+    if (cu.platform == LCompilers::Platform::Linux
+        || cu.platform == LCompilers::Platform::Windows) {
         FortranEvaluator e(cu);
-        LCompilers::Result<FortranEvaluator::EvalResult>
-        r = e.evaluate2("(2.5_4, 3.5_4)");
+        LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("(2.5_4, 3.5_4)");
         REQUIRE(r.ok);
         REQUIRE(r.result.type == FortranEvaluator::EvalResult::complex4);
         CHECK(r.result.c32.re == 2.5);
@@ -1817,13 +1862,13 @@ TEST_CASE("FortranEvaluator 9 single complex") {
     }
 }
 
-TEST_CASE("FortranEvaluator 9 double complex") {
+TEST_CASE("FortranEvaluator 9 double complex")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2("(2.5_8, 3.5_8)");
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("(2.5_8, 3.5_8)");
     REQUIRE(r.ok);
     REQUIRE(r.result.type == FortranEvaluator::EvalResult::complex8);
     CHECK(r.result.c64.re == 2.5);
@@ -1831,7 +1876,8 @@ TEST_CASE("FortranEvaluator 9 double complex") {
 }
 
 #ifndef __EMSCRIPTEN__
-TEST_CASE("FortranEvaluator Windows complex result ABI") {
+TEST_CASE("FortranEvaluator Windows complex result ABI")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -1839,7 +1885,7 @@ TEST_CASE("FortranEvaluator Windows complex result ABI") {
     // These primitive signatures also use the host's scalar/pointer ABI.
     cu.platform = LCompilers::Platform::Windows;
     FortranEvaluator e(cu);
-    for (bool swapped : {false, true}) {
+    for (bool swapped : { false, true }) {
         CAPTURE(swapped);
         auto r = e.evaluate2(swapped ? "(-2.5_4, 1.25_4)" : "(1.25_4, -2.5_4)");
         REQUIRE(r.ok);
@@ -1847,7 +1893,7 @@ TEST_CASE("FortranEvaluator Windows complex result ABI") {
         CHECK(r.result.c32.re == (swapped ? -2.5f : 1.25f));
         CHECK(r.result.c32.im == (swapped ? 1.25f : -2.5f));
     }
-    for (bool swapped : {false, true}) {
+    for (bool swapped : { false, true }) {
         CAPTURE(swapped);
         auto r = e.evaluate2(swapped ? "(-2.5_8, 1.25_8)" : "(1.25_8, -2.5_8)");
         REQUIRE(r.ok);
@@ -1858,13 +1904,13 @@ TEST_CASE("FortranEvaluator Windows complex result ABI") {
 }
 #endif
 
-TEST_CASE("FortranEvaluator logical 1") {
+TEST_CASE("FortranEvaluator logical 1")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2("logical :: i");
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("logical :: i");
     CHECK(r.ok);
     CHECK(r.result.type == FortranEvaluator::EvalResult::none);
     r = e.evaluate2("i = .true.");
@@ -1876,21 +1922,22 @@ TEST_CASE("FortranEvaluator logical 1") {
     CHECK(r.result.b);
 }
 
-TEST_CASE("FortranEvaluator character comparison") {
+TEST_CASE("FortranEvaluator character comparison")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
     // Comparing character dummy arguments calls the runtime's str_compare,
     // which the JIT must resolve from the runtime library on every platform.
-    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2(
-        "module str_order\n"
-        "contains\n"
-        "logical function before(x, y)\n"
-        "character(len=*), intent(in) :: x, y\n"
-        "before = x < y\n"
-        "end function\n"
-        "end module\n");
+    LCompilers::Result<FortranEvaluator::EvalResult> r
+        = e.evaluate2("module str_order\n"
+                      "contains\n"
+                      "logical function before(x, y)\n"
+                      "character(len=*), intent(in) :: x, y\n"
+                      "before = x < y\n"
+                      "end function\n"
+                      "end module\n");
     REQUIRE(r.ok);
     r = e.evaluate2("use str_order\nbefore('abc', 'abd')");
     REQUIRE(r.ok);
@@ -1902,13 +1949,13 @@ TEST_CASE("FortranEvaluator character comparison") {
     CHECK(!r.result.b);
 }
 
-TEST_CASE("FortranEvaluator logical 2") {
+TEST_CASE("FortranEvaluator logical 2")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2("logical :: i");
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("logical :: i");
     CHECK(r.ok);
     CHECK(r.result.type == FortranEvaluator::EvalResult::none);
     r = e.evaluate2("i = .false.");
@@ -1920,13 +1967,13 @@ TEST_CASE("FortranEvaluator logical 2") {
     CHECK(!r.result.b);
 }
 
-TEST_CASE("FortranEvaluator logical 3") {
+TEST_CASE("FortranEvaluator logical 3")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2(".false. .or. .true.");
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2(".false. .or. .true.");
     CHECK(r.ok);
     CHECK(r.result.type == FortranEvaluator::EvalResult::boolean);
     CHECK(r.result.b);
@@ -1946,13 +1993,13 @@ TEST_CASE("FortranEvaluator logical 3") {
     CHECK(r.result.b);
 }
 
-TEST_CASE("FortranEvaluator logical 4") {
+TEST_CASE("FortranEvaluator logical 4")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2(R"(
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2(R"(
 function is_even(n) result(result)
 integer, intent(in) :: n
 logical :: result
@@ -1971,13 +2018,13 @@ end function is_even
     CHECK(r.result.b);
 }
 
-TEST_CASE("FortranEvaluator integer kind 1") {
+TEST_CASE("FortranEvaluator integer kind 1")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2("integer(4) :: i");
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("integer(4) :: i");
     CHECK(r.ok);
     CHECK(r.result.type == FortranEvaluator::EvalResult::none);
     r = e.evaluate2("i = 5");
@@ -1989,13 +2036,13 @@ TEST_CASE("FortranEvaluator integer kind 1") {
     CHECK(r.result.i32 == 5);
 }
 
-TEST_CASE("FortranEvaluator integer kind 2") {
+TEST_CASE("FortranEvaluator integer kind 2")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2("integer(8) :: i");
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("integer(8) :: i");
     CHECK(r.ok);
     CHECK(r.result.type == FortranEvaluator::EvalResult::none);
     r = e.evaluate2("i = 5");
@@ -2007,13 +2054,13 @@ TEST_CASE("FortranEvaluator integer kind 2") {
     CHECK(r.result.i64 == 5);
 }
 
-TEST_CASE("FortranEvaluator Array 1") {
+TEST_CASE("FortranEvaluator Array 1")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2("integer :: i(10)");
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("integer :: i(10)");
     CHECK(r.ok);
     CHECK(r.result.type == FortranEvaluator::EvalResult::none);
     r = e.evaluate2("print *, i");
@@ -2021,13 +2068,13 @@ TEST_CASE("FortranEvaluator Array 1") {
     CHECK(r.result.type == FortranEvaluator::EvalResult::statement);
 }
 
-TEST_CASE("FortranEvaluator Array 2") {
+TEST_CASE("FortranEvaluator Array 2")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2("integer :: x(3)");
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("integer :: x(3)");
     CHECK(r.ok);
     CHECK(r.result.type == FortranEvaluator::EvalResult::none);
     r = e.evaluate2("x = 5");
@@ -2038,13 +2085,13 @@ TEST_CASE("FortranEvaluator Array 2") {
     CHECK(r.result.type == FortranEvaluator::EvalResult::statement);
 }
 
-TEST_CASE("FortranEvaluator re-declaration 1") {
+TEST_CASE("FortranEvaluator re-declaration 1")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2("integer :: i");
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("integer :: i");
     CHECK(r.ok);
     CHECK(r.result.type == FortranEvaluator::EvalResult::none);
     r = e.evaluate2("i = 5");
@@ -2055,29 +2102,29 @@ TEST_CASE("FortranEvaluator re-declaration 1") {
     CHECK(r.result.type == FortranEvaluator::EvalResult::integer4);
     CHECK(r.result.i32 == 5);
 
-/*
-    r = e.evaluate2("integer :: i");
-    CHECK(r.ok);
-    CHECK(r.result.type == FortranEvaluator::EvalResult::none);
-    r = e.evaluate2("i = 6");
-    CHECK(r.ok);
-    CHECK(r.result.type == FortranEvaluator::EvalResult::statement);
-    r = e.evaluate2("i");
-    CHECK(r.ok);
-    CHECK(r.result.type == FortranEvaluator::EvalResult::integer4);
-    CHECK(r.result.i32 == 6);
-*/
+    /*
+        r = e.evaluate2("integer :: i");
+        CHECK(r.ok);
+        CHECK(r.result.type == FortranEvaluator::EvalResult::none);
+        r = e.evaluate2("i = 6");
+        CHECK(r.ok);
+        CHECK(r.result.type == FortranEvaluator::EvalResult::statement);
+        r = e.evaluate2("i");
+        CHECK(r.ok);
+        CHECK(r.result.type == FortranEvaluator::EvalResult::integer4);
+        CHECK(r.result.i32 == 6);
+    */
 }
 
 // "fn_redecl" avoids an RTLD_GLOBAL collision with FortranEvaluator 4's "fn"
 // function (different arity → LinkError at WASM side-module instantiation).
-TEST_CASE("FortranEvaluator re-declaration 2") {
+TEST_CASE("FortranEvaluator re-declaration 2")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2(R"(
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2(R"(
 integer function fn_redecl(i)
 integer, intent(in) :: i
 fn_redecl = i+1
@@ -2090,29 +2137,29 @@ end function
     CHECK(r.result.type == FortranEvaluator::EvalResult::integer4);
     CHECK(r.result.i32 == 4);
 
-/*
-    r = e.evaluate2(R"(
-integer function fn(i)
-integer, intent(in) :: i
-fn = i-1
-end function
-)");
-    CHECK(r.ok);
-    CHECK(r.result.type == FortranEvaluator::EvalResult::none);
-    r = e.evaluate2("fn(3)");
-    CHECK(r.ok);
-    CHECK(r.result.type == FortranEvaluator::EvalResult::integer4);
-    CHECK(r.result.i32 == 2);
-*/
+    /*
+        r = e.evaluate2(R"(
+    integer function fn(i)
+    integer, intent(in) :: i
+    fn = i-1
+    end function
+    )");
+        CHECK(r.ok);
+        CHECK(r.result.type == FortranEvaluator::EvalResult::none);
+        r = e.evaluate2("fn(3)");
+        CHECK(r.ok);
+        CHECK(r.result.type == FortranEvaluator::EvalResult::integer4);
+        CHECK(r.result.i32 == 2);
+    */
 }
 
-TEST_CASE("FortranEvaluator asr verify 1") {
+TEST_CASE("FortranEvaluator asr verify 1")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2(R"(
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2(R"(
 pure function double(x) result(r)
     integer, intent(in) :: x
     integer :: r
@@ -2149,13 +2196,13 @@ end subroutine s
     CHECK(r.result.i32 == 4);
 }
 
-TEST_CASE("FortranEvaluator asr verify 2") {
+TEST_CASE("FortranEvaluator asr verify 2")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2(R"(
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2(R"(
 pure function id(x) result(r)
     integer, intent(in) :: x
     integer :: r
@@ -2201,13 +2248,13 @@ end subroutine sa
     CHECK(r.result.i32 == 1);
 }
 
-TEST_CASE("FortranEvaluator asr verify 3") {
+TEST_CASE("FortranEvaluator asr verify 3")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2(R"(
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2(R"(
 function add(x, y) result(r)
     real, intent(in) :: x
     real, intent(in) :: y
@@ -2238,7 +2285,8 @@ end function sub
 }
 
 #ifndef __EMSCRIPTEN__
-TEST_CASE("llvm ir 1") {
+TEST_CASE("llvm ir 1")
+{
     LCompilers::LLVMEvaluator e;
     std::string file_name = std::string(LFORTRAN_PROJECT_SOURCE_DIR) + "/src/lfortran/tests/ir.ll";
     std::ifstream infile(file_name);
@@ -2252,18 +2300,18 @@ TEST_CASE("llvm ir 1") {
     CHECK_THROWS_AS(e.parse_module2("", file_name), LCompilers::LCompilersException);
     CHECK_THROWS_WITH(e.parse_module2("", file_name), "parse_module(): Invalid LLVM IR");
 }
-#endif // __EMSCRIPTEN__
+#endif  // __EMSCRIPTEN__
 
 // This test does not work on Windows yet
 // https://github.com/lfortran/lfortran/issues/913
 #if !defined(_WIN32)
-TEST_CASE("FortranEvaluator 10 trig functions") {
+TEST_CASE("FortranEvaluator 10 trig functions")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2("sin(1.0)");
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("sin(1.0)");
     CHECK(r.ok);
     CHECK(r.result.type == FortranEvaluator::EvalResult::real4);
     CHECK(std::abs(r.result.f32 - 0.8414709848078965) < 1e-7);
@@ -2284,7 +2332,8 @@ TEST_CASE("FortranEvaluator 10 trig functions") {
 }
 #endif
 
-TEST_CASE("FortranEvaluator kind parameter from global symtab") {
+TEST_CASE("FortranEvaluator kind parameter from global symtab")
+{
     // Regression test: declaring a parameter `dp = kind(1.0d0)` and then
     // using it in a subsequent declaration `real(dp) :: x(5)` previously
     // crashed in interactive mode because extract_kind() unconditionally
@@ -2294,8 +2343,8 @@ TEST_CASE("FortranEvaluator kind parameter from global symtab") {
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2("integer, parameter :: dp = kind(1.0d0)");
+    LCompilers::Result<FortranEvaluator::EvalResult> r
+        = e.evaluate2("integer, parameter :: dp = kind(1.0d0)");
     CHECK(r.ok);
     r = e.evaluate2("real(dp) :: x(5)");
     CHECK(r.ok);
@@ -2304,7 +2353,8 @@ TEST_CASE("FortranEvaluator kind parameter from global symtab") {
 #if !defined(__EMSCRIPTEN__)
 // TODO: The 80 MB stack allocation (real(dp) :: x(10**7)) exceeds the WASM
 // shadow-stack budget and causes a memory-access-out-of-bounds at runtime.
-TEST_CASE("FortranEvaluator pass_array_by_data on global random_number") {
+TEST_CASE("FortranEvaluator pass_array_by_data on global random_number")
+{
     // Regression test: in interactive mode the global symbol table persists
     // across evaluate2 calls, and the pass_array_by_data pass would re-add
     // the same generated procedure name on each subsequent evaluation,
@@ -2313,8 +2363,8 @@ TEST_CASE("FortranEvaluator pass_array_by_data on global random_number") {
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2("integer, parameter :: n = 10**7");
+    LCompilers::Result<FortranEvaluator::EvalResult> r
+        = e.evaluate2("integer, parameter :: n = 10**7");
     CHECK(r.ok);
     r = e.evaluate2("integer, parameter :: dp = kind(1.0d0)");
     CHECK(r.ok);
@@ -2332,7 +2382,8 @@ TEST_CASE("FortranEvaluator pass_array_by_data on global random_number") {
 #endif
 
 #ifdef __EMSCRIPTEN__
-TEST_CASE("FortranEvaluator iso_c_binding") {
+TEST_CASE("FortranEvaluator iso_c_binding")
+{
     // Regression test for JupyterLite wasm kernel: "use iso_c_binding" must
     // resolve to the preloaded .mod file at /lib/lfortran_intrinsic_iso_c_binding.mod
     // (set via --preload-file at link time; on native builds get_runtime_library_dir()
@@ -2341,8 +2392,8 @@ TEST_CASE("FortranEvaluator iso_c_binding") {
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    LCompilers::Result<FortranEvaluator::EvalResult>
-    r = e.evaluate2("use iso_c_binding, only: c_int");
+    LCompilers::Result<FortranEvaluator::EvalResult> r
+        = e.evaluate2("use iso_c_binding, only: c_int");
     CHECK(r.ok);
     CHECK(r.result.type == FortranEvaluator::EvalResult::none);
     r = e.evaluate2("integer(c_int) :: n_cint");
@@ -2355,7 +2406,8 @@ TEST_CASE("FortranEvaluator iso_c_binding") {
     CHECK(r.result.i32 == 7);
 }
 
-TEST_CASE("WasmLFortranExecutor basic") {
+TEST_CASE("WasmLFortranExecutor basic")
+{
     // Directly exercise WasmLFortranExecutor bypassing FortranEvaluator
     LCompilers::WasmLFortranExecutor we;
     auto m = we.parse_module2(R"""(
@@ -2363,13 +2415,15 @@ define i64 @__lfortran_evaluate_1()
 {
     ret i64 42
 }
-    )""", "test.ll");
+    )""",
+                              "test.ll");
     we.add_module(std::move(m), 1);
     CHECK(we.execfn<int64_t>("__lfortran_evaluate_1") == 42);
 }
 #endif
 
-TEST_CASE("FortranEvaluator program unit in a cell") {
+TEST_CASE("FortranEvaluator program unit in a cell")
+{
     // A cell holding a complete program unit must run it. Before this was
     // fixed the program was compiled and never called, so the cell produced
     // no output at all -- prints, and any display_data, silently did nothing.
@@ -2378,19 +2432,17 @@ TEST_CASE("FortranEvaluator program unit in a cell") {
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
 
-    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2(
-        "module counter_mod\n"
-        "implicit none\n"
-        "integer :: counter = 0\n"
-        "end module counter_mod\n");
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("module counter_mod\n"
+                                                                     "implicit none\n"
+                                                                     "integer :: counter = 0\n"
+                                                                     "end module counter_mod\n");
     CHECK(r.ok);
 
-    r = e.evaluate2(
-        "program bump\n"
-        "use counter_mod\n"
-        "implicit none\n"
-        "counter = counter + 1\n"
-        "end program bump\n");
+    r = e.evaluate2("program bump\n"
+                    "use counter_mod\n"
+                    "implicit none\n"
+                    "counter = counter + 1\n"
+                    "end program bump\n");
     CHECK(r.ok);
     CHECK(r.result.type == FortranEvaluator::EvalResult::statement);
 
@@ -2401,12 +2453,11 @@ TEST_CASE("FortranEvaluator program unit in a cell") {
 
     // Re-running the same cell is the ordinary notebook loop: the program is
     // redefined under the same name and runs again.
-    r = e.evaluate2(
-        "program bump\n"
-        "use counter_mod\n"
-        "implicit none\n"
-        "counter = counter + 1\n"
-        "end program bump\n");
+    r = e.evaluate2("program bump\n"
+                    "use counter_mod\n"
+                    "implicit none\n"
+                    "counter = counter + 1\n"
+                    "end program bump\n");
     CHECK(r.ok);
 
     r = e.evaluate2("use counter_mod\ncounter\n");
@@ -2415,12 +2466,11 @@ TEST_CASE("FortranEvaluator program unit in a cell") {
 
     // A program under a different name also runs, and loose statements keep
     // working afterwards.
-    r = e.evaluate2(
-        "program bump2\n"
-        "use counter_mod\n"
-        "implicit none\n"
-        "counter = counter + 10\n"
-        "end program bump2\n");
+    r = e.evaluate2("program bump2\n"
+                    "use counter_mod\n"
+                    "implicit none\n"
+                    "counter = counter + 10\n"
+                    "end program bump2\n");
     CHECK(r.ok);
 
     r = e.evaluate2("use counter_mod\ncounter\n");
@@ -2436,7 +2486,8 @@ TEST_CASE("FortranEvaluator program unit in a cell") {
     CHECK(r.result.i32 == 5);
 }
 
-TEST_CASE("FortranEvaluator array-argument module procedure across cells") {
+TEST_CASE("FortranEvaluator array-argument module procedure across cells")
+{
     // ASR passes rewrite symbols in place. In interactive mode the symbol
     // table is the session state, so a pass that specialises a procedure --
     // pass_array_by_data, for an assumed-shape array argument -- used to
@@ -2447,15 +2498,14 @@ TEST_CASE("FortranEvaluator array-argument module procedure across cells") {
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
 
-    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2(
-        "module mf\n"
-        "implicit none\n"
-        "contains\n"
-        "integer function sf(a)\n"
-        "real, intent(in) :: a(:)\n"
-        "sf = size(a)\n"
-        "end function sf\n"
-        "end module mf\n");
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("module mf\n"
+                                                                     "implicit none\n"
+                                                                     "contains\n"
+                                                                     "integer function sf(a)\n"
+                                                                     "real, intent(in) :: a(:)\n"
+                                                                     "sf = size(a)\n"
+                                                                     "end function sf\n"
+                                                                     "end module mf\n");
     CHECK(r.ok);
 
     // called from a later cell
@@ -2474,14 +2524,13 @@ TEST_CASE("FortranEvaluator array-argument module procedure across cells") {
     CHECK(r.result.i32 == 5);
 
     // from inside a program unit too
-    r = e.evaluate2(
-        "program pf\n"
-        "use mf\n"
-        "implicit none\n"
-        "real :: u(7)\n"
-        "u = 3\n"
-        "print *, sf(u)\n"
-        "end program pf\n");
+    r = e.evaluate2("program pf\n"
+                    "use mf\n"
+                    "implicit none\n"
+                    "real :: u(7)\n"
+                    "u = 3\n"
+                    "print *, sf(u)\n"
+                    "end program pf\n");
     CHECK(r.ok);
 }
 
@@ -2491,7 +2540,8 @@ TEST_CASE("FortranEvaluator array-argument module procedure across cells") {
 // using the binding that was in scope when it was compiled, and new code sees
 // the new one. This mirrors what Python does in a notebook.
 
-TEST_CASE("FortranEvaluator shadow a variable across cells") {
+TEST_CASE("FortranEvaluator shadow a variable across cells")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -2502,7 +2552,8 @@ TEST_CASE("FortranEvaluator shadow a variable across cells") {
     CHECK(e.evaluate2(R"(integer function old_i()
 old_i = i
 end function
-)").ok);
+)")
+              .ok);
     LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("old_i()");
     CHECK(r.ok);
     CHECK(r.result.i32 == 1);
@@ -2518,7 +2569,8 @@ end function
     CHECK(r.result.i32 == 1);
 }
 
-TEST_CASE("FortranEvaluator shadow a function across cells") {
+TEST_CASE("FortranEvaluator shadow a function across cells")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -2526,7 +2578,8 @@ TEST_CASE("FortranEvaluator shadow a function across cells") {
     CHECK(e.evaluate2(R"(integer function f()
 f = 1
 end function
-)").ok);
+)")
+              .ok);
     LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("f()");
     CHECK(r.ok);
     CHECK(r.result.i32 == 1);
@@ -2535,7 +2588,8 @@ end function
     CHECK(e.evaluate2(R"(integer function f()
 f = 2
 end function
-)").ok);
+)")
+              .ok);
     r = e.evaluate2("f()");
     CHECK(r.ok);
     CHECK(r.result.i32 == 2);
@@ -2553,29 +2607,30 @@ end function
 #endif
 }
 
-TEST_CASE("FortranEvaluator independent session symbol ownership") {
+TEST_CASE("FortranEvaluator independent session symbol ownership")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     {
         FortranEvaluator functions(cu);
-        REQUIRE(functions.evaluate2(R"(integer function session_symbol()
+        REQUIRE(functions
+                    .evaluate2(R"(integer function session_symbol()
 session_symbol = 17
 end function
-)").ok);
+)")
+                    .ok);
         auto r = functions.evaluate2("session_symbol()");
         REQUIRE(r.ok);
         CHECK(r.result.i32 == 17);
         {
             FortranEvaluator variables(cu);
-            REQUIRE(variables.evaluate2(
-                "integer, allocatable :: session_symbol").ok);
+            REQUIRE(variables.evaluate2("integer, allocatable :: session_symbol").ok);
             r = variables.evaluate2("allocated(session_symbol)");
             REQUIRE(r.ok);
             REQUIRE(r.result.type == FortranEvaluator::EvalResult::boolean);
             REQUIRE_FALSE(r.result.b);
-            REQUIRE(variables.evaluate2(
-                "allocate(session_symbol, source=7)").ok);
+            REQUIRE(variables.evaluate2("allocate(session_symbol, source=7)").ok);
             r = variables.evaluate2("session_symbol + 0");
             REQUIRE(r.ok);
             CHECK(r.result.i32 == 7);
@@ -2590,17 +2645,20 @@ end function
     }
     {
         FortranEvaluator functions(cu);
-        REQUIRE(functions.evaluate2(R"(integer function session_symbol()
+        REQUIRE(functions
+                    .evaluate2(R"(integer function session_symbol()
 session_symbol = 29
 end function
-)").ok);
+)")
+                    .ok);
         auto r = functions.evaluate2("session_symbol()");
         REQUIRE(r.ok);
         CHECK(r.result.i32 == 29);
     }
 }
 
-TEST_CASE("FortranEvaluator shadow a module across cells") {
+TEST_CASE("FortranEvaluator shadow a module across cells")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -2609,12 +2667,14 @@ TEST_CASE("FortranEvaluator shadow a module across cells") {
 implicit none
 integer, parameter :: c = 1
 end module
-)").ok);
+)")
+              .ok);
     CHECK(e.evaluate2(R"(integer function old_c()
 use m, only: c
 old_c = c
 end function
-)").ok);
+)")
+              .ok);
     LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("old_c()");
     CHECK(r.ok);
     CHECK(r.result.i32 == 1);
@@ -2623,12 +2683,14 @@ end function
 implicit none
 integer, parameter :: c = 2
 end module
-)").ok);
+)")
+              .ok);
     CHECK(e.evaluate2(R"(integer function new_c()
 use m, only: c
 new_c = c
 end function
-)").ok);
+)")
+              .ok);
     r = e.evaluate2("new_c()");
     CHECK(r.ok);
     CHECK(r.result.i32 == 2);
@@ -2642,7 +2704,8 @@ end function
 // being compiled. Resolving `use` has to look through the chain; otherwise a
 // modfile is searched for on disk, of which there is none in a notebook.
 
-TEST_CASE("FortranEvaluator module using another module across cells") {
+TEST_CASE("FortranEvaluator module using another module across cells")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -2651,12 +2714,14 @@ TEST_CASE("FortranEvaluator module using another module across cells") {
 implicit none
 integer, parameter :: c = 5
 end module
-)").ok);
+)")
+              .ok);
     CHECK(e.evaluate2(R"(module mb
 use ma
 implicit none
 end module
-)").ok);
+)")
+              .ok);
     // A program unit resolves `use` through load_module(), which is the path
     // that used to report "modfile was not found" for ma, a dependency of mb.
     CHECK(e.evaluate2(R"(program p
@@ -2664,10 +2729,12 @@ use mb
 implicit none
 if (c /= 5) error stop
 end program
-)").ok);
+)")
+              .ok);
 }
 
-TEST_CASE("FortranEvaluator re-exported module symbol across cells") {
+TEST_CASE("FortranEvaluator re-exported module symbol across cells")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -2687,16 +2754,19 @@ module mtop
 use msub
 implicit none
 end module
-)").ok);
+)")
+              .ok);
     CHECK(e.evaluate2(R"(program p
 use mtop
 implicit none
 if (twice(3) /= 6) error stop
 end program
-)").ok);
+)")
+              .ok);
 }
 
-TEST_CASE("FortranEvaluator optional argument across cells") {
+TEST_CASE("FortranEvaluator optional argument across cells")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -2717,7 +2787,8 @@ contains
         end if
     end subroutine
 end module
-)").ok);
+)")
+              .ok);
     CHECK(e.evaluate2(R"(program p
 use mopt
 implicit none
@@ -2726,10 +2797,12 @@ a = 1.0
 call s(a)
 call s(a, "with label")
 end program
-)").ok);
+)")
+              .ok);
 }
 
-TEST_CASE("FortranEvaluator re-run a cell calling an optional argument") {
+TEST_CASE("FortranEvaluator re-run a cell calling an optional argument")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -2746,12 +2819,13 @@ contains
         end if
     end subroutine
 end module
-)").ok);
+)")
+              .ok);
     // Running the same cell twice has to keep working. The pass that replaces
     // optional arguments with presence flags rewrites the procedure in place,
     // so if it were let at the copy handed to the next cell, `lbl` would come
     // back as a required argument and this call would stop compiling.
-    const char *cell = R"(program p
+    const char* cell = R"(program p
 use mopt2
 implicit none
 real :: a(3)
@@ -2764,7 +2838,8 @@ end program
     CHECK(e.evaluate2(cell).ok);
 }
 
-TEST_CASE("FortranEvaluator common block across cells") {
+TEST_CASE("FortranEvaluator common block across cells")
+{
     // The storage of a common block is created by the first cell that
     // declares the block. A later cell's view of it, in a program, a module,
     // a procedure or the global scope, refers to that storage: it does not
@@ -2781,15 +2856,16 @@ common /cells_blk/ x, y
 x = 3
 y = 4
 end program set_cells
-)").ok);
+)")
+              .ok);
     CHECK(e.evaluate2(R"(module cells_mod
 implicit none
 integer :: a, b
 common /cells_blk/ a, b
 end module cells_mod
-)").ok);
-    LCompilers::Result<FortranEvaluator::EvalResult> r
-        = e.evaluate2("use cells_mod\na + b\n");
+)")
+              .ok);
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("use cells_mod\na + b\n");
     CHECK(r.ok);
     CHECK(r.result.type == FortranEvaluator::EvalResult::integer4);
     CHECK(r.result.i32 == 7);
@@ -2800,7 +2876,8 @@ integer :: x, y
 common /cells_blk/ x, y
 x = x + 10
 end subroutine bump_cells
-)").ok);
+)")
+              .ok);
     CHECK(e.evaluate2("call bump_cells()\n").ok);
     r = e.evaluate2("use cells_mod\na\n");
     CHECK(r.ok);
@@ -2819,17 +2896,20 @@ integer :: z(3)
 common /cells_blk/ z
 z = 0
 end program grow_cells
-)").ok);
+)")
+               .ok);
     CHECK(!e.evaluate2(R"(block data init_cells
 implicit none
 integer :: x, y
 common /cells_blk/ x, y
 data x /1/
 end block data init_cells
-)").ok);
+)")
+               .ok);
 }
 
-TEST_CASE("FortranEvaluator call a procedure no earlier cell called") {
+TEST_CASE("FortranEvaluator call a procedure no earlier cell called")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -2855,17 +2935,20 @@ implicit none
 call called_now()
 if (counter /= 1) error stop
 end program
-)").ok);
+)")
+              .ok);
     CHECK(e.evaluate2(R"(program p2
 use munused
 implicit none
 call untouched()
 if (counter /= 11) error stop
 end program
-)").ok);
+)")
+              .ok);
 }
 
-TEST_CASE("FortranEvaluator shadow a subroutine across cells") {
+TEST_CASE("FortranEvaluator shadow a subroutine across cells")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -2874,12 +2957,14 @@ TEST_CASE("FortranEvaluator shadow a subroutine across cells") {
     CHECK(e.evaluate2(R"(subroutine sub()
 r = 1
 end subroutine
-)").ok);
+)")
+              .ok);
     // Compiled now, so it calls the `sub` that exists now.
     CHECK(e.evaluate2(R"(subroutine call_old_sub()
 call sub()
 end subroutine
-)").ok);
+)")
+              .ok);
     CHECK(e.evaluate2("call call_old_sub()").ok);
     LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("r");
     CHECK(r.ok);
@@ -2889,7 +2974,8 @@ end subroutine
     CHECK(e.evaluate2(R"(subroutine sub()
 r = 2
 end subroutine
-)").ok);
+)")
+              .ok);
     CHECK(e.evaluate2("call sub()").ok);
     r = e.evaluate2("r");
     CHECK(r.ok);
@@ -2907,12 +2993,13 @@ end subroutine
 // side by side. Re-evaluating the old accessor then rebinds it to the new
 // symbol, which is what a notebook user re-running a cell expects.
 
-TEST_CASE("FortranEvaluator old and new variable side by side") {
+TEST_CASE("FortranEvaluator old and new variable side by side")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    const char *accessor = R"(integer function f1()
+    const char* accessor = R"(integer function f1()
 f1 = x
 end function
 )";
@@ -2924,7 +3011,8 @@ end function
     CHECK(e.evaluate2(R"(integer function f2()
 f2 = x
 end function
-)").ok);
+)")
+              .ok);
     // One cell, both accessors: the two `x` are live at the same time.
     LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("f1()");
     CHECK(r.ok);
@@ -2935,7 +3023,8 @@ end function
     CHECK(e.evaluate2(R"(if (f1() /= 1) error stop
 if (f2() /= 2) error stop
 if (f1() == f2()) error stop
-)").ok);
+)")
+              .ok);
 
     // Re-evaluating f1 rebinds it to the `x` that is in scope now.
     CHECK(e.evaluate2(accessor).ok);
@@ -2945,28 +3034,32 @@ if (f1() == f2()) error stop
     CHECK(e.evaluate2("if (f1() /= f2()) error stop").ok);
 }
 
-TEST_CASE("FortranEvaluator old and new function side by side") {
+TEST_CASE("FortranEvaluator old and new function side by side")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    const char *caller = R"(integer function g1()
+    const char* caller = R"(integer function g1()
 g1 = f()
 end function
 )";
     CHECK(e.evaluate2(R"(integer function f()
 f = 1
 end function
-)").ok);
+)")
+              .ok);
     CHECK(e.evaluate2(caller).ok);
     CHECK(e.evaluate2(R"(integer function f()
 f = 2
 end function
-)").ok);
+)")
+              .ok);
     CHECK(e.evaluate2(R"(integer function g2()
 g2 = f()
 end function
-)").ok);
+)")
+              .ok);
     LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("g1()");
     CHECK(r.ok);
     CHECK(r.result.i32 == 1);
@@ -2976,7 +3069,8 @@ end function
     CHECK(e.evaluate2(R"(if (g1() /= 1) error stop
 if (g2() /= 2) error stop
 if (g1() == g2()) error stop
-)").ok);
+)")
+              .ok);
 
     CHECK(e.evaluate2(caller).ok);
     r = e.evaluate2("g1()");
@@ -2985,12 +3079,13 @@ if (g1() == g2()) error stop
     CHECK(e.evaluate2("if (g1() /= g2()) error stop").ok);
 }
 
-TEST_CASE("FortranEvaluator old and new module side by side") {
+TEST_CASE("FortranEvaluator old and new module side by side")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    const char *accessor = R"(integer function a1()
+    const char* accessor = R"(integer function a1()
 use mshadow, only: c
 a1 = c
 end function
@@ -2999,18 +3094,21 @@ end function
 implicit none
 integer, parameter :: c = 1
 end module
-)").ok);
+)")
+              .ok);
     CHECK(e.evaluate2(accessor).ok);
     CHECK(e.evaluate2(R"(module mshadow
 implicit none
 integer, parameter :: c = 2
 end module
-)").ok);
+)")
+              .ok);
     CHECK(e.evaluate2(R"(integer function a2()
 use mshadow, only: c
 a2 = c
 end function
-)").ok);
+)")
+              .ok);
     LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("a1()");
     CHECK(r.ok);
     CHECK(r.result.i32 == 1);
@@ -3021,7 +3119,8 @@ end function
     CHECK(e.evaluate2(R"(if (a1() /= 1) error stop
 if (a2() /= 2) error stop
 if (a1() == a2()) error stop
-)").ok);
+)")
+              .ok);
 
     CHECK(e.evaluate2(accessor).ok);
     r = e.evaluate2("a1()");
@@ -3030,7 +3129,8 @@ if (a1() == a2()) error stop
     CHECK(e.evaluate2("if (a1() /= a2()) error stop").ok);
 }
 
-TEST_CASE("FortranEvaluator generic procedure from an earlier cell") {
+TEST_CASE("FortranEvaluator generic procedure from an earlier cell")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -3054,22 +3154,25 @@ contains
         twice_real = 2 * x
     end function
 end module
-)").ok);
+)")
+              .ok);
     CHECK(e.evaluate2(R"(program p
 use mgen
 implicit none
 if (twice(3) /= 6) error stop
 if (twice(1.5) /= 3.0) error stop
 end program
-)").ok);
+)")
+              .ok);
 }
 
-TEST_CASE("FortranEvaluator a modfile module used by a cell's module") {
+TEST_CASE("FortranEvaluator a modfile module used by a cell's module")
+{
     // A module loaded from a modfile is held by the cell that first used it,
     // so a later cell resolves it through the chain and its module calls into
     // the copy. That copy has to be declared before this cell's own modules
     // are emitted, or the call has nothing to link to.
-    const char *modsrc = R"(module mcellmod
+    const char* modsrc = R"(module mcellmod
 implicit none
 contains
 subroutine say(i)
@@ -3079,7 +3182,7 @@ end subroutine
 end module
 )";
     {
-        Allocator al(1024*1024);
+        Allocator al(1024 * 1024);
         LCompilers::diag::Diagnostics diagnostics;
         CompilerOptions co;
         LCompilers::LocationManager lm;
@@ -3087,11 +3190,10 @@ end module
         fl.in_filename = "mcellmod.f90";
         lm.files.push_back(fl);
         lm.file_ends.push_back(LCompilers::LFortran::source_offset(std::strlen(modsrc)));
-        LCompilers::LFortran::AST::TranslationUnit_t* ast = TRY(
-            LCompilers::LFortran::parse(al, modsrc, diagnostics, co));
-        LCompilers::ASR::TranslationUnit_t* asr = TRY(
-            LCompilers::LFortran::ast_to_asr(al, *ast, diagnostics, nullptr,
-                false, co, lm));
+        LCompilers::LFortran::AST::TranslationUnit_t* ast
+            = TRY(LCompilers::LFortran::parse(al, modsrc, diagnostics, co));
+        LCompilers::ASR::TranslationUnit_t* asr
+            = TRY(LCompilers::LFortran::ast_to_asr(al, *ast, diagnostics, nullptr, false, co, lm));
         std::ofstream out("mcellmod.mod", std::ios::binary);
         out << LCompilers::save_modfile(*asr, lm);
     }
@@ -3100,7 +3202,7 @@ end module
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
-    const char *cell = R"(module mcell
+    const char* cell = R"(module mcell
 use mcellmod
 implicit none
 contains
@@ -3118,7 +3220,8 @@ end program
     std::remove("mcellmod.mod");
 }
 
-TEST_CASE("FortranEvaluator a program unit using an earlier cell's module") {
+TEST_CASE("FortranEvaluator a program unit using an earlier cell's module")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -3131,11 +3234,12 @@ integer, intent(in) :: i
 if (i /= 3) error stop
 end subroutine
 end module
-)").ok);
+)")
+              .ok);
     // A program unit loads the submodules of what it uses, and that walks the
     // dependencies of mlate. mearly is one of them and it is a parent scope
     // away, not a modfile on disk.
-    const char *cell = R"(module mlate
+    const char* cell = R"(module mlate
 use mearly
 implicit none
 contains
@@ -3153,7 +3257,8 @@ end program
     CHECK(e.evaluate2(cell).ok);
 }
 
-TEST_CASE("FortranEvaluator a type-bound procedure from an earlier cell") {
+TEST_CASE("FortranEvaluator a type-bound procedure from an earlier cell")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -3174,8 +3279,9 @@ class(point), intent(in) :: self
 norm = abs(self%x)
 end function
 end module
-)").ok);
-    const char *caller = R"(program p
+)")
+              .ok);
+    const char* caller = R"(program p
 use mtb
 implicit none
 type(point) :: a
@@ -3202,7 +3308,8 @@ end program
 #endif
 }
 
-TEST_CASE("FortranEvaluator a derived type argument from an earlier cell") {
+TEST_CASE("FortranEvaluator a derived type argument from an earlier cell")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -3223,7 +3330,8 @@ type(vec), intent(in) :: a, b
 addv%x = a%x + b%x
 end function
 end module
-)").ok);
+)")
+              .ok);
     CHECK(e.evaluate2(R"(program p
 use mret
 implicit none
@@ -3233,10 +3341,12 @@ b%x = 2.0
 c = addv(a, b)
 if (c%x /= 3.0) error stop
 end program
-)").ok);
+)")
+              .ok);
 }
 
-TEST_CASE("FortranEvaluator a type re-exported by a module across cells") {
+TEST_CASE("FortranEvaluator a type re-exported by a module across cells")
+{
     CompilerOptions cu;
     cu.interactive = true;
     // Not get_runtime_library_dir(): this binary never sets the execution
@@ -3248,7 +3358,7 @@ TEST_CASE("FortranEvaluator a type re-exported by a module across cells") {
     // relinks its copy of the module against that entry, which would name an
     // ExternalSymbol from an ExternalSymbol -- a chain nothing that reads the
     // symbol can follow.
-    const char *cell = R"(module mcptr
+    const char* cell = R"(module mcptr
 use iso_c_binding, only: c_ptr
 implicit none
 contains
@@ -3269,7 +3379,8 @@ end program
     CHECK(e.evaluate2(cell).ok);
 }
 
-TEST_CASE("FortranEvaluator a cell declaring a requirement and a template") {
+TEST_CASE("FortranEvaluator a cell declaring a requirement and a template")
+{
     CompilerOptions cu;
     cu.interactive = true;
     // Not get_runtime_library_dir(): this binary never sets the execution
@@ -3280,7 +3391,7 @@ TEST_CASE("FortranEvaluator a cell declaring a requirement and a template") {
     // the next one is parented to a tree no ASR pass has touched. A kind the
     // duplicator does not know about throws and kills the cell, which is what
     // a Requirement and a Template used to do.
-    const char *cell = R"(module mtempl
+    const char* cell = R"(module mtempl
 implicit none
 requirement r {t, op}
 deferred type :: t
@@ -3307,7 +3418,8 @@ end module
     CHECK(e.evaluate2(cell).ok);
 }
 
-TEST_CASE("FortranEvaluator re-run a cell declaring an operator") {
+TEST_CASE("FortranEvaluator re-run a cell declaring an operator")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -3315,7 +3427,7 @@ TEST_CASE("FortranEvaluator re-run a cell declaring an operator") {
     // A custom operator names its specific procedures the way a generic
     // interface does, and asking it for a scope it does not have used to
     // abort the copy outright.
-    const char *cell = R"(module mop
+    const char* cell = R"(module mop
 implicit none
 type :: vec
     real :: x
@@ -3343,7 +3455,8 @@ end program
     CHECK(e.evaluate2(cell).ok);
 }
 
-TEST_CASE("FortranEvaluator a diagnostic about an earlier cell") {
+TEST_CASE("FortranEvaluator a diagnostic about an earlier cell")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -3352,15 +3465,14 @@ TEST_CASE("FortranEvaluator a diagnostic about an earlier cell") {
     // The name is declared by the first cell, so the message has to quote that
     // cell. Each cell is compiled on its own; without a range of its own, the
     // location is read as a position in this cell and quotes its text.
-    const char *cell = "use mdp; integer, parameter :: dp = kind(0.0)\n";
+    const char* cell = "use mdp; integer, parameter :: dp = kind(0.0)\n";
     // As the prompt and the kernel set it up: nothing, the evaluator names the
     // cell and keeps its text.
     LCompilers::LocationManager lm;
     LCompilers::PassManager lpm;
     lpm.use_default_passes();
     LCompilers::diag::Diagnostics d;
-    LCompilers::Result<FortranEvaluator::EvalResult> r
-        = e.evaluate(cell, false, lm, lpm, d);
+    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate(cell, false, lm, lpm, d);
     CHECK(!r.ok);
     cu.use_colors = false;
     std::string message = d.render(lm, cu);
@@ -3368,11 +3480,11 @@ TEST_CASE("FortranEvaluator a diagnostic about an earlier cell") {
     CHECK(message.find("<cell 1>") != std::string::npos);
     CHECK(message.find("<cell 2>") != std::string::npos);
     // The quoted line is the one that declares dp, not this cell's text.
-    CHECK(message.find("module mdp; integer, parameter :: dp = kind(0.0d0)")
-        != std::string::npos);
+    CHECK(message.find("module mdp; integer, parameter :: dp = kind(0.0d0)") != std::string::npos);
 }
 
-TEST_CASE("FortranEvaluator a module's derived type globals across cells") {
+TEST_CASE("FortranEvaluator a module's derived type globals across cells")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -3413,7 +3525,8 @@ use rm3
 implicit none
 seen = arr(1)%z
 end program
-)").ok);
+)")
+              .ok);
     r = e.evaluate2("seen\n");
     CHECK(r.ok);
     CHECK(r.result.i32 == 99);
@@ -3431,7 +3544,8 @@ end program
     CHECK(r.result.i32 == 7);
 }
 
-TEST_CASE("FortranEvaluator a module allocatable array across cells") {
+TEST_CASE("FortranEvaluator a module allocatable array across cells")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -3449,9 +3563,10 @@ implicit none
 allocate(x(1))
 x = 5
 end program
-)").ok);
-    LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2(
-        "use m_alloc_arr_cell\nallocated(x)\n");
+)")
+                .ok);
+    LCompilers::Result<FortranEvaluator::EvalResult> r
+        = e.evaluate2("use m_alloc_arr_cell\nallocated(x)\n");
     REQUIRE(r.ok);
     REQUIRE(r.result.type == FortranEvaluator::EvalResult::boolean);
     REQUIRE(r.result.b);
@@ -3468,7 +3583,8 @@ if (.not. allocated(x)) error stop
 if (size(x) /= 1) error stop
 if (sum(x) /= 5) error stop
 end program
-)").ok);
+)")
+                .ok);
 
     // The allocation is made by a later program than the module, then
     // observed by a statement cell and by another program. The size stays
@@ -3478,14 +3594,16 @@ end program
 implicit none
 integer, allocatable :: y(:)
 end module
-)").ok);
+)")
+                .ok);
     REQUIRE(e2.evaluate2(R"(program p_alloc_arr_size
 use m_alloc_arr_size
 implicit none
 allocate(y(3))
 y = 5
 end program
-)").ok);
+)")
+                .ok);
     r = e2.evaluate2("use m_alloc_arr_size\nallocated(y)\n");
     REQUIRE(r.ok);
     REQUIRE(r.result.type == FortranEvaluator::EvalResult::boolean);
@@ -3503,7 +3621,8 @@ if (.not. allocated(y)) error stop
 if (size(y) /= 3) error stop
 if (sum(y) /= 15) error stop
 end program
-)").ok);
+)")
+                .ok);
     r = e2.evaluate2("size(y)\n");
     REQUIRE(r.ok);
     REQUIRE(r.result.i32 == 3);
@@ -3512,7 +3631,8 @@ end program
     REQUIRE(r.result.i32 == 15);
 }
 
-TEST_CASE("FortranEvaluator the calls the kernel makes") {
+TEST_CASE("FortranEvaluator the calls the kernel makes")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -3566,7 +3686,8 @@ TEST_CASE("FortranEvaluator the calls the kernel makes") {
 // These two tests hang on Windows since
 // https://github.com/lfortran/lfortran/pull/14350
 #if !defined(_WIN32)
-TEST_CASE("FortranEvaluator a SAVE class pointer across cells") {
+TEST_CASE("FortranEvaluator a SAVE class pointer across cells")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -3580,7 +3701,8 @@ type :: s
 end type
 type(s), target :: x
 end module
-)").ok);
+)")
+              .ok);
     CHECK(e.evaluate2("use mcp1").ok);
     CHECK(e.evaluate2("class(s), pointer :: gp => null()").ok);
     CHECK(e.evaluate2("class(s), pointer, save :: gq").ok);
@@ -3609,7 +3731,8 @@ end module
     }
 }
 
-TEST_CASE("FortranEvaluator a SAVE class pointer of a redefined module") {
+TEST_CASE("FortranEvaluator a SAVE class pointer of a redefined module")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -3626,7 +3749,8 @@ class(s), pointer :: p => null()
 type(s), target :: x
 contains
 subroutine set()
-    x%i = )" + std::to_string(i) + R"(
+    x%i = )" + std::to_string(i)
+               + R"(
     p => x
 end subroutine
 integer function get()
@@ -3641,23 +3765,27 @@ end module
 use mcp2, only: get
 old_get = get()
 end function
-)").ok);
+)")
+              .ok);
     CHECK(e.evaluate2(R"(subroutine old_set()
 use mcp2, only: set
 call set()
 end subroutine
-)").ok);
+)")
+              .ok);
     CHECK(e.evaluate2(module_mcp2(2)).ok);
     CHECK(e.evaluate2(R"(integer function new_get()
 use mcp2, only: get
 new_get = get()
 end function
-)").ok);
+)")
+              .ok);
     CHECK(e.evaluate2(R"(subroutine new_set()
 use mcp2, only: set
 call set()
 end subroutine
-)").ok);
+)")
+              .ok);
     CHECK(e.evaluate2("call old_set()").ok);
     CHECK(e.evaluate2("call new_set()").ok);
     LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("old_get()");
@@ -3669,10 +3797,14 @@ end subroutine
 }
 #endif
 
-extern "C" void lfortran_display_data(const char *mime_type, const char *data);
-extern "C" void lfortran_clear_output();
+extern "C" void
+lfortran_display_data(const char* mime_type, const char* data);
+extern "C" void
+lfortran_clear_output();
 
-static CompilerOptions execute_options() {
+static CompilerOptions
+execute_options()
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.use_colors = false;
@@ -3681,23 +3813,33 @@ static CompilerOptions execute_options() {
     return cu;
 }
 
-TEST_CASE("FortranEvaluator execute: results and cells") {
+TEST_CASE("FortranEvaluator execute: results and cells")
+{
     CompilerOptions cu = execute_options();
     FortranEvaluator e(cu);
-    const std::vector<std::pair<std::string, std::string>> examples = {
-        {"42", "42"}, {"42_8", "42"}, {"1.25", "1.25"},
-        {"1.2345678901234567_8", "1.2345678901234567"},
-        {"(1.25, -2.5)", "(1.25, -2.5)"},
-        {"(1.25_8, -2.5_8)", "(1.25, -2.5)"},
-        // A real always has a decimal point or an exponent.
-        {"1.0", "1.0"}, {"-3.0_8", "-3.0"}, {"(1.0, -2.0)", "(1.0, -2.0)"},
-        {"(0.0_8, 4.0_8)", "(0.0, 4.0)"}, {"1.0e20", "1e+20"},
-        // The shortest text that reads back as the same value.
-        {"3.14159", "3.14159"}, {"0.1_8", "0.1"}, {"1e-5", "1e-05"},
-        {"1.0/3.0", "0.33333334"}, {"tiny(1.0)", "1.1754944e-38"},
-        {".true.", "True"}, {".false.", "False"}, {"'hello'", "hello"}
-    };
-    for (auto &example : examples) {
+    const std::vector<std::pair<std::string, std::string>> examples
+        = { { "42", "42" },
+            { "42_8", "42" },
+            { "1.25", "1.25" },
+            { "1.2345678901234567_8", "1.2345678901234567" },
+            { "(1.25, -2.5)", "(1.25, -2.5)" },
+            { "(1.25_8, -2.5_8)", "(1.25, -2.5)" },
+            // A real always has a decimal point or an exponent.
+            { "1.0", "1.0" },
+            { "-3.0_8", "-3.0" },
+            { "(1.0, -2.0)", "(1.0, -2.0)" },
+            { "(0.0_8, 4.0_8)", "(0.0, 4.0)" },
+            { "1.0e20", "1e+20" },
+            // The shortest text that reads back as the same value.
+            { "3.14159", "3.14159" },
+            { "0.1_8", "0.1" },
+            { "1e-5", "1e-05" },
+            { "1.0/3.0", "0.33333334" },
+            { "tiny(1.0)", "1.1754944e-38" },
+            { ".true.", "True" },
+            { ".false.", "False" },
+            { "'hello'", "hello" } };
+    for (auto& example : examples) {
         CAPTURE(example.first);
         auto cell = e.execute(example.first);
         REQUIRE(cell.ok);
@@ -3726,8 +3868,7 @@ TEST_CASE("FortranEvaluator execute: results and cells") {
     CHECK(!cell.ok);
     CHECK(cell.internal_error);
     CHECK(cell.error_value == "Return type not supported in interactive mode");
-    CHECK(cell.error_text().rfind("Internal Compiler Error: Unhandled exception\n", 0)
-        == 0);
+    CHECK(cell.error_text().rfind("Internal Compiler Error: Unhandled exception\n", 0) == 0);
     CHECK(e.execute("n").value.text() == "41");
     // An inspection cell sees the session.
     cell = e.execute("%%showasr\nn + 1");
@@ -3736,13 +3877,13 @@ TEST_CASE("FortranEvaluator execute: results and cells") {
     cell = e.execute("max0(1, 2_8)");
     REQUIRE(cell.ok);
     CHECK(cell.value.text() == "2");
-    CHECK(cell.diagnostics.find("warning: Different kinds of args in max0")
-        != std::string::npos);
+    CHECK(cell.diagnostics.find("warning: Different kinds of args in max0") != std::string::npos);
 }
 
-TEST_CASE("FortranEvaluator execute: persistent implicit none") {
+TEST_CASE("FortranEvaluator execute: persistent implicit none")
+{
     for (int mode = 0; mode < 3; mode++) {
-        for (bool implicit_typing : {false, true}) {
+        for (bool implicit_typing : { false, true }) {
             CAPTURE(mode);
             CAPTURE(implicit_typing);
             CompilerOptions cu = execute_options();
@@ -3756,7 +3897,7 @@ TEST_CASE("FortranEvaluator execute: persistent implicit none") {
             REQUIRE(cell.ok);
             CHECK(!cell.value.has_value());
             CHECK(e.execute("previous").value.text() == "7");
-            for (const std::string source : {"n = 1", "x = 1.0"}) {
+            for (const std::string source : { "n = 1", "x = 1.0" }) {
                 cell = e.execute(source);
                 CHECK(!cell.ok);
                 CHECK(!cell.internal_error);
@@ -3779,16 +3920,26 @@ TEST_CASE("FortranEvaluator execute: persistent implicit none") {
     }
 }
 
-TEST_CASE("FortranEvaluator execute: implicit none scope and inspection") {
+TEST_CASE("FortranEvaluator execute: implicit none scope and inspection")
+{
     CompilerOptions cu = execute_options();
-    SUBCASE("normal") {}
-    SUBCASE("fast") { cu.po.fast = true; }
-    SUBCASE("f23") { cu.std_f23_conformance = true; }
+    SUBCASE("normal")
+    {
+    }
+    SUBCASE("fast")
+    {
+        cu.po.fast = true;
+    }
+    SUBCASE("f23")
+    {
+        cu.std_f23_conformance = true;
+    }
     cu.implicit_typing = true;
     FortranEvaluator e(cu);
-    for (const std::string magic : {"asr", "llvm", "asm", "cpp"}) {
+    for (const std::string magic : { "asr", "llvm", "asm", "cpp" }) {
 #ifdef __EMSCRIPTEN__
-        if (magic == "asm") continue;
+        if (magic == "asm")
+            continue;
 #endif
         CAPTURE(magic);
         auto cell = e.execute("%%show" + magic + "\nimplicit none");
@@ -3821,11 +3972,13 @@ TEST_CASE("FortranEvaluator execute: implicit none scope and inspection") {
     CHECK(!e.execute("z = 5.0").ok);
 }
 
-TEST_CASE("FortranEvaluator execute: inspection cells") {
-    for (const std::string magic : {"ast", "asr", "llvm", "asm", "cpp", "fmt"}) {
+TEST_CASE("FortranEvaluator execute: inspection cells")
+{
+    for (const std::string magic : { "ast", "asr", "llvm", "asm", "cpp", "fmt" }) {
 #ifdef __EMSCRIPTEN__
         // In the WASM test build, the compilation after get_asm() traps (#15853).
-        if (magic == "asm") continue;
+        if (magic == "asm")
+            continue;
 #endif
         CAPTURE(magic);
         CompilerOptions cu = execute_options();
@@ -3850,17 +4003,23 @@ TEST_CASE("FortranEvaluator execute: inspection cells") {
     CHECK(!defaults.value.has_value());
 }
 
-TEST_CASE("FortranEvaluator execute: display hooks") {
+TEST_CASE("FortranEvaluator execute: display hooks")
+{
     CompilerOptions cu = execute_options();
     FortranEvaluator e(cu);
     std::string mime, data;
     int clears = 0;
     FortranEvaluator::CellIO io;
-    io.display = [&](const std::string &m, const std::string &d) { mime = m; data = d; };
+    io.display = [&](const std::string& m, const std::string& d) {
+        mime = m;
+        data = d;
+    };
     io.clear_output = [&]() { clears++; };
     auto cell = e.execute("use lfortran_display, only: display_data, clear_output\n"
-        "call display_data('text/html', '<b>hello</b>')\n"
-        "call clear_output()", false, io);
+                          "call display_data('text/html', '<b>hello</b>')\n"
+                          "call clear_output()",
+                          false,
+                          io);
     REQUIRE(cell.ok);
     CHECK(mime == "text/html");
     CHECK(data == "<b>hello</b>");
@@ -3886,18 +4045,19 @@ TEST_CASE("FortranEvaluator execute: display hooks") {
 // Like test_runtime_input, the stdin cases run natively only; the WASM test
 // build also cannot read the integration test sources.
 #ifndef __EMSCRIPTEN__
-TEST_CASE("FortranEvaluator execute: streaming hook affinity and failure cleanup") {
+TEST_CASE("FortranEvaluator execute: streaming hook affinity and failure cleanup")
+{
     CompilerOptions cu = execute_options();
     FortranEvaluator e(cu);
     auto owner = std::this_thread::get_id();
     std::string output, events;
     FortranEvaluator::CellIO io;
-    io.output = [&](int fd, const std::string &text) {
+    io.output = [&](int fd, const std::string& text) {
         CHECK(std::this_thread::get_id() == owner);
         CHECK(fd == 1);
         output += text;
     };
-    io.display = [&](const std::string &, const std::string &) {
+    io.display = [&](const std::string&, const std::string&) {
         CHECK(std::this_thread::get_id() == owner);
         CHECK(output == "printed\n");
         events += "display ";
@@ -3907,7 +4067,7 @@ TEST_CASE("FortranEvaluator execute: streaming hook affinity and failure cleanup
         CHECK(output == "printed\n");
         events += "clear ";
     };
-    io.input = [&](std::string &record) {
+    io.input = [&](std::string& record) {
         CHECK(std::this_thread::get_id() == owner);
         CHECK(output == "printed\nprompt");
         events += "input";
@@ -3923,7 +4083,9 @@ call clear_output()
 write(*,'(a)',advance='no') 'prompt'
 read(*,*,iostat=ios) answer
 if (ios /= 0 .or. answer /= 42) error stop
-)", false, io);
+)",
+                          false,
+                          io);
     REQUIRE_MESSAGE(cell.ok, cell.error_text());
     CHECK(events == "display clear input");
     io.clear_output = [&]() {
@@ -3934,13 +4096,13 @@ if (ios /= 0 .or. answer /= 42) error stop
     CHECK(!cell.ok);
     CHECK(cell.error_name == "DisplayError");
     CHECK(cell.error_value == "display failed: clear failed");
-    io.input = [&](std::string &) -> int {
+    io.input = [&](std::string&) -> int {
         CHECK(std::this_thread::get_id() == owner);
         throw std::runtime_error("input failed");
     };
     cell = e.execute("read(*,*,iostat=ios) answer\nif (ios <= 0) error stop", false, io);
     REQUIRE_MESSAGE(cell.ok, cell.error_text());
-    io.output = [&](int, const std::string &) {
+    io.output = [&](int, const std::string&) {
         CHECK(std::this_thread::get_id() == owner);
         throw std::runtime_error("publication failed");
     };
@@ -3948,7 +4110,7 @@ if (ios /= 0 .or. answer /= 42) error stop
     CHECK(!cell.ok);
     CHECK(cell.error_name == "ExecutionError");
     CHECK(cell.error_value == "publication failed");
-    io.output = [&](int, const std::string &text) { output += text; };
+    io.output = [&](int, const std::string& text) { output += text; };
     output.clear();
     cell = e.execute("print '(a)', 'recovered'", false, io);
     REQUIRE_MESSAGE(cell.ok, cell.error_text());
@@ -3968,14 +4130,15 @@ if (ios /= 0 .or. answer /= 42) error stop
     CHECK(output == "transport recovered\n");
 }
 
-TEST_CASE("Kernel streams: split UTF-8 and invalid bytes") {
+TEST_CASE("Kernel streams: split UTF-8 and invalid bytes")
+{
     using namespace LCompilers::LFortran::kernel;
     std::string streams[2];
-    std::function<void(const std::string &, const std::string &)> publish =
-        [&](const std::string &name, const std::string &text) {
-            CHECK(LCompilers::is_valid_utf8(text));
-            streams[name == "stdout" ? 0 : 1] += text;
-        };
+    std::function<void(const std::string&, const std::string&)> publish
+        = [&](const std::string& name, const std::string& text) {
+              CHECK(LCompilers::is_valid_utf8(text));
+              streams[name == "stdout" ? 0 : 1] += text;
+          };
     StreamText text(publish);
     text.write(1, "partial\xe2");
     CHECK(streams[0] == "partial");
@@ -3992,8 +4155,7 @@ TEST_CASE("Kernel streams: split UTF-8 and invalid bytes") {
     CHECK(streams[0] == "partial\xe2\x82\xac" + utf8("\xff\xe2\x82"));
     text.write(1, "\xe0\x80");
     text.write(1, "\x80");
-    CHECK(streams[0] == "partial\xe2\x82\xac" +
-        utf8("\xff\xe2\x82") + utf8("\xe0\x80\x80"));
+    CHECK(streams[0] == "partial\xe2\x82\xac" + utf8("\xff\xe2\x82") + utf8("\xe0\x80\x80"));
 }
 
 struct InputRecords {
@@ -4001,11 +4163,13 @@ struct InputRecords {
     size_t next = 0;
     int calls = 0;
     int end = -1;
-    FortranEvaluator::CellIO io() {
+    FortranEvaluator::CellIO io()
+    {
         FortranEvaluator::CellIO io;
-        io.input = [this](std::string &record) {
+        io.input = [this](std::string& record) {
             calls++;
-            if (next == records.size()) return end;
+            if (next == records.size())
+                return end;
             record = records[next++];
             return 0;
         };
@@ -4013,24 +4177,26 @@ struct InputRecords {
     }
 };
 
-static void run_cell(FortranEvaluator &e, const std::string &code,
-        const FortranEvaluator::CellIO &io = {}) {
+static void
+run_cell(FortranEvaluator& e, const std::string& code, const FortranEvaluator::CellIO& io = {})
+{
     auto cell = e.execute(code, false, io);
     CAPTURE(code);
     REQUIRE_MESSAGE(cell.ok, cell.error_text());
 }
 
-static void check_input(const std::string &code,
-        std::vector<std::string> records, int expected_calls = -1) {
+static void
+check_input(const std::string& code, std::vector<std::string> records, int expected_calls = -1)
+{
     CompilerOptions cu = execute_options();
     FortranEvaluator e(cu);
-    InputRecords input{std::move(records)};
+    InputRecords input{ std::move(records) };
     run_cell(e, code, input.io());
-    CHECK(input.calls ==
-        (expected_calls < 0 ? (int)input.records.size() : expected_calls));
+    CHECK(input.calls == (expected_calls < 0 ? (int) input.records.size() : expected_calls));
 }
 
-TEST_CASE("FortranEvaluator execute: stdin records") {
+TEST_CASE("FortranEvaluator execute: stdin records")
+{
     check_input(R"(
 integer :: a, b, c, u, ios
 u = 5
@@ -4041,7 +4207,8 @@ if (ios /= 0 .or. c /= 13) error stop
 read(*,*)
 read(5,*,iostat=ios) a
 if (ios /= 0 .or. a /= 14) error stop
-)", {"11 12 ignored", "13", "", "14"});
+)",
+                { "11 12 ignored", "13", "", "14" });
     check_input(R"(
 integer :: a(3), ios
 real :: r(2)
@@ -4057,7 +4224,8 @@ read(5,*,iostat=ios) d
 if (ios /= 0 .or. any(abs(d-[(5.,6.),(7.,8.)]) > 1e-6)) error stop
 read(*,*,iostat=ios) z
 if (ios /= 0 .or. abs(z-(9.,10.)) > 1e-6) error stop
-)", {"1,2", "3", "1.5 2.5", "(1,2), ( 3, 4 )", "(5,6) (7,8)", "(9,10)"});
+)",
+                { "1,2", "3", "1.5 2.5", "(1,2), ( 3, 4 )", "(5,6) (7,8)", "(9,10)" });
     check_input(R"(
 character(4) :: a
 character(2) :: b
@@ -4074,7 +4242,8 @@ read(5,'(a2)',advance='no',iostat=ios) b
 if (ios /= 0 .or. b /= 'ab') error stop
 read(*,'(a2)',iostat=ios) b
 if (ios /= 0 .or. b /= 'cd') error stop
-)", {"", "text", "21", "22", "31", "32", "33", "abcd"});
+)",
+                { "", "text", "21", "22", "31", "32", "33", "abcd" });
     check_input(R"(
 program input_namelist
 integer :: a,ios
@@ -4084,7 +4253,8 @@ if (ios /= 0 .or. a /= 57) error stop
 read(*,nml=values,iostat=ios)
 if (ios /= 0 .or. a /= 58) error stop
 end program
-)", {"&values", "a=57 /", "&values a=58 /"});
+)",
+                { "&values", "a=57 /", "&values a=58 /" });
     check_input(R"(
 integer(1) :: a(2)
 integer(2) :: b(2)
@@ -4108,7 +4278,8 @@ read(*,*,iostat=ios) l
 if (ios /= 0 .or. .not. l(1) .or. l(2)) error stop
 read(*,*,iostat=ios) t
 if (ios /= 0 .or. t(1) /= 'abc' .or. t(2) /= 'def') error stop
-)", {"1 2", "3 4", "5 6", "1.5,2.5", "3.5,4.5", "T F", "'abc' 'def'"});
+)",
+                { "1 2", "3 4", "5 6", "1.5,2.5", "3.5,4.5", "T F", "'abc' 'def'" });
     check_input(R"(
 character(2000) :: text
 integer :: ios
@@ -4116,7 +4287,8 @@ read(5,'(a2000)',advance='no',iostat=ios) text
 if (ios /= 0 .or. text /= repeat('x',2000)) error stop
 read(*,'(a2000)',iostat=ios) text
 if (ios /= 0 .or. text /= repeat('x',2000)) error stop
-)", {std::string(4000, 'x')});
+)",
+                { std::string(4000, 'x') });
     check_input(R"(
 character(2) :: a,b,c
 integer :: ios
@@ -4126,10 +4298,12 @@ read(*,'(t2,a2)',iostat=ios) a
 if (ios /= 0 .or. a /= 'bc') error stop
 read(5,'(tl1,a2)',iostat=ios) a
 if (ios /= 0 .or. a /= 'ab') error stop
-)", {"abcd", "abcd", "abcd"});
+)",
+                { "abcd", "abcd", "abcd" });
 }
 
-TEST_CASE("FortranEvaluator execute: stdin EOF and reset") {
+TEST_CASE("FortranEvaluator execute: stdin EOF and reset")
+{
     check_input(R"(
 program input_eof
 integer :: a(2),ios
@@ -4147,54 +4321,60 @@ if (ios /= -1) error stop 'namelist EOF'
 read(*,*,iostat=ios)
 if (ios /= -1) error stop 'empty read EOF'
 end program
-)", {}, 1);
+)",
+                {},
+                1);
     CompilerOptions cu = execute_options();
     FortranEvaluator e(cu);
     // EOF stays latched for the rest of the cell.
     InputRecords eof;
-    run_cell(e, R"(
+    run_cell(e,
+             R"(
 integer :: a,ios
 read(*,*,iostat=ios) a
 if (ios /= -1) error stop
 read(5,*,iostat=ios) a
 if (ios /= -1) error stop
-)", eof.io());
+)",
+             eof.io());
     CHECK(eof.calls == 1);
     // A later cell can read again.
-    InputRecords fresh{{"42"}};
-    run_cell(e, "read(5,*,iostat=ios) a\nif (ios /= 0 .or. a /= 42) error stop",
-        fresh.io());
+    InputRecords fresh{ { "42" } };
+    run_cell(e, "read(5,*,iostat=ios) a\nif (ios /= 0 .or. a /= 42) error stop", fresh.io());
     // Unavailable input is a positive IOSTAT, also latched.
     InputRecords disconnected;
     disconnected.end = 1;
-    run_cell(e, R"(
+    run_cell(e,
+             R"(
 read(*,*,iostat=ios) a
 if (ios <= 0) error stop
 read(5,'(i2)',iostat=ios) a
 if (ios <= 0) error stop
-)", disconnected.io());
+)",
+             disconnected.io());
     CHECK(disconnected.calls == 1);
     // A hook's exception must not unwind through generated code.
     FortranEvaluator::CellIO throwing;
-    throwing.input = [](std::string &) -> int {
-        throw std::runtime_error("input callback failure");
-    };
+    throwing.input
+        = [](std::string&) -> int { throw std::runtime_error("input callback failure"); };
     run_cell(e, "read(*,*,iostat=ios) a\nif (ios <= 0) error stop", throwing);
     run_cell(e, "a+1");
 }
 
-TEST_CASE("FortranEvaluator execute: files never read stdin records") {
+TEST_CASE("FortranEvaluator execute: files never read stdin records")
+{
     CompilerOptions cu = execute_options();
     FortranEvaluator e(cu);
     InputRecords forbidden;
     forbidden.end = 1;
-    std::ifstream file(std::string(LFORTRAN_PROJECT_SOURCE_DIR) +
-        "/integration_tests/runtime_input_records.f90");
+    std::ifstream file(std::string(LFORTRAN_PROJECT_SOURCE_DIR)
+                       + "/integration_tests/runtime_input_records.f90");
     REQUIRE(file.good());
     std::ostringstream source;
     source << file.rdbuf();
     run_cell(e, source.str(), forbidden.io());
-    run_cell(e, R"(
+    run_cell(e,
+             R"(
 program unit5_named_file
 integer :: u,i,ios
 character(3) :: r
@@ -4209,19 +4389,21 @@ r='456'
 read(r,*,iostat=ios) i
 if (ios /= 0 .or. i /= 456) error stop
 end program
-)", forbidden.io());
+)",
+             forbidden.io());
     CHECK(forbidden.calls == 0);
 }
 #endif
 
-TEST_CASE("FortranEvaluator allocate in an interactive cell") {
+TEST_CASE("FortranEvaluator allocate in an interactive cell")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
     FortranEvaluator e(cu);
     // The notebook cell from issue 13455. A bare allocate is the statement,
     // so the cell runs and the sum is 6. deallocate is the same parse.
-    const char *cell = R"(integer, allocatable :: a(:)
+    const char* cell = R"(integer, allocatable :: a(:)
 allocate(a(3))
 a = [1, 2, 3]
 print *, sum(a)
@@ -4247,14 +4429,16 @@ end function
 integer :: y
 y = allocate(2)
 y
-)").ok);
+)")
+                .ok);
     r = e2.evaluate2("y");
     REQUIRE(r.ok);
     CHECK(r.result.i32 == 3);
     REQUIRE(e2.evaluate2(R"(integer, allocatable :: b(:)
 allocate(b(1))
 b(1) = 4
-)").ok);
+)")
+                .ok);
     r = e2.evaluate2("sum(b)");
     REQUIRE(r.ok);
     CHECK(r.result.i32 == 4);
@@ -4265,13 +4449,15 @@ end subroutine
 integer :: n
 n = 1
 call deallocate(n)
-)").ok);
+)")
+                .ok);
     r = e2.evaluate2("n");
     REQUIRE(r.ok);
     CHECK(r.result.i32 == 8);
 }
 
-TEST_CASE("FortranEvaluator allocate source mold and type parameter") {
+TEST_CASE("FortranEvaluator allocate source mold and type parameter")
+{
     CompilerOptions cu;
     cu.interactive = true;
     cu.po.runtime_library_dir = LCompilers::LFortran::get_runtime_library_dir();
@@ -4281,7 +4467,8 @@ TEST_CASE("FortranEvaluator allocate source mold and type parameter") {
         FortranEvaluator e(cu);
         REQUIRE(e.evaluate2(R"(integer, allocatable :: c(:)
 allocate(c, source=[1, 2])
-)").ok);
+)")
+                    .ok);
         LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("sum(c)");
         REQUIRE(r.ok);
         CHECK(r.result.type == FortranEvaluator::EvalResult::integer4);
@@ -4293,7 +4480,8 @@ allocate(c, source=[1, 2])
 a = [4, 5]
 integer, allocatable :: d(:)
 allocate(d, mold=a)
-)").ok);
+)")
+                    .ok);
         LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("size(d)");
         REQUIRE(r.ok);
         CHECK(r.result.type == FortranEvaluator::EvalResult::integer4);
@@ -4310,7 +4498,8 @@ alloc_source_fn_13455 = 7
 end function
 integer, allocatable :: f
 allocate(f, source=alloc_source_fn_13455())
-)").ok);
+)")
+                    .ok);
         // An allocatable scalar is not a supported cell result, so read it
         // through an integer expression.
         LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("f + 0");
@@ -4324,7 +4513,8 @@ allocate(f, source=alloc_source_fn_13455())
 n = 1
 character(:), allocatable :: s, t
 allocate(character(n+1) :: s, t)
-)").ok);
+)")
+                    .ok);
         LCompilers::Result<FortranEvaluator::EvalResult> r = e.evaluate2("len(s)");
         REQUIRE(r.ok);
         CHECK(r.result.type == FortranEvaluator::EvalResult::integer4);

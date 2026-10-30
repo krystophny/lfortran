@@ -66,10 +66,15 @@
 #include <libasr/codegen/asr_to_mlir.h>
 #endif
 #else
-namespace LCompilers {
-    class LLVMEvaluator {};
+namespace LCompilers
+{
+class LLVMEvaluator
+{
+};
 #ifdef __EMSCRIPTEN__
-    class WasmLFortranExecutor {};
+class WasmLFortranExecutor
+{
+};
 #endif
 }
 #endif
@@ -78,74 +83,110 @@ namespace LCompilers {
 // lfortran_intrinsics.h, a C header), whose lfortran_display_data() and
 // lfortran_clear_output() the lfortran_display module calls; the JIT
 // resolves them to the copy linked into this process.
-extern "C" void *_lfortran_set_display_hooks(
-    void (*display_data)(void *context, const char *mime_type, const char *data),
-    void (*clear_output)(void *context),
-    void *context);
+extern "C" void*
+_lfortran_set_display_hooks(void (*display_data)(void* context,
+                                                 const char* mime_type,
+                                                 const char* data),
+                            void (*clear_output)(void* context),
+                            void* context);
 
-namespace {
+namespace
+{
 // The context of the display hooks while FortranEvaluator::execute() runs a
 // cell.
 struct DisplayContext {
-    const LCompilers::FortranEvaluator::CellIO &io;
-    std::string error; // why a hook failed; empty if none has
+    const LCompilers::FortranEvaluator::CellIO& io;
+    std::string error;  // why a hook failed; empty if none has
 };
 
 // The context of the runtime's stdin provider while execute() runs a cell
 // whose CellIO has an input hook. The runtime copies `record` before it
 // asks for the next one.
 struct InputContext {
-    const LCompilers::FortranEvaluator::CellIO &io;
+    const LCompilers::FortranEvaluator::CellIO& io;
     std::string record;
 };
 
 #ifdef _WIN32
-int dup_fd(int fd) { return _dup(fd); }
-int dup2_fd(int from, int to) { return _dup2(from, to); }
-void close_fd(int fd) { _close(fd); }
+int
+dup_fd(int fd)
+{
+    return _dup(fd);
+}
+int
+dup2_fd(int from, int to)
+{
+    return _dup2(from, to);
+}
+void
+close_fd(int fd)
+{
+    _close(fd);
+}
 #else
-int dup_fd(int fd) { return dup(fd); }
-int dup2_fd(int from, int to) { return dup2(from, to); }
-void close_fd(int fd) { close(fd); }
+int
+dup_fd(int fd)
+{
+    return dup(fd);
+}
+int
+dup2_fd(int from, int to)
+{
+    return dup2(from, to);
+}
+void
+close_fd(int fd)
+{
+    close(fd);
+}
 #endif
 
 // While a cell runs with CellIO::output set, its stdout and stderr (file
 // descriptors 1 and 2) go to temporary files rather than pipes: a file never
 // fills up. Readers must not change the writer's file position.
-class OutputCapture {
-    FILE *files[2] = {nullptr, nullptr};
-    int saved[2] = {-1, -1};
-    int64_t consumed[2] = {0, 0};
+class OutputCapture
+{
+    FILE* files[2] = { nullptr, nullptr };
+    int saved[2] = { -1, -1 };
+    int64_t consumed[2] = { 0, 0 };
 #ifdef _WIN32
-    int readers[2] = {-1, -1};
+    int readers[2] = { -1, -1 };
 #endif
-    void restore() noexcept {
+    void restore() noexcept
+    {
         for (int i = 0; i < 2; i++) {
             if (saved[i] >= 0) {
                 dup2_fd(saved[i], 1 + i);
                 close_fd(saved[i]);
             }
 #ifdef _WIN32
-            if (readers[i] >= 0) close_fd(readers[i]);
+            if (readers[i] >= 0)
+                close_fd(readers[i]);
 #endif
-            if (files[i]) fclose(files[i]);
+            if (files[i])
+                fclose(files[i]);
         }
     }
+
 public:
-    OutputCapture() {
+    OutputCapture()
+    {
         try {
             fflush(stdout);
             fflush(stderr);
             for (int i = 0; i < 2; i++) {
                 files[i] = tmpfile();
-                if (!files[i]) throw std::runtime_error("cannot create cell output capture");
+                if (!files[i])
+                    throw std::runtime_error("cannot create cell output capture");
 #ifdef _WIN32
                 // Unlike dup(), ReOpenFile creates an independent file position.
-                HANDLE reader = ReOpenFile((HANDLE)_get_osfhandle(fileno(files[i])),
-                    GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, 0);
+                HANDLE reader = ReOpenFile((HANDLE) _get_osfhandle(fileno(files[i])),
+                                           GENERIC_READ,
+                                           FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                           0);
                 if (reader == INVALID_HANDLE_VALUE)
                     throw std::runtime_error("cannot open cell output reader");
-                readers[i] = _open_osfhandle((intptr_t)reader, _O_BINARY);
+                readers[i] = _open_osfhandle((intptr_t) reader, _O_BINARY);
                 if (readers[i] < 0) {
                     CloseHandle(reader);
                     throw std::runtime_error("cannot open cell output descriptor");
@@ -160,16 +201,17 @@ public:
             throw;
         }
     }
-    ~OutputCapture() {
+    ~OutputCapture()
+    {
         fflush(stdout);
         fflush(stderr);
         restore();
     }
-    OutputCapture(const OutputCapture &) = delete;
-    OutputCapture &operator=(const OutputCapture &) = delete;
+    OutputCapture(const OutputCapture&) = delete;
+    OutputCapture& operator=(const OutputCapture&) = delete;
     // Passes what the cell has written since the last call to `output`.
-    void pump(const std::function<void(int, const std::string &)> &output,
-            bool barrier = false) {
+    void pump(const std::function<void(int, const std::string&)>& output, bool barrier = false)
+    {
         // Formatted/nonadvancing WRITE may still be in the C stdio buffer.
         // fflush serializes with stdio writers; it never moves the read offset.
         if (fflush(stdout) != 0 || fflush(stderr) != 0)
@@ -187,10 +229,10 @@ public:
                 throw std::runtime_error("cannot inspect cell output capture");
             // Snapshot at barriers; bounded turns otherwise. Separate spools
             // preserve per-stream order, not stdout/stderr interleaving.
-            int64_t end = barrier ? info.st_size
-                : std::min<int64_t>(info.st_size, consumed[i] + 65536);
+            int64_t end
+                = barrier ? info.st_size : std::min<int64_t>(info.st_size, consumed[i] + 65536);
             while (consumed[i] < end) {
-                unsigned size = (unsigned)std::min<int64_t>(sizeof(buffer), end - consumed[i]);
+                unsigned size = (unsigned) std::min<int64_t>(sizeof(buffer), end - consumed[i]);
 #ifdef _WIN32
                 if (_lseeki64(readers[i], consumed[i], SEEK_SET) < 0)
                     throw std::runtime_error("cannot position cell output reader");
@@ -198,8 +240,10 @@ public:
 #else
                 auto n = pread(fd, buffer, size, consumed[i]);
 #endif
-                if (n < 0 && errno == EINTR) continue;
-                if (n <= 0) throw std::runtime_error("cannot read cell output capture");
+                if (n < 0 && errno == EINTR)
+                    continue;
+                if (n <= 0)
+                    throw std::runtime_error("cannot read cell output capture");
                 consumed[i] += n;
                 output(1 + i, std::string(buffer, n));
             }
@@ -209,41 +253,54 @@ public:
 
 // What the cell running with CellIO::output has written but not yet passed
 // on, for when it ends the process.
-std::function<void()> *flush_at_exit = nullptr;
+std::function<void()>* flush_at_exit = nullptr;
 
 #ifndef __EMSCRIPTEN__
 // One synchronous hook at a time; no output queue or frontend work on the
 // worker. In particular no mutex is held while a callback waits for stdin.
-class CellMailbox {
+class CellMailbox
+{
     std::mutex mutex;
     std::condition_variable changed;
     std::function<void()> pending;
     std::exception_ptr failure;
     bool done = false;
+
 public:
-    void call(const std::function<void()> &action) {
+    void call(const std::function<void()>& action)
+    {
         std::unique_lock<std::mutex> lock(mutex);
         pending = action;
         changed.notify_one();
         changed.wait(lock, [&]() { return !pending; });
-        if (failure) std::rethrow_exception(failure);
+        if (failure)
+            std::rethrow_exception(failure);
     }
-    void finish() {
+    void finish()
+    {
         std::lock_guard<std::mutex> lock(mutex);
         done = true;
         changed.notify_one();
     }
-    [[noreturn]] void await_process_exit() {
+    [[noreturn]] void await_process_exit()
+    {
         std::unique_lock<std::mutex> lock(mutex);
-        for (;;) changed.wait(lock);
+        for (;;)
+            changed.wait(lock);
     }
-    bool service() {
+    bool service()
+    {
         std::unique_lock<std::mutex> lock(mutex);
-        if (!pending && !done) changed.wait_for(lock, std::chrono::milliseconds(10));
+        if (!pending && !done)
+            changed.wait_for(lock, std::chrono::milliseconds(10));
         if (pending) {
             lock.unlock();
             std::exception_ptr error;
-            try { pending(); } catch (...) { error = std::current_exception(); }
+            try {
+                pending();
+            } catch (...) {
+                error = std::current_exception();
+            }
             lock.lock();
             failure = error;
             pending = {};
@@ -257,31 +314,46 @@ public:
 // A hook is called from generated code, so its exception must not unwind
 // through it.
 template <typename Call>
-void run_hook(DisplayContext &context, const Call &call) {
+void
+run_hook(DisplayContext& context, const Call& call)
+{
     try {
         call();
-    } catch (const std::exception &error) {
-        if (context.error.empty()) context.error = error.what();
+    } catch (const std::exception& error) {
+        if (context.error.empty())
+            context.error = error.what();
     } catch (...) {
-        if (context.error.empty()) context.error = "unknown exception";
+        if (context.error.empty())
+            context.error = "unknown exception";
     }
 }
 }
 
 extern "C" {
-static void display_data_hook(void *context, const char *mime_type,
-        const char *data) {
-    DisplayContext &c = *static_cast<DisplayContext *>(context);
-    run_hook(c, [&]() { if (c.io.display) c.io.display(mime_type, data); });
+static void
+display_data_hook(void* context, const char* mime_type, const char* data)
+{
+    DisplayContext& c = *static_cast<DisplayContext*>(context);
+    run_hook(c, [&]() {
+        if (c.io.display)
+            c.io.display(mime_type, data);
+    });
 }
 
-static void clear_output_hook(void *context) {
-    DisplayContext &c = *static_cast<DisplayContext *>(context);
-    run_hook(c, [&]() { if (c.io.clear_output) c.io.clear_output(); });
+static void
+clear_output_hook(void* context)
+{
+    DisplayContext& c = *static_cast<DisplayContext*>(context);
+    run_hook(c, [&]() {
+        if (c.io.clear_output)
+            c.io.clear_output();
+    });
 }
 
-static int read_input(void *context, const char **record, size_t *length) {
-    InputContext &c = *static_cast<InputContext *>(context);
+static int
+read_input(void* context, const char** record, size_t* length)
+{
+    InputContext& c = *static_cast<InputContext*>(context);
     try {
         c.record.clear();
         int status = c.io.input(c.record);
@@ -296,25 +368,30 @@ static int read_input(void *context, const char **record, size_t *length) {
 }
 }
 
-namespace LCompilers {
+namespace LCompilers
+{
 
-class StringDescriptor {
+class StringDescriptor
+{
     struct Storage {
-        char *data;
+        char* data;
         int64_t length;
     };
     Storage storage{};
 
 public:
-    void *pointer() {
+    void* pointer()
+    {
         return &storage;
     }
 
-    char *data() const {
+    char* data() const
+    {
         return storage.data;
     }
 
-    int64_t length() const {
+    int64_t length() const
+    {
         return storage.length;
     }
 };
@@ -324,21 +401,24 @@ public:
 // FortranEvaluator
 
 FortranEvaluator::FortranEvaluator(CompilerOptions& compiler_options)
-    :
-    compiler_options{compiler_options},
-    al{1024*1024},
+    : compiler_options{ compiler_options }
+    , al{ 1024 * 1024 }
+    ,
 #ifdef HAVE_LFORTRAN_LLVM
-    e{nullptr},
-    eval_count{0},
+    e{ nullptr }
+    , eval_count{ 0 }
+    ,
 #endif
-    symbol_table{nullptr}
+    symbol_table{ nullptr }
 {
 }
 
 FortranEvaluator::~FortranEvaluator() = default;
 
 #ifdef HAVE_LFORTRAN_LLVM
-LLVMEvaluator &FortranEvaluator::get_llvm_evaluator() {
+LLVMEvaluator&
+FortranEvaluator::get_llvm_evaluator()
+{
     if (!e) {
         e = std::make_unique<LLVMEvaluator>(compiler_options);
     }
@@ -346,7 +426,9 @@ LLVMEvaluator &FortranEvaluator::get_llvm_evaluator() {
 }
 
 #ifdef __EMSCRIPTEN__
-WasmLFortranExecutor &FortranEvaluator::get_wasm_executor() {
+WasmLFortranExecutor&
+FortranEvaluator::get_wasm_executor()
+{
     if (!wasm_exec) {
         wasm_exec = std::make_unique<WasmLFortranExecutor>();
     }
@@ -362,8 +444,8 @@ WasmLFortranExecutor &FortranEvaluator::get_wasm_executor() {
 // of them, each with its own text. Without that, a location from an earlier
 // cell is read as a position in this one and quotes whatever text happens to
 // be there.
-uint32_t FortranEvaluator::open_cell(const std::string &code,
-    LocationManager &lm)
+uint32_t
+FortranEvaluator::open_cell(const std::string& code, LocationManager& lm)
 {
     uint32_t start = cell_ends.empty() ? 0 : cell_ends.back();
     LocationManager::FileLocations fl;
@@ -388,13 +470,15 @@ uint32_t FortranEvaluator::open_cell(const std::string &code,
 
 // The prescanner fills in the intervals of the file it is given, counting from
 // zero. This cell starts further along, so they are moved up to where it is.
-void FortranEvaluator::close_cell(const std::string &code, LocationManager &lm)
+void
+FortranEvaluator::close_cell(const std::string& code, LocationManager& lm)
 {
-    if (lm.files.empty() || lm.file_ends.empty()) return;
-    LocationManager::FileLocations &fl = lm.files.back();
+    if (lm.files.empty() || lm.file_ends.empty())
+        return;
+    LocationManager::FileLocations& fl = lm.files.back();
     if (fl.out_start.empty()) {
-        fl.out_start = {cell_start, cell_start + (uint32_t)code.size()};
-        fl.in_start = {0, (uint32_t)code.size()};
+        fl.out_start = { cell_start, cell_start + (uint32_t) code.size() };
+        fl.in_start = { 0, (uint32_t) code.size() };
         lm.get_newlines(fl.source, fl.in_newlines);
     } else {
         for (size_t i = 0; i < fl.out_start.size(); i++) {
@@ -406,7 +490,9 @@ void FortranEvaluator::close_cell(const std::string &code, LocationManager &lm)
     cell_ends.push_back(lm.file_ends.back());
 }
 
-Result<FortranEvaluator::EvalResult> FortranEvaluator::evaluate2(const std::string &code) {
+Result<FortranEvaluator::EvalResult>
+FortranEvaluator::evaluate2(const std::string& code)
+{
     LocationManager lm;
     LCompilers::PassManager lpm;
     lpm.use_default_passes();
@@ -420,23 +506,28 @@ Result<FortranEvaluator::EvalResult> FortranEvaluator::evaluate2(const std::stri
     return evaluate(code, false, lm, lpm, diagnostics);
 }
 
-Result<FortranEvaluator::EvalResult> FortranEvaluator::evaluate(
+Result<FortranEvaluator::EvalResult>
+FortranEvaluator::evaluate(
 #ifdef HAVE_LFORTRAN_LLVM
-            const std::string &code_orig, bool verbose, LocationManager &lm,
-            LCompilers::PassManager& pass_manager, diag::Diagnostics &diagnostics
+    const std::string& code_orig,
+    bool verbose,
+    LocationManager& lm,
+    LCompilers::PassManager& pass_manager,
+    diag::Diagnostics& diagnostics
 #else
-            const std::string &/*code_orig*/, bool /*verbose*/,
-                LocationManager &/*lm*/, LCompilers::PassManager& /*pass_manager*/,
-                diag::Diagnostics &/*diagnostics*/
+    const std::string& /*code_orig*/,
+    bool /*verbose*/,
+    LocationManager& /*lm*/,
+    LCompilers::PassManager& /*pass_manager*/,
+    diag::Diagnostics& /*diagnostics*/
 #endif
-            )
+)
 {
 #ifdef HAVE_LFORTRAN_LLVM
     EvalResult result;
 
     // Src -> AST
-    Result<LFortran::AST::TranslationUnit_t*> res = get_ast2(
-        code_orig, lm, diagnostics);
+    Result<LFortran::AST::TranslationUnit_t*> res = get_ast2(code_orig, lm, diagnostics);
     LFortran::AST::TranslationUnit_t* ast;
     if (res.ok) {
         ast = res.result;
@@ -462,17 +553,16 @@ Result<FortranEvaluator::EvalResult> FortranEvaluator::evaluate(
         result.asr = pickle(*asr, true, false, false, false);
     }
 
-    bool character_result = asr->n_items > 0
-        && asr->m_items[asr->n_items - 1]->type == ASR::asrType::expr
-        && ASRUtils::is_character(*ASRUtils::expr_type(
-            ASRUtils::EXPR(asr->m_items[asr->n_items - 1])));
+    bool character_result
+        = asr->n_items > 0 && asr->m_items[asr->n_items - 1]->type == ASR::asrType::expr
+          && ASRUtils::is_character(
+              *ASRUtils::expr_type(ASRUtils::EXPR(asr->m_items[asr->n_items - 1])));
 
     // ASR -> LLVM. The passes rewrite this tree; that is fine, it is this
     // cell's own and is discarded afterwards. What later cells resolve
     // against is the snapshot taken in get_asr3().
-    Result<std::unique_ptr<LLVMModule>> res3 = get_llvm3(*asr,
-        pass_manager, diagnostics, lm, lm.files.back().in_filename,
-        nullptr);
+    Result<std::unique_ptr<LLVMModule>> res3
+        = get_llvm3(*asr, pass_manager, diagnostics, lm, lm.files.back().in_filename, nullptr);
     std::unique_ptr<LCompilers::LLVMModule> m;
     if (res3.ok) {
         m = std::move(res3.result);
@@ -507,15 +597,15 @@ Result<FortranEvaluator::EvalResult> FortranEvaluator::evaluate(
     // in the session ASR, it is created by the wrap-global-statements pass, so
     // in interactive mode it only ever appears in the copy.
     if (asr->m_symtab->get_symbol(run_fn) != nullptr) {
-        ASR::symbol_t *fn_sym = asr->m_symtab->get_symbol(run_fn);
+        ASR::symbol_t* fn_sym = asr->m_symtab->get_symbol(run_fn);
         if (ASR::is_a<ASR::Function_t>(*fn_sym)) {
-            ASR::Function_t *fn = ASR::down_cast<ASR::Function_t>(fn_sym);
+            ASR::Function_t* fn = ASR::down_cast<ASR::Function_t>(fn_sym);
             if (fn->m_return_var) {
-                ASR::ttype_t *ret_type = ASRUtils::expr_type(fn->m_return_var);
+                ASR::ttype_t* ret_type = ASRUtils::expr_type(fn->m_return_var);
                 if (ASRUtils::is_logical(*ret_type)) {
                     return_type = "logical";
-                } else if (compiler_options.platform == Platform::Windows &&
-                        ASRUtils::is_complex(*ret_type)) {
+                } else if (compiler_options.platform == Platform::Windows
+                           && ASRUtils::is_complex(*ret_type)) {
                     int kind = ASRUtils::extract_kind_from_ttype_t(ret_type);
                     LCOMPILERS_ASSERT(kind == 4 || kind == 8);
                     return_type = kind == 4 ? "complex4" : "complex8";
@@ -530,10 +620,10 @@ Result<FortranEvaluator::EvalResult> FortranEvaluator::evaluate(
 
     // LLVM -> Machine code -> Execution
 #ifdef __EMSCRIPTEN__
-    WasmLFortranExecutor &e = get_wasm_executor();
+    WasmLFortranExecutor& e = get_wasm_executor();
     e.add_module(std::move(m), eval_count);
 #else
-    LLVMEvaluator &e = get_llvm_evaluator();
+    LLVMEvaluator& e = get_llvm_evaluator();
     e.add_module(std::move(m));
 #endif
     if (has_setup) {
@@ -604,16 +694,16 @@ Result<FortranEvaluator::EvalResult> FortranEvaluator::evaluate(
         StringDescriptor descriptor;
         e.execfn<void>(run_fn, descriptor.pointer());
         result.type = EvalResult::character;
-        char *data = descriptor.data();
+        char* data = descriptor.data();
         int64_t length = descriptor.length();
         if (data && length > 0) {
             result.str.assign(data, length);
         }
         if (data) {
             const std::string allocator_fn = compiler_options.detect_leaks
-                ? "_lfortran_get_compiler_mem_dbg_allocator"
-                : "_lfortran_get_default_allocator";
-            void *allocator = e.execfn<void *>(allocator_fn);
+                                                 ? "_lfortran_get_compiler_mem_dbg_allocator"
+                                                 : "_lfortran_get_default_allocator";
+            void* allocator = e.execfn<void*>(allocator_fn);
             e.execfn<void>("_lfortran_free_alloc", allocator, data);
         }
     } else if (return_type == "void") {
@@ -630,67 +720,101 @@ Result<FortranEvaluator::EvalResult> FortranEvaluator::evaluate(
 #endif
 }
 
-std::string FortranEvaluator::EvalResult::type_name() const {
+std::string
+FortranEvaluator::EvalResult::type_name() const
+{
     switch (type) {
-        case integer4: return "integer";
-        case integer8: return "integer(8)";
-        case real4: return "real";
-        case real8: return "real(8)";
-        case complex4: return "complex";
-        case complex8: return "complex(8)";
-        case boolean: return "logical";
-        case character: return "character";
-        default: return "none";
+        case integer4:
+            return "integer";
+        case integer8:
+            return "integer(8)";
+        case real4:
+            return "real";
+        case real8:
+            return "real(8)";
+        case complex4:
+            return "complex";
+        case complex8:
+            return "complex(8)";
+        case boolean:
+            return "logical";
+        case character:
+            return "character";
+        default:
+            return "none";
     }
 }
 
-namespace {
-// The shortest text, with at most `max_digits` significant digits, that reads
-// back as `x`, and always with a decimal point or an exponent, so that a real
-// such as 1.0 does not look like the integer 1.
-template <typename T>
-std::string real_text(T x, int max_digits) {
-    std::string text;
-    for (int digits = 1; digits <= max_digits; digits++) {
-        std::ostringstream s;
-        s << std::setprecision(digits) << x;
-        text = s.str();
-        T y = std::is_same<T, float>::value ? std::strtof(text.c_str(), nullptr)
-            : std::strtod(text.c_str(), nullptr);
-        if (y == x) break;
+namespace
+{
+    // The shortest text, with at most `max_digits` significant digits, that reads
+    // back as `x`, and always with a decimal point or an exponent, so that a real
+    // such as 1.0 does not look like the integer 1.
+    template <typename T>
+    std::string real_text(T x, int max_digits)
+    {
+        std::string text;
+        for (int digits = 1; digits <= max_digits; digits++) {
+            std::ostringstream s;
+            s << std::setprecision(digits) << x;
+            text = s.str();
+            T y = std::is_same<T, float>::value ? std::strtof(text.c_str(), nullptr)
+                                                : std::strtod(text.c_str(), nullptr);
+            if (y == x)
+                break;
+        }
+        if (text.find_first_not_of("-0123456789") == std::string::npos) {
+            text += ".0";
+        }
+        return text;
     }
-    if (text.find_first_not_of("-0123456789") == std::string::npos) {
-        text += ".0";
-    }
-    return text;
-}
 }
 
-std::string FortranEvaluator::EvalResult::text() const {
+std::string
+FortranEvaluator::EvalResult::text() const
+{
     std::ostringstream s;
     switch (type) {
-        case integer4: s << i32; break;
-        case integer8: s << i64; break;
-        case real4: s << real_text(f32, 9); break;
-        case real8: s << real_text(f64, 17); break;
+        case integer4:
+            s << i32;
+            break;
+        case integer8:
+            s << i64;
+            break;
+        case real4:
+            s << real_text(f32, 9);
+            break;
+        case real8:
+            s << real_text(f64, 17);
+            break;
         case complex4:
             s << "(" << real_text(c32.re, 9) << ", " << real_text(c32.im, 9) << ")";
             break;
         case complex8:
             s << "(" << real_text(c64.re, 17) << ", " << real_text(c64.im, 17) << ")";
             break;
-        case boolean: s << (b ? "True" : "False"); break;
-        case character: s << str; break;
-        case statement: s << "(statement)"; break;
-        case none: s << "(nothing to execute)"; break;
+        case boolean:
+            s << (b ? "True" : "False");
+            break;
+        case character:
+            s << str;
+            break;
+        case statement:
+            s << "(statement)";
+            break;
+        case none:
+            s << "(nothing to execute)";
+            break;
     }
     return s.str();
 }
 
-std::string FortranEvaluator::CellResult::error_text() const {
+std::string
+FortranEvaluator::CellResult::error_text() const
+{
     if (internal_error) {
-        return "Internal Compiler Error: Unhandled exception\n" + error_traceback
-            + error_name + ": " + error_value + "\n";
+        return "Internal Compiler Error: Unhandled exception\n" + error_traceback + error_name
+               + ": " + error_value + "\n";
     }
     if (!error_value.empty() && error_value.back() != '\n') {
         return error_value + "\n";
@@ -698,8 +822,9 @@ std::string FortranEvaluator::CellResult::error_text() const {
     return error_value;
 }
 
-FortranEvaluator::CellResult FortranEvaluator::execute(const std::string &code,
-        bool verbose, const CellIO &io) {
+FortranEvaluator::CellResult
+FortranEvaluator::execute(const std::string& code, bool verbose, const CellIO& io)
+{
     LCOMPILERS_ASSERT(compiler_options.interactive);
     CellResult out;
     // What the cell writes goes to io.output before anything it displays,
@@ -707,13 +832,14 @@ FortranEvaluator::CellResult FortranEvaluator::execute(const std::string &code,
     std::optional<OutputCapture> capture;
     std::exception_ptr output_error;
     auto drain_output = [&](bool barrier) {
-        if (output_error) std::rethrow_exception(output_error);
+        if (output_error)
+            std::rethrow_exception(output_error);
         if (capture) {
             try {
                 capture->pump(io.output, barrier);
-                if (io.progress_output) io.progress_output();
-            }
-            catch (...) {
+                if (io.progress_output)
+                    io.progress_output();
+            } catch (...) {
                 output_error = std::current_exception();
                 throw;
             }
@@ -723,9 +849,9 @@ FortranEvaluator::CellResult FortranEvaluator::execute(const std::string &code,
     CellMailbox mailbox;
     const bool threaded = bool(io.output);
     const auto owner = std::this_thread::get_id();
-    bool process_exiting = false; // Only accessed by the caller.
+    bool process_exiting = false;  // Only accessed by the caller.
 #endif
-    auto dispatch = [&](const std::function<void()> &action) {
+    auto dispatch = [&](const std::function<void()>& action) {
 #ifndef __EMSCRIPTEN__
         if (threaded && std::this_thread::get_id() != owner) {
             mailbox.call(action);
@@ -741,33 +867,43 @@ FortranEvaluator::CellResult FortranEvaluator::execute(const std::string &code,
 #endif
             // STOP runs atexit on the worker. Drain and flush the transport
             // here, before letting it continue process termination.
-            try { drain_output(true); }
-            catch (...) {
-                if (io.flush_on_exit) io.flush_on_exit();
+            try {
+                drain_output(true);
+            } catch (...) {
+                if (io.flush_on_exit)
+                    io.flush_on_exit();
                 throw;
             }
-            if (io.flush_on_exit) io.flush_on_exit();
+            if (io.flush_on_exit)
+                io.flush_on_exit();
         });
     };
     // A cell that ends the process (STOP, a fatal error) still passes on
     // what it wrote.
     struct FlushAtExit {
-        FlushAtExit(std::function<void()> *flush) {
+        FlushAtExit(std::function<void()>* flush)
+        {
             static const int registered = std::atexit([]() {
-                try { if (flush_at_exit) (*flush_at_exit)(); }
-                catch (...) {} // An atexit failure cannot escape exit().
+                try {
+                    if (flush_at_exit)
+                        (*flush_at_exit)();
+                } catch (...) {
+                }  // An atexit failure cannot escape exit().
             });
-            (void)registered;
+            (void) registered;
             flush_at_exit = flush;
         }
-        ~FlushAtExit() { flush_at_exit = nullptr; }
+        ~FlushAtExit()
+        {
+            flush_at_exit = nullptr;
+        }
     };
     std::optional<FlushAtExit> flush_at_exit_guard;
     CellIO hooks_io = io;
     if (io.output) {
         flush_at_exit_guard.emplace(&flush_output);
         if (io.display) {
-            hooks_io.display = [&](const std::string &mime, const std::string &data) {
+            hooks_io.display = [&](const std::string& mime, const std::string& data) {
                 dispatch([&]() {
                     drain_output(true);
                     io.display(mime, data);
@@ -783,7 +919,7 @@ FortranEvaluator::CellResult FortranEvaluator::execute(const std::string &code,
             };
         }
         if (io.input) {
-            hooks_io.input = [&](std::string &record) {
+            hooks_io.input = [&](std::string& record) {
                 int status = 1;
                 dispatch([&]() {
                     drain_output(true);
@@ -793,16 +929,18 @@ FortranEvaluator::CellResult FortranEvaluator::execute(const std::string &code,
             };
         }
     }
-    DisplayContext display{hooks_io, ""};
-    InputContext input{hooks_io, ""};
+    DisplayContext display{ hooks_io, "" };
+    InputContext input{ hooks_io, "" };
     struct Hooks {
-        Hooks(DisplayContext &display, InputContext &input) {
-            [[maybe_unused]] void *previous = _lfortran_set_display_hooks(display_data_hook,
-                clear_output_hook, &display);
+        Hooks(DisplayContext& display, InputContext& input)
+        {
+            [[maybe_unused]] void* previous
+                = _lfortran_set_display_hooks(display_data_hook, clear_output_hook, &display);
             LCOMPILERS_ASSERT(previous == nullptr);
             _lfortran_stdin_install(input.io.input ? read_input : nullptr, &input);
         }
-        ~Hooks() {
+        ~Hooks()
+        {
             _lfortran_stdin_reset();
             _lfortran_set_display_hooks(nullptr, nullptr, nullptr);
         }
@@ -818,32 +956,39 @@ FortranEvaluator::CellResult FortranEvaluator::execute(const std::string &code,
             // Trailing blanks and the \r of a CRLF line ending are not part of it.
             magic.erase(magic.find_last_not_of(" \t\r") + 1);
             const auto source = newline == std::string::npos ? "" : code.substr(newline + 1);
-            Result<std::string> shown{Error{}};
+            Result<std::string> shown{ Error{} };
             // An inspection cell shows how its code compiles in the session, but
             // it does not run, so its declarations must not join the session.
             struct KeepSession {
-                SymbolTable *&scope;
-                SymbolTable *const saved;
-                ~KeepSession() { scope = saved; }
+                SymbolTable*& scope;
+                SymbolTable* const saved;
+                ~KeepSession()
+                {
+                    scope = saved;
+                }
             };
             out.inspection = true;
-            if (magic == "%%showast") shown = get_ast(source, lm, diagnostics);
+            if (magic == "%%showast")
+                shown = get_ast(source, lm, diagnostics);
             else if (magic == "%%showasr") {
-                KeepSession keep{symbol_table, symbol_table};
+                KeepSession keep{ symbol_table, symbol_table };
                 shown = get_asr(source, lm, diagnostics);
             } else if (magic == "%%showllvm") {
-                KeepSession keep{symbol_table, symbol_table};
+                KeepSession keep{ symbol_table, symbol_table };
                 shown = get_llvm(source, lm, passes, diagnostics);
             } else if (magic == "%%showasm") {
-                KeepSession keep{symbol_table, symbol_table};
+                KeepSession keep{ symbol_table, symbol_table };
                 shown = get_asm(source, lm, passes, diagnostics);
-            } else if (magic == "%%showcpp") shown = get_cpp(source, lm, diagnostics, 1);
-            else if (magic == "%%showfmt") shown = get_fmt(source, lm, diagnostics);
+            } else if (magic == "%%showcpp")
+                shown = get_cpp(source, lm, diagnostics, 1);
+            else if (magic == "%%showfmt")
+                shown = get_fmt(source, lm, diagnostics);
             else {
                 out.inspection = false;
                 auto result = evaluate(code, verbose, lm, passes, diagnostics);
                 out.ok = result.ok;
-                if (out.ok) out.value = std::move(result.result);
+                if (out.ok)
+                    out.value = std::move(result.result);
             }
             if (shown.ok) {
                 out.ok = true;
@@ -859,7 +1004,7 @@ FortranEvaluator::CellResult FortranEvaluator::execute(const std::string &code,
                 out.error_name = "DisplayError";
                 out.error_value = "display failed: " + display.error;
             }
-        } catch (const LCompilersException &error) {
+        } catch (const LCompilersException& error) {
             out.ok = false;
             out.internal_error = true;
             out.error_name = error.name();
@@ -870,7 +1015,7 @@ FortranEvaluator::CellResult FortranEvaluator::execute(const std::string &code,
             out.error_traceback = stacktrace2str(trace, stacktrace_depth);
         }
     };
-    auto execution_error = [&](const std::string &message) {
+    auto execution_error = [&](const std::string& message) {
         out.ok = false;
         out.internal_error = false;
         out.error_traceback.clear();
@@ -878,32 +1023,40 @@ FortranEvaluator::CellResult FortranEvaluator::execute(const std::string &code,
         out.error_value = message;
     };
     try {
-        if (io.output) capture.emplace();
+        if (io.output)
+            capture.emplace();
 #ifndef __EMSCRIPTEN__
         if (threaded) {
             std::exception_ptr worker_error;
             std::thread worker([&]() {
-                try { execute_cell(); }
-                catch (...) { worker_error = std::current_exception(); }
+                try {
+                    execute_cell();
+                } catch (...) {
+                    worker_error = std::current_exception();
+                }
                 mailbox.finish();
             });
             bool done;
             do {
-                try { drain_output(false); }
-                catch (...) {} // Saved above; keep servicing hooks until join.
+                try {
+                    drain_output(false);
+                } catch (...) {
+                }  // Saved above; keep servicing hooks until join.
                 done = mailbox.service();
-                if (process_exiting) mailbox.await_process_exit();
+                if (process_exiting)
+                    mailbox.await_process_exit();
             } while (!done);
             worker.join();
             drain_output(true);
-            if (worker_error) std::rethrow_exception(worker_error);
+            if (worker_error)
+                std::rethrow_exception(worker_error);
         } else
 #endif
         {
             execute_cell();
         }
         drain_output(true);
-    } catch (const std::exception &error) {
+    } catch (const std::exception& error) {
         execution_error(error.what());
     } catch (...) {
         execution_error("unknown cell execution failure");
@@ -911,28 +1064,29 @@ FortranEvaluator::CellResult FortranEvaluator::execute(const std::string &code,
     return out;
 }
 
-Result<std::string> FortranEvaluator::get_ast(const std::string &code,
-    LocationManager &lm, diag::Diagnostics &diagnostics)
+Result<std::string>
+FortranEvaluator::get_ast(const std::string& code,
+                          LocationManager& lm,
+                          diag::Diagnostics& diagnostics)
 {
-    Result<LFortran::AST::TranslationUnit_t*> ast = get_ast2(code, lm,
-        diagnostics);
+    Result<LFortran::AST::TranslationUnit_t*> ast = get_ast2(code, lm, diagnostics);
     if (ast.ok) {
         if (compiler_options.po.tree) {
             return LFortran::pickle_tree(*ast.result, compiler_options.use_colors);
         } else if (compiler_options.po.json || compiler_options.po.visualize) {
             return LFortran::pickle_json(*ast.result, lm, compiler_options.po.no_loc);
         }
-        return LFortran::pickle(*ast.result, compiler_options.use_colors,
-            compiler_options.indent);
+        return LFortran::pickle(*ast.result, compiler_options.use_colors, compiler_options.indent);
     } else {
         LCOMPILERS_ASSERT(diagnostics.has_error())
         return ast.error;
     }
 }
 
-Result<LFortran::AST::TranslationUnit_t*> FortranEvaluator::get_ast2(
-            const std::string &code_orig, LocationManager &lm,
-            diag::Diagnostics &diagnostics)
+Result<LFortran::AST::TranslationUnit_t*>
+FortranEvaluator::get_ast2(const std::string& code_orig,
+                           LocationManager& lm,
+                           diag::Diagnostics& diagnostics)
 {
     // Src -> AST
     // Every interactive entry point comes through here, so this is where a
@@ -942,12 +1096,12 @@ Result<LFortran::AST::TranslationUnit_t*> FortranEvaluator::get_ast2(
     if (compiler_options.interactive) {
         cell_start = open_cell(code_orig, lm);
     }
-    const std::string *code=&code_orig;
+    const std::string* code = &code_orig;
     std::string tmp;
     if (compiler_options.c_preprocessor) {
         // Preprocessor
         LFortran::CPreprocessor cpp(compiler_options);
-        const std::string *cpp_input = &code_orig;
+        const std::string* cpp_input = &code_orig;
         std::string cpp_input_with_newline;
         if (!code_orig.empty() && code_orig.back() != '\n') {
             cpp_input_with_newline = code_orig;
@@ -959,7 +1113,8 @@ Result<LFortran::AST::TranslationUnit_t*> FortranEvaluator::get_ast2(
             tmp = res.result;
         } else {
             LCOMPILERS_ASSERT(diagnostics.has_error())
-            if (compiler_options.interactive) close_cell(*cpp_input, lm);
+            if (compiler_options.interactive)
+                close_cell(*cpp_input, lm);
             return res.error;
         }
         code = &tmp;
@@ -970,21 +1125,22 @@ Result<LFortran::AST::TranslationUnit_t*> FortranEvaluator::get_ast2(
         include_dirs.insert(include_dirs.end(),
                             compiler_options.po.include_dirs.begin(),
                             compiler_options.po.include_dirs.end());
-        Result<std::string> prescan_res = LFortran::prescan(*code, lm,
-            compiler_options.fixed_form, include_dirs, diagnostics);
+        Result<std::string> prescan_res
+            = LFortran::prescan(*code, lm, compiler_options.fixed_form, include_dirs, diagnostics);
         if (prescan_res.ok) {
             tmp = prescan_res.result;
         } else {
             LCOMPILERS_ASSERT(diagnostics.has_error())
-            if (compiler_options.interactive) close_cell(*code, lm);
+            if (compiler_options.interactive)
+                close_cell(*code, lm);
             return prescan_res.error;
         }
         code = &tmp;
     }
-    if (compiler_options.interactive) close_cell(*code, lm);
-    Result<LFortran::AST::TranslationUnit_t*>
-        res = LFortran::parse(al, *code, diagnostics, compiler_options,
-            compiler_options.interactive ? cell_start : 0);
+    if (compiler_options.interactive)
+        close_cell(*code, lm);
+    Result<LFortran::AST::TranslationUnit_t*> res = LFortran::parse(
+        al, *code, diagnostics, compiler_options, compiler_options.interactive ? cell_start : 0);
     if (res.ok) {
         return res.result;
     } else {
@@ -993,8 +1149,10 @@ Result<LFortran::AST::TranslationUnit_t*> FortranEvaluator::get_ast2(
     }
 }
 
-Result<std::string> FortranEvaluator::get_asr(const std::string &code,
-    LocationManager &lm, diag::Diagnostics &diagnostics)
+Result<std::string>
+FortranEvaluator::get_asr(const std::string& code,
+                          LocationManager& lm,
+                          diag::Diagnostics& diagnostics)
 {
     Result<ASR::TranslationUnit_t*> asr = get_asr2(code, lm, diagnostics);
     if (asr.ok) {
@@ -1003,31 +1161,33 @@ Result<std::string> FortranEvaluator::get_asr(const std::string &code,
         } else if (compiler_options.po.json) {
             return pickle_json(*asr.result, lm, compiler_options.po.no_loc, false);
         }
-        return pickle(*asr.result,
-            compiler_options.use_colors, compiler_options.indent, false, false);
+        return pickle(
+            *asr.result, compiler_options.use_colors, compiler_options.indent, false, false);
     } else {
         LCOMPILERS_ASSERT(diagnostics.has_error())
         return asr.error;
     }
 }
 
-LCompilers::ASR::asr_t* FortranEvaluator::handle_lookup_name(LCompilers::ASR::TranslationUnit_t* tu, uint32_t pos) {
+LCompilers::ASR::asr_t*
+FortranEvaluator::handle_lookup_name(LCompilers::ASR::TranslationUnit_t* tu, uint32_t pos)
+{
     LCompilers::LFortran::LookupNameVisitor lnv(pos);
     lnv.visit_TranslationUnit(*tu);
     if (lnv.node_to_return != nullptr) {
         return lnv.node_to_return;
     } else {
-        return ( LCompilers::ASR::asr_t*) tu;
+        return (LCompilers::ASR::asr_t*) tu;
     }
 }
 
-Result<ASR::TranslationUnit_t*> FortranEvaluator::get_asr2(
-            const std::string &code_orig, LocationManager &lm,
-            diag::Diagnostics &diagnostics)
+Result<ASR::TranslationUnit_t*>
+FortranEvaluator::get_asr2(const std::string& code_orig,
+                           LocationManager& lm,
+                           diag::Diagnostics& diagnostics)
 {
     // Src -> AST
-    Result<LFortran::AST::TranslationUnit_t*>
-        res = get_ast2(code_orig, lm, diagnostics);
+    Result<LFortran::AST::TranslationUnit_t*> res = get_ast2(code_orig, lm, diagnostics);
     LFortran::AST::TranslationUnit_t* ast;
     if (res.ok) {
         ast = res.result;
@@ -1047,7 +1207,8 @@ Result<ASR::TranslationUnit_t*> FortranEvaluator::get_asr2(
 
 
 #ifdef HAVE_LFORTRAN_LLVM
-void FortranEvaluator::drop_redefinitions(LLVMModule &m)
+void
+FortranEvaluator::drop_redefinitions(LLVMModule& m)
 {
     // Each interactive evaluation compiles a fresh copy of the session ASR, so
     // the passes regenerate their helper procedures every time: intrinsic
@@ -1056,8 +1217,9 @@ void FortranEvaluator::drop_redefinitions(LLVMModule &m)
     // session. Adding a second definition of a symbol the JIT already holds is
     // an error, and the existing definition is equivalent, so keep the
     // declaration and drop the body.
-    for (llvm::Function &fn : *m.m_m) {
-        if (fn.isDeclaration()) continue;
+    for (llvm::Function& fn : *m.m_m) {
+        if (fn.isDeclaration())
+            continue;
         std::string name = fn.getName().str();
         if (!defined_symbols.insert(name).second) {
             fn.deleteBody();
@@ -1066,120 +1228,119 @@ void FortranEvaluator::drop_redefinitions(LLVMModule &m)
 }
 #endif
 
-namespace {
-
-// Whether `scope`, or a scope nested in it, has a view of a common block.
-static bool has_common_block(SymbolTable *scope) {
-    for (auto &item : scope->get_scope()) {
-        if (ASR::is_a<ASR::CommonBlock_t>(*item.second)) {
-            return true;
-        }
-        SymbolTable *nested = ASRUtils::symbol_symtab(item.second);
-        if (nested != nullptr && has_common_block(nested)) {
-            return true;
-        }
-    }
-    return false;
-}
-
-// A generic procedure and a custom operator name the specific procedures they
-// resolve to. A later cell that resolves one would otherwise call the original
-// specific procedure, which is not the one this cell compiled and which code
-// generation never declares. The list is shared with the original, so it is
-// replaced, not written to.
-static void relink_procs(Allocator &al, SymbolTable *scope,
-    ASR::symbol_t **&m_procs, size_t &n_procs)
+namespace
 {
-    Vec<ASR::symbol_t*> procs;
-    procs.reserve(al, n_procs);
-    for (size_t i = 0; i < n_procs; i++) {
-        ASR::symbol_t *copy = scope->resolve_symbol(
-            ASRUtils::symbol_name(m_procs[i]));
-        procs.push_back(al, copy != nullptr ? copy : m_procs[i]);
-    }
-    m_procs = procs.p;
-    n_procs = procs.size();
-}
 
-// The duplicated symbols still point into the scopes they were copied from: an
-// ExternalSymbol at the module it names, a generic procedure at the specific
-// procedures it resolves to. A later cell resolves a name and finds the copy,
-// so anything still pointing at an original does not match it. Point them at
-// the copies.
-static void relink_copied_symbols(Allocator &al, SymbolTable *scope,
-    SymbolTable *tu)
-{
-    for (auto &item : scope->get_scope()) {
-        ASR::symbol_t *s = item.second;
-        if (ASR::is_a<ASR::ExternalSymbol_t>(*s)) {
-            ASR::ExternalSymbol_t *es = ASR::down_cast<ASR::ExternalSymbol_t>(s);
-            ASR::symbol_t *mod = tu->resolve_symbol(es->m_module_name);
-            if (mod == nullptr || !ASR::is_a<ASR::Module_t>(*mod)) continue;
-            ASR::Module_t *m = ASR::down_cast<ASR::Module_t>(mod);
-            ASR::symbol_t *target = m->m_symtab->find_scoped_symbol(
-                es->m_original_name, es->n_scope_names, es->m_scope_names);
-            // An ExternalSymbol has to name a definition. The module's own
-            // entry for the name may be an import of its own -- an intrinsic
-            // module re-exporting a derived type -- and naming that would
-            // build a chain no consumer of the symbol can follow.
-            if (target != nullptr &&
-                    !ASR::is_a<ASR::ExternalSymbol_t>(*target)) {
-                es->m_external = target;
+    // Whether `scope`, or a scope nested in it, has a view of a common block.
+    static bool has_common_block(SymbolTable* scope)
+    {
+        for (auto& item : scope->get_scope()) {
+            if (ASR::is_a<ASR::CommonBlock_t>(*item.second)) {
+                return true;
             }
-        } else if (ASR::is_a<ASR::GenericProcedure_t>(*s)) {
-            ASR::GenericProcedure_t *gp
-                = ASR::down_cast<ASR::GenericProcedure_t>(s);
-            relink_procs(al, scope, gp->m_procs, gp->n_procs);
-        } else if (ASR::is_a<ASR::CustomOperator_t>(*s)) {
-            ASR::CustomOperator_t *co
-                = ASR::down_cast<ASR::CustomOperator_t>(s);
-            relink_procs(al, scope, co->m_procs, co->n_procs);
-        } else if (ASR::is_a<ASR::StructMethodDeclaration_t>(*s)) {
-            // A type-bound procedure names the procedure it binds to, and a
-            // later cell calls whatever it names. Left pointing at the
-            // original, that is a procedure code generation never declares.
-            ASR::StructMethodDeclaration_t *m
-                = ASR::down_cast<ASR::StructMethodDeclaration_t>(s);
-            // From the scope holding the derived type, not from the type's
-            // own scope: the binding carries the name of the procedure, and
-            // looking it up there finds the binding itself.
-            SymbolTable *outer = scope->parent;
-            ASR::symbol_t *copy = outer == nullptr ? nullptr
-                : outer->resolve_symbol(ASRUtils::symbol_name(m->m_proc));
-            if (copy != nullptr && ASR::is_a<ASR::Function_t>(
-                    *ASRUtils::symbol_get_past_external(copy))) {
-                m->m_proc = copy;
+            SymbolTable* nested = ASRUtils::symbol_symtab(item.second);
+            if (nested != nullptr && has_common_block(nested)) {
+                return true;
             }
-        } else if (ASR::is_a<ASR::Variable_t>(*s)) {
-            // A variable of a derived type names the type it was declared
-            // with. Left pointing at the original, a dummy argument of a
-            // copied procedure is of a different type than the one a later
-            // cell declares from the copy, and the call does not type check.
-            ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(s);
-            if (v->m_type_declaration != nullptr) {
-                ASR::symbol_t *copy = scope->resolve_symbol(
-                    ASRUtils::symbol_name(v->m_type_declaration));
-                if (copy != nullptr) v->m_type_declaration = copy;
+        }
+        return false;
+    }
+
+    // A generic procedure and a custom operator name the specific procedures they
+    // resolve to. A later cell that resolves one would otherwise call the original
+    // specific procedure, which is not the one this cell compiled and which code
+    // generation never declares. The list is shared with the original, so it is
+    // replaced, not written to.
+    static void relink_procs(Allocator& al,
+                             SymbolTable* scope,
+                             ASR::symbol_t**& m_procs,
+                             size_t& n_procs)
+    {
+        Vec<ASR::symbol_t*> procs;
+        procs.reserve(al, n_procs);
+        for (size_t i = 0; i < n_procs; i++) {
+            ASR::symbol_t* copy = scope->resolve_symbol(ASRUtils::symbol_name(m_procs[i]));
+            procs.push_back(al, copy != nullptr ? copy : m_procs[i]);
+        }
+        m_procs = procs.p;
+        n_procs = procs.size();
+    }
+
+    // The duplicated symbols still point into the scopes they were copied from: an
+    // ExternalSymbol at the module it names, a generic procedure at the specific
+    // procedures it resolves to. A later cell resolves a name and finds the copy,
+    // so anything still pointing at an original does not match it. Point them at
+    // the copies.
+    static void relink_copied_symbols(Allocator& al, SymbolTable* scope, SymbolTable* tu)
+    {
+        for (auto& item : scope->get_scope()) {
+            ASR::symbol_t* s = item.second;
+            if (ASR::is_a<ASR::ExternalSymbol_t>(*s)) {
+                ASR::ExternalSymbol_t* es = ASR::down_cast<ASR::ExternalSymbol_t>(s);
+                ASR::symbol_t* mod = tu->resolve_symbol(es->m_module_name);
+                if (mod == nullptr || !ASR::is_a<ASR::Module_t>(*mod))
+                    continue;
+                ASR::Module_t* m = ASR::down_cast<ASR::Module_t>(mod);
+                ASR::symbol_t* target = m->m_symtab->find_scoped_symbol(
+                    es->m_original_name, es->n_scope_names, es->m_scope_names);
+                // An ExternalSymbol has to name a definition. The module's own
+                // entry for the name may be an import of its own -- an intrinsic
+                // module re-exporting a derived type -- and naming that would
+                // build a chain no consumer of the symbol can follow.
+                if (target != nullptr && !ASR::is_a<ASR::ExternalSymbol_t>(*target)) {
+                    es->m_external = target;
+                }
+            } else if (ASR::is_a<ASR::GenericProcedure_t>(*s)) {
+                ASR::GenericProcedure_t* gp = ASR::down_cast<ASR::GenericProcedure_t>(s);
+                relink_procs(al, scope, gp->m_procs, gp->n_procs);
+            } else if (ASR::is_a<ASR::CustomOperator_t>(*s)) {
+                ASR::CustomOperator_t* co = ASR::down_cast<ASR::CustomOperator_t>(s);
+                relink_procs(al, scope, co->m_procs, co->n_procs);
+            } else if (ASR::is_a<ASR::StructMethodDeclaration_t>(*s)) {
+                // A type-bound procedure names the procedure it binds to, and a
+                // later cell calls whatever it names. Left pointing at the
+                // original, that is a procedure code generation never declares.
+                ASR::StructMethodDeclaration_t* m
+                    = ASR::down_cast<ASR::StructMethodDeclaration_t>(s);
+                // From the scope holding the derived type, not from the type's
+                // own scope: the binding carries the name of the procedure, and
+                // looking it up there finds the binding itself.
+                SymbolTable* outer = scope->parent;
+                ASR::symbol_t* copy = outer == nullptr
+                                          ? nullptr
+                                          : outer->resolve_symbol(ASRUtils::symbol_name(m->m_proc));
+                if (copy != nullptr
+                    && ASR::is_a<ASR::Function_t>(*ASRUtils::symbol_get_past_external(copy))) {
+                    m->m_proc = copy;
+                }
+            } else if (ASR::is_a<ASR::Variable_t>(*s)) {
+                // A variable of a derived type names the type it was declared
+                // with. Left pointing at the original, a dummy argument of a
+                // copied procedure is of a different type than the one a later
+                // cell declares from the copy, and the call does not type check.
+                ASR::Variable_t* v = ASR::down_cast<ASR::Variable_t>(s);
+                if (v->m_type_declaration != nullptr) {
+                    ASR::symbol_t* copy
+                        = scope->resolve_symbol(ASRUtils::symbol_name(v->m_type_declaration));
+                    if (copy != nullptr)
+                        v->m_type_declaration = copy;
+                }
+            } else if (ASR::is_a<ASR::Module_t>(*s) || ASR::is_a<ASR::Program_t>(*s)
+                       || ASR::is_a<ASR::BlockData_t>(*s) || ASR::is_a<ASR::Function_t>(*s)
+                       || ASR::is_a<ASR::Struct_t>(*s) || ASR::is_a<ASR::Enum_t>(*s)
+                       || ASR::is_a<ASR::Union_t>(*s) || ASR::is_a<ASR::Block_t>(*s)
+                       || ASR::is_a<ASR::AssociateBlock_t>(*s)) {
+                // Only the symbols that own a scope: asking any other kind for one
+                // is an error, not an empty answer.
+                relink_copied_symbols(al, ASRUtils::symbol_symtab(s), tu);
             }
-        } else if (ASR::is_a<ASR::Module_t>(*s)
-                || ASR::is_a<ASR::Program_t>(*s)
-                || ASR::is_a<ASR::BlockData_t>(*s)
-                || ASR::is_a<ASR::Function_t>(*s)
-                || ASR::is_a<ASR::Struct_t>(*s)
-                || ASR::is_a<ASR::Enum_t>(*s)
-                || ASR::is_a<ASR::Union_t>(*s)
-                || ASR::is_a<ASR::Block_t>(*s)
-                || ASR::is_a<ASR::AssociateBlock_t>(*s)) {
-            // Only the symbols that own a scope: asking any other kind for one
-            // is an error, not an empty answer.
-            relink_copied_symbols(al, ASRUtils::symbol_symtab(s), tu);
         }
     }
-}
 
-} // namespace
+}  // namespace
 
-SymbolTable* FortranEvaluator::snapshot_cell_scope(ASR::TranslationUnit_t &asr)
+SymbolTable*
+FortranEvaluator::snapshot_cell_scope(ASR::TranslationUnit_t& asr)
 {
     // ASR passes rewrite what they are given: pass_array_by_data replaces a
     // procedure taking an assumed-shape array with a specialisation under a
@@ -1202,10 +1363,8 @@ SymbolTable* FortranEvaluator::snapshot_cell_scope(ASR::TranslationUnit_t &asr)
     // presented to the next cell with its optional arguments already gone, and
     // a call omitting them would no longer compile. Each cell therefore hands
     // the next one a chain that no pass has seen.
-    SymbolTable* parent = copy_cell_chain(asr.m_symtab->parent,
-        asr.base.base.loc);
-    SymbolTable* snapshot = copy_cell_scope(asr.m_symtab, parent,
-        asr.base.base.loc);
+    SymbolTable* parent = copy_cell_chain(asr.m_symtab->parent, asr.base.base.loc);
+    SymbolTable* snapshot = copy_cell_scope(asr.m_symtab, parent, asr.base.base.loc);
     return snapshot;
 }
 
@@ -1213,14 +1372,14 @@ SymbolTable* FortranEvaluator::snapshot_cell_scope(ASR::TranslationUnit_t &asr)
 // are copied: later cells resolve names and read signatures, they never re-run
 // an earlier cell's statements. The copy carries the same names at the same
 // depth, so it mangles to the same symbols that cell compiled to.
-SymbolTable* FortranEvaluator::copy_cell_scope(SymbolTable *scope,
-    SymbolTable *parent, const Location &loc)
+SymbolTable*
+FortranEvaluator::copy_cell_scope(SymbolTable* scope, SymbolTable* parent, const Location& loc)
 {
     SymbolTable* copy = al.make_new<SymbolTable>(parent);
     ASR::asr_t* owner = ASR::make_TranslationUnit_t(al, loc, copy, nullptr, 0, nullptr);
     copy->asr_owner = owner;
     ASRUtils::SymbolDuplicator duplicator(al);
-    for (auto &item : scope->get_scope()) {
+    for (auto& item : scope->get_scope()) {
         // A program unit is executed by the cell that declares it and its name
         // is not referenceable from Fortran, so later cells have no use for
         // its statements. The same holds for a BLOCK DATA, whose initial
@@ -1229,29 +1388,39 @@ SymbolTable* FortranEvaluator::copy_cell_scope(SymbolTable *scope,
         // tell it that the storage of those blocks exists already, so one
         // that has views is copied without its statements.
         if (ASR::is_a<ASR::Program_t>(*item.second)) {
-            ASR::Program_t *program = ASR::down_cast<ASR::Program_t>(item.second);
+            ASR::Program_t* program = ASR::down_cast<ASR::Program_t>(item.second);
             if (has_common_block(program->m_symtab)) {
-                SymbolTable *symtab = al.make_new<SymbolTable>(copy);
+                SymbolTable* symtab = al.make_new<SymbolTable>(copy);
                 duplicator.duplicate_SymbolTable(program->m_symtab, symtab);
-                ASR::asr_t *program_copy = ASR::make_Program_t(al,
-                    program->base.base.loc, symtab, program->m_name,
-                    program->m_dependencies, program->n_dependencies,
-                    nullptr, 0, nullptr, program->m_start_name,
-                    program->m_end_name);
+                ASR::asr_t* program_copy = ASR::make_Program_t(al,
+                                                               program->base.base.loc,
+                                                               symtab,
+                                                               program->m_name,
+                                                               program->m_dependencies,
+                                                               program->n_dependencies,
+                                                               nullptr,
+                                                               0,
+                                                               nullptr,
+                                                               program->m_start_name,
+                                                               program->m_end_name);
                 symtab->asr_owner = program_copy;
                 copy->add_symbol(item.first, ASR::down_cast<ASR::symbol_t>(program_copy));
             }
             continue;
         }
         if (ASR::is_a<ASR::BlockData_t>(*item.second)) {
-            ASR::BlockData_t *block_data = ASR::down_cast<ASR::BlockData_t>(item.second);
-            SymbolTable *symtab = al.make_new<SymbolTable>(copy);
+            ASR::BlockData_t* block_data = ASR::down_cast<ASR::BlockData_t>(item.second);
+            SymbolTable* symtab = al.make_new<SymbolTable>(copy);
             duplicator.duplicate_SymbolTable(block_data->m_symtab, symtab);
-            ASR::asr_t *block_data_copy = ASR::make_BlockData_t(al,
-                block_data->base.base.loc, symtab, block_data->m_name,
-                block_data->m_block_data_name, block_data->m_dependencies,
-                block_data->n_dependencies, block_data->m_start_name,
-                block_data->m_end_name);
+            ASR::asr_t* block_data_copy = ASR::make_BlockData_t(al,
+                                                                block_data->base.base.loc,
+                                                                symtab,
+                                                                block_data->m_name,
+                                                                block_data->m_block_data_name,
+                                                                block_data->m_dependencies,
+                                                                block_data->n_dependencies,
+                                                                block_data->m_start_name,
+                                                                block_data->m_end_name);
             symtab->asr_owner = block_data_copy;
             copy->add_symbol(item.first, ASR::down_cast<ASR::symbol_t>(block_data_copy));
             continue;
@@ -1263,16 +1432,19 @@ SymbolTable* FortranEvaluator::copy_cell_scope(SymbolTable *scope,
 }
 
 // The chain of earlier cells, oldest first, copied scope by scope.
-SymbolTable* FortranEvaluator::copy_cell_chain(SymbolTable *chain,
-    const Location &loc)
+SymbolTable*
+FortranEvaluator::copy_cell_chain(SymbolTable* chain, const Location& loc)
 {
-    if (chain == nullptr) return nullptr;
-    SymbolTable *parent = copy_cell_chain(chain->parent, loc);
+    if (chain == nullptr)
+        return nullptr;
+    SymbolTable* parent = copy_cell_chain(chain->parent, loc);
     return copy_cell_scope(chain, parent, loc);
 }
 
-Result<ASR::TranslationUnit_t*> FortranEvaluator::get_asr3(
-    LFortran::AST::TranslationUnit_t &ast, diag::Diagnostics &diagnostics, LCompilers::LocationManager &lm)
+Result<ASR::TranslationUnit_t*>
+FortranEvaluator::get_asr3(LFortran::AST::TranslationUnit_t& ast,
+                           diag::Diagnostics& diagnostics,
+                           LCompilers::LocationManager& lm)
 {
     ASR::TranslationUnit_t* asr;
     // AST -> ASR
@@ -1288,7 +1460,7 @@ Result<ASR::TranslationUnit_t*> FortranEvaluator::get_asr3(
     //
     // Ordinary compilation has none of this: one translation unit, no chaining
     // and no copying, so that it is not slowed down by it.
-    SymbolTable *cell_scope = symbol_table;
+    SymbolTable* cell_scope = symbol_table;
     std::map<std::string, ASR::ttype_t*> implicit_types;
     if (compiler_options.interactive) {
         auto previous = cell_implicit_types.find(symbol_table);
@@ -1302,9 +1474,14 @@ Result<ASR::TranslationUnit_t*> FortranEvaluator::get_asr3(
         }
         cell_scope = al.make_new<SymbolTable>(symbol_table);
     }
-    auto res = LFortran::ast_to_asr(al, ast, diagnostics, cell_scope,
-        compiler_options.symtab_only, compiler_options, lm,
-        compiler_options.interactive ? &implicit_types : nullptr);
+    auto res = LFortran::ast_to_asr(al,
+                                    ast,
+                                    diagnostics,
+                                    cell_scope,
+                                    compiler_options.symtab_only,
+                                    compiler_options,
+                                    lm,
+                                    compiler_options.interactive ? &implicit_types : nullptr);
     if (res.ok) {
         asr = res.result;
     } else {
@@ -1321,10 +1498,11 @@ Result<ASR::TranslationUnit_t*> FortranEvaluator::get_asr3(
     return asr;
 }
 
-Result<std::string> FortranEvaluator::get_llvm(
-    const std::string &code, LocationManager &lm, LCompilers::PassManager& pass_manager,
-    diag::Diagnostics &diagnostics
-    )
+Result<std::string>
+FortranEvaluator::get_llvm(const std::string& code,
+                           LocationManager& lm,
+                           LCompilers::PassManager& pass_manager,
+                           diag::Diagnostics& diagnostics)
 {
     Result<std::unique_ptr<LLVMModule>> res = get_llvm2(code, lm, pass_manager, diagnostics);
     if (res.ok) {
@@ -1339,16 +1517,18 @@ Result<std::string> FortranEvaluator::get_llvm(
     }
 }
 
-Result<std::unique_ptr<LLVMModule>> FortranEvaluator::get_llvm2(
-    const std::string &code, LocationManager &lm, LCompilers::PassManager& pass_manager,
-    diag::Diagnostics &diagnostics)
+Result<std::unique_ptr<LLVMModule>>
+FortranEvaluator::get_llvm2(const std::string& code,
+                            LocationManager& lm,
+                            LCompilers::PassManager& pass_manager,
+                            diag::Diagnostics& diagnostics)
 {
     Result<ASR::TranslationUnit_t*> asr = get_asr2(code, lm, diagnostics);
     if (!asr.ok) {
         return asr.error;
     }
-    Result<std::unique_ptr<LLVMModule>> res = get_llvm3(*asr.result, pass_manager,
-        diagnostics, lm, lm.files.back().in_filename, nullptr);
+    Result<std::unique_ptr<LLVMModule>> res = get_llvm3(
+        *asr.result, pass_manager, diagnostics, lm, lm.files.back().in_filename, nullptr);
     if (res.ok) {
 #ifdef HAVE_LFORTRAN_LLVM
         std::unique_ptr<LLVMModule> m = std::move(res.result);
@@ -1367,16 +1547,22 @@ Result<std::unique_ptr<LLVMModule>> FortranEvaluator::get_llvm2(
         i.e. time taken by optimizations, and used when
         `--time-report` flag is used
 */
-Result<std::unique_ptr<LLVMModule>> FortranEvaluator::get_llvm3(
+Result<std::unique_ptr<LLVMModule>>
+FortranEvaluator::get_llvm3(
 #ifdef HAVE_LFORTRAN_LLVM
-    ASR::TranslationUnit_t &asr, LCompilers::PassManager& pass_manager,
-    diag::Diagnostics &diagnostics, LocationManager& lm
+    ASR::TranslationUnit_t& asr,
+    LCompilers::PassManager& pass_manager,
+    diag::Diagnostics& diagnostics,
+    LocationManager& lm
 #else
-    ASR::TranslationUnit_t &/*asr*/, LCompilers::PassManager &/*pass_manager*/,
-    diag::Diagnostics &/*diagnostics*/, LocationManager &/*lm*/
+    ASR::TranslationUnit_t& /*asr*/,
+    LCompilers::PassManager& /*pass_manager*/,
+    diag::Diagnostics& /*diagnostics*/,
+    LocationManager& /*lm*/
 #endif
-, [[maybe_unused]] const std::string &infile,
-  [[maybe_unused]] int64_t* time_opt=nullptr)
+    ,
+    [[maybe_unused]] const std::string& infile,
+    [[maybe_unused]] int64_t* time_opt = nullptr)
 {
 #ifdef HAVE_LFORTRAN_LLVM
     eval_count++;
@@ -1394,21 +1580,27 @@ Result<std::unique_ptr<LLVMModule>> FortranEvaluator::get_llvm3(
     }
 
 #ifdef __EMSCRIPTEN__
-    llvm::LLVMContext &ctx = get_wasm_executor().get_context();
-    LLVMTargetConfig target_config
-        = resolve_llvm_target_config(compiler_options);
+    llvm::LLVMContext& ctx = get_wasm_executor().get_context();
+    LLVMTargetConfig target_config = resolve_llvm_target_config(compiler_options);
 #else
-    LLVMEvaluator &llvm_evaluator = get_llvm_evaluator();
-    llvm::LLVMContext &ctx = llvm_evaluator.get_context();
+    LLVMEvaluator& llvm_evaluator = get_llvm_evaluator();
+    llvm::LLVMContext& ctx = llvm_evaluator.get_context();
     LLVMTargetConfig target_config = llvm_evaluator.get_target_config();
 #endif
 
     // ASR -> LLVM
     std::unique_ptr<LCompilers::LLVMModule> m;
-    Result<std::unique_ptr<LCompilers::LLVMModule>> res
-        = asr_to_llvm(asr, diagnostics,
-            ctx, target_config, al, pass_manager,
-            compiler_options, run_fn, "", infile, lm);
+    Result<std::unique_ptr<LCompilers::LLVMModule>> res = asr_to_llvm(asr,
+                                                                      diagnostics,
+                                                                      ctx,
+                                                                      target_config,
+                                                                      al,
+                                                                      pass_manager,
+                                                                      compiler_options,
+                                                                      run_fn,
+                                                                      "",
+                                                                      infile,
+                                                                      lm);
     if (res.ok) {
         m = std::move(res.result);
     } else {
@@ -1433,18 +1625,20 @@ Result<std::unique_ptr<LLVMModule>> FortranEvaluator::get_llvm3(
 #endif
 }
 
-Result<std::string> FortranEvaluator::get_asm(
+Result<std::string>
+FortranEvaluator::get_asm(
 #ifdef HAVE_LFORTRAN_LLVM
-    const std::string &code, LocationManager &lm,
+    const std::string& code,
+    LocationManager& lm,
     LCompilers::PassManager& lpm,
-    diag::Diagnostics &diagnostics
+    diag::Diagnostics& diagnostics
 #else
-    const std::string &/*code*/,
-    LocationManager &/*lm*/,
-    LCompilers::PassManager&/*lpm*/,
-    diag::Diagnostics &/*diagnostics*/
+    const std::string& /*code*/,
+    LocationManager& /*lm*/,
+    LCompilers::PassManager& /*lpm*/,
+    diag::Diagnostics& /*diagnostics*/
 #endif
-    )
+)
 {
 #ifdef HAVE_LFORTRAN_LLVM
     Result<std::unique_ptr<LLVMModule>> res = get_llvm2(code, lm, lpm, diagnostics);
@@ -1459,11 +1653,13 @@ Result<std::string> FortranEvaluator::get_asm(
 #endif
 }
 
-Result<Vec<uint8_t>> FortranEvaluator::get_wasm(const std::string &code,
-    LocationManager &lm, diag::Diagnostics &diagnostics)
+Result<Vec<uint8_t>>
+FortranEvaluator::get_wasm(const std::string& code,
+                           LocationManager& lm,
+                           diag::Diagnostics& diagnostics)
 {
     // Src -> AST -> ASR -> WASM
-    SymbolTable *old_symbol_table = symbol_table;
+    SymbolTable* old_symbol_table = symbol_table;
     symbol_table = nullptr;
     Result<ASR::TranslationUnit_t*> asr = get_asr2(code, lm, diagnostics);
     symbol_table = old_symbol_table;
@@ -1475,27 +1671,32 @@ Result<Vec<uint8_t>> FortranEvaluator::get_wasm(const std::string &code,
     }
 }
 
-Result<std::string> FortranEvaluator::get_wat(const std::string &code,
-    LocationManager &lm, diag::Diagnostics &diagnostics)
+Result<std::string>
+FortranEvaluator::get_wat(const std::string& code,
+                          LocationManager& lm,
+                          diag::Diagnostics& diagnostics)
 {
     // Src -> AST -> ASR -> WASM -> WAT
-    SymbolTable *old_symbol_table = symbol_table;
+    SymbolTable* old_symbol_table = symbol_table;
     symbol_table = nullptr;
     Result<Vec<uint8_t>> wasm = get_wasm(code, lm, diagnostics);
     symbol_table = old_symbol_table;
     if (wasm.ok) {
-            return wasm_to_wat(wasm.result, al, diagnostics);
+        return wasm_to_wat(wasm.result, al, diagnostics);
     } else {
         LCOMPILERS_ASSERT(diagnostics.has_error())
         return wasm.error;
     }
 }
 
-Result<std::string> FortranEvaluator::get_cpp(const std::string &code,
-    LocationManager &lm, diag::Diagnostics &diagnostics, int64_t default_lower_bound)
+Result<std::string>
+FortranEvaluator::get_cpp(const std::string& code,
+                          LocationManager& lm,
+                          diag::Diagnostics& diagnostics,
+                          int64_t default_lower_bound)
 {
     // Src -> AST -> ASR
-    SymbolTable *old_symbol_table = symbol_table;
+    SymbolTable* old_symbol_table = symbol_table;
     symbol_table = nullptr;
     Result<ASR::TranslationUnit_t*> asr = get_asr2(code, lm, diagnostics);
     symbol_table = old_symbol_table;
@@ -1507,20 +1708,23 @@ Result<std::string> FortranEvaluator::get_cpp(const std::string &code,
     }
 }
 
-Result<std::string> FortranEvaluator::get_cpp2(ASR::TranslationUnit_t &asr,
-        diag::Diagnostics &diagnostics, int64_t default_lower_bound)
+Result<std::string>
+FortranEvaluator::get_cpp2(ASR::TranslationUnit_t& asr,
+                           diag::Diagnostics& diagnostics,
+                           int64_t default_lower_bound)
 {
     // ASR -> C++
-    return asr_to_cpp(al, asr, diagnostics, compiler_options,
-                      default_lower_bound);
+    return asr_to_cpp(al, asr, diagnostics, compiler_options, default_lower_bound);
 }
 
-Result<std::string> FortranEvaluator::get_c(const std::string &code,
-    LocationManager &lm, diag::Diagnostics &diagnostics,
-    int64_t default_lower_bound)
+Result<std::string>
+FortranEvaluator::get_c(const std::string& code,
+                        LocationManager& lm,
+                        diag::Diagnostics& diagnostics,
+                        int64_t default_lower_bound)
 {
     // Src -> AST -> ASR
-    SymbolTable *old_symbol_table = symbol_table;
+    SymbolTable* old_symbol_table = symbol_table;
     symbol_table = nullptr;
     Result<ASR::TranslationUnit_t*> asr = get_asr2(code, lm, diagnostics);
     symbol_table = old_symbol_table;
@@ -1532,19 +1736,23 @@ Result<std::string> FortranEvaluator::get_c(const std::string &code,
     }
 }
 
-Result<std::string> FortranEvaluator::get_c2(ASR::TranslationUnit_t &asr,
-        diag::Diagnostics &diagnostics, int64_t default_lower_bound)
+Result<std::string>
+FortranEvaluator::get_c2(ASR::TranslationUnit_t& asr,
+                         diag::Diagnostics& diagnostics,
+                         int64_t default_lower_bound)
 {
     // ASR -> C
-    return asr_to_c(al, asr, diagnostics, compiler_options,
-                    default_lower_bound);
+    return asr_to_c(al, asr, diagnostics, compiler_options, default_lower_bound);
 }
 
-Result<std::string> FortranEvaluator::get_c3(ASR::TranslationUnit_t &asr,
-        diag::Diagnostics &diagnostics, LCompilers::PassManager& pass_manager, int64_t default_lower_bound)
+Result<std::string>
+FortranEvaluator::get_c3(ASR::TranslationUnit_t& asr,
+                         diag::Diagnostics& diagnostics,
+                         LCompilers::PassManager& pass_manager,
+                         int64_t default_lower_bound)
 {
     // ASR -> ASR pass
-    Allocator al(64*1024*1024);
+    Allocator al(64 * 1024 * 1024);
     compiler_options.po.always_run = false;
     compiler_options.po.run_fun = "f";
     pass_manager.skip_c_passes();
@@ -1553,13 +1761,14 @@ Result<std::string> FortranEvaluator::get_c3(ASR::TranslationUnit_t &asr,
     return asr_to_c(al, asr, diagnostics, compiler_options, default_lower_bound);
 }
 
-Result<std::string> FortranEvaluator::get_gpu_kernel_source(
-        ASR::TranslationUnit_t &asr, diag::Diagnostics &diagnostics,
-        LCompilers::PassManager& pass_manager)
+Result<std::string>
+FortranEvaluator::get_gpu_kernel_source(ASR::TranslationUnit_t& asr,
+                                        diag::Diagnostics& diagnostics,
+                                        LCompilers::PassManager& pass_manager)
 {
     // The kernels only exist once gpu_offload has run, so the passes have to
     // be applied before either backend is asked for source.
-    Allocator al(64*1024*1024);
+    Allocator al(64 * 1024 * 1024);
     compiler_options.po.always_run = false;
     compiler_options.po.run_fun = "f";
     if (!pass_manager.has_user_defined_passes()) {
@@ -1571,23 +1780,26 @@ Result<std::string> FortranEvaluator::get_gpu_kernel_source(
     // fails on is an error here as everywhere else.
     compiler_options.po.gpu_kernel_source_only = true;
     pass_manager.apply_passes(al, &asr, compiler_options.po, diagnostics);
-    if (diagnostics.has_error()) return Error();
+    if (diagnostics.has_error())
+        return Error();
     if (compiler_options.gpu_backend == "cuda") {
         return asr_to_cuda(al, asr, diagnostics, compiler_options, false);
     } else if (compiler_options.gpu_backend == "metal") {
         return asr_to_metal(al, asr, diagnostics, compiler_options);
     }
-    diagnostics.add(diag::Diagnostic(
-        "no GPU backend selected, pass --gpu=cuda or --gpu=metal",
-        diag::Level::Error, diag::Stage::CodeGen));
+    diagnostics.add(diag::Diagnostic("no GPU backend selected, pass --gpu=cuda or --gpu=metal",
+                                     diag::Level::Error,
+                                     diag::Stage::CodeGen));
     return Error();
 }
 
-Result<std::string> FortranEvaluator::get_julia(const std::string &code,
-    LocationManager &lm, diag::Diagnostics &diagnostics)
+Result<std::string>
+FortranEvaluator::get_julia(const std::string& code,
+                            LocationManager& lm,
+                            diag::Diagnostics& diagnostics)
 {
     // Src -> AST -> ASR -> Julia
-    SymbolTable *old_symbol_table = symbol_table;
+    SymbolTable* old_symbol_table = symbol_table;
     symbol_table = nullptr;
     Result<ASR::TranslationUnit_t*> asr = get_asr2(code, lm, diagnostics);
     symbol_table = old_symbol_table;
@@ -1600,13 +1812,15 @@ Result<std::string> FortranEvaluator::get_julia(const std::string &code,
 }
 
 // asr_t &asr accepts only TranslationUnit and Module's type for now
-Result<std::unique_ptr<MLIRModule>> FortranEvaluator::get_mlir(
+Result<std::unique_ptr<MLIRModule>>
+FortranEvaluator::get_mlir(
 #ifdef HAVE_LFORTRAN_MLIR
-        ASR::asr_t &asr, diag::Diagnostics &diagnostics
+    ASR::asr_t& asr, diag::Diagnostics& diagnostics
 #else
-        ASR::asr_t &/*asr*/, diag::Diagnostics &/*diagnostics*/
+    ASR::asr_t& /*asr*/, diag::Diagnostics& /*diagnostics*/
 #endif
-) {
+)
+{
 #ifdef HAVE_LFORTRAN_MLIR
     // ASR -> MLIR
     std::unique_ptr<LCompilers::MLIRModule> m;
@@ -1617,11 +1831,10 @@ Result<std::unique_ptr<MLIRModule>> FortranEvaluator::get_mlir(
     pass_manager.skip_pass("string_format_array_args");
     if (ASR::is_a<ASR::unit_t>(asr)) {
         pass_manager.use_default_passes();
-        pass_manager.apply_passes(al, (ASR::TranslationUnit_t *)&asr,
-            compiler_options.po, diagnostics);
+        pass_manager.apply_passes(
+            al, (ASR::TranslationUnit_t*) &asr, compiler_options.po, diagnostics);
     }
-    Result<std::unique_ptr<MLIRModule>> res = asr_to_mlir(al,
-        (ASR::asr_t &)asr, diagnostics);
+    Result<std::unique_ptr<MLIRModule>> res = asr_to_mlir(al, (ASR::asr_t&) asr, diagnostics);
     if (res.ok) {
         m = std::move(res.result);
     } else {
@@ -1637,12 +1850,14 @@ Result<std::unique_ptr<MLIRModule>> FortranEvaluator::get_mlir(
 #endif
 }
 
-Result<std::string> FortranEvaluator::get_fortran(const std::string &code,
-    LocationManager &lm, diag::Diagnostics &diagnostics,
-    LCompilers::PassManager& pass_manager)
+Result<std::string>
+FortranEvaluator::get_fortran(const std::string& code,
+                              LocationManager& lm,
+                              diag::Diagnostics& diagnostics,
+                              LCompilers::PassManager& pass_manager)
 {
     // SRC -> AST -> ASR -> Fortran
-    SymbolTable *old_symbol_table = symbol_table;
+    SymbolTable* old_symbol_table = symbol_table;
     symbol_table = nullptr;
     Result<ASR::TranslationUnit_t*> asr = get_asr2(code, lm, diagnostics);
     symbol_table = old_symbol_table;
@@ -1664,8 +1879,10 @@ Result<std::string> FortranEvaluator::get_fortran(const std::string &code,
     }
 }
 
-Result<std::string> FortranEvaluator::get_fmt(const std::string &code,
-    LocationManager &lm, diag::Diagnostics &diagnostics)
+Result<std::string>
+FortranEvaluator::get_fmt(const std::string& code,
+                          LocationManager& lm,
+                          diag::Diagnostics& diagnostics)
 {
     // Src -> AST
     Result<LFortran::AST::TranslationUnit_t*> ast = get_ast2(code, lm, diagnostics);
@@ -1678,4 +1895,4 @@ Result<std::string> FortranEvaluator::get_fmt(const std::string &code,
     }
 }
 
-} // namespace LCompilers
+}  // namespace LCompilers
