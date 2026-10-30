@@ -23273,11 +23273,14 @@ public:
             f_name_data = llvm::Constant::getNullValue(character_type);
             f_name_len = llvm::ConstantInt::get(llvm::Type::getInt64Ty(context), 0);
         }
+        // Every `exist=`-style output actual is stored to, so it must be
+        // lowered to its address. Loading it, as `load_ref` does for a
+        // derived-type component, leaves a value to store into.
         llvm::Value *exist_actual = nullptr;
         if (x.m_exist) {
             int64_t ptr_loads_copy = ptr_loads;
             ptr_loads = 0;
-            this->visit_expr_wrapper(x.m_exist, true);
+            this->visit_expr_wrapper(x.m_exist, false);
             exist_actual = tmp;
             ptr_loads = ptr_loads_copy;
         }
@@ -23295,7 +23298,7 @@ public:
         if (x.m_opened) {
             int64_t ptr_loads_copy = ptr_loads;
             ptr_loads = 0;
-            this->visit_expr_wrapper(x.m_opened, true);
+            this->visit_expr_wrapper(x.m_opened, false);
             opened_actual = tmp;
             ptr_loads = ptr_loads_copy;
         }
@@ -23576,7 +23579,7 @@ public:
         if (x.m_number) {
             int64_t ptr_loads_copy = ptr_loads;
             ptr_loads = 0;
-            this->visit_expr_wrapper(x.m_number, true);
+            this->visit_expr_wrapper(x.m_number, false);
             number = tmp;
             ptr_loads = ptr_loads_copy;
         } else {
@@ -23588,7 +23591,7 @@ public:
         if (x.m_named) {
             int64_t ptr_loads_copy = ptr_loads;
             ptr_loads = 0;
-            this->visit_expr_wrapper(x.m_named, true);
+            this->visit_expr_wrapper(x.m_named, false);
             named_actual = tmp;
             ptr_loads = ptr_loads_copy;
         }
@@ -23653,7 +23656,7 @@ public:
         if (x.m_iostat) {
             int64_t ptr_loads_copy = ptr_loads;
             ptr_loads = 0;
-            this->visit_expr_wrapper(x.m_iostat, true);
+            this->visit_expr_wrapper(x.m_iostat, false);
             iostat = tmp;
             ptr_loads = ptr_loads_copy;
         } else {
@@ -23664,7 +23667,7 @@ public:
         if (x.m_nextrec) {
             int64_t ptr_loads_copy = ptr_loads;
             ptr_loads = 0;
-            this->visit_expr_wrapper(x.m_nextrec, true);
+            this->visit_expr_wrapper(x.m_nextrec, false);
             nextrec = tmp;
             ptr_loads = ptr_loads_copy;
         } else {
@@ -23762,7 +23765,7 @@ public:
         if (x.m_pending) {
             int64_t ptr_loads_copy = ptr_loads;
             ptr_loads = 0;
-            this->visit_expr_wrapper(x.m_pending, true);
+            this->visit_expr_wrapper(x.m_pending, false);
             pending_actual = tmp;
             ptr_loads = ptr_loads_copy;
         }
