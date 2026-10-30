@@ -5733,6 +5733,18 @@ public:
         if( !ASR::is_a<ASR::Array_t>(*selector_type)) {
             // Throw error if selector is not an array
         }
+        // The rank the selector takes inside the construct lasts only for the
+        // construct (F2018 11.1.10.3), so the binding made by a `rank (n)`
+        // branch is undone below when the construct ends.
+        bool outer_has_rank = false;
+        int outer_rank = 0;
+        if (!array_var_name.empty()) {
+            auto outer = assumed_rank_arrays.find(array_var_name);
+            if (outer != assumed_rank_arrays.end()) {
+                outer_has_rank = true;
+                outer_rank = outer->second;
+            }
+        }
         Vec<ASR::rank_stmt_t*> select_rank_body;
         Vec<ASR::stmt_t*> select_rank_default;
         select_rank_body.reserve(al, x.n_body);
@@ -5820,6 +5832,14 @@ public:
                 }
             }
             current_scope = parent_scope;
+        }
+
+        if (!array_var_name.empty()) {
+            if (outer_has_rank) {
+                assumed_rank_arrays[array_var_name] = outer_rank;
+            } else {
+                assumed_rank_arrays.erase(array_var_name);
+            }
         }
 
         all_loops_blocks_nesting--;
