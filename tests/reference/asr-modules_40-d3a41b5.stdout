@@ -54,9 +54,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             fill_stack:
                                                 (Function
@@ -88,9 +90,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             stack:
                                                                 (Variable
@@ -127,9 +131,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             top:
                                                                 (Variable
@@ -151,9 +157,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     fill_stack
@@ -261,9 +269,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             stack:
                                                                 (Variable
@@ -300,9 +310,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     resize
@@ -398,9 +410,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             toml_key:
                                 (Struct
@@ -429,9 +443,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     toml_key
@@ -471,6 +487,7 @@
                                                     Source
                                                     .false.
                                                     .false.
+                                                    Private
                                                 )
                                         })
                                     toml_tokenizer
@@ -497,6 +514,7 @@
                     modules_40_tomlf_de_tokenizer
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.

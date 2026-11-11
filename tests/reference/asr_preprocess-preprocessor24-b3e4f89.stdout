@@ -27,14 +27,17 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     wrapped
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.

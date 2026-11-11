@@ -27,9 +27,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             b:
                                 (Variable
@@ -51,9 +53,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             i:
                                 (Variable
@@ -75,9 +79,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             j:
                                 (Variable
@@ -99,9 +105,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     doloop_02
@@ -112,11 +120,15 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 2 a)
                         (IntegerConstant 1 (Integer 4) Decimal)
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -126,13 +138,15 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (DoLoop
                         ()
                         ((Var 2 i)
                         (Var 2 a)
                         (Var 2 b)
-                        ())
+                        (IntegerConstant 1 (Integer 4) Decimal))
                         [(Assignment
                             (Var 2 j)
                             (IntegerBinOp
@@ -143,6 +157,8 @@
                                 ()
                             )
                             ()
+                            .false.
+                            .false.
                             .false.
                             .false.
                         )]
@@ -167,6 +183,8 @@
                             ()
                             [(Var 2 j)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -179,19 +197,21 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (DoLoop
                         ()
                         ((Var 2 i)
                         (IntegerConstant 1 (Integer 4) Decimal)
                         (IntegerConstant 10 (Integer 4) Decimal)
-                        ())
+                        (IntegerConstant 1 (Integer 4) Decimal))
                         [(DoLoop
                             ()
                             ((Var 2 j)
                             (IntegerConstant 1 (Integer 4) Decimal)
                             (IntegerConstant 10 (Integer 4) Decimal)
-                            ())
+                            (IntegerConstant 1 (Integer 4) Decimal))
                             [(Assignment
                                 (Var 2 a)
                                 (IntegerBinOp
@@ -220,6 +240,8 @@
                                     ()
                                 )
                                 ()
+                                .false.
+                                .false.
                                 .false.
                                 .false.
                             )]
@@ -258,6 +280,8 @@
                             ()
                             [(Var 2 a)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -270,19 +294,21 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (DoLoop
                         ()
                         ((Var 2 i)
                         (IntegerConstant 1 (Integer 4) Decimal)
                         (IntegerConstant 10 (Integer 4) Decimal)
-                        ())
+                        (IntegerConstant 1 (Integer 4) Decimal))
                         [(DoLoop
                             ()
                             ((Var 2 j)
                             (IntegerConstant 1 (Integer 4) Decimal)
                             (Var 2 i)
-                            ())
+                            (IntegerConstant 1 (Integer 4) Decimal))
                             [(Assignment
                                 (Var 2 a)
                                 (IntegerBinOp
@@ -293,6 +319,8 @@
                                     ()
                                 )
                                 ()
+                                .false.
+                                .false.
                                 .false.
                                 .false.
                             )]
@@ -319,6 +347,8 @@
                             ()
                             [(Var 2 a)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )

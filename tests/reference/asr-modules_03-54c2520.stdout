@@ -41,6 +41,8 @@
                                             )
                                             (Var 2 priv)]
                                             FormatFortran
+                                            []
+                                            ()
                                             (Allocatable
                                                 (String 1 () DeferredLength DescriptorString)
                                             )
@@ -56,6 +58,8 @@
                                             )
                                             (Var 2 publ)]
                                             FormatFortran
+                                            []
+                                            ()
                                             (Allocatable
                                                 (String 1 () DeferredLength DescriptorString)
                                             )
@@ -94,9 +98,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             publ:
                                 (Variable
@@ -124,14 +130,17 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     access_vars
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.

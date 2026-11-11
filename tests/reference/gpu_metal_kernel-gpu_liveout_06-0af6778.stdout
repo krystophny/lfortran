@@ -1,0 +1,88 @@
+#include <metal_stdlib>
+using namespace metal;
+
+struct pt_gpu {
+    int x_gpu;
+    int y_gpu;
+};
+
+inline void maybe_move_gpu_13(thread pt_gpu& p_gpu, int i_gpu) {
+    if ((i_gpu == 9)) {
+        p_gpu.y_gpu = 90;
+    }
+}
+
+inline void maybe_set_gpu_14(thread int& k_gpu, int i_gpu) {
+    if ((i_gpu == 7)) {
+        k_gpu = 70;
+    }
+}
+
+struct __ScalarArgs___lfortran_gpu_kernel_0_14gpu_liveout_06 {
+    int __dim_a_0_gpu;
+    int __lb_a_0_gpu;
+};
+
+kernel void __lfortran_gpu_kernel_0_14gpu_liveout_06(
+    device int* __gpu_buf_k_gpu [[buffer(0)]],
+    device int* a_gpu [[buffer(1)]],
+    device pt_gpu& p_gpu [[buffer(2)]],
+    constant __ScalarArgs___lfortran_gpu_kernel_0_14gpu_liveout_06& __scalar_args [[buffer(3)]],
+    uint __thread_id [[thread_position_in_grid]])
+{
+    int __lb_a_0_gpu = __scalar_args.__lb_a_0_gpu;
+    int __flat_idx_gpu;
+    int __gpu_before1_gpu;
+    int __gpu_before2_gpu;
+    int __gpu_before_gpu;
+    pt_gpu __gpu_private_p_gpu;
+    int i__dc_gpu;
+    int k_gpu;
+    if ((((0 * 0) + __thread_id) >= 100000)) {
+        return;
+    }
+    __flat_idx_gpu = ((0 * 0) + __thread_id);
+    i__dc_gpu = (__flat_idx_gpu + 1);
+    k_gpu = __gpu_buf_k_gpu[((int)(1) - (1))];
+    __gpu_private_p_gpu = p_gpu;
+    a_gpu[((int)(i__dc_gpu) - (__lb_a_0_gpu))] = i__dc_gpu;
+    __gpu_before_gpu = k_gpu;
+    maybe_set_gpu_14(k_gpu, i__dc_gpu);
+    if ((k_gpu != __gpu_before_gpu)) {
+        __gpu_buf_k_gpu[((int)(1) - (1))] = k_gpu;
+    }
+    __gpu_before1_gpu = __gpu_private_p_gpu.x_gpu;
+    __gpu_before2_gpu = __gpu_private_p_gpu.y_gpu;
+    maybe_move_gpu_13(__gpu_private_p_gpu, i__dc_gpu);
+    if ((__gpu_private_p_gpu.x_gpu != __gpu_before1_gpu)) {
+        p_gpu.x_gpu = __gpu_private_p_gpu.x_gpu;
+    }
+    if ((__gpu_private_p_gpu.y_gpu != __gpu_before2_gpu)) {
+        p_gpu.y_gpu = __gpu_private_p_gpu.y_gpu;
+    }
+}
+
+inline void set_gpu_22(thread int& k_gpu, int i_gpu) {
+    k_gpu = (2 * i_gpu);
+}
+
+kernel void __lfortran_gpu_kernel_1_14gpu_liveout_06(
+    device int* __gpu_buf_m_gpu [[buffer(0)]],
+    uint __thread_id [[thread_position_in_grid]])
+{
+    int __flat_idx_gpu;
+    int i__dc1_gpu;
+    int m_gpu;
+    const int n_gpu = 100000;
+    if ((((0 * 0) + __thread_id) >= 100000)) {
+        return;
+    }
+    __flat_idx_gpu = ((0 * 0) + __thread_id);
+    i__dc1_gpu = (__flat_idx_gpu + 1);
+    m_gpu = __gpu_buf_m_gpu[((int)(1) - (1))];
+    if ((i__dc1_gpu == n_gpu)) {
+        set_gpu_22(m_gpu, i__dc1_gpu);
+        __gpu_buf_m_gpu[((int)(1) - (1))] = m_gpu;
+    }
+}
+

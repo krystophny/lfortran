@@ -27,9 +27,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     complex1
@@ -53,6 +55,8 @@
                             )
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )]

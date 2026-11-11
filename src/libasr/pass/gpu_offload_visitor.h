@@ -14,11 +14,14 @@
 #include <libasr/utils.h>
 #include <libasr/pass/gpu_decline.h>
 #include <libasr/pass/gpu_offload_rewrite.h>
+#include <libasr/pass/gpu_procedure_implementation.h>
 #include <libasr/pass/intrinsic_array_function_registry.h>
 #include <libasr/pass/parallel_canonicalize.h>
 #include <libasr/pass/stmt_walk_visitor.h>
 
 namespace LCompilers {
+
+struct GpuExtentScope;
 
 // Hands a body rewrite the loop's statements and writes whatever it made
 // of them back into the loop. The rewrites report their result by moving
@@ -57,13 +60,12 @@ public:
     GpuOffloadVisitor(Allocator &al, PassOptions pass_options_,
                       ASR::TranslationUnit_t &tu_)
         : StatementWalkVisitor(al), pass_options(pass_options_),
-          device_caps(gpu_device_capabilities(pass_options_)), tu(tu_) {}
+          device_caps(gpu_device_capabilities(pass_options_)), tu(tu_),
+          implementations(al, tu_, pass_options) {}
 
     void load_submodule_deps(ASR::TranslationUnit_t &sub_tu);
 
     void lower_loaded_implied_do_loops(ASR::TranslationUnit_t &sub_tu);
-
-    ASR::expr_t* dup_expr_to_scope(ASR::expr_t *expr, SymbolTable *scope);
 
     void fixup_struct_refs_in_scope(SymbolTable *scope,
             SymbolTable *kernel_scope,
@@ -81,18 +83,23 @@ public:
             SymbolTable *orig_scope, SymbolTable *kernel_scope,
             const Location &loc);
 
-    void find_array_section_bounds(ASR::expr_t *e,
-            ASR::expr_t *&loop_start, ASR::expr_t *&loop_end);
+    ASR::expr_t* import_constant_value(ASR::expr_t *value,
+            SymbolTable *orig_scope, SymbolTable *kernel_scope,
+            const Location &loc);
+
+    void import_folded_struct_constants(ASR::stmt_t **body, size_t n_body,
+            SymbolTable *orig_scope, SymbolTable *kernel_scope,
+            const Location &loc);
+
+    void import_folded_struct_constants(SymbolTable *scope,
+            SymbolTable *orig_scope, SymbolTable *kernel_scope,
+            const Location &loc);
 
     void find_array_section_all_bounds(ASR::expr_t *e,
             std::vector<std::pair<ASR::expr_t*, ASR::expr_t*>> &dim_bounds);
 
-    ASR::expr_t* elementize_mask(ASR::expr_t *e, ASR::expr_t *loop_var,
-            ASR::ttype_t *logical_type, const Location &loc);
-
-    ASR::expr_t* elementize_mask_multi(ASR::expr_t *e,
-            std::vector<ASR::expr_t*> &loop_vars,
-            ASR::ttype_t *logical_type, const Location &loc);
+    ASR::expr_t* elementize_array_expr(ASR::expr_t *e,
+            std::vector<ASR::expr_t*> &loop_vars, const Location &loc);
 
     ASR::expr_t* inline_single_all(ASR::IntrinsicArrayFunction_t *iaf,
             const Location &loc, Vec<ASR::stmt_t*> &preamble);
@@ -109,13 +116,13 @@ public:
     // an `inline` device function cannot declare a local whose extent is
     // only known at run time. A kernel *can* have one: the extent is
     // evaluated on the host at launch and a device buffer is bound for
-    // it (`analyze_gpu_vla_workspaces`). So instead of teaching the
-    // device-function boundary to carry such a workspace through every
-    // address-space overload, splice the callee's body into the loop
-    // body: its locals become kernel-scope locals and the existing
-    // workspace machinery applies unchanged, while its dummy arguments
-    // are replaced by the actual arguments -- which often makes the
-    // extent a compile-time constant outright.
+    // it. Every such local of a device function becomes an argument its
+    // callers give it, up to the kernel (gpu_device_workspace.cpp),
+    // wherever the function is called from. A call that is the whole
+    // value of an assignment is spliced into the loop body instead: the
+    // callee's locals become kernel-scope locals, while its dummy
+    // arguments are replaced by the actual arguments -- which often
+    // makes the extent a compile-time constant outright.
     // ---------------------------------------------------------------
 
     // Functions whose bodies must be spliced into the loop body for this
@@ -124,18 +131,10 @@ public:
     // inline_device_function_calls() afterwards.
     std::set<ASR::Function_t*> functions_to_inline;
 
-    // The implementation already found for an interface declaration.
-    // Loading a submodule from disk builds a fresh copy of its symbol
-    // table every time, so without this the same `module procedure`
-    // would resolve to a different Function_t at every call. The
-    // inliner identifies a planned callee by pointer, so the plan and
-    // the splice would then disagree and the callee would silently stay
-    // an out-of-line device function.
-    std::map<ASR::Function_t*, ASR::Function_t*> function_implementations;
+    // The bodies of the separate module procedures device code calls.
+    GpuProcedureImplementations implementations;
 
     ASR::Function_t* resolve_function_implementation(ASR::Function_t *fn);
-
-    ASR::Function_t* find_function_implementation(ASR::Function_t *fn);
 
     ASR::Function_t* resolve_device_function(ASR::symbol_t *sym);
 
@@ -152,6 +151,19 @@ public:
     std::set<ASR::Function_t*> device_reachable_functions;
 
     void mark_regions_device_code_runs();
+
+    void plain_allocatable_dummies(ASR::Function_t *fn);
+    // The routines plain_allocatable_dummies has looked at, or is looking
+    // at: a routine is looked at once, after the routines it calls.
+    std::set<ASR::Function_t*> plain_dummies_decided;
+
+    // The allocatable dummy arrays plain_allocatable_dummies declared as
+    // plain arrays, per routine, until pass_plain_dummy_lower_bounds
+    // gives them the lower bounds of their actual arguments.
+    std::map<ASR::Function_t*, std::vector<ASR::symbol_t*>>
+        plain_allocatable_dummy_args;
+
+    void pass_plain_dummy_lower_bounds(ASR::Function_t &kernel);
 
     static ASR::expr_t* strip_array_casts(ASR::expr_t *e);
 
@@ -170,6 +182,13 @@ public:
             std::set<ASR::Function_t*> &on_stack,
             GpuDecline &decline,
             bool spliceable = true);
+
+    // The section `actual` that splicing `fn` copies into a contiguous
+    // array for its dummy `dummy` (gather_section_actual), with the
+    // dimensions it spans; nullptr when splicing passes it on as it is.
+    ASR::ArraySection_t* spliced_section_copy(ASR::Function_t *fn,
+            ASR::symbol_t *dummy, ASR::expr_t *actual,
+            std::vector<int> &range_dims);
 
     ASR::expr_t* gather_section_actual(const Location &loc,
             SymbolTable *block_scope, ASR::Function_t *fn,
@@ -192,6 +211,11 @@ public:
 
     void inline_matmul_stmts(ASR::stmt_t** &body, size_t &n_body);
 
+    void hoist_array_function_results(ParallelLoopNest &nest);
+
+    void hoist_array_function_results_in_body(ASR::stmt_t** &body,
+            size_t &n_body, SymbolTable *scope, SymbolTable *&block_scope);
+
     void hoist_nested_matmuls(ParallelLoopNest &nest);
 
     void hoist_nested_matmuls_in_body(ASR::stmt_t** &body, size_t &n_body,
@@ -202,28 +226,34 @@ public:
             Vec<ASR::stmt_t*> &out, SymbolTable *var_scope,
             bool scope_has_workspaces);
 
-    bool matmul_operand_aliases_target(ASR::IntrinsicArrayFunction_t *mm,
-            ASR::expr_t *target);
-
-    ASR::expr_t* matmul_temp_section(ASR::expr_t *tmp, ASR::expr_t *target);
-
-    bool declared_constant_dims(ASR::expr_t *e, Vec<ASR::dimension_t> &out);
-
     ASR::expr_t* make_matmul_result_temp(ASR::IntrinsicArrayFunction_t *mm,
             const Location &loc, SymbolTable *var_scope,
-            bool scope_has_workspaces, ASR::expr_t *target = nullptr);
+            bool scope_has_workspaces);
 
     bool intrinsic_array_result_dims(ASR::expr_t *e,
             Vec<ASR::dimension_t> &dims);
 
     ASR::dimension_t dim_or_runtime_extent(ASR::expr_t *operand,
-            ASR::dimension_t *dims, size_t d);
+            ASR::dimension_t *dims, size_t d, int size_kind = 4);
+
+    // True while rewrite_loop_body_for_kernel lowers the kernel's loop
+    // nest, whose BLOCKs are remapped into the kernel in place.
+    bool lowering_kernel_nest = false;
+
+    // Each bound copy_bound copied, mapped to the node it was first
+    // copied from.
+    std::map<ASR::expr_t*, ASR::expr_t*> bound_copies;
+
+    ASR::expr_t* own_bound(ASR::expr_t *bound);
+
+    ASR::expr_t* copy_bound(ASR::expr_t *bound);
+
+    ASR::expr_t* bound_origin(ASR::expr_t *e);
 
     void inline_intrinsic_matmul(ParallelLoopNest &nest);
 
     ASR::expr_t* index_array_expr(ASR::expr_t *expr,
-            ASR::array_index_t *idx_p, size_t idx_n,
-            ASR::ttype_t *elem_type, const Location &loc);
+            ASR::array_index_t *idx_p, size_t idx_n, const Location &loc);
 
     ASR::IntrinsicArrayFunction_t* find_array_intrinsic_in_expr(
             ASR::expr_t *expr, ASRUtils::IntrinsicArrayFunctions which,
@@ -243,11 +273,21 @@ public:
 
     void inline_intrinsic_transpose(ParallelLoopNest &nest);
 
+    bool inline_transpose_stmts(ASR::stmt_t **&body, size_t &n_body);
+
     static bool is_int_literal(ASR::expr_t *e, int64_t value);
 
     ASR::expr_t *int32_const(const Location &loc, int64_t n);
 
     ASR::expr_t *to_int32(const Location &loc, ASR::expr_t *e);
+
+    ASR::ttype_t *index_type(const Location &loc);
+
+    ASR::expr_t *index_const(const Location &loc, int64_t n);
+
+    ASR::expr_t *to_index_kind(const Location &loc, ASR::expr_t *e);
+
+    ASR::expr_t *bound_to_index_kind(const Location &loc, ASR::expr_t *e);
 
     ASR::expr_t *section_extent(const Location &loc,
             const ASR::array_index_t &d);
@@ -262,29 +302,49 @@ public:
             ASR::expr_t **extents, size_t n_extents,
             const std::string &prefix);
 
-    ASR::expr_t *self_aliasing_target(ASR::Assignment_t *asgn);
+    ASR::expr_t *self_aliasing_target(ASR::Assignment_t *asgn,
+            bool *in_non_elemental = nullptr);
 
     bool alias_temp_is_fixed_size(ASR::expr_t *target);
 
+    // Whether an expression reads a value that changes from one
+    // iteration of the offloaded loop to the next.
+    using GpuVaries = std::function<bool(ASR::expr_t*)>;
+
+    ASR::expr_t *whole_dim_extent(const Location &loc, ASR::expr_t *base,
+            size_t dim);
+
     bool alias_temp_extents(ASR::expr_t *target,
+            const GpuVaries &host_sizable, Vec<ASR::expr_t*> &sizes,
             Vec<ASR::expr_t*> &extents);
+
+    GpuVaries alias_extent_host_sizable(const ParallelLoopNest &work,
+            const std::vector<std::string> &arg_names);
 
     bool alias_temp_extents_resolvable(ASR::expr_t *target,
             ASR::expr_t **extents, size_t n_extents,
+            const GpuExtentScope &scope);
+
+    bool body_needs_unsupported_alias_temp(const ParallelLoopNest &work,
             const std::vector<std::string> &arg_names);
 
-    bool body_needs_unsupported_alias_temp(ASR::stmt_t **body,
-            size_t n_body, bool top_level,
-            const std::vector<std::string> &arg_names);
+    bool body_needs_unsupported_alias_temp_in(ASR::stmt_t **body,
+            size_t n_body, const GpuVaries &host_sizable,
+            const GpuExtentScope &scope);
 
     void size_scope_array_temporaries(ASR::stmt_t **body, size_t n_body);
 
-    void materialize_runtime_alias_blocks(ParallelLoopNest &nest);
+    void materialize_runtime_alias_blocks(ParallelLoopNest &nest,
+            const std::vector<std::string> &arg_names);
+
+    void materialize_runtime_alias_in_body(ASR::stmt_t** &body,
+            size_t &n_body, SymbolTable *scope,
+            const GpuVaries &host_sizable);
 
     void materialize_aliased_assignments(ParallelLoopNest &nest);
 
     void materialize_aliased_in_body(ASR::stmt_t** &body, size_t &n_body,
-            bool &changed);
+            SymbolTable *scope, bool &changed);
 
     void inline_array_section_assignment(ParallelLoopNest &nest);
 
@@ -334,10 +394,6 @@ public:
 
     bool strided_section_is_gatherable(ASR::ArraySection_t *as);
 
-    // Whether an expression reads a value that changes from one
-    // iteration of the offloaded loop to the next.
-    using GpuVaries = std::function<bool(ASR::expr_t*)>;
-
     bool gather_strided_section_arg(const Location &loc,
             SymbolTable *block_scope, ASR::expr_t **slot, bool writable,
             const GpuVaries &varies, std::vector<ASR::stmt_t*> &before,
@@ -369,6 +425,8 @@ public:
     void gather_strided_sections_in_body(ASR::stmt_t** &body,
             size_t &n_body, SymbolTable *scope, const GpuVaries &varies);
 
+    void gather_strided_sections_in_routine(ASR::Function_t &fn);
+
     void inline_elemental_array_var_assignment(ParallelLoopNest &nest);
 
     void inline_elemental_array_var_in_body(ASR::stmt_t** &body,
@@ -391,8 +449,6 @@ public:
             const GpuDecline &decline);
 
     void report_clause_ignored(const Location &where, const std::string &name);
-
-    void report_stop_degraded(const Location &where, const std::string &name);
 
     std::string unhonoured_clause(const ASR::omp_clause_t *clause);
 
@@ -427,10 +483,19 @@ public:
     // different blocks in two different scopes.
     std::vector<ASR::symbol_t*> kernel_blocks;
 
+    // The BLOCKs materialize_runtime_alias_blocks made for an assignment
+    // whose target a TRANSPOSE or MATMUL operand reads. The TRANSPOSE
+    // lowering, which takes only the statements of the loop body itself,
+    // takes the statements of these too.
+    std::set<ASR::symbol_t*> non_elemental_alias_blocks;
+
     ASR::stmt_t* copy_loop_stmt(ASR::stmt_t *stmt,
             ASRUtils::ExprStmtDuplicator &dup);
 
     void retarget_local_extents(SymbolTable *scope);
+
+    void retarget_declaration_calls(SymbolTable *scope,
+        SymbolTable &kernel_scope);
 
     void remap_associate_to_own_scope(ASR::AssociateBlock_t *ab);
 
@@ -452,6 +517,67 @@ public:
         ASR::ttype_t *scalar_type;
     };
 
+    // What a loop defines and the host reads after it (see
+    // gpu_offload_liveout.cpp).
+    struct GpuLiveoutPlan {
+        std::vector<LiveoutScalarInfo> scalars;
+        // A part of a derived-type variable that each thread keeps a
+        // private copy of, named `copy`: the whole variable when `path` is
+        // empty, otherwise the scalar component the names in `path`
+        // select, which the loop names through the components `members`.
+        // The variable itself is a kernel argument, which the device
+        // writes in place.
+        struct Copy {
+            // The variable past use association, and as the loop names it.
+            ASR::symbol_t *variable;
+            ASR::symbol_t *named;
+            std::vector<std::string> path;
+            std::vector<ASR::symbol_t*> members;
+            ASR::ttype_t *type;
+            std::string copy;
+            // Whether the value of the variable is kept after the loop:
+            // only then is what the thread defines of the copy put back.
+            bool live;
+        };
+        std::vector<Copy> copies;
+        // The assignments that give each private copy its value on entry
+        // to the kernel.
+        std::set<ASR::stmt_t*> entries;
+    };
+
+    // Decides how each variable the loop defines and the host reads after
+    // it reaches the kernel, and makes the kernel take what it needs for
+    // that in place of the variable in `involved_syms`; also how each
+    // thread keeps a copy of a derived-type variable that is not in
+    // `live_vars` but cannot be a kernel local. False when one cannot be
+    // offloaded; the error is then reported.
+    bool plan_liveouts(const Location &loc, ASR::stmt_t **body,
+        size_t n_body, const std::set<std::string> &assigned_vars,
+        const std::set<std::string> &live_vars,
+        const std::set<std::string> &loop_var_set,
+        const std::set<std::string> &reduction_names,
+        std::set<std::string> &local_scalar_names,
+        std::map<std::string, std::pair<ASR::ttype_t*, ASR::expr_t*>>
+            &involved_syms,
+        GpuLiveoutPlan &plan);
+    // Declares the private copies in the kernel scope.
+    void declare_liveout_copies(const Location &loc,
+        SymbolTable *kernel_scope, GpuLiveoutPlan &plan);
+    // Makes the loop body, a copy of it still naming the host's symbols,
+    // and the body of a BLOCK of it, already naming the kernel's, work on
+    // the private copies of parts of derived-type variables, and gives
+    // those their values at the start of the loop body.
+    void privatize_liveout_body(const Location &loc,
+        SymbolTable *kernel_scope, Vec<ASR::stmt_t*> &body,
+        GpuLiveoutPlan &plan);
+    void privatize_liveout_block(SymbolTable *kernel_scope,
+        ASR::stmt_t **body, size_t n_body, GpuLiveoutPlan &plan);
+    // Gives the private copies their values, at the start of the body.
+    void enter_liveouts(const Location &loc, SymbolTable *kernel_scope,
+        Vec<ASR::stmt_t*> &kernel_body, GpuLiveoutPlan &plan);
+    // Puts what the kernel defines of a copy back where it is shared.
+    void write_back_liveouts(ASR::Function_t &kernel, GpuLiveoutPlan &plan);
+
     // One `reduce(op:var)` of an offloaded loop.
     //
     // Threads cannot all accumulate into one scalar without a race, and a
@@ -459,10 +585,17 @@ public:
     // slot of its own instead: the kernel sets its slot to the identity of
     // the operator, accumulates into that, and the host folds the slots
     // into the original scalar once the launch has finished. The device
-    // needs no atomics for it and the launch stays a single dispatch.
+    // needs no atomics for it and no kernel of its own to combine the slots.
     //
-    // There is one slot per iteration, so a thread the bounds guard turns
-    // away has no slot to leave unwritten.
+    // A kernel that can run its iterations in a grid-stride loop (the body
+    // has no cycle of the offloaded loop and no scalar live after it) runs
+    // at most device_caps.reduction_threads threads, each of which accumulates its
+    // iterations in a local variable and combines it into its slot once, so
+    // the host folds at most that many slots. Otherwise there is one slot
+    // per iteration. Either way a thread the bounds guard turns away has no
+    // slot to leave unwritten. A launch that runs in chunks has one per
+    // thread of its largest chunk, the first: the threads of the later
+    // chunks combine into the slots the first one started.
     struct GpuReductionInfo {
         std::string orig_name;
         ASR::reduction_opType op;
@@ -495,12 +628,39 @@ public:
         ASR::ttype_t *int_type = nullptr;
         size_t n_dims = 0;
         Vec<ASR::call_arg_t> call_args;
+        Vec<ASR::stmt_t*> private_shapes;
         Vec<ASR::stmt_t*> gather_stmts;
         Vec<ASR::stmt_t*> scatter_stmts;
         std::vector<LiveoutScalarInfo> liveout_scalars;
         std::vector<GpuReductionInfo> reductions;
         std::vector<DimInfo> dim_info;
-        std::vector<ASR::symbol_t*> optional_syms;
+        // A launch that can run in tiles (GpuDeviceCapabilities::
+        // tile_width): the call argument that tells the kernel whether it
+        // does (-1 when the kernel always numbers the iterations flat), and
+        // the dimensions the width and the height of a tile run along.
+        int tiled_arg = -1;
+        size_t tile_dims[2] = {0, 0};
+        // The dimensions in the order the kernel numbers the iterations in,
+        // fastest first, and for each dimension the launch may split into
+        // chunks the kernel parameters that hold its bounds (nullptr for
+        // one it never splits), and the product of the constant extents of
+        // the others, or 0 when the launch is never split (see
+        // GpuKernelLaunch.chunk_dimensions).
+        std::vector<size_t> order;
+        std::vector<ASR::symbol_t*> start_parameters;
+        std::vector<ASR::symbol_t*> end_parameters;
+        int64_t chunk_fixed_iterations = 0;
+        // The kernel parameter a launch that may run in chunks sets to 1
+        // when it runs as one or for its first chunk, and to 0 for the
+        // later chunks, or nullptr (see
+        // GpuKernelLaunch.first_chunk_parameter).
+        ASR::symbol_t *first_chunk_parameter = nullptr;
+        // The kernel runs its iterations in a grid-stride loop of at most
+        // device_caps.reduction_threads threads (a launch with a reduction).
+        bool strided = false;
+        // The threads of a warp combine their accumulators, and the warp
+        // owns one slot (GpuDeviceCapabilities::reduction_warp_slots).
+        bool warp_slots = false;
     };
 
     void decline(const ASR::OMPRegion_t &x);
@@ -514,6 +674,41 @@ public:
 
     void resolve_enclosing_associates(ParallelLoopNest &work, size_t n_dims,
             std::map<ASR::symbol_t*, ASR::expr_t*> &enclosing_assoc_map);
+
+    // Gives each iteration its own copy of a variable of LOCAL
+    // locality, and of an array of unspecified locality that
+    // the iteration defines whole before it references it, by making it a
+    // local of a BLOCK around the body (see gpu_offload_privatize.cpp).
+    // False when the loop has been reported as one the kernel cannot run.
+    bool privatize_iteration_arrays(const ASR::OMPRegion_t &region,
+            ParallelLoopNest &work,
+            const std::map<ASR::symbol_t*, ASR::expr_t*> &enclosing_assoc_map,
+            Vec<ASR::stmt_t*> &private_shapes);
+
+    // Appends to `local` the variables of LOCAL locality that the body
+    // names and a thread can hold a copy of its own of. A scalar it
+    // cannot is left alone. An array it cannot makes it return false,
+    // with `rejected` set to the decline that names the array and why;
+    // the caller reports it, and the loop is not offloaded.
+    bool locality_spec_variables(const ASR::OMPRegion_t &region,
+            ParallelLoopNest &work,
+            const std::map<ASR::symbol_t*, ASR::expr_t*> &enclosing_assoc_map,
+            std::vector<ASR::symbol_t*> &local, GpuDecline &rejected);
+
+    // The variables of `names` whose value may be read on entry to the
+    // loop `region` (`work`), by an iteration that reads it before
+    // assigning it, or when the loop ends, by a statement run after it
+    // before something defines all of it again: every array, and every
+    // scalar the reading cannot follow (gpu_offload_privatize.cpp).
+    std::set<std::string> scalars_read_after_region(
+            const ASR::OMPRegion_t &region, const ParallelLoopNest &work,
+            const std::set<std::string> &names,
+            const std::map<ASR::symbol_t*, ASR::expr_t*> &enclosing_assoc_map);
+
+    // The arrays privatize_iteration_arrays may make local.
+    std::vector<ASR::symbol_t*> iteration_array_candidates(
+            const ASR::OMPRegion_t &region, ParallelLoopNest &work,
+            const std::map<ASR::symbol_t*, ASR::expr_t*> &enclosing_assoc_map);
 
     bool offloadable_before_rewrites(const ParallelLoopNest &work,
             const std::set<SymbolTable*> &enclosing_block_scopes,
@@ -532,7 +727,7 @@ public:
     // array elements the loop `loop` writes the storage the kernel writes
     // into, or check that they have it, before the launch. `starts` and
     // `ends` hold the limits of each loop of the nest, already evaluated.
-    std::vector<ASR::stmt_t*> build_component_fit(
+    ASR::symbol_t* build_component_fit(
             const ParallelLoopNest &loop,
             const std::vector<ASR::expr_t*> &starts,
             const std::vector<ASR::expr_t*> &ends, const Location &loc);

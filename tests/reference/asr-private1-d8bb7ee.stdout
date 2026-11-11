@@ -15,6 +15,7 @@
                     .false.
                     .false.
                     .false.
+                    .false.
                     ()
                 ),
             foo2:
@@ -56,6 +57,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )]
                                     ()
                                     Public
@@ -95,14 +98,17 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     foo2
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.
@@ -141,6 +147,8 @@
                             ()
                             [(Var 5 y)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -191,6 +199,8 @@
                             ()
                             [(Var 5 y)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )

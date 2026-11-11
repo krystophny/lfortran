@@ -62,9 +62,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             lhs:
                                                 (Variable
@@ -88,9 +90,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             rhs:
                                                 (Variable
@@ -119,9 +123,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     date_to_string
@@ -194,6 +200,8 @@
                                                 ()
                                             )]
                                             FormatFortran
+                                            []
+                                            ()
                                             (Allocatable
                                                 (String 1 () DeferredLength DescriptorString)
                                             )
@@ -282,9 +290,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             rhs:
                                                 (Variable
@@ -336,9 +346,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             temporary:
                                                 (Variable
@@ -362,9 +374,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             time_to_string:
                                                 (ExternalSymbol
@@ -578,6 +592,8 @@
                                                 ()
                                                 .false.
                                                 .false.
+                                                .false.
+                                                .false.
                                             )]
                                             []
                                         )]
@@ -661,6 +677,8 @@
                                                     ()
                                                     .false.
                                                 )
+                                                .false.
+                                                .false.
                                                 .false.
                                                 .false.
                                             )]
@@ -748,9 +766,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             millisec:
                                                 (Variable
@@ -772,9 +792,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             minute:
                                                 (Variable
@@ -796,9 +818,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             second:
                                                 (Variable
@@ -820,9 +844,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             self:
                                                 (Variable
@@ -857,9 +883,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             zone:
                                                 (Variable
@@ -881,9 +909,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     new_toml_time
@@ -911,7 +941,7 @@
                                         Implementation
                                         ()
                                         .true.
-                                        .false.
+                                        .true.
                                         .false.
                                         .false.
                                         .false.
@@ -945,6 +975,8 @@
                                             ()
                                             .false.
                                             .false.
+                                            .false.
+                                            .false.
                                         )]
                                         []
                                     )
@@ -968,6 +1000,8 @@
                                             ()
                                             .false.
                                             .false.
+                                            .false.
+                                            .false.
                                         )]
                                         []
                                     )
@@ -989,6 +1023,8 @@
                                             )
                                             (Var 13 second)
                                             ()
+                                            .false.
+                                            .false.
                                             .false.
                                             .false.
                                         )]
@@ -1016,6 +1052,8 @@
                                             ()
                                             .false.
                                             .false.
+                                            .false.
+                                            .false.
                                         )]
                                         []
                                     )
@@ -1039,6 +1077,8 @@
                                             )
                                             (Var 13 zone)
                                             ()
+                                            .false.
+                                            .false.
                                             .false.
                                             .false.
                                         )]
@@ -1125,9 +1165,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             lfortran_iomsg1:
                                                 (Variable
@@ -1149,9 +1191,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             lhs:
                                                 (Variable
@@ -1175,9 +1219,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             rhs:
                                                 (Variable
@@ -1212,9 +1258,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     time_to_string
@@ -1317,6 +1365,8 @@
                                                     ()
                                                 )]
                                                 FormatFortran
+                                                []
+                                                ()
                                                 (Allocatable
                                                     (String 1 () DeferredLength DescriptorString)
                                                 )
@@ -1373,6 +1423,8 @@
                                                     ()
                                                 )]
                                                 FormatFortran
+                                                []
+                                                ()
                                                 (Allocatable
                                                     (String 1 () DeferredLength DescriptorString)
                                                 )
@@ -1433,6 +1485,8 @@
                                             ()
                                             .false.
                                             .false.
+                                            .false.
+                                            .false.
                                         )]
                                         []
                                     )]
@@ -1467,9 +1521,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             month:
                                                 (Variable
@@ -1491,9 +1547,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             to_string:
                                                 (StructMethodDeclaration
@@ -1505,6 +1563,7 @@
                                                     Source
                                                     .false.
                                                     .false.
+                                                    Public
                                                 ),
                                             year:
                                                 (Variable
@@ -1526,9 +1585,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             ~assign:
                                                 (CustomOperator
@@ -1553,7 +1614,7 @@
                                     day]
                                     []
                                     Source
-                                    Private
+                                    Public
                                     .false.
                                     .false.
                                     .false.
@@ -1596,9 +1657,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             time:
                                                 (Variable
@@ -1635,9 +1698,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             to_string:
                                                 (StructMethodDeclaration
@@ -1649,6 +1714,7 @@
                                                     Source
                                                     .false.
                                                     .false.
+                                                    Public
                                                 ),
                                             ~assign:
                                                 (CustomOperator
@@ -1695,7 +1761,7 @@
                                     time]
                                     []
                                     Source
-                                    Private
+                                    Public
                                     .false.
                                     .false.
                                     .false.
@@ -1729,9 +1795,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             millisec:
                                                 (Variable
@@ -1755,9 +1823,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             minute:
                                                 (Variable
@@ -1779,9 +1849,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             second:
                                                 (Variable
@@ -1803,9 +1875,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             to_string:
                                                 (StructMethodDeclaration
@@ -1817,6 +1891,7 @@
                                                     Source
                                                     .false.
                                                     .false.
+                                                    Public
                                                 ),
                                             zone:
                                                 (Variable
@@ -1840,9 +1915,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             ~assign:
                                                 (CustomOperator
@@ -1875,7 +1952,7 @@
                                     zone]
                                     []
                                     Source
-                                    Private
+                                    Public
                                     .false.
                                     .false.
                                     .false.
@@ -1898,6 +1975,7 @@
                     .true.
                     .false.
                     .false.
+                    .false.
                     ()
                 ),
             tomlf_utils:
@@ -1906,13 +1984,10 @@
                         2
                         {
                             convert_raw:
-                                (ExternalSymbol
+                                (GenericProcedure
                                     2
                                     convert_raw
-                                    4 convert_raw
-                                    tomlf_utils_convert
-                                    []
-                                    convert_raw
+                                    [2 toml_raw_to_timestamp@convert_raw]
                                     Public
                                 ),
                             new_toml_time@~toml_time:
@@ -1923,7 +1998,7 @@
                                     tomlf_datetime
                                     []
                                     new_toml_time
-                                    Public
+                                    Private
                                 ),
                             toml_date:
                                 (ExternalSymbol
@@ -1955,6 +2030,16 @@
                                     toml_raw_to_timestamp
                                     Public
                                 ),
+                            toml_raw_to_timestamp@convert_raw:
+                                (ExternalSymbol
+                                    2
+                                    toml_raw_to_timestamp@convert_raw
+                                    4 toml_raw_to_timestamp
+                                    tomlf_utils_convert
+                                    []
+                                    toml_raw_to_timestamp
+                                    Private
+                                ),
                             toml_time:
                                 (ExternalSymbol
                                     2
@@ -1966,13 +2051,10 @@
                                     Public
                                 ),
                             ~toml_time:
-                                (ExternalSymbol
+                                (GenericProcedure
                                     2
                                     ~toml_time
-                                    7 ~toml_time
-                                    tomlf_datetime
-                                    []
-                                    ~toml_time
+                                    [2 new_toml_time@~toml_time]
                                     Public
                                 )
                         })
@@ -1980,6 +2062,7 @@
                     ()
                     [tomlf_utils_convert
                     tomlf_datetime]
+                    .false.
                     .false.
                     .false.
                     .false.
@@ -2005,7 +2088,7 @@
                                     tomlf_datetime
                                     []
                                     new_toml_time
-                                    Public
+                                    Private
                                 ),
                             toml_date:
                                 (ExternalSymbol
@@ -2062,9 +2145,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             err:
                                                 (Variable
@@ -2086,9 +2171,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             first:
                                                 (Variable
@@ -2110,9 +2197,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             raw:
                                                 (Variable
@@ -2134,9 +2223,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             stat:
                                                 (Variable
@@ -2158,9 +2249,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             timestamp:
                                                 (Variable
@@ -2212,9 +2305,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     toml_raw_to_timestamp
@@ -2273,6 +2368,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )
                                     (Assignment
                                         (StructInstanceMember
@@ -2308,6 +2405,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )
                                     (Assignment
                                         (Var 5 stat)
@@ -2319,6 +2418,8 @@
                                             ()
                                         )
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )]
@@ -2339,13 +2440,10 @@
                                     Public
                                 ),
                             ~toml_time:
-                                (ExternalSymbol
+                                (GenericProcedure
                                     4
                                     ~toml_time
-                                    7 ~toml_time
-                                    tomlf_datetime
-                                    []
-                                    ~toml_time
+                                    [4 new_toml_time@~toml_time]
                                     Public
                                 )
                         })
@@ -2353,6 +2451,7 @@
                     ()
                     [tomlf_datetime]
                     .true.
+                    .false.
                     .false.
                     .false.
                     ()

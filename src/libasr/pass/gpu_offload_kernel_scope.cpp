@@ -6,6 +6,8 @@
 #include <libasr/asr.h>
 #include <libasr/asr_utils.h>
 #include <libasr/containers.h>
+#include <libasr/pass/entry_initialized_locals.h>
+#include <libasr/pass/gpu_device_struct_storage.h>
 #include <libasr/pass/gpu_offload_collect.h>
 #include <libasr/pass/gpu_offload_designator.h>
 #include <libasr/pass/gpu_offload_rewrite.h>
@@ -317,7 +319,7 @@ bool GpuOffloadVisitor::hoist_struct_element_gathers(
         gather_stmts.push_back(al, ASRUtils::STMT(
             ASR::make_Assignment_t(al, gloc,
                 ASRUtils::EXPR(ASR::make_Var_t(al, gloc, temp)),
-                rhs, nullptr, false, false)));
+                rhs, nullptr, false, false, false, false)));
         if (!g.scatter) continue;
         ASRUtils::ExprStmtDuplicator back(al);
         back.success = true;
@@ -326,7 +328,7 @@ bool GpuOffloadVisitor::hoist_struct_element_gathers(
         scatter_stmts.push_back(al, ASRUtils::STMT(
             ASR::make_Assignment_t(al, gloc, lhs,
                 ASRUtils::EXPR(ASR::make_Var_t(al, gloc, temp)),
-                nullptr, false, false)));
+                nullptr, false, false, false, false)));
     }
 
     GpuStructElementGatherVisitor sub(al, gathers);
@@ -369,6 +371,9 @@ ASR::stmt_t* GpuOffloadVisitor::copy_loop_stmt(ASR::stmt_t *stmt,
         ASR::Block_t *blk = ASR::down_cast<ASR::Block_t>(copy);
         retarget_block_calls_in(blk);
         remap_block_to_own_scope(blk);
+        // Substitution follows nested calls, which must name the copies
+        // before it can rewrite their declarations and expression types.
+        inline_entry_initialized_locals(al, copy, &orig->base);
         std::string name = current_scope->get_unique_name(
             std::string(orig->m_name) + "_gpu");
         blk->m_name = s2c(al, name);
@@ -393,6 +398,7 @@ ASR::stmt_t* GpuOffloadVisitor::copy_loop_stmt(ASR::stmt_t *stmt,
         ASR::AssociateBlock_t *ab =
             ASR::down_cast<ASR::AssociateBlock_t>(copy);
         remap_associate_to_own_scope(ab);
+        inline_entry_initialized_locals(al, copy, &orig->base);
         std::string name = current_scope->get_unique_name(
             std::string(orig->m_name) + "_gpu");
         ab->m_name = s2c(al, name);
@@ -413,7 +419,7 @@ ASR::stmt_t* GpuOffloadVisitor::copy_loop_stmt(ASR::stmt_t *stmt,
             if (c == nullptr) return nullptr;
             body.push_back(al, c);
         }
-        return ASRUtils::STMT(ASR::make_DoLoop_t(al, dl->base.base.loc,
+        return ASRUtils::STMT(ASRUtils::make_DoLoop_t_util(al, dl->base.base.loc,
             dl->m_name, dl->m_head, body.p, body.n, dl->m_orelse,
             dl->n_orelse));
     }
@@ -502,6 +508,43 @@ void GpuOffloadVisitor::retarget_local_extents(SymbolTable *scope) {
     }
 }
 
+// A function the declaration of a local of a routine copied into the
+// kernel calls, `real :: w(f(n))`, is the kernel's copy of the function,
+// as one its statements call is. Only the calls are retargeted: what the
+// declaration reads of the routine is the routine's own.
+void GpuOffloadVisitor::retarget_declaration_calls(SymbolTable *scope,
+        SymbolTable &kernel_scope) {
+    class Calls : public ASR::BaseExprReplacer<Calls> {
+    public:
+        GpuReplaceSymbols symbols;
+        explicit Calls(SymbolTable &kernel_scope) : symbols(kernel_scope) {}
+        void replace_FunctionCall(ASR::FunctionCall_t *x) {
+            symbols.retarget_call(x->m_name, x->m_original_name);
+            ASR::BaseExprReplacer<Calls>::replace_FunctionCall(x);
+        }
+    };
+    Calls calls(kernel_scope);
+    std::vector<SymbolTable*> scopes;
+    gpu_routine_scopes(scope, scopes);
+    for (SymbolTable *s : scopes) {
+        for (auto &item : s->get_scope()) {
+            if (!ASR::is_a<ASR::Variable_t>(*item.second)) continue;
+            ASR::ttype_t *type = ASRUtils::type_get_past_allocatable_pointer(
+                ASR::down_cast<ASR::Variable_t>(item.second)->m_type);
+            if (!type || !ASR::is_a<ASR::Array_t>(*type)) continue;
+            ASR::Array_t *arr = ASR::down_cast<ASR::Array_t>(type);
+            for (size_t d = 0; d < arr->n_dims; d++) {
+                for (ASR::expr_t **e : {&arr->m_dims[d].m_start,
+                        &arr->m_dims[d].m_length}) {
+                    if (*e == nullptr) continue;
+                    calls.current_expr = e;
+                    calls.replace_expr(*e);
+                }
+            }
+        }
+    }
+}
+
 // duplicate_AssociateBlock copies the symbol table but leaves Var
 // nodes in the body pointing at the original Variables. Point them at
 // the copies so the inliner rewrites the draft, not the host
@@ -574,64 +617,36 @@ void GpuOffloadVisitor::remap_block_to_own_scope(ASR::Block_t *block) {
 void GpuOffloadVisitor::retarget_nested_calls_in(
         ASR::symbol_t *owner, SymbolTable *scope,
         ASR::stmt_t **body, size_t n_body) {
-    std::function<void(ASR::stmt_t**, size_t)> walk =
-        [&](ASR::stmt_t **stmts, size_t n_stmts) {
-        for (size_t i = 0; i < n_stmts; i++) {
-            if (ASR::is_a<ASR::BlockCall_t>(*stmts[i])) {
-                ASR::BlockCall_t *bc =
-                    ASR::down_cast<ASR::BlockCall_t>(stmts[i]);
-                if (!ASR::is_a<ASR::Block_t>(*bc->m_m)) continue;
-                ASR::Block_t *inner =
-                    ASR::down_cast<ASR::Block_t>(bc->m_m);
-                ASR::symbol_t *local =
-                    scope->get_symbol(inner->m_name);
-                if (local && ASR::is_a<ASR::Block_t>(*local)
-                        && local != owner) {
-                    bc->m_m = local;
-                    retarget_block_calls_in(
-                        ASR::down_cast<ASR::Block_t>(local));
-                }
-                continue;
+    GpuConstructCallVisitor walk(
+        [&](ASR::BlockCall_t &bc) {
+            if (!ASR::is_a<ASR::Block_t>(*bc.m_m)) return;
+            ASR::Block_t *inner = ASR::down_cast<ASR::Block_t>(bc.m_m);
+            ASR::symbol_t *local = scope->get_symbol(inner->m_name);
+            if (local && ASR::is_a<ASR::Block_t>(*local)
+                    && local != owner) {
+                bc.m_m = local;
+                retarget_block_calls_in(ASR::down_cast<ASR::Block_t>(local));
             }
-            if (ASR::is_a<ASR::AssociateBlockCall_t>(*stmts[i])) {
-                // An ASSOCIATE inside the construct is copied with it,
-                // and the call has to name the copy for the same
-                // reason a nested block's does.
-                ASR::AssociateBlockCall_t *abc =
-                    ASR::down_cast<ASR::AssociateBlockCall_t>(stmts[i]);
-                ASR::symbol_t *inner = ASRUtils::symbol_get_past_external(
-                    abc->m_m);
-                if (inner == nullptr
-                        || !ASR::is_a<ASR::AssociateBlock_t>(*inner)) {
-                    continue;
-                }
-                ASR::symbol_t *local = scope->get_symbol(
-                    ASRUtils::symbol_name(inner));
-                if (local && ASR::is_a<ASR::AssociateBlock_t>(*local)) {
-                    abc->m_m = local;
-                    ASR::AssociateBlock_t *ab =
-                        ASR::down_cast<ASR::AssociateBlock_t>(local);
-                    retarget_nested_calls_in(local, ab->m_symtab,
-                        ab->m_body, ab->n_body);
-                }
-                continue;
+        },
+        [&](ASR::AssociateBlockCall_t &abc) {
+            ASR::symbol_t *inner = ASRUtils::symbol_get_past_external(abc.m_m);
+            if (inner == nullptr || !ASR::is_a<ASR::AssociateBlock_t>(*inner)) {
+                return;
             }
-            if (ASR::is_a<ASR::DoLoop_t>(*stmts[i])) {
-                ASR::DoLoop_t *dl =
-                    ASR::down_cast<ASR::DoLoop_t>(stmts[i]);
-                walk(dl->m_body, dl->n_body);
-            } else if (ASR::is_a<ASR::If_t>(*stmts[i])) {
-                ASR::If_t *ifs = ASR::down_cast<ASR::If_t>(stmts[i]);
-                walk(ifs->m_body, ifs->n_body);
-                walk(ifs->m_orelse, ifs->n_orelse);
-            } else if (ASR::is_a<ASR::WhileLoop_t>(*stmts[i])) {
-                ASR::WhileLoop_t *wl =
-                    ASR::down_cast<ASR::WhileLoop_t>(stmts[i]);
-                walk(wl->m_body, wl->n_body);
+            ASR::symbol_t *local = scope->get_symbol(
+                ASRUtils::symbol_name(inner));
+            if (local && ASR::is_a<ASR::AssociateBlock_t>(*local)) {
+                abc.m_m = local;
+                ASR::AssociateBlock_t *ab =
+                    ASR::down_cast<ASR::AssociateBlock_t>(local);
+                retarget_nested_calls_in(local, ab->m_symtab,
+                    ab->m_body, ab->n_body);
             }
         }
-    };
-    walk(body, n_body);
+    );
+    for (size_t i = 0; i < n_body; i++) {
+        walk.visit_stmt(*body[i]);
+    }
 }
 
 void GpuOffloadVisitor::retarget_block_calls_in(ASR::Block_t *block) {

@@ -1,0 +1,29 @@
+#include <stdint.h>
+
+struct __ScalarArgs___lfortran_gpu_kernel_0_15gpu_metal_478_m21changed_pointer_bound {
+    int __libasr_extent_t_1;
+    int m;
+    int __dim_t_0;
+};
+
+extern "C" __global__ void __launch_bounds__(256) __lfortran_gpu_kernel_0_15gpu_metal_478_m21changed_pointer_bound(
+    float* __restrict__ t,
+    float* __restrict__ y,
+    __ScalarArgs___lfortran_gpu_kernel_0_15gpu_metal_478_m21changed_pointer_bound __scalar_args)
+{
+    int m = __scalar_args.m;
+    int __flat_idx;
+    int j__dc;
+    int k;
+    if ((((blockIdx.x * blockDim.x) + threadIdx.x) >= 4)) {
+        return;
+    }
+    __flat_idx = ((blockIdx.x * blockDim.x) + threadIdx.x);
+    j__dc = (__flat_idx + 1);
+    #pragma unroll 16
+    for (k = 1; k <= m; k++) {
+        t[((int)(k) - (1))] = ((float)j__dc);
+    }
+    y[((int)(j__dc) - (1))] = t[((int)(4) - (1))];
+}
+

@@ -31,9 +31,11 @@
                     nil
                     false
                     false
+                    false
                     :NotMethod
                     nil
                     []
+                    nil
                   )
                 }
               )
@@ -75,6 +77,7 @@
         "m"
         nil
         []
+        false
         false
         false
         false
@@ -132,9 +135,11 @@
               nil
               false
               false
+              false
               :NotMethod
               nil
               []
+              nil
             )
           }
         )
@@ -148,6 +153,7 @@
             (Var
               (SymbolRef 6 "impl")
             )
+            :NoPointerBounds
           )
         ]
         nil

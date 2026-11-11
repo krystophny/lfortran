@@ -242,6 +242,16 @@ class ASTNodeVisitor(ASDLVisitor):
         self.emit(    "%s_t base;" % base, 2);
         args = ["Allocator &al", "const Location &a_loc"]
         lines = []
+        # An optional symbol reference that only defaulted fields follow
+        # defaults to absent, so that appending one to a constructor does not
+        # change its existing callers.
+        defaulted = set()
+        for f in reversed(cons.fields):
+            if f.type == "location" or (f.type == "symbol" and f.opt
+                    and not f.seq):
+                defaulted.add(f.name)
+            else:
+                break
         for f in cons.fields:
             type_ = convert_type(f.type, f.seq, f.opt, self.mod.name.lower())
             if f.seq:
@@ -249,7 +259,7 @@ class ASTNodeVisitor(ASDLVisitor):
             else:
                 seq = ""
             self.emit("%s m_%s;%s" % (type_, f.name, seq), 2)
-            if f.type == "location":
+            if f.name in defaulted:
                 args.append("%s a_%s = nullptr" % (type_, f.name))
             else:
                 args.append("%s a_%s" % (type_, f.name))
@@ -354,7 +364,7 @@ class DefaultLookupNameVisitor(ASDLVisitor):
         self.emit("private:")
         self.emit("    StructType& self() { return static_cast<StructType&>(*this); }")
         self.emit("public:")
-        self.emit("uint16_t pos;", 1)
+        self.emit("uint32_t pos;", 1)
         self.emit("uint32_t min_span = UINT32_MAX;", 1)
         self.emit("ASR::asr_t* node_to_return = nullptr;", 1)
         self.emit("bool test_loc_and_set_span(Location loc) {", 1)
@@ -433,6 +443,18 @@ class DefaultLookupNameVisitor(ASDLVisitor):
         self.emit("}", 3)
         self.emit("case ASR::symbolType::Namelist: {", 3)
         self.emit("node_to_return = ( ASR::asr_t* ) ((Variable_t*)sym);", 4)
+        self.emit("return;", 4)
+        self.emit("}", 3)
+        self.emit("case ASR::symbolType::BlockData: {", 3)
+        self.emit("node_to_return = ( ASR::asr_t* ) ((BlockData_t*)sym);", 4)
+        self.emit("return;", 4)
+        self.emit("}", 3)
+        self.emit("case ASR::symbolType::CommonBlock: {", 3)
+        self.emit("node_to_return = ( ASR::asr_t* ) ((CommonBlock_t*)sym);", 4)
+        self.emit("return;", 4)
+        self.emit("}", 3)
+        self.emit("case ASR::symbolType::ScopedVariableAttribute: {", 3)
+        self.emit("node_to_return = (ASR::asr_t*)sym;", 4)
         self.emit("return;", 4)
         self.emit("}", 3)
         self.emit("}", 2)
@@ -1371,7 +1393,9 @@ class ExprStmtDuplicatorVisitor(ASDLVisitor):
             field.type == "call_arg" or
             field.type == "do_loop_head" or
             field.type == "array_index" or
+            field.type == "array_extent_check" or
             field.type == "alloc_arg" or
+            field.type == "reduction_expr" or
             field.type == "case_stmt" or
             field.type == "type_stmt" or
             field.type == "rank_stmt" or
@@ -1383,7 +1407,9 @@ class ExprStmtDuplicatorVisitor(ASDLVisitor):
                 pointer_char = ''
                 if (field.type != "call_arg" and
                     field.type != "array_index" and
+                    field.type != "array_extent_check" and
                     field.type != "alloc_arg" and
+                    field.type != "reduction_expr" and
                     field.type != "dimension" and
                     field.type != "do_loop_head"):
                     pointer_char = '*'
@@ -1428,6 +1454,12 @@ class ExprStmtDuplicatorVisitor(ASDLVisitor):
                     self.emit("    }", level)
                     self.emit("    alloc_arg_copy.m_codims = codims_copy.p;", level)
                     self.emit("    m_%s.push_back(al, alloc_arg_copy);"%(field.name), level)
+                elif field.type == "reduction_expr":
+                    self.emit("    ASR::reduction_expr_t reduction_copy;", level)
+                    self.emit("    reduction_copy.loc = x->m_%s[i].loc;"%(field.name), level)
+                    self.emit("    reduction_copy.m_op = x->m_%s[i].m_op;"%(field.name), level)
+                    self.emit("    reduction_copy.m_arg = self().duplicate_expr(x->m_%s[i].m_arg);"%(field.name), level)
+                    self.emit("    m_%s.push_back(al, reduction_copy);"%(field.name), level)
                 elif field.type == "array_index":
                     self.emit("    ASR::array_index_t array_index_copy;", level)
                     self.emit("    array_index_copy.loc = x->m_%s[i].loc;"%(field.name), level)
@@ -1435,6 +1467,11 @@ class ExprStmtDuplicatorVisitor(ASDLVisitor):
                     self.emit("    array_index_copy.m_right = duplicate_expr(x->m_%s[i].m_right);"%(field.name), level)
                     self.emit("    array_index_copy.m_step = duplicate_expr(x->m_%s[i].m_step);"%(field.name), level)
                     self.emit("    m_%s.push_back(al, array_index_copy);"%(field.name), level)
+                elif field.type == "array_extent_check":
+                    self.emit("    ASR::array_extent_check_t check_copy = x->m_%s[i];"%(field.name), level)
+                    self.emit("    check_copy.m_left_extent = self().duplicate_expr(x->m_%s[i].m_left_extent);"%(field.name), level)
+                    self.emit("    check_copy.m_right_extent = self().duplicate_expr(x->m_%s[i].m_right_extent);"%(field.name), level)
+                    self.emit("    m_%s.push_back(al, check_copy);"%(field.name), level)
                 elif field.type == "dimension":
                     self.emit("    ASR::dimension_t dim_copy;", level)
                     self.emit("    dim_copy.loc = x->m_%s[i].loc;"%(field.name), level)
@@ -2136,8 +2173,8 @@ class JsonVisitorVisitor(ASDLVisitor):
         self.emit(      'uint32_t last_line = 0, last_col = 0;', 2)
         self.emit(      'std::string last_filename;', 2)
         self.emit(      '')
-        self.emit(      'lm.pos_to_linecol(first, first_line, first_col, first_filename);', 2)
-        self.emit(      'lm.pos_to_linecol(last, last_line, last_col, last_filename);', 2)
+        self.emit(      'lm.output_pos_to_linecol(first, false, first_line, first_col, first_filename);', 2)
+        self.emit(      'lm.output_pos_to_linecol(last, true, last_line, last_col, last_filename);', 2)
         self.emit(      '')
         self.emit(      's.append(",\\n" + indtd);', 2)
         self.emit(      's.append("\\"first_filename\\": \\"" + first_filename + "\\"");', 2)
@@ -2456,14 +2493,21 @@ class ASRTextSerializationVisitorVisitor(ASDLVisitor):
     def make_visitor(self, name, fields):
         serialized_fields = [field for field in fields if field.type != "location"]
         optional = [f for f in serialized_fields if f.opt and f.type in products]
+        # An absent optional product field is omitted only when every later
+        # one is absent too (written as nil otherwise), so that the reader
+        # can match a positional form that omits a trailing run of them.
+        written = {}
+        for i, field in enumerate(optional):
+            written[field.name] = "(%s)" % " || ".join(
+                "x.m_%s != nullptr" % f.name for f in optional[i:])
         field_count = str(len(serialized_fields) - len(optional))
         for field in optional:
-            field_count += " + (x.m_%s != nullptr)" % field.name
+            field_count += " + %s" % written[field.name]
         self.emit("void visit_%s(const %s_t &x) {" % (name, name), 1)
         self.emit('self().begin_form("%s", %s);' % (name, field_count), 2)
         for field in serialized_fields:
             if field in optional:
-                self.emit("if (x.m_%s) {" % field.name, 2)
+                self.emit("if %s {" % written[field.name], 2)
             self.emit('self().begin_field("%s");' % field.name, 2)
             self.visitField(field, name)
             if field in optional:
@@ -3113,6 +3157,9 @@ class SerializationVisitorVisitor(ASDLVisitor):
             self.emit(    'self().write_int8(x.base.type);', 2)
             self.emit(    'self().write_int64(x.base.base.loc.first);', 2)
             self.emit(    'self().write_int64(x.base.base.loc.last);', 2)
+        else:
+            self.emit(    'self().write_int64(x.loc.first);', 2)
+            self.emit(    'self().write_int64(x.loc.last);', 2)
         self.used = False
         for n, field in enumerate(serialization_fields(name, fields)):
             self.visitField(field, cons, name)
@@ -3290,6 +3337,22 @@ class DeserializationVisitorVisitor(ASDLVisitor):
         self.emit(  "uint32_t offset = 0;", 1)
         self.emit(  "std::map<uint64_t,SymbolTable*> id_symtab_map;", 1)
         self.emit(  r"DeserializationBaseVisitor(Allocator &al, bool load_symtab_id, uint32_t offset) : al{al}, load_symtab_id{load_symtab_id}, offset{offset} {}", 1)
+        # Location positions are uint32_t but serialized as 64-bit integers.
+        # Reject values that cannot have come from a Location; adding the
+        # position offset keeps the existing uint32_t (modular) arithmetic.
+        self.emit(  "uint32_t read_location_position(uint32_t position_offset) {", 1)
+        self.emit(    "uint64_t position = self().read_int64();", 2)
+        self.emit(    "if (position > std::numeric_limits<uint32_t>::max()) {", 2)
+        self.emit(      'throw LCompilersException("Location position out of range in deserialization");', 3)
+        self.emit(    "}", 2)
+        self.emit(    "return static_cast<uint32_t>(position) + position_offset;", 2)
+        self.emit(  "}", 1)
+        self.emit(  "decltype(SymbolTable::counter) symtab_counter_from_serialized(uint64_t counter) {", 1)
+        self.emit(    "if (counter > std::numeric_limits<decltype(SymbolTable::counter)>::max()) {", 2)
+        self.emit(      'throw LCompilersException("Symbol table counter out of range in deserialization");', 3)
+        self.emit(    "}", 2)
+        self.emit(    "return static_cast<decltype(SymbolTable::counter)>(counter);", 2)
+        self.emit(  "}", 1)
         self.emit_deserialize_node();
         self.mod = mod
         super(DeserializationVisitorVisitor, self).visitModule(mod)
@@ -3341,6 +3404,8 @@ class DeserializationVisitorVisitor(ASDLVisitor):
     def visitProduct(self, prod, name):
         self.emit("%s_t deserialize_%s() {" % (name, name), 1)
         self.emit(  '%s_t x;' % (name), 2)
+        self.emit(  'x.loc.first = read_location_position(offset);', 2)
+        self.emit(  'x.loc.last = read_location_position(offset);', 2)
         for field in serialization_fields(name, prod.fields):
             if field.seq:
                 assert not field.opt
@@ -3529,7 +3594,7 @@ class DeserializationVisitorVisitor(ASDLVisitor):
                             # be present:
                             lines.append("LCOMPILERS_ASSERT(id_symtab_map.find(m_%s_counter) == id_symtab_map.end());" % f.name)
                             lines.append("SymbolTable *m_%s = al.make_new<SymbolTable>(nullptr);" % (f.name))
-                            lines.append("if (load_symtab_id) m_%s->counter = m_%s_counter;" % (f.name, f.name))
+                            lines.append("if (load_symtab_id) m_%s->counter = symtab_counter_from_serialized(m_%s_counter);" % (f.name, f.name))
                             lines.append("id_symtab_map[m_%s_counter] = m_%s;" % (f.name, f.name))
                             lines.append("{")
                             lines.append("    size_t n = self().read_int64();")
@@ -3545,8 +3610,8 @@ class DeserializationVisitorVisitor(ASDLVisitor):
                     elif f.type == "location":
                         lines.append("Location* m_%s;"% f.name)
                         lines.append("m_%s = al.make_new<Location>();"% f.name)
-                        lines.append("m_%s->first = self().read_int64();"% f.name)
-                        lines.append("m_%s->last = self().read_int64();"% f.name)
+                        lines.append("m_%s->first = read_location_position(0);"% f.name)
+                        lines.append("m_%s->last = read_location_position(0);"% f.name)
                         field_args[f.name] = ["m_%s" % (f.name)]
                     else:
                         print(f.type)
@@ -3590,8 +3655,8 @@ class DeserializationVisitorVisitor(ASDLVisitor):
                     field_args[f.name] = ["m_%s" % (f.name)]
 
         self.emit(    'Location loc;', 2)
-        self.emit(    'loc.first = self().read_int64() + offset;', 2)
-        self.emit(    'loc.last = self().read_int64() + offset;', 2)
+        self.emit(    'loc.first = read_location_position(offset);', 2)
+        self.emit(    'loc.last = read_location_position(offset);', 2)
         for line in lines:
             self.emit(line, 2)
         args = ["al", "loc"]
@@ -3809,6 +3874,8 @@ HEAD = r"""#ifndef LFORTRAN_%(MOD2)s_H
 
 // Generated by grammar/asdl_cpp.py
 
+#include <limits>
+
 #include <libasr/alloc.h>
 #include <libasr/location.h>
 #include <libasr/colors.h>
@@ -3870,6 +3937,7 @@ HEAD_VISITOR = r"""#pragma once
 // Generated by grammar/asdl_cpp.py
 
 #include <cstring>
+#include <limits>
 
 #include <libasr/alloc.h>
 #include <libasr/location.h>

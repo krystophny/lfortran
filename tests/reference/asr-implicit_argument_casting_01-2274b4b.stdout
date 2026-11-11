@@ -33,9 +33,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             dp:
                                 (Variable
@@ -66,9 +68,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             n:
                                 (Variable
@@ -90,9 +94,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     idz_realcomp
@@ -157,6 +163,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )]
                     ()
                     Public
@@ -198,15 +206,145 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             idzp_svd:
                                 (Function
                                     (SymbolTable
                                         4
                                         {
+                                            idz_realcomp~fpcast:
+                                                (Function
+                                                    (SymbolTable
+                                                        5
+                                                        {
+                                                            idz_realcomp~arg_0:
+                                                                (Variable
+                                                                    5
+                                                                    idz_realcomp~arg_0
+                                                                    []
+                                                                    Unspecified
+                                                                    ()
+                                                                    ()
+                                                                    Default
+                                                                    (Integer 4)
+                                                                    ()
+                                                                    Source
+                                                                    Public
+                                                                    Required
+                                                                    .false.
+                                                                    .false.
+                                                                    .false.
+                                                                    ()
+                                                                    .false.
+                                                                    .false.
+                                                                    .false.
+                                                                    NotMethod
+                                                                    ()
+                                                                    []
+                                                                    ()
+                                                                ),
+                                                            idz_realcomp~arg_1:
+                                                                (Variable
+                                                                    5
+                                                                    idz_realcomp~arg_1
+                                                                    []
+                                                                    Unspecified
+                                                                    ()
+                                                                    ()
+                                                                    Default
+                                                                    (Complex 8)
+                                                                    ()
+                                                                    Source
+                                                                    Public
+                                                                    Required
+                                                                    .false.
+                                                                    .false.
+                                                                    .false.
+                                                                    ()
+                                                                    .false.
+                                                                    .false.
+                                                                    .false.
+                                                                    NotMethod
+                                                                    ()
+                                                                    []
+                                                                    ()
+                                                                )
+                                                        })
+                                                    idz_realcomp~fpcast
+                                                    (FunctionType
+                                                        [(Integer 4)
+                                                        (Complex 8)]
+                                                        ()
+                                                        Source
+                                                        Interface
+                                                        ()
+                                                        .false.
+                                                        .false.
+                                                        .false.
+                                                        .false.
+                                                        .false.
+                                                        []
+                                                        .false.
+                                                        Host
+                                                    )
+                                                    []
+                                                    [(Var 5 idz_realcomp~arg_0)
+                                                    (Var 5 idz_realcomp~arg_1)]
+                                                    []
+                                                    ()
+                                                    Public
+                                                    .false.
+                                                    .false.
+                                                    ()
+                                                ),
+                                            idz_realcomp~fpcast_ptr:
+                                                (Variable
+                                                    4
+                                                    idz_realcomp~fpcast_ptr
+                                                    []
+                                                    Local
+                                                    ()
+                                                    ()
+                                                    Default
+                                                    (Pointer
+                                                        (FunctionType
+                                                            [(Integer 4)
+                                                            (Complex 8)]
+                                                            ()
+                                                            Source
+                                                            Interface
+                                                            ()
+                                                            .false.
+                                                            .false.
+                                                            .false.
+                                                            .false.
+                                                            .false.
+                                                            []
+                                                            .false.
+                                                            Host
+                                                        )
+                                                    )
+                                                    4 idz_realcomp~fpcast
+                                                    Source
+                                                    Public
+                                                    Required
+                                                    .false.
+                                                    .false.
+                                                    .false.
+                                                    ()
+                                                    .false.
+                                                    .false.
+                                                    .false.
+                                                    NotMethod
+                                                    ()
+                                                    []
+                                                    ()
+                                                ),
                                             isi:
                                                 (Variable
                                                     4
@@ -227,9 +365,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             ls:
                                                 (Variable
@@ -251,9 +391,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             w:
                                                 (Variable
@@ -281,41 +423,11 @@
                                                     ()
                                                     .false.
                                                     .false.
-                                                    NotMethod
-                                                    ()
-                                                    []
-                                                ),
-                                            w_cast:
-                                                (Variable
-                                                    4
-                                                    w_cast
-                                                    []
-                                                    Local
-                                                    ()
-                                                    ()
-                                                    Default
-                                                    (Pointer
-                                                        (Array
-                                                            (Real 8)
-                                                            [(()
-                                                            ())]
-                                                            DescriptorArray
-                                                            Global
-                                                        )
-                                                    )
-                                                    ()
-                                                    Source
-                                                    Public
-                                                    Required
-                                                    .false.
-                                                    .false.
-                                                    .false.
-                                                    ()
-                                                    .false.
                                                     .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     idzp_svd
@@ -341,7 +453,7 @@
                                         .false.
                                         Host
                                     )
-                                    [idz_realcomp]
+                                    []
                                     [(Var 4 ls)
                                     (Var 4 w)]
                                     [(Assignment
@@ -350,47 +462,37 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )
-                                    (CPtrToPointer
-                                        (PointerToCPtr
-                                            (GetPointer
-                                                (ArrayItem
-                                                    (Var 4 w)
-                                                    [(()
-                                                    (Var 4 isi)
-                                                    ())]
-                                                    (Complex 8)
-                                                    ColMajor
-                                                    ()
-                                                )
-                                                (Pointer
-                                                    (Complex 8)
-                                                )
+                                    (Associate
+                                        (Var 4 idz_realcomp~fpcast_ptr)
+                                        (FunctionPointerCast
+                                            (Var 1 idz_realcomp)
+                                            4 idz_realcomp~fpcast
+                                            (FunctionType
+                                                [(Integer 4)
+                                                (Complex 8)]
                                                 ()
-                                            )
-                                            (CPtr
-                                                CPtrUnspecified
+                                                Source
+                                                Interface
+                                                ()
+                                                .false.
+                                                .false.
+                                                .false.
+                                                .false.
+                                                .false.
+                                                []
+                                                .false.
+                                                Host
                                             )
                                             ()
                                         )
-                                        (Var 4 w_cast)
-                                        (ArrayConstant
-                                            4
-                                            [1000]
-                                            (Array
-                                                (Integer 4)
-                                                [((IntegerConstant 1 (Integer 4) Decimal)
-                                                (IntegerConstant 1 (Integer 4) Decimal))]
-                                                FixedSizeArray
-                                                Global
-                                            )
-                                            ColMajor
-                                        )
-                                        ()
+                                        NoPointerBounds
                                     )
                                     (SubroutineCall
+                                        4 idz_realcomp~fpcast_ptr
                                         1 idz_realcomp
-                                        ()
                                         [((IntegerBinOp
                                             (Var 4 ls)
                                             Mul
@@ -398,20 +500,15 @@
                                             (Integer 4)
                                             ()
                                         ))
-                                        ((ArrayPhysicalCast
-                                            (Var 4 w_cast)
-                                            DescriptorArray
-                                            PointerArray
-                                            (Pointer
-                                                (Array
-                                                    (Real 8)
-                                                    [(()
-                                                    ())]
-                                                    PointerArray
-                                                    Global
-                                                )
-                                            )
+                                        ((ArrayItem
+                                            (Var 4 w)
+                                            [(()
+                                            (Var 4 isi)
+                                            ())]
+                                            (Complex 8)
+                                            ColMajor
                                             ()
+                                            .false.
                                         ))]
                                         ()
                                         .false.
@@ -427,8 +524,11 @@
                                                 (Complex 8)
                                                 ColMajor
                                                 ()
+                                                .false.
                                             )]
                                             FormatFortran
+                                            []
+                                            ()
                                             (Allocatable
                                                 (String 1 () DeferredLength DescriptorString)
                                             )
@@ -451,6 +551,7 @@
                                                             (Complex 8)
                                                             ColMajor
                                                             ()
+                                                            .false.
                                                         )]
                                                         0
                                                         (Real 8)
@@ -522,9 +623,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     main
@@ -539,8 +642,8 @@
                             UnboundedPointerArray
                             (Array
                                 (Complex 8)
-                                [((IntegerConstant 1 (Integer 4) Decimal)
-                                (IntegerConstant 5 (Integer 4) Decimal))]
+                                [(()
+                                ())]
                                 UnboundedPointerArray
                                 Global
                             )

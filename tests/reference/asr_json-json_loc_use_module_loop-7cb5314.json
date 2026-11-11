@@ -1,0 +1,13 @@
+{
+    "basename": "asr_json-json_loc_use_module_loop-7cb5314",
+    "cmd": "lfortran --show-asr --no-indent --json {infile} -o {outfile}",
+    "infile": "tests/json_loc_use_module_loop.f90",
+    "infile_hash": "dab2e439c209d2c42b0ac0bbbfe8d87baa6d21d3823ce37103ee18d1",
+    "outfile": null,
+    "outfile_hash": null,
+    "stdout": "asr_json-json_loc_use_module_loop-7cb5314.stdout",
+    "stdout_hash": "00f30a5c421419af1fbe3a36d566905b89db1e67dbd948c7e7df9de3",
+    "stderr": null,
+    "stderr_hash": null,
+    "returncode": 0
+}

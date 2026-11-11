@@ -55,6 +55,7 @@ _CPack_Packages
 .cmake
 ## Pixi
 .pixi/
+pixi.lock
 ## libraries
 *.a
 *.a.*
@@ -169,6 +170,9 @@ __pycache__/
 .Python
 build/
 build-wasm/
+# The unpacked source tarball that CI builds (ci/source_tarball.sh)
+/lfortran-src/
+/.wasm-tools/
 .jupyterlite.doit.db
 develop-eggs/
 dist/
@@ -237,6 +241,8 @@ doc/man/lfortran.1
 /run.sh
 /run_re.sh
 /.fix-issue/
+# make-release state, downstream clones, and downloaded tarballs/logs.
+/.release/
 /mre_*.f90
 /re_*.f90
 /test_ref

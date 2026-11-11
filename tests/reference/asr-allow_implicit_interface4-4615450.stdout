@@ -18,7 +18,7 @@
                                     (FunctionType
                                         []
                                         ()
-                                        BindC
+                                        Source
                                         ImplicitInterface
                                         ()
                                         .false.
@@ -55,7 +55,7 @@
                                                     Default
                                                     (Real 8)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -64,16 +64,18 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     dqk15w~fpcast
                                     (FunctionType
                                         [(Real 8)]
                                         ()
-                                        BindC
+                                        Source
                                         Interface
                                         ()
                                         .false.
@@ -107,7 +109,7 @@
                                         (FunctionType
                                             [(Real 8)]
                                             ()
-                                            BindC
+                                            Source
                                             Interface
                                             ()
                                             .false.
@@ -130,9 +132,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             f:
                                 (Variable
@@ -146,7 +150,7 @@
                                     (FunctionType
                                         []
                                         (Real 8)
-                                        BindC
+                                        Source
                                         ImplicitInterface
                                         ()
                                         .false.
@@ -168,9 +172,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             f~fpcast:
                                 (Function
@@ -188,7 +194,7 @@
                                                     Default
                                                     (Real 4)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -197,9 +203,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             f~result:
                                                 (Variable
@@ -212,7 +220,7 @@
                                                     Default
                                                     (Real 8)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -221,16 +229,18 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     f~fpcast
                                     (FunctionType
                                         [(Real 4)]
                                         (Real 8)
-                                        BindC
+                                        Source
                                         Interface
                                         ()
                                         .false.
@@ -264,7 +274,7 @@
                                         (FunctionType
                                             [(Real 4)]
                                             (Real 8)
-                                            BindC
+                                            Source
                                             Interface
                                             ()
                                             .false.
@@ -287,9 +297,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             hlgth:
                                 (Variable
@@ -311,22 +323,49 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             ~implicit_interface_f_7:
                                 (Function
                                     (SymbolTable
                                         7
                                         {
-                                            
+                                            ~implicit_interface_f_7_return_var_name:
+                                                (Variable
+                                                    7
+                                                    ~implicit_interface_f_7_return_var_name
+                                                    []
+                                                    ReturnVar
+                                                    ()
+                                                    ()
+                                                    Default
+                                                    (Real 8)
+                                                    ()
+                                                    Source
+                                                    Public
+                                                    Required
+                                                    .false.
+                                                    .false.
+                                                    .false.
+                                                    ()
+                                                    .false.
+                                                    .false.
+                                                    .false.
+                                                    NotMethod
+                                                    ()
+                                                    []
+                                                    ()
+                                                )
                                         })
                                     ~implicit_interface_f_7
                                     (FunctionType
                                         []
                                         (Real 8)
-                                        BindC
+                                        Source
                                         ImplicitInterface
                                         ()
                                         .false.
@@ -341,7 +380,7 @@
                                     []
                                     []
                                     []
-                                    ()
+                                    (Var 7 ~implicit_interface_f_7_return_var_name)
                                     Private
                                     .false.
                                     .false.
@@ -353,7 +392,7 @@
                         [(FunctionType
                             []
                             (Real 8)
-                            BindC
+                            Source
                             ImplicitInterface
                             ()
                             .false.
@@ -388,7 +427,7 @@
                             (FunctionType
                                 [(Real 8)]
                                 ()
-                                BindC
+                                Source
                                 Interface
                                 ()
                                 .false.
@@ -402,6 +441,7 @@
                             )
                             ()
                         )
+                        NoPointerBounds
                     )
                     (SubroutineCall
                         2 dqk15w~fpcast_ptr
@@ -418,7 +458,7 @@
                             (FunctionType
                                 [(Real 4)]
                                 (Real 8)
-                                BindC
+                                Source
                                 Interface
                                 ()
                                 .false.
@@ -432,19 +472,22 @@
                             )
                             ()
                         )
+                        NoPointerBounds
                     )
                     (Print
                         (StringFormat
                             ()
                             [(FunctionCall
                                 2 f~fpcast_ptr
-                                ()
+                                2 f
                                 [((Var 2 hlgth))]
                                 (Real 8)
                                 ()
                                 ()
                             )]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -478,7 +521,7 @@
                                                     Default
                                                     (Real 8)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -487,16 +530,18 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     c
                                     (FunctionType
                                         []
                                         (Real 8)
-                                        BindC
+                                        Source
                                         ImplicitInterface
                                         ()
                                         .false.
@@ -533,7 +578,7 @@
                                                     Default
                                                     (Real 4)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -542,9 +587,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             c~result:
                                                 (Variable
@@ -557,7 +604,7 @@
                                                     Default
                                                     (Real 8)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -566,16 +613,18 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     c~fpcast
                                     (FunctionType
                                         [(Real 4)]
                                         (Real 8)
-                                        BindC
+                                        Source
                                         Interface
                                         ()
                                         .false.
@@ -609,7 +658,7 @@
                                         (FunctionType
                                             [(Real 4)]
                                             (Real 8)
-                                            BindC
+                                            Source
                                             Interface
                                             ()
                                             .false.
@@ -632,9 +681,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             d:
                                 (Variable
@@ -656,9 +707,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             f:
                                 (Variable
@@ -680,9 +733,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             func:
                                 (Variable
@@ -704,9 +759,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             sub2:
                                 (Function
@@ -719,7 +776,7 @@
                                     (FunctionType
                                         []
                                         ()
-                                        BindC
+                                        Source
                                         ImplicitInterface
                                         ()
                                         .false.
@@ -756,7 +813,7 @@
                                                     Default
                                                     (Real 8)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -765,16 +822,18 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     sub2~fpcast
                                     (FunctionType
                                         [(Real 8)]
                                         ()
-                                        BindC
+                                        Source
                                         Interface
                                         ()
                                         .false.
@@ -808,7 +867,7 @@
                                         (FunctionType
                                             [(Real 8)]
                                             ()
-                                            BindC
+                                            Source
                                             Interface
                                             ()
                                             .false.
@@ -831,9 +890,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     func
@@ -862,7 +923,7 @@
                             (FunctionType
                                 [(Real 8)]
                                 ()
-                                BindC
+                                Source
                                 Interface
                                 ()
                                 .false.
@@ -876,6 +937,7 @@
                             )
                             ()
                         )
+                        NoPointerBounds
                     )
                     (SubroutineCall
                         3 sub2~fpcast_ptr
@@ -892,7 +954,7 @@
                             (FunctionType
                                 [(Real 4)]
                                 (Real 8)
-                                BindC
+                                Source
                                 Interface
                                 ()
                                 .false.
@@ -906,19 +968,22 @@
                             )
                             ()
                         )
+                        NoPointerBounds
                     )
                     (Print
                         (StringFormat
                             ()
                             [(FunctionCall
                                 3 c~fpcast_ptr
-                                ()
+                                3 c
                                 [((Var 3 d))]
                                 (Real 8)
                                 ()
                                 ()
                             )]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -952,7 +1017,7 @@
                                                     Default
                                                     (Real 8)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -961,16 +1026,18 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     a
                                     (FunctionType
                                         []
                                         (Real 8)
-                                        BindC
+                                        Source
                                         ImplicitInterface
                                         ()
                                         .false.
@@ -1007,7 +1074,7 @@
                                                     Default
                                                     (Real 4)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -1016,9 +1083,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             a~result:
                                                 (Variable
@@ -1031,7 +1100,7 @@
                                                     Default
                                                     (Real 8)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -1040,16 +1109,18 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     a~fpcast
                                     (FunctionType
                                         [(Real 4)]
                                         (Real 8)
-                                        BindC
+                                        Source
                                         Interface
                                         ()
                                         .false.
@@ -1083,7 +1154,7 @@
                                         (FunctionType
                                             [(Real 4)]
                                             (Real 8)
-                                            BindC
+                                            Source
                                             Interface
                                             ()
                                             .false.
@@ -1106,9 +1177,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             b:
                                 (Variable
@@ -1130,9 +1203,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             sub:
                                 (Function
@@ -1145,7 +1220,7 @@
                                     (FunctionType
                                         []
                                         ()
-                                        BindC
+                                        Source
                                         ImplicitInterface
                                         ()
                                         .false.
@@ -1182,7 +1257,7 @@
                                                     Default
                                                     (Real 8)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -1191,16 +1266,18 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     sub~fpcast
                                     (FunctionType
                                         [(Real 8)]
                                         ()
-                                        BindC
+                                        Source
                                         Interface
                                         ()
                                         .false.
@@ -1234,7 +1311,7 @@
                                         (FunctionType
                                             [(Real 8)]
                                             ()
-                                            BindC
+                                            Source
                                             Interface
                                             ()
                                             .false.
@@ -1257,9 +1334,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     main
@@ -1272,7 +1351,7 @@
                             (FunctionType
                                 [(Real 8)]
                                 ()
-                                BindC
+                                Source
                                 Interface
                                 ()
                                 .false.
@@ -1286,6 +1365,7 @@
                             )
                             ()
                         )
+                        NoPointerBounds
                     )
                     (SubroutineCall
                         4 sub~fpcast_ptr
@@ -1302,7 +1382,7 @@
                             (FunctionType
                                 [(Real 4)]
                                 (Real 8)
-                                BindC
+                                Source
                                 Interface
                                 ()
                                 .false.
@@ -1316,19 +1396,22 @@
                             )
                             ()
                         )
+                        NoPointerBounds
                     )
                     (Print
                         (StringFormat
                             ()
                             [(FunctionCall
                                 4 a~fpcast_ptr
-                                ()
+                                4 a
                                 [((Var 4 b))]
                                 (Real 8)
                                 ()
                                 ()
                             )]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )

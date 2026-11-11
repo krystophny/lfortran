@@ -82,12 +82,13 @@ public:
     void generate_array_decl(std::string& sub, std::string v_m_name,
                              std::string& type_name, std::string& dims,
                              std::string& encoded_type_name,
-                             ASR::dimension_t* m_dims, int n_dims,
+                             ASR::dimension_t* m_dims, size_t n_dims,
                              bool use_ref, bool dummy,
                              bool declare_value, bool is_fixed_size,
                              bool is_pointer,
                              ASR::abiType m_abi,
-                             bool is_simd_array) {
+                             bool is_simd_array,
+                             const std::string &data_init = "") {
         std::string indent(indentation_level*indentation_spaces, ' ');
         std::string type_name_copy = type_name;
         std::string original_type_name = type_name;
@@ -115,13 +116,13 @@ public:
                     }
                 } else {
                     sub += indent + format_type_c(dims, type_name_copy, std::string(v_m_name) + "_data",
-                                                use_ref, dummy) + ";\n";
+                                                use_ref, dummy) + data_init + ";\n";
                 }
                 sub += indent + std::string(v_m_name) + "->data = " + std::string(v_m_name) + "_data;\n";
                 sub += indent + std::string(v_m_name) + "->n_dims = " + std::to_string(n_dims) + ";\n";
                 sub += indent + std::string(v_m_name) + "->offset = " + std::to_string(0) + ";\n";
                 std::string stride = "1";
-                for (int i = n_dims - 1; i >= 0; i--) {
+                for (size_t i = n_dims; i-- > 0;) {
                     std::string start = "1", length = "0";
                     if( m_dims[i].m_start ) {
                         this->visit_expr(*m_dims[i].m_start);
@@ -216,6 +217,13 @@ public:
                 bool is_simd_array = (ASR::is_a<ASR::Array_t>(*v.m_type) &&
                     ASR::down_cast<ASR::Array_t>(v.m_type)->m_physical_type
                         == ASR::array_physical_typeType::SIMDArray);
+                // The elements of a named constant are its initial value.
+                std::string data_init;
+                if (v.m_storage == ASR::storage_typeType::Parameter && n_dims == 1 &&
+                        v.m_value && ASR::is_a<ASR::ArrayConstant_t>(*v.m_value)) {
+                    data_init = " = " + array_constant_initializer(
+                        ASR::down_cast<ASR::ArrayConstant_t>(v.m_value));
+                }
                 generate_array_decl(sub, force_declare_name, type_name, dims,
                                     encoded_type_name, m_dims, n_dims,
                                     use_ref, dummy,
@@ -224,7 +232,8 @@ public:
                                     v.m_intent != ASRUtils::intent_out &&
                                     v.m_intent != ASRUtils::intent_unspecified &&
                                     !is_struct_type_member && !is_module_var) || force_declare,
-                                    is_fixed_size, false, ASR::abiType::Source, is_simd_array);
+                                    is_fixed_size, false, ASR::abiType::Source, is_simd_array,
+                                    data_init);
             }
         } else {
             bool is_fixed_size = true;
@@ -238,12 +247,53 @@ public:
         }
     }
 
+    // The C type of a Var of the variable that the frame member `member`
+    // refers to: the descriptor pointer of an array, the pointer to a derived
+    // type object, and otherwise the type of its value.
+    std::string designator_type(const ASR::Variable_t &member) {
+        ASR::ttype_t* t = ASR::down_cast<ASR::Reference_t>(member.m_type)->m_type;
+        ASR::ttype_t* elem = ASRUtils::type_get_past_array(
+            ASRUtils::type_get_past_allocatable_pointer(t));
+        if (ASR::is_a<ASR::FunctionType_t>(*elem) || ASR::is_a<ASR::UnionType_t>(*elem) ||
+                ASRUtils::is_character(*elem)) {
+            throw unsupported_reference_member(member);
+        }
+        std::string elem_type, encoded_type_name;
+        if (ASR::is_a<ASR::StructType_t>(*elem)) {
+            std::string der_type_name = ASRUtils::symbol_name(
+                ASRUtils::symbol_get_past_external(member.m_type_declaration));
+            elem_type = "struct " + der_type_name;
+            encoded_type_name = "x" + der_type_name;
+        } else if (ASRUtils::is_array(t) || !ASRUtils::is_pointer(t)) {
+            elem_type = CUtils::get_c_type_from_ttype_t(elem);
+            encoded_type_name = ASRUtils::get_type_code(elem);
+        } else {
+            // A pointer to a scalar of intrinsic type is its address.
+            return CUtils::get_c_type_from_ttype_t(
+                ASRUtils::type_get_past_allocatable(t));
+        }
+        if (ASRUtils::is_array(t)) {
+            return c_ds_api->get_array_type(elem_type, encoded_type_name,
+                array_types_decls);
+        }
+        if (ASR::is_a<ASR::StructType_t>(*elem)) {
+            return elem_type + "*";
+        }
+        return elem_type;
+    }
+
     std::string convert_variable_decl(const ASR::Variable_t &v,
         DeclarationOptions* decl_options=nullptr)
     {
         if (v.m_storage == ASR::storage_typeType::Threadprivate) {
             throw CodeGenError("threadprivate variables are not supported by the c backend",
                 v.base.base.loc);
+        }
+        LCOMPILERS_ASSERT(!ASRUtils::is_host_associated(v));
+        if (ASRUtils::is_reference(v.m_type)) {
+            // A member of Reference type holds the address of the variable
+            // that it designates (see visit_StructInstanceMember).
+            return designator_type(v) + " *" + std::string(v.m_name);
         }
         bool pre_initialise_derived_type;
         bool use_ptr_for_derived_type;
@@ -283,6 +333,37 @@ public:
         size_t n_dims = ASRUtils::extract_dimensions_from_ttype(v.m_type, m_dims);
         ASR::ttype_t* v_m_type = v.m_type;
         v_m_type = ASRUtils::type_get_past_array(ASRUtils::type_get_past_allocatable(v_m_type));
+        if (ASR::is_a<ASR::FunctionType_t>(*v_m_type)) {
+            ASR::Function_t* iface = nullptr;
+            if (v.m_type_declaration) {
+                ASR::symbol_t* td = ASRUtils::symbol_get_past_external(v.m_type_declaration);
+                if (td && ASR::is_a<ASR::Function_t>(*td)) {
+                    iface = ASR::down_cast<ASR::Function_t>(td);
+                }
+            }
+            if (!iface) {
+                diag.codegen_error_label("Procedure variable '"
+                    + std::string(v.m_name)
+                    + "' has no interface. Add explicit interface.",
+                    {v.base.base.loc}, "");
+                throw Abort();
+            }
+            std::string ret = "void ";
+            if (iface->m_return_var) {
+                ASR::Variable_t* rv = ASRUtils::EXPR2VAR(iface->m_return_var);
+                ret = get_return_var_type(rv);
+            }
+            std::string params;
+            for (size_t i=0; i<iface->n_args; i++) {
+                ASR::Variable_t* arg = ASRUtils::EXPR2VAR(iface->m_args[i]);
+                CDeclarationOptions inner_opts;
+                inner_opts.pre_initialise_derived_type = false;
+                params += convert_variable_decl(*arg, &inner_opts);
+                if (i < iface->n_args-1) params += ", ";
+            }
+            sub = ret + "(*" + std::string(v.m_name) + ")(" + params + ")";
+            return sub;
+        }
         if (ASRUtils::is_pointer(v_m_type)) {
             ASR::ttype_t *t2 = ASR::down_cast<ASR::Pointer_t>(v_m_type)->m_type;
             t2 = ASRUtils::type_get_past_array(t2);
@@ -654,6 +735,9 @@ R"(
         std::string indent(indentation_level * indentation_spaces, ' ');
         std::string tab(indentation_spaces, ' ');
 
+        layout_common_blocks(x);
+        unit_src += declare_common_storage();
+
         std::string unit_src_tmp;
         for (auto &item : x.m_symtab->get_scope()) {
             if (ASR::is_a<ASR::Variable_t>(*item.second)) {
@@ -792,6 +876,10 @@ R"(
             if (sym != nullptr && ASR::is_a<ASR::Variable_t>(*sym)) {
                 std::string unit_src_tmp;
                 ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(sym);
+                // A variable in a common block lives in the block's storage.
+                if (ASRUtils::get_common_block(v) != nullptr) {
+                    continue;
+                }
                 unit_src_tmp = convert_variable_decl(*v);
                 unit_src += unit_src_tmp;
                 if(unit_src_tmp.size() > 0) {
@@ -832,7 +920,20 @@ R"(
         intrinsic_module = false;
     }
 
+    // Declares at file scope the frame types (see nested_vars) that `scope`
+    // declares.
+    void declare_frame_types(SymbolTable &scope) {
+        for (auto &item : scope.get_scope()) {
+            if (ASRUtils::is_frame_type(item.second)) {
+                visit_symbol(*item.second);
+            }
+        }
+    }
+
     void visit_Program(const ASR::Program_t &x) {
+        SymbolTable* current_scope_copy = current_scope;
+        current_scope = x.m_symtab;
+        declare_frame_types(*x.m_symtab);
         // Topologically sort all program functions
         // and then define them in the right order
         std::vector<std::string> func_order = ASRUtils::determine_function_definition_order(x.m_symtab);
@@ -858,6 +959,9 @@ R"(
             ASR::symbol_t* var_sym = x.m_symtab->get_symbol(item);
             if (ASR::is_a<ASR::Variable_t>(*var_sym)) {
                 ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(var_sym);
+                if (ASRUtils::get_common_block(v) != nullptr) {
+                    continue;
+                }
                 decl += indent1;
                 decl_tmp = convert_variable_decl(*v);
                 decl += decl_tmp;
@@ -915,6 +1019,7 @@ R"(    // Initialise Numpy
                 + decl + body
                 + indent1 + "return 0;\n}\n";
         indentation_level -= 2;
+        current_scope = current_scope_copy;
     }
 
     template <typename T>
@@ -1159,7 +1264,7 @@ R"(    // Initialise Numpy
         if( ASRUtils::is_array(ASRUtils::expr_type(x.m_ptr)) ) {
             std::string dim_set_code = "";
             ASR::dimension_t* m_dims = nullptr;
-            int n_dims = ASRUtils::extract_dimensions_from_ttype(ASRUtils::expr_type(x.m_ptr), m_dims);
+            int n_dims = checked_integer_cast<int>(ASRUtils::extract_dimensions_from_ttype(ASRUtils::expr_type(x.m_ptr), m_dims));
             dim_set_code = indent + dest_src + "->n_dims = " + std::to_string(n_dims) + ";\n";
             dim_set_code = indent + dest_src + "->offset = 0;\n";
             std::string stride = "1";
@@ -1215,10 +1320,17 @@ R"(    // Initialise Numpy
             const std::string &indent, const std::string &result_data,
             const std::string &result_len, const std::string &decimal_mode,
             const std::string &sign_mode, const std::string &round_mode) {
-        if (x.m_kind != ASR::string_format_kindType::FormatFortran) {
+        if (x.m_kind != ASR::string_format_kindType::FormatFortran
+                && x.m_kind != ASR::string_format_kindType::FormatFortranLeadingBlank) {
             throw CodeGenError("only Fortran formatting is supported by the C backend",
                 x.base.base.loc);
         }
+        if (x.n_dtio_bindings > 0) {
+            throw CodeGenError("user-defined derived-type output is not supported "
+                "by the C backend yet", x.base.base.loc);
+        }
+        std::string leading_blank =
+            x.m_kind == ASR::string_format_kindType::FormatFortranLeadingBlank ? "1" : "0";
         std::string out;
         std::string fmt_data = "NULL", fmt_len = "0";
         if (x.m_fmt) {
@@ -1285,7 +1397,8 @@ R"(    // Initialise Numpy
         out += indent + "char *" + result_data + " = _lcompilers_string_format_fortran("
             "_lfortran_get_default_allocator(), " + fmt_data + ", " + fmt_len + ", \""
             + serialization + "\", &" + result_len + ", 0, 0, " + decimal_mode + ", "
-            + sign_mode + ", " + round_mode + item_ptrs + ");\n";
+            + sign_mode + ", " + round_mode + ", " + leading_blank + ", 0, 0, NULL"
+            + item_ptrs + ");\n";
         return out;
     }
 
@@ -1542,7 +1655,7 @@ R"(    // Initialise Numpy
                 v.push_back("cimag(" + src + ")");
             }
             if (i+1!=n_values) {
-                tmp_gen += "\%s";
+                tmp_gen += "%s";
                 v.push_back(separator);
             }
         }
@@ -1586,7 +1699,7 @@ R"(    // Initialise Numpy
         if (x.m_dim == nullptr) {
             std::string array_size_func = c_utils_functions->get_array_size();
             ASR::dimension_t* m_dims = nullptr;
-            int n_dims = ASRUtils::extract_dimensions_from_ttype(ASRUtils::expr_type(x.m_v), m_dims);
+            int n_dims = checked_integer_cast<int>(ASRUtils::extract_dimensions_from_ttype(ASRUtils::expr_type(x.m_v), m_dims));
             src = "((" + result_type + ") " + array_size_func + "(" + var_name + "->dims, " + std::to_string(n_dims) + "))";
         } else {
             visit_expr(*x.m_dim);
@@ -1666,11 +1779,42 @@ R"(    // Initialise Numpy
 
     void visit_ArrayItem(const ASR::ArrayItem_t &x) {
         CHECK_FAST_C(compiler_options, x)
+        ASR::expr_t *array_base = x.m_v;
+        if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*array_base)) {
+            array_base = ASR::down_cast<ASR::ArrayPhysicalCast_t>(array_base)->m_arg;
+        }
+        if (const CommonPlacement *placement = common_placement_of(array_base)) {
+            // An element of an array in a common block is accessed in the
+            // storage of the block, as its other views are, where the array
+            // is in array element order: the first subscript varies fastest.
+            ASR::Variable_t *v = ASRUtils::EXPR2VAR(array_base);
+            ASR::dimension_t* m_dims = nullptr;
+            ASRUtils::extract_dimensions_from_ttype(v->m_type, m_dims);
+            std::string index = "0", stride = "1";
+            for (size_t i = 0; i < x.n_args; i++) {
+                this->visit_expr(*x.m_args[i].m_right);
+                std::string subscript = src;
+                std::string lower = "1";
+                if (m_dims[i].m_start) {
+                    this->visit_expr(*m_dims[i].m_start);
+                    lower = src;
+                }
+                index = "(" + index + " + " + stride + " * (" + subscript + " - "
+                    + lower + "))";
+                this->visit_expr(*m_dims[i].m_length);
+                stride = "(" + stride + " * " + src + ")";
+            }
+            int64_t size, alignment;
+            src = "((" + common_access_type_name(common_element_type(*v, size, alignment))
+                + "*)(" + common_address(*placement) + "))[" + index + "]";
+            last_expr_precedence = 2;
+            return;
+        }
         this->visit_expr(*x.m_v);
         std::string array = src;
         ASR::ttype_t* x_mv_type = ASRUtils::expr_type(x.m_v);
         ASR::dimension_t* m_dims;
-        int n_dims = ASRUtils::extract_dimensions_from_ttype(x_mv_type, m_dims);
+        int n_dims = checked_integer_cast<int>(ASRUtils::extract_dimensions_from_ttype(x_mv_type, m_dims));
         bool is_data_only_array = ASRUtils::is_fixed_size_array(m_dims, n_dims) &&
                                   ASR::is_a<ASR::Struct_t>(*ASRUtils::get_asr_owner(x.m_v));
         if( is_data_only_array || ASRUtils::is_simd_array(x.m_v)) {
@@ -1729,6 +1873,11 @@ R"(    // Initialise Numpy
             }
         } else if( array_t->m_physical_type == ASR::array_physical_typeType::UnboundedPointerArray ) {
             for( size_t idim = 0; idim < x.n_args; idim++ ) {
+                if (m_dims[idim].m_start == nullptr) {
+                    throw CodeGenError("an array element of an array without "
+                        "declared lower bounds is not supported by the c backend yet",
+                        x.base.base.loc);
+                }
                 this->visit_expr(*m_dims[idim].m_start);
                 diminfo.push_back(src);
             }
@@ -1736,13 +1885,13 @@ R"(    // Initialise Numpy
 
         LCOMPILERS_ASSERT(ASRUtils::extract_n_dims_from_ttype(x_mv_type) > 0);
         if (array_t->m_physical_type == ASR::array_physical_typeType::UnboundedPointerArray) {
-            src = arr_get_single_element(array, indices, x.n_args,
+            src = arr_get_single_element(array, indices, checked_integer_cast<int>(x.n_args),
                                                 true,
                                                 false,
                                                 diminfo,
                                                 true);
         } else {
-            src = arr_get_single_element(array, indices, x.n_args,
+            src = arr_get_single_element(array, indices, checked_integer_cast<int>(x.n_args),
                                                 array_t->m_physical_type == ASR::array_physical_typeType::PointerArray,
                                                 array_t->m_physical_type == ASR::array_physical_typeType::FixedSizeArray,
                                                 diminfo, false);
@@ -1904,6 +2053,13 @@ R"(    // Initialise Numpy
             opening_pragma = "#pragma omp single ";
         } else if (x.m_region == ASR::omp_region_typeType::Critical) {
             opening_pragma = "#pragma omp critical ";
+            for (size_t i = 0; i < x.n_clauses; i++) {
+                if (ASR::is_a<ASR::OMPCriticalName_t>(*x.m_clauses[i])) {
+                    opening_pragma = "#pragma omp critical("
+                        + std::string(ASR::down_cast<ASR::OMPCriticalName_t>(
+                            x.m_clauses[i])->m_name) + ") ";
+                }
+            }
         } else if (x.m_region == ASR::omp_region_typeType::Atomic) {
             opening_pragma = "#pragma omp atomic ";
         } else if (x.m_region == ASR::omp_region_typeType::Barrier) {

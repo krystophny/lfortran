@@ -72,9 +72,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             key:
                                                 (Variable
@@ -96,9 +98,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             ptr:
                                                 (Variable
@@ -129,9 +133,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             self:
                                                 (Variable
@@ -181,9 +187,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     find
@@ -258,7 +266,7 @@
                                             (Integer 4)
                                             ()
                                         )
-                                        ())
+                                        (IntegerConstant 1 (Integer 4) Decimal))
                                         [(If
                                             ()
                                             (IntrinsicImpureFunction
@@ -313,6 +321,7 @@
                                                         )
                                                         ColMajor
                                                         ()
+                                                        .false.
                                                     )
                                                     13 1_toml_node_val
                                                     (Allocatable
@@ -386,6 +395,7 @@
                                                             )
                                                             ColMajor
                                                             ()
+                                                            .false.
                                                         )
                                                         13 1_toml_node_val
                                                         (Allocatable
@@ -453,6 +463,7 @@
                                                             )
                                                             ColMajor
                                                             ()
+                                                            .false.
                                                         )
                                                         13 1_toml_node_val
                                                         (Allocatable
@@ -520,6 +531,7 @@
                                                             )
                                                             ColMajor
                                                             ()
+                                                            .false.
                                                         )
                                                         13 1_toml_node_val
                                                         (Allocatable
@@ -534,6 +546,7 @@
                                                         )
                                                         ()
                                                     )
+                                                    NoPointerBounds
                                                 )
                                                 (Exit
                                                     ()
@@ -595,9 +608,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             self:
                                                 (Variable
@@ -647,9 +662,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     new_vector
@@ -709,6 +726,8 @@
                                         )
                                         (IntegerConstant 0 (Integer 4) Decimal)
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )
@@ -809,9 +828,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     toml_node
@@ -900,9 +921,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             n:
                                                 (Variable
@@ -924,9 +947,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     toml_vector
@@ -977,6 +1002,7 @@
                     tomlf_structure_vector
                     ()
                     [tomlf_type_value]
+                    .false.
                     .false.
                     .false.
                     .false.
@@ -1039,9 +1065,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     destroy
@@ -1094,6 +1122,8 @@
                                                 )
                                                 ()
                                             )]
+                                            ()
+                                            ()
                                         )]
                                         []
                                     )
@@ -1122,6 +1152,8 @@
                                                 )
                                                 ()
                                             )]
+                                            ()
+                                            ()
                                         )]
                                         []
                                     )]
@@ -1146,6 +1178,7 @@
                                                     Source
                                                     .false.
                                                     .false.
+                                                    Public
                                                 ),
                                             raw:
                                                 (Variable
@@ -1169,9 +1202,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     toml_keyval
@@ -1210,6 +1245,7 @@
                     tomlf_type_keyval
                     ()
                     [tomlf_type_value]
+                    .false.
                     .false.
                     .false.
                     .false.
@@ -1252,9 +1288,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     destroy
@@ -1288,6 +1326,7 @@
                                     .false.
                                     .false.
                                     ()
+                                    (.true.)
                                 ),
                             match_key:
                                 (Function
@@ -1324,9 +1363,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             match:
                                                 (Variable
@@ -1348,9 +1389,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             self:
                                                 (Variable
@@ -1379,9 +1422,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     match_key
@@ -1446,6 +1491,8 @@
                                             ()
                                             .false.
                                             .false.
+                                            .false.
+                                            .false.
                                         )]
                                         [(Assignment
                                             (Var 5 match)
@@ -1454,6 +1501,8 @@
                                                 (Logical 4)
                                             )
                                             ()
+                                            .false.
+                                            .false.
                                             .false.
                                             .false.
                                         )]
@@ -1479,6 +1528,7 @@
                                                     Source
                                                     .true.
                                                     .false.
+                                                    Public
                                                 ),
                                             key:
                                                 (Variable
@@ -1502,9 +1552,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             match_key:
                                                 (StructMethodDeclaration
@@ -1516,6 +1568,7 @@
                                                     Source
                                                     .false.
                                                     .false.
+                                                    Public
                                                 )
                                         })
                                     toml_value
@@ -1544,6 +1597,7 @@
                     tomlf_type_value
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.

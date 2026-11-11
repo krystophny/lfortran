@@ -44,9 +44,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             self:
                                                 (Variable
@@ -73,9 +75,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     all_abstract
@@ -91,7 +95,7 @@
                                         Interface
                                         ()
                                         .true.
-                                        .false.
+                                        .true.
                                         .false.
                                         .false.
                                         .false.
@@ -107,6 +111,7 @@
                                     .false.
                                     .true.
                                     ()
+                                    (.true.)
                                 ),
                             bitset_type:
                                 (Struct
@@ -123,6 +128,7 @@
                                                     Source
                                                     .true.
                                                     .false.
+                                                    Public
                                                 ),
                                             num_bits:
                                                 (Variable
@@ -144,9 +150,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     bitset_type
@@ -160,7 +168,7 @@
                                     [num_bits]
                                     []
                                     Source
-                                    Private
+                                    Public
                                     .false.
                                     .true.
                                     .false.
@@ -173,6 +181,7 @@
                     derived_types_04_bitset
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.

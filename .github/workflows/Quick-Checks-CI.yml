@@ -9,16 +9,13 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
-# For a PR #7488 against main branch, the `group` will become: CI-{{ 7488 || github.sha }}
-# which eventually evaluates to: CI-7488 and 'sha' isn't used.
-# NOTE: `||` acts as a logical OR and a default operator both,
-# see: https://docs.github.com/en/actions/learn-github-actions/expressions#operators.
-# When it isn't a PR against main but instead a commit pushed (or merged) to main, then `group` will
-# evaluate to `${{ github.sha }}` but "cancel-in-progress" evaluates to false, so the CI on main
-# will run in a new group `${{ github.sha }}`, but no previous CI will be cancelled on main
+# Main pushes share one group: a running main run is never cancelled, and a
+# newer push replaces the pending one, so the latest main is always tested.
+# PRs cancel superseded runs; tags and manual runs stay independent per commit.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  group: quick-${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && 'main' || github.event.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 
@@ -29,14 +26,15 @@ jobs:
   Build:
     name: LFortran CI (OS=${{ matrix.os }}, LLVM=${{ matrix.llvm-version }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: ${{ matrix.os == 'windows-2025' && 60 || matrix.os == 'macos-latest' && 150 || 90 }}
+    env:
+      LFORTRAN_TEST_SUITE: smoke
     strategy:
       fail-fast: false
       matrix:
         include:
-          # macOS runs LLVM 11 only. A full integration-test pass costs ~7x
-          # more on the 3-core macOS runners than on Linux, and macOS + a
-          # recent LLVM is covered on every merge by the Exhaustive checks
-          # "Test LLVM 22 (macos-latest)" job.
+          # The same platform smoke and full CPU mode coverage runs on all
+          # events. Exhaustive adds full normal/fast platform suites.
           - os: macos-latest
             llvm-version: "11"
           - os: ubuntu-latest
@@ -50,95 +48,24 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: mamba-org/setup-micromamba@v2.0.2
+      - name: Build platform compiler
+        uses: ./.github/actions/build-platform
         with:
-          micromamba-version: '2.0.4-0'
-          environment-file: ci/environment.yml
-          create-args: >-
-            llvmdev=${{ matrix.llvm-version }}
-
-
-      - name: Install Windows Packages
-        if: contains(matrix.os, 'windows')
-        shell: bash -e -l {0}
-        run: |
-          micromamba install m2-bison=3.0.4 m2-filesystem cmake=3.21.1 zstd-static=1.5.5 zlib=1.2.13
-
-      - name: Install Linux / macOS Packages
-        if: contains(matrix.os, 'ubuntu') || contains(matrix.os, 'macos')
-        shell: bash -e -l {0}
-        run: |
-          micromamba install bison=3.4 openblas=0.3.21 llvm-openmp=14.0.4  zlib=1.3.1 llvmdev=${{ matrix.llvm-version }}
-          if [[ "${{ matrix.os }}" == *ubuntu* ]]; then
-            micromamba install openmpi=5.0.6=hb85ec53_102
-          elif [[ "${{ matrix.os }}" == *macos* ]]; then
-            micromamba install openmpi=5.0.6=h31ce4ef_102
-          fi
-          if [[ "${{ matrix.llvm-version }}" == "11" ]]; then
-            micromamba install zstd-static=1.5.6 nodejs=18.20.4 kokkos=4.4.01
-          elif [[ "${{ matrix.llvm-version }}" == "21" ]]; then
-            micromamba install zstd-static=1.5.7
-          fi
-          if [[ "${{ matrix.os }}" == *ubuntu* && "${{ matrix.llvm-version }}" != "11" ]]; then
-            micromamba install libunwind=1.7.2
-          fi
-          if [[ "${{ matrix.os }}" == *ubuntu* && "${{ matrix.llvm-version }}" == "11" ]]; then
-            micromamba install pandoc=3.1.13
-          fi
-
-      - uses: hendrikmuhs/ccache-action@main
-        with:
-          key: ${{ github.job }}-${{ matrix.os }}-${{ matrix.llvm-version }}
-
-      - name: Setup Platform
-        shell: bash -e -l {0}
-        run: |
-            echo "LFORTRAN_CMAKE_GENERATOR=Ninja" >> $GITHUB_ENV
-            echo "CMAKE_C_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
-            echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache" >> $GITHUB_ENV
-            echo "ENABLE_RUNTIME_STACKTRACE=yes" >> $GITHUB_ENV
+          os: ${{ matrix.os }}
+          llvm-version: ${{ matrix.llvm-version }}
+          # The Enzyme plugin needs LLVM 15 or newer; one lane builds and tests it.
+          cmake-args: ${{ (matrix.os == 'ubuntu-latest' && matrix.llvm-version == '21') && '-DWITH_ENZYME=yes' || '' }}
 
       # we need to run this only once for debugging purpose
       - name: Print github concurrent group name
-        shell: bash -e -l {0}
+        shell: bash -e {0}
         if: contains(matrix.os, 'ubuntu') && contains(matrix.llvm-version, '21')
         run: |
-          echo "Concurrency Group: ${{ github.workflow }}-${{ github.event.number || github.sha }}"
+          echo "Concurrency Group: quick-${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') && 'main' || github.event.number || github.sha }}"
           echo "Cancel-in-progress: ${{ github.event_name == 'pull_request' }}"
 
-      - name: Build (Linux / macOS)
-        shell: bash -e -l {0}
-        if: contains(matrix.os, 'ubuntu') || contains(matrix.os, 'macos')
-        run: |
-            export CXXFLAGS="-Werror -D_GLIBCXX_ASSERTIONS -D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG"
-            export CFLAGS="-Werror -D_GLIBCXX_ASSERTIONS -D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG"
-            export WIN=0
-            if [[ "${{ matrix.os }}" == *ubuntu* && "${{ matrix.llvm-version }}" == "21" ]]; then
-                export WITH_ENZYME=yes
-            fi
-            shell ci/build.sh
-
-      - name: Build (Windows)
-        if: contains(matrix.os, 'windows')
-        shell: cmd
-        run: |
-            set MAMBA_INSTALL_LOCN=C:\\Users\runneradmin\micromamba
-            call %MAMBA_INSTALL_LOCN%\Scripts\activate.bat
-            call micromamba activate lf
-            set LFORTRAN_CMAKE_GENERATOR=Ninja
-            set WIN=1
-            set MACOS=0
-            set ENABLE_RUNTIME_STACKTRACE=no
-            for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do (
-                call "%%i\VC\Auxiliary\Build\vcvars64.bat"
-            )
-            set CC=cl.exe
-            set CXX=cl.exe
-            set "PATH=%PATH:C:\mingw64\bin;=%"
-            shell ci\build.sh
-
       - name: Test (Linux / macOS)
-        shell: bash -e -l {0}
+        shell: bash -e {0}
         if: contains(matrix.os, 'ubuntu') || contains(matrix.os, 'macos')
         run: |
             case "$OSTYPE" in darwin*) export MACOS=1;; *) export MACOS=0;; esac
@@ -147,59 +74,61 @@ jobs:
             shell ci/test.sh
 
       - name: Test LFortran's Command Line Interface (Linux / macOS)
-        shell: bash -e -l {0}
+        shell: bash -e {0}
         if: contains(matrix.os, 'ubuntu') || contains(matrix.os, 'macos')
         run: |
             ./test_lfortran_cmdline
 
-      # --std=f23, llvm -sc, --detect-leaks, llvm_single_invocation, and
-      # ci/test_cpp_version.sh run in Exhaustive checks (release /
-      # debug_outOfSource) on main and on PRs labeled Tests::Run-Exhaustive.
+      - name: Test full descriptor modes
+        if: matrix.os == 'ubuntu-latest' && matrix.llvm-version == '21'
+        shell: bash -e {0}
+        run: |
+            export PATH="$(pwd)/src/bin:$PATH"
+            export LFORTRAN_LLVM_VERSION="${{ matrix.llvm-version }}"
+            bash ci/test_llvm_integration.sh --options
 
       - name: Test Enzyme autodiff integration (Linux, LLVM 21)
-        shell: bash -e -l {0}
-        if: contains(matrix.os, 'ubuntu') && contains(matrix.llvm-version, '21')
+        shell: bash -e {0}
+        if: matrix.os == 'ubuntu-latest' && matrix.llvm-version == '21'
         run: |
-            BUILD_DIR=$(find . -maxdepth 3 -type d -name test-bld | head -1)
-            PLUGIN=$(find "$BUILD_DIR" -name 'LLVMEnzyme-*.so' | head -1)
+            PLUGIN=$(find build/llvm21 -name 'LLVMEnzyme-*.so' | head -1)
             if [[ -z "$PLUGIN" ]]; then
-                echo "ERROR: LLVMEnzyme plugin not found in $BUILD_DIR"
-                find "$BUILD_DIR" -name 'LLVMEnzyme*' | head -5
+                echo "ERROR: LLVMEnzyme plugin not found in build/llvm21"
                 exit 1
             fi
-            export LFORTRAN="$CONDA_PREFIX/bin/lfortran"
+            export LFORTRAN="$(pwd)/src/bin/lfortran"
             export LLVMENZYME_PLUGIN="$PLUGIN"
             export OPT="$(command -v opt)"
             integration_tests/run_autodiff_test.sh \
                 integration_tests/autodiff_01_square.f90
 
+      # Capability check. The full Metal suite runs once, on Exhaustive's macOS
+      # platform job, which is the only runner with a Metal GPU.
       - name: Test Metal GPU backend (macOS)
-        shell: bash -e -l {0}
+        shell: bash -e {0}
         if: contains(matrix.os, 'macos')
         run: |
-            cd ./integration_tests
-            ./run_tests.py -b metal -j3
+            pixi run -e llvm${{ matrix.llvm-version }} integration_tests -b metal --smoke -j3
 
       # The CUDA device code is compiled and run on the CPU, so this exercises
-      # the whole CUDA path on a runner that has no GPU.
+      # the CUDA path on a runner that has no GPU. Linux LLVM 21 runs the full
+      # suite once. The other platform jobs keep the capability check.
       - name: Test CUDA GPU backend on the CPU (Linux / macOS)
-        shell: bash -e -l {0}
+        shell: bash -e {0}
         if: contains(matrix.os, 'ubuntu') || contains(matrix.os, 'macos')
         run: |
-            cd ./integration_tests
-            ./run_tests.py -b cuda_cpu -j3
+            if [[ "${{ matrix.os }}" == ubuntu-* && "${{ matrix.llvm-version }}" == "21" ]]; then
+                pixi run -e llvm${{ matrix.llvm-version }} integration_tests -b cuda_cpu -j3
+            else
+                pixi run -e llvm${{ matrix.llvm-version }} integration_tests -b cuda_cpu --smoke -j3
+            fi
 
       - name: Test (Windows)
         if: contains(matrix.os, 'windows')
         shell: cmd
         run: |
-            set MAMBA_INSTALL_LOCN=C:\\Users\runneradmin\micromamba
-            call %MAMBA_INSTALL_LOCN%\Scripts\activate.bat
-            call micromamba activate lf
-            set LFORTRAN_CMAKE_GENERATOR=Ninja
             set WIN=1
             set MACOS=0
-            set ENABLE_RUNTIME_STACKTRACE=no
             for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath`) do (
                 call "%%i\VC\Auxiliary\Build\vcvars64.bat"
             )
@@ -208,21 +137,8 @@ jobs:
             set "PATH=%PATH:C:\mingw64\bin;=%"
             shell ci\test.sh
 
-      - name: Install Timeout (macOS)
-        shell: bash -e -l {0}
-        if: contains(matrix.os, 'macos')
-        run: brew install coreutils
-
-      # ~/.bash_logout wanted to run `/usr/bin/clear_console -q` while exiting
-      # login shells which frequently erred on ubuntu-latest since the shell was
-      # not run interactively.
-      - name: Disable ~/.bash_logout (Linux)
-        shell: bash -e {0}
-        if: contains(matrix.os, 'ubuntu') && contains(matrix.llvm-version, '11')
-        run: mv -v ~/.bash_logout ~/.bash_logout.bak
-
       - name: LSP Test (Linux / macOS)
-        shell: bash -e -l {0}
+        shell: bash -e {0}
         if: (contains(matrix.os, 'ubuntu') || contains(matrix.os, 'macos')) && contains(matrix.llvm-version, '11')
         timeout-minutes: 5
         env:
@@ -235,22 +151,19 @@ jobs:
             PYTEST_TIMEOUT: 10
         run: |
             set -ex
-            pip install src/server/tests tests/server
             timeout -k $SIGKILL_TIMEOUT $SIGTERM_TIMEOUT \
-                pytest -vv \
+                pixi run -e llvm11 lsp_tests -vv \
                     --showlocals \
                     --timeout=$PYTEST_TIMEOUT \
-                    --execution-strategy="concurrent" \
-                    tests/server
+                    --execution-strategy="concurrent"
             set +e
             for (( ATTEMPT = 1; ATTEMPT <= MAX_ATTEMPTS; ATTEMPT++ )); do
                 echo "Attempt $ATTEMPT of $MAX_ATTEMPTS"
                 timeout -k $SIGKILL_TIMEOUT $SIGTERM_TIMEOUT \
-                    pytest -vv \
+                    pixi run -e llvm11 lsp_tests -vv \
                         --showlocals \
                         --timeout=$PYTEST_TIMEOUT \
-                        --execution-strategy="parallel" \
-                        tests/server
+                        --execution-strategy="parallel"
                 EXIT_CODE=$?
                 if [ $EXIT_CODE -eq $EXIT_SUCCESS ]; then
                     break
@@ -261,50 +174,33 @@ jobs:
             exit $EXIT_CODE
 
       - name: Test GFortran, Debug Build, Fortran, OpenMP, C/C++ backend, Upload Tarball, CPP Build, WASM - Test integration_tests with GFortran
-        shell: bash -e -l {0}
+        shell: bash -e {0}
         if: contains(matrix.os, 'ubuntu') && contains(matrix.llvm-version, '11')
         run: |
-            cd integration_tests
-            ./run_tests.py -b gfortran
+            pixi run -e llvm11 integration_tests -b gfortran
 
       - name: Test GFortran, Debug Build, Fortran, OpenMP, C/C++ backend, Upload Tarball, CPP Build, WASM - Test OpenMP
-        shell: bash -e -l {0}
+        shell: bash -e {0}
         if: contains(matrix.os, 'ubuntu') && contains(matrix.llvm-version, '11')
         run: |
-            cd integration_tests
-            ./run_tests.py -b llvm_omp
+            pixi run -e llvm11 integration_tests -b llvm_omp
       
       - name: Test GFortran, Debug Build, Fortran, OpenMP, C/C++ backend, Upload Tarball, CPP Build, WASM - Test Fortran Backend
-        shell: bash -e -l {0}
+        shell: bash -e {0}
         if: contains(matrix.os, 'ubuntu') && contains(matrix.llvm-version, '11')
         run: |
-            cd integration_tests
-            ./run_tests.py -b fortran -j1
-            ./run_tests.py -b fortran -f -j1
+            pixi run -e llvm11 integration_tests -b fortran -j1
+            pixi run -e llvm11 integration_tests -b fortran -f -j1
 
       - name: Test GFortran, Debug Build, Fortran, OpenMP, C/C++ backend, Upload Tarball, CPP Build, WASM - Test C/C++ Backend
-        shell: bash -e -l {0}
+        shell: bash -e {0}
         if: contains(matrix.os, 'ubuntu') && contains(matrix.llvm-version, '11')
         run: |
-            mkdir build-kokkos
-            cd build-kokkos
-            wget https://github.com/kokkos/kokkos/archive/3.1.01.tar.gz
-            tar xaf 3.1.01.tar.gz
-            cd kokkos-3.1.01
-            mkdir build
-            cd build
-            export LFORTRAN_KOKKOS_DIR=$HOME/ext/kokkos
-            cmake -DCMAKE_INSTALL_PREFIX=$LFORTRAN_KOKKOS_DIR -DKokkos_ENABLE_OPENMP=On -DKokkos_ARCH_HSW=On ..
-            make
-            make install
-            cd ../../..
-
-            cd integration_tests
-            ./run_tests.py -b cpp c c_nopragma
-            ./run_tests.py -b cpp c c_nopragma -f
+            pixi run -e llvm11 integration_tests -b cpp c c_nopragma
+            pixi run -e llvm11 integration_tests -b cpp c c_nopragma -f
 
       - name: Test GFortran, Debug Build, Fortran, OpenMP, C/C++ backend, Upload Tarball, CPP Build, WASM - Show Node Info
-        shell: bash -e -l {0}
+        shell: bash -e {0}
         if: contains(matrix.os, 'ubuntu') && contains(matrix.llvm-version, '11')
         run: |
           set -ex
@@ -312,22 +208,26 @@ jobs:
           node --version
 
       - name: Test GFortran, Debug Build, Fortran, OpenMP, C/C++ backend, Upload Tarball, CPP Build, WASM - Test WASM backend
-        shell: bash -e -l {0}
+        shell: bash -e {0}
         if: contains(matrix.os, 'ubuntu') && contains(matrix.llvm-version, '11')
         run: |
-            cd integration_tests
-            ./run_tests.py -b wasm
-            ./run_tests.py -b wasm -f
+            pixi run -e llvm11 integration_tests -b wasm
+            pixi run -e llvm11 integration_tests -b wasm -f
+
+      - name: Test CI smoke selection
+        if: contains(matrix.os, 'ubuntu') && contains(matrix.llvm-version, '21')
+        shell: bash -e {0}
+        run: python ci/test_ci.py
 
       - name: Check Bison Grammar for Essential Conflicts
         if: contains(matrix.os, 'ubuntu') && contains(matrix.llvm-version, '21')
-        shell: bash -e -l {0}
+        shell: bash -e {0}
         run: |
           ./ci/grammar_conflicts.sh
 
       # Run last among history checks. Binary script checks out commits in PR history.
       - name: Check for Added Binary Files
-        shell: bash -e -l {0}
+        shell: bash -e {0}
         if: contains(matrix.os, 'ubuntu') && contains(matrix.llvm-version, '21')
         run: |
           python3 check_binary_file_in_git_history.py
@@ -335,72 +235,236 @@ jobs:
       # Human-only commit authorship: no AI author/committer/Co-Authored-By stamps.
       # Does not rewrite the working tree; safe after the binary-file history check.
       - name: Check for AI Commit Authorship
-        shell: bash -e -l {0}
+        shell: bash -e {0}
         if: contains(matrix.os, 'ubuntu') && contains(matrix.llvm-version, '21')
         run: |
           python3 check_ai_commit_authorship.py
 
-  build_to_wasm_and_upload:
-    name: Build LFortran to WASM and Upload
-    runs-on: "ubuntu-latest"
+  compatibility:
+    name: Compiler compatibility
+    uses: ./.github/workflows/Compiler-Compatibility-CI.yml
+    with:
+      scope: quick
+
+  # Preserve the public check names when moving these jobs out of the shared workflow.
+  # The two LLVM WASM backends run in parallel jobs: the Emscripten pass alone
+  # takes about as long as the WASI pass plus building the compiler, because
+  # every emcc link runs Emscripten's JavaScript compiler.
+  test_llvm_wasm:
+    name: Compiler compatibility / Test LLVM 19 WASM${{ matrix.suffix }} (ubuntu-latest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - backend: llvm_wasm
+            suffix: ""
+          - backend: llvm_wasm_emcc
+            suffix: " Emscripten"
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: mamba-org/setup-micromamba@v2.0.2
+      # The later steps run in this environment with `pixi run`; activating
+      # it provides sccache for ccache-action.
+      - uses: prefix-dev/setup-pixi@v0.11.3
         with:
-          micromamba-version: '2.0.4-0'
-          environment-file: ci/environment_linux.yml
-          create-args: >-
-            python=3.10
+          pixi-version: v0.83.0
+          environments: llvm19-wasm
+          activate-environment: llvm19-wasm
+          cache: false
 
-      - uses: hendrikmuhs/ccache-action@main
+      # `install: "no"`: use the environment's sccache rather than
+      # downloading one with a plain curl.
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
         with:
+          install: "no"
           variant: sccache
-          key: ${{ github.job }}-${{ matrix.os }}
+          key: ${{ github.job }}-pixi-ubuntu-latest-19-o2
+          # Both jobs build the same compiler; one copy of the cache is enough.
+          save: ${{ github.ref == 'refs/heads/main' && matrix.backend == 'llvm_wasm' }}
 
-      # ── Set up Emscripten 4 from conda instead of outdated emsdk 3.1.35 ──
-      - name: Install Emscripten 4 environment
-        shell: bash -l {0}
+      # The WASI SDK, wasmtime and emsdk releases (ci/wasm_tools.sh).
+      - name: Install WASM toolchains
+        shell: bash -e {0}
+        run: pixi run -e llvm19-wasm wasm-tools
+
+      - name: Build Linux ( WASM )
+        shell: bash -e {0}
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: sccache
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
         run: |
-          set -ex
-          micromamba create -f environment-wasm-build.yml -y
-          micromamba install -n xeus-lfortran-wasm-build re2c bison -c conda-forge -y
+            export CXXFLAGS="-Werror -D_GLIBCXX_ASSERTIONS"
+            # A Debug build (assertions and per-pass ASR verification, no
+            # NDEBUG) compiled with -O2, like Quick's LLVM 11 compiler: each
+            # test spends about half as long in LFortran. See that job for
+            # -Wno-mismatched-new-delete.
+            pixi run -e llvm19-wasm build \
+              -DCMAKE_BUILD_TYPE=Debug \
+              "-DCMAKE_CXX_FLAGS_DEBUG=-Wall -Wextra -O2 -Wno-mismatched-new-delete" \
+              "-DCMAKE_C_FLAGS_DEBUG=-O2" \
+              -DWITH_LSP=yes \
+              -DWITH_TARGET_WASM=yes \
+              -DWITH_STACKTRACE=no
+
+      - name: Test unit tests
+        if: matrix.backend == 'llvm_wasm'
+        shell: bash -e {0}
+        run: pixi run -e llvm19-wasm ctest
+
+      - name: Test Linux ( WASM )
+        shell: bash -e {0}
+        run: pixi run -e llvm19-wasm integration_tests -b ${{ matrix.backend }}
+
+  test_without_llvm:
+    name: Compiler compatibility / Test without LLVM Backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: prefix-dev/setup-pixi@v0.11.3
+        with:
+          pixi-version: v0.83.0
+          environments: nollvm
+          cache: false
+
+      - name: Test
+        shell: bash -e {0}
+        run: pixi run -e nollvm shell ci/test_without_llvm_backend.sh
+
+  test_mlir:
+    name: Compiler compatibility / Test MLIR backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # The later steps run in this environment with `pixi run`; activating
+      # it provides sccache for ccache-action.
+      - uses: prefix-dev/setup-pixi@v0.11.3
+        with:
+          pixi-version: v0.83.0
+          environments: mlir
+          activate-environment: mlir
+          cache: false
+
+      # `install: "no"`: use the environment's sccache rather than
+      # downloading one with a plain curl.
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
+        with:
+          install: "no"
+          variant: sccache
+          key: ${{ github.job }}-pixi-ubuntu-latest
+          save: ${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build Linux
+        shell: bash -e {0}
+        env:
+          CMAKE_C_COMPILER_LAUNCHER: sccache
+          CMAKE_CXX_COMPILER_LAUNCHER: sccache
+        run: pixi run -e mlir build -DWITH_MLIR=yes -DWITH_LSP=yes -DWITH_STACKTRACE=no
+
+      - name: Test unit tests
+        shell: bash -e {0}
+        run: pixi run -e mlir ctest
+
+      - name: Test Linux
+        shell: bash -e {0}
+        run: pixi run -e mlir integration_tests -b mlir -j1
+
+  build_to_wasm_and_upload:
+    name: Build LFortran to WASM
+    runs-on: "ubuntu-latest"
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # llvm11 builds the native compiler; wasm-build has Emscripten 4.
+      - uses: prefix-dev/setup-pixi@v0.11.3
+        with:
+          pixi-version: v0.83.0
+          environments: llvm11 wasm-build
+          cache: false
+
+      # ccache-action needs ccache on PATH. Activating llvm11 would leak its
+      # activation, such as the conda GCC's CFLAGS/CXXFLAGS, into the
+      # wasm-build steps (em++ must not inherit them), so put only the llvm11
+      # ccache on PATH. Each build runs the ccache of its own environment,
+      # the same version.
+      - name: Put the Pixi ccache on PATH
+        shell: bash -e {0}
+        run: |
+            mkdir -p "$RUNNER_TEMP/ccache-bin"
+            ln -s "$(pixi run -e llvm11 bash -c 'command -v ccache')" "$RUNNER_TEMP/ccache-bin/ccache"
+            echo "$RUNNER_TEMP/ccache-bin" >> "$GITHUB_PATH"
+
+      # ccache wraps both the native compiler and em++ (Emscripten documents
+      # `ccache emcc`). The cache holds both builds. `install: "no"`: use the
+      # Pixi ccache rather than installing one with apt-get.
+      - uses: hendrikmuhs/ccache-action@f09c25b45002a07be2955cbe52e8cee55643f89d # v1.2.24
+        with:
+          install: "no"
+          key: ${{ github.job }}-pixi-ubuntu-latest
+          max-size: 1500M
+          save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Show Emscripten and Node Info
-        shell: bash -l {0}
+        shell: bash -e {0}
         run: |
-            set -ex
-            micromamba run -n xeus-lfortran-wasm-build emcc -v
-            micromamba run -n xeus-lfortran-wasm-build em++ -v
-            micromamba run -n xeus-lfortran-wasm-build node -v
+            set -x
+            pixi run -e wasm-build emcc -v
+            pixi run -e wasm-build em++ -v
+            pixi run -e wasm-build node -v
 
-      # Phase 1: Native build (needs re2c, bison, LLVM from lf env)
+      # Phase 1: Native build. This is Quick's only Linux GCC Release (NDEBUG)
+      # build, so it uses -Werror and the LSP/runtime-stacktrace options of
+      # Exhaustive's "Check Release build": the Debug builds cannot catch
+      # warnings such as variables used only in assertions.
       - name: Build native LFortran
-        shell: bash -l {0}
+        shell: bash -e {0}
         run: |
-            set -ex
-            cmake \
+            set -x
+            export CXXFLAGS="-Werror"
+            export CFLAGS="-Werror"
+            pixi run -e llvm11 build \
                 -DCMAKE_BUILD_TYPE=Release \
-                -DWITH_LLVM=yes \
-                -DLFORTRAN_BUILD_ALL=yes \
+                -DWITH_LSP=yes \
                 -DWITH_STACKTRACE=no \
-                -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH_LFORTRAN;$CONDA_PREFIX" \
-                -DCMAKE_INSTALL_PREFIX=`pwd`/inst \
-                -DCMAKE_EXPORT_COMPILE_COMMANDS=yes \
-                .
-            cmake --build . -j$(nproc) --target install
+                -DWITH_RUNTIME_STACKTRACE=yes \
+                -DWITH_INTERNAL_ALLOC_CHECK=no \
+                -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+                -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
             mkdir -p src/bin/asset_dir
-            cp src/runtime/*.mod src/bin/asset_dir
-            git clean -dfx -e src/bin/asset_dir
+            cp build/llvm11/src/runtime/*.mod src/bin/asset_dir
+            # Keep the compiler cache and the Pixi environments, which live
+            # in the workspace.
+            git clean -dfx -e src/bin/asset_dir -e .ccache -e .pixi
 
-      # Phase 2: Emscripten WASM build (needs emcmake from wasm-build env)
+      # Phase 2: Emscripten WASM build, in the source tree for the upload.
+      # It uses Makefiles: em++ resolves `--preload-file asset_dir` from
+      # src/bin/, where Make (unlike Ninja) runs the link.
       - name: Build to WASM
-        shell: bash -l {0}
+        shell: bash -e {0}
         run: |
-            set -ex
-            micromamba run -n xeus-lfortran-wasm-build bash -c '
+            set -x
+            pixi run -e wasm-build bash -c '
+              set -ex
               emcmake cmake \
                   -DCMAKE_BUILD_TYPE=Release \
                   -DCMAKE_CXX_FLAGS_DEBUG="-Wall -Wextra -fexceptions" \
@@ -413,20 +477,19 @@ jobs:
                   -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH_LFORTRAN;$CONDA_PREFIX" \
                   -DCMAKE_INSTALL_PREFIX=$(pwd)/inst \
                   -DCMAKE_EXPORT_COMPILE_COMMANDS=yes \
+                  -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+                  -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
                   .
               cmake --build . -j$(nproc)
             '
 
       - name: Test built lfortran.wasm
-        shell: bash -l {0}
-        run: |
-            set -ex
-            micromamba run -n xeus-lfortran-wasm-build node src/lfortran/tests/test_lfortran.js
+        shell: bash -e {0}
+        run: pixi run -e wasm-build node src/lfortran/tests/test_lfortran.js
 
       - name: Upload to wasm_builds
-        shell: bash -l {0}
-        run: |
-            ci/upload_lfortran_wasm.sh
+        if: github.event_name == 'push'
+        shell: bash -e {0}
+        run: pixi run -e wasm-build ci/upload_lfortran_wasm.sh
         env:
           SSH_PRIVATE_KEY_WASM_BUILDS: ${{ secrets.SSH_PRIVATE_KEY_WASM_BUILDS }}
-

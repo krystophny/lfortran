@@ -1,3 +1,6 @@
+#include <algorithm>
+#include <cctype>
+#include <cstdint>
 #include <filesystem>
 #include <iostream>
 #include <set>
@@ -5,16 +8,22 @@
 #include <vector>
 
 #include <libasr/asr.h>
+#include <libasr/asr_builder.h>
 #include <libasr/asr_utils.h>
+#include <libasr/codegen/gpu_utils.h>
 #include <libasr/containers.h>
 #include <libasr/diagnostics.h>
 #include <libasr/exception.h>
 #include <libasr/modfile.h>
 #include <libasr/serialization.h>
 #include <libasr/string_utils.h>
+#include <libasr/pass/entry_initialized_locals.h>
 #include <libasr/pass/gpu_data_layout.h>
 #include <libasr/pass/gpu_decline.h>
+#include <libasr/pass/gpu_device_struct_storage.h>
 #include <libasr/pass/gpu_offload_collect.h>
+#include <libasr/pass/gpu_offload_designator.h>
+#include <libasr/pass/gpu_offload_host_association.h>
 #include <libasr/pass/gpu_offload_preflight.h>
 #include <libasr/pass/symbol_expr_substitution.h>
 #include <libasr/pass/gpu_offload_rewrite.h>
@@ -28,6 +37,422 @@ using ASR::down_cast;
 using ASR::is_a;
 
 static int gpu_kernel_counter = 0;
+
+// A kernel is a global symbol of its object file, and the Metal runtime
+// finds its source by its name, so the kernels of all the files linked
+// into a program need distinct names; the counter only numbers those of
+// one file. The kernel is therefore also named after the scopes the loop
+// is in, from the outermost one (a program, a module or an external
+// procedure, which has a name of its own in the program), each name
+// prefixed by its length so that no two chains of scopes give the same
+// name: `__lfortran_gpu_kernel_<n>_<len><name>...`. A procedure with a
+// binding label is named `b<len><label>` instead: its label is a global
+// identifier, its Fortran name is not, so two external procedures of one
+// name may be linked into a program by distinct labels. Only the
+// procedure a BLOCK is in is named, and a character no identifier of the
+// kernel languages may hold becomes `_`. A chain too long for the names
+// the runtimes accept is replaced by `h` and its FNV-1a hash.
+static std::string gpu_kernel_name(SymbolTable *scope) {
+    std::string chain;
+    for (SymbolTable *s = scope; s != nullptr; s = s->parent) {
+        if (s->asr_owner == nullptr || !ASR::is_a<ASR::symbol_t>(
+                *s->asr_owner)) {
+            break;
+        }
+        ASR::symbol_t *owner = ASR::down_cast<ASR::symbol_t>(s->asr_owner);
+        if (ASR::is_a<ASR::Block_t>(*owner)) continue;
+        std::string name = ASRUtils::symbol_name(owner);
+        std::string marker;
+        if (ASR::is_a<ASR::Function_t>(*owner)) {
+            ASR::FunctionType_t *ftype = ASRUtils::get_FunctionType(
+                ASR::down_cast<ASR::Function_t>(owner));
+            if (ftype->m_abi == ASR::abiType::BindC
+                    && ftype->m_bindc_name != nullptr
+                    && ftype->m_bindc_name[0] != '\0') {
+                name = ftype->m_bindc_name;
+                marker = "b";
+            }
+        }
+        for (char &c : name) {
+            if (!std::isalnum(static_cast<unsigned char>(c))) c = '_';
+        }
+        chain = marker + std::to_string(name.size()) + name + chain;
+    }
+    if (chain.size() > 128) {
+        uint64_t hash = 14695981039346656037ULL;
+        for (char c : chain) {
+            hash = (hash ^ static_cast<unsigned char>(c)) * 1099511628211ULL;
+        }
+        chain = "h" + std::to_string(hash);
+    }
+    std::string name = "__lfortran_gpu_kernel_"
+        + std::to_string(gpu_kernel_counter++);
+    if (!chain.empty()) name += "_" + chain;
+    return name;
+}
+
+// Replaces each expression that stands for an extent the host computes
+// -- the extent node of a BLOCK local's declaration, or a copy a
+// lowering made of it (copy_bound) -- by the kernel argument holding
+// that value.  The lowerings embed the extent wherever its value is
+// needed: as a loop bound, under a cast, in an IF or in a nested BLOCK,
+// such as the one of an alias temporary.  So the statements are walked
+// through every construct, nested BLOCKs and their declared shapes
+// included.
+class GpuHostExtentReplacer :
+        public ASR::CallReplacerOnExpressionsVisitor<GpuHostExtentReplacer> {
+    const std::function<ASR::expr_t*(ASR::expr_t*)> &origin;
+    const std::vector<std::pair<ASR::expr_t*, ASR::expr_t*>> &replacements;
+
+public:
+    GpuHostExtentReplacer(
+            const std::function<ASR::expr_t*(ASR::expr_t*)> &origin,
+            const std::vector<std::pair<ASR::expr_t*, ASR::expr_t*>>
+                &replacements)
+        : origin(origin), replacements(replacements) {}
+
+    void call_replacer() {
+        if (*current_expr == nullptr) return;
+        ASR::expr_t *o = origin(*current_expr);
+        for (auto &[old_e, new_e] : replacements) {
+            if (o == origin(old_e)) {
+                *current_expr = new_e;
+                return;
+            }
+        }
+    }
+
+    void replace_in_scope(SymbolTable *symtab) {
+        for (auto &item : symtab->get_scope()) {
+            if (ASR::is_a<ASR::Variable_t>(*item.second)) {
+                visit_ttype(*ASR::down_cast<ASR::Variable_t>(
+                    item.second)->m_type);
+            }
+        }
+    }
+
+    void visit_BlockCall(const ASR::BlockCall_t &x) {
+        if (!ASR::is_a<ASR::Block_t>(*x.m_m)) return;
+        ASR::Block_t *block = ASR::down_cast<ASR::Block_t>(x.m_m);
+        replace_in_scope(block->m_symtab);
+        transform_stmts(block->m_body, block->n_body);
+    }
+
+    void visit_AssociateBlockCall(const ASR::AssociateBlockCall_t &x) {
+        if (!ASR::is_a<ASR::AssociateBlock_t>(*x.m_m)) return;
+        ASR::AssociateBlock_t *block =
+            ASR::down_cast<ASR::AssociateBlock_t>(x.m_m);
+        transform_stmts(block->m_body, block->n_body);
+    }
+};
+
+class GpuContiguousStoreFinder : public ASR::BaseWalkVisitor<GpuContiguousStoreFinder> {
+    const std::set<ASR::symbol_t*> &loop_variables;
+    // Which subscript of a store, counted from the contiguous one.
+    size_t subscript;
+    std::set<ASR::symbol_t*> visited_blocks;
+
+public:
+    std::set<ASR::symbol_t*> candidates;
+    bool has_unrecognized_store = false;
+
+    GpuContiguousStoreFinder(const std::set<ASR::symbol_t*> &variables,
+            size_t subscript) : loop_variables(variables),
+            subscript(subscript) {}
+
+    void note_store(ASR::expr_t *target) {
+        ASR::ttype_t *type = ASRUtils::expr_type(target);
+        if (ASR::is_a<ASR::Var_t>(*target) && !ASRUtils::is_array(type)
+                && !ASRUtils::is_pointer(type)
+                && !ASR::is_a<ASR::StructType_t>(*ASRUtils::extract_type(type))) {
+            return;
+        }
+        if (!ASR::is_a<ASR::ArrayItem_t>(*target)) {
+            has_unrecognized_store = true;
+            return;
+        }
+        const auto &item = *ASR::down_cast<ASR::ArrayItem_t>(target);
+        if (item.n_args <= subscript) {
+            has_unrecognized_store = true;
+            return;
+        }
+        size_t dimension = item.m_storage_format == ASR::arraystorageType::ColMajor
+            ? subscript : item.n_args - 1 - subscript;
+        ASR::expr_t *index = item.m_args[dimension].m_right;
+        if (index && ASR::is_a<ASR::Var_t>(*index)) {
+            ASR::symbol_t *variable = ASRUtils::symbol_get_past_external(
+                ASR::down_cast<ASR::Var_t>(index)->m_v);
+            if (loop_variables.count(variable)) {
+                candidates.insert(variable);
+                return;
+            }
+        }
+        // A subscript that names no loop index (one the body computes from
+        // them, such as the indices of the frame index-set splitting packs
+        // into the nest, gpu_index_set_split.cpp) says nothing about which
+        // index is contiguous. The same holds for a scalar the source
+        // computes, as in `k = i + 1; b(k) = ...`. This only picks the
+        // layout of the threads, which every choice runs correctly, so
+        // such a store is passed over instead of disabling the choice.
+        if (index && !names_loop_variable(index)) return;
+        has_unrecognized_store = true;
+    }
+
+    bool names_loop_variable(ASR::expr_t *e) {
+        struct Find : public ASR::BaseWalkVisitor<Find> {
+            const std::set<ASR::symbol_t*> *vars;
+            bool found = false;
+            void visit_Var(const ASR::Var_t &x) {
+                if (vars->count(ASRUtils::symbol_get_past_external(x.m_v))) {
+                    found = true;
+                }
+            }
+        } f;
+        f.vars = &loop_variables;
+        f.visit_expr(*e);
+        return f.found;
+    }
+
+    void note_call_args(ASR::symbol_t *name, ASR::call_arg_t *args,
+            size_t n_args) {
+        for (size_t i = 0; i < n_args; i++) {
+            if (!args[i].m_value) continue;
+            ASR::Variable_t *dummy = GpuWrittenRootCollector::dummy_of(name, i);
+            if (dummy && dummy->m_intent == ASR::intentType::In) continue;
+            note_store(args[i].m_value);
+        }
+    }
+
+    void visit_Assignment(const ASR::Assignment_t &x) {
+        note_store(x.m_target);
+        ASR::BaseWalkVisitor<GpuContiguousStoreFinder>::visit_Assignment(x);
+    }
+
+    void visit_SubroutineCall(const ASR::SubroutineCall_t &x) {
+        note_call_args(x.m_name, x.m_args, x.n_args);
+        ASR::BaseWalkVisitor<GpuContiguousStoreFinder>::visit_SubroutineCall(x);
+    }
+
+    void visit_FunctionCall(const ASR::FunctionCall_t &x) {
+        note_call_args(x.m_name, x.m_args, x.n_args);
+        ASR::BaseWalkVisitor<GpuContiguousStoreFinder>::visit_FunctionCall(x);
+    }
+
+    void visit_BlockCall(const ASR::BlockCall_t &x) {
+        ASR::symbol_t *symbol = ASRUtils::symbol_get_past_external(x.m_m);
+        if (!visited_blocks.insert(symbol).second) return;
+        const auto &block = *ASR::down_cast<ASR::Block_t>(symbol);
+        for (size_t i = 0; i < block.n_body; i++) visit_stmt(*block.m_body[i]);
+    }
+};
+
+// The dimension of the nest that every store indexes with its subscript
+// at `subscript` (0 is the contiguous one), or `otherwise`.
+static size_t store_dimension(const ParallelLoopNest &nest, size_t subscript,
+        size_t otherwise) {
+    if (nest.n_heads() < 2) return otherwise;
+    std::vector<ASR::symbol_t*> variables;
+    std::set<ASR::symbol_t*> variable_set;
+    for (size_t d = 0; d < nest.n_heads(); d++) {
+        ASR::symbol_t *variable = ASRUtils::symbol_get_past_external(
+            ASR::down_cast<ASR::Var_t>(nest.head(d).m_v)->m_v);
+        variables.push_back(variable);
+        variable_set.insert(variable);
+    }
+    GpuContiguousStoreFinder finder(variable_set, subscript);
+    for (size_t i = 0; i < nest.n_body; i++) finder.visit_stmt(*nest.body[i]);
+    // Conflicting or unrecognized store layouts retain the original mapping.
+    if (!finder.has_unrecognized_store && finder.candidates.size() == 1) {
+        for (size_t d = 0; d < variables.size(); d++) {
+            if (finder.candidates.count(variables[d])) return d;
+        }
+    }
+    return otherwise;
+}
+
+// `a * b`, or UINT64_MAX when that does not fit.
+static uint64_t gpu_saturating_product(uint64_t a, uint64_t b) {
+    if (a != 0 && b > UINT64_MAX / a) return UINT64_MAX;
+    return a * b;
+}
+
+// The number of values from `start` to `end`, or UINT64_MAX when that does
+// not fit, and 0 when `end < start`.
+static uint64_t gpu_value_count(int64_t start, int64_t end) {
+    if (end < start) return 0;
+    uint64_t span = static_cast<uint64_t>(end) - static_cast<uint64_t>(start);
+    return span == UINT64_MAX ? UINT64_MAX : span + 1;
+}
+
+// The number of threads a tiled launch of a nest whose extents are all
+// constants runs (gpu_offload_launch.cpp): whole tiles of `width` iterations
+// of dimension `across` by `threads_per_block / width` of `down`, for every
+// value of the other dimensions. UINT64_MAX when that does not fit. 0 when a
+// bound is not a constant or the nest is empty; either way the nest stays
+// tiled and the launch decides at run time.
+static uint64_t gpu_constant_tile_threads(
+        const std::vector<ASR::expr_t*> &starts,
+        const std::vector<ASR::expr_t*> &ends, size_t across, size_t down,
+        int64_t width, int64_t threads_per_block) {
+    auto tiles = [](uint64_t extent, uint64_t size) {
+        return extent / size + (extent % size != 0 ? 1 : 0);
+    };
+    uint64_t threads = static_cast<uint64_t>(threads_per_block);
+    for (size_t d = 0; d < starts.size(); d++) {
+        int64_t start = 0, end = 0;
+        if (!ASRUtils::extract_value(ASRUtils::expr_value(starts[d]), start)
+                || !ASRUtils::extract_value(ASRUtils::expr_value(ends[d]),
+                    end)) {
+            return 0;
+        }
+        uint64_t extent = gpu_value_count(start, end);
+        if (d == across) {
+            extent = tiles(extent, static_cast<uint64_t>(width));
+        } else if (d == down) {
+            extent = tiles(extent,
+                static_cast<uint64_t>(threads_per_block / width));
+        }
+        threads = gpu_saturating_product(threads, extent);
+    }
+    return threads;
+}
+
+// Which dimensions of a nest a launch splits into chunks of at most `limit`
+// iterations when it has more (GpuKernelLaunch.chunk_dimensions), given the
+// bounds of each dimension, the kind of its index and the order the kernel
+// numbers the iterations in, fastest first. A chunk covers a dimension it
+// does not split whole, wherever it is in that order: the kernel numbers the
+// iterations of each chunk from the bounds of its box. So a dimension with
+// a constant extent is never split, and keeps its bounds as constants in the
+// kernel, as long as its extent and those of the ones before it in that
+// order that are never split come to at most `limit` iterations in all; the
+// others are split, as is every dimension whose extent is not a constant.
+// None is split when `chunked` is false, when a constant extent makes the
+// nest empty, or when the nest cannot have more than `limit` iterations:
+// the value of an index fits its kind, which bounds the extent of a
+// dimension whose bounds are not both constants, as a constant bound does
+// further. `fixed_iterations` is set to the product of the extents of the
+// dimensions that are never split when one is (1 when there are none), and
+// to 0 otherwise.
+static std::vector<bool> gpu_splittable_dimensions(
+        const std::vector<ASR::expr_t*> &starts,
+        const std::vector<ASR::expr_t*> &ends,
+        const std::vector<int> &index_kinds,
+        const std::vector<size_t> &order, bool chunked, int64_t limit,
+        int64_t &fixed_iterations) {
+    std::vector<bool> splittable(order.size(), false);
+    fixed_iterations = 0;
+    if (!chunked) return splittable;
+    // The constant extent of each dimension, 0 where it is not a constant,
+    // and the most iterations the nest can have.
+    std::vector<uint64_t> extents(order.size(), 0);
+    uint64_t most = 1;
+    for (size_t d = 0; d < order.size(); d++) {
+        int64_t start = 0, end = 0;
+        bool start_known = ASRUtils::extract_value(
+            ASRUtils::expr_value(starts[d]), start);
+        bool end_known = ASRUtils::extract_value(
+            ASRUtils::expr_value(ends[d]), end);
+        uint64_t extent = 0;
+        if (start_known && end_known) {
+            if (end < start) return splittable;
+            extent = gpu_value_count(start, end);
+            extents[d] = extent;
+        } else {
+            int64_t huge = index_kinds[d] < 1 || index_kinds[d] >= 8
+                ? INT64_MAX
+                : (int64_t(1) << (8 * index_kinds[d] - 1)) - 1;
+            extent = gpu_value_count(
+                start_known ? std::max(start, -huge - 1) : -huge - 1,
+                end_known ? std::min(end, huge) : huge);
+        }
+        most = gpu_saturating_product(most, extent);
+    }
+    if (most <= static_cast<uint64_t>(limit)) return splittable;
+    uint64_t fixed = 1;
+    for (size_t d : order) {
+        if (extents[d] > 0
+                && extents[d] <= static_cast<uint64_t>(limit) / fixed) {
+            fixed *= extents[d];
+        } else {
+            splittable[d] = true;
+        }
+    }
+    fixed_iterations = static_cast<int64_t>(fixed);
+    return splittable;
+}
+
+// Why a host entity of type `type`, declared with `type_declaration`,
+// cannot become a kernel parameter, if it cannot. Through
+// gpu_entity_decline, this is the one test for every host entity that
+// reaches device code: a variable or named constant the loop names, an
+// allocatable component handed over as a buffer, and a variable or named
+// constant a procedure the loop calls reaches. Every kernel parameter is
+// declared with the type of its entity without the Allocatable (or
+// Pointer) wrapper, as the kernel receives the data rather than a
+// descriptor, and so is every component of a derived-type parameter that
+// the device layout hands over as a buffer (here and in
+// gpu_struct_component_args). A deferred-length string has a length only
+// while it is allocatable or a pointer, so that parameter could not be
+// declared. No string is a kernel argument the launch takes, and no
+// derived type with an allocatable string array component is one either
+// (GpuLaunchSupport), so the loop is declined with the reason a string of
+// a constant length is declined with. An array of derived type keeps the
+// reasons it is declined with later.
+static GpuDecline gpu_kernel_parameter_decline(ASR::ttype_t *type,
+        ASR::symbol_t *type_declaration) {
+    if (ASRUtils::is_deferredLength_string(type)) {
+        return GpuDecline(ASRUtils::is_array(type)
+            ? GpuDeclineReason::ArrayElementNotNumeric
+            : GpuDeclineReason::ScalarNotNumeric);
+    }
+    if (type_declaration && !ASRUtils::is_array(type)
+            && ASR::is_a<ASR::StructType_t>(*ASRUtils::extract_type(type))) {
+        ASR::symbol_t *definition =
+            ASRUtils::symbol_get_past_external(type_declaration);
+        if (ASR::is_a<ASR::Struct_t>(*definition)
+                && gpu_struct_hands_over_deferred_length_string(
+                    ASR::down_cast<ASR::Struct_t>(definition))) {
+            return GpuDecline(GpuDeclineReason::StructAllocatableArrayMember);
+        }
+    }
+    return GpuDecline();
+}
+
+// Why the host entity `entity`, of type `type`, cannot reach device code,
+// if it cannot (gpu_kernel_parameter_decline). A named constant is copied
+// into device code rather than passed, but a derived-type copy is given
+// arrays of the same stripped types for its allocatable array components
+// there (gpu_device_struct_storage), so it is declined too, with the
+// reason a derived-type constant with such a component of a constant
+// length gets later, which names that component.
+static GpuDecline gpu_entity_decline(ASR::ttype_t *type,
+        ASR::symbol_t *entity) {
+    ASR::Variable_t *var = nullptr;
+    if (entity) {
+        entity = ASRUtils::symbol_get_past_external(entity);
+        if (ASR::is_a<ASR::Variable_t>(*entity)) {
+            var = ASR::down_cast<ASR::Variable_t>(entity);
+        }
+    }
+    GpuDecline decline = gpu_kernel_parameter_decline(type,
+        var ? var->m_type_declaration : nullptr);
+    if (!decline.declined() || !var
+            || var->m_storage != ASR::storage_typeType::Parameter
+            || !var->m_type_declaration || !var->m_value
+            || !ASR::is_a<ASR::StructConstant_t>(*var->m_value)) {
+        return decline;
+    }
+    ASR::symbol_t *definition =
+        ASRUtils::symbol_get_past_external(var->m_type_declaration);
+    if (!ASR::is_a<ASR::Struct_t>(*definition)) return decline;
+    size_t next_arg = 0;
+    std::string component = gpu_struct_constant_unsupported_component(
+        ASR::down_cast<ASR::Struct_t>(definition),
+        ASR::down_cast<ASR::StructConstant_t>(var->m_value), next_arg);
+    if (component.empty()) return decline;
+    return GpuDecline(GpuDeclineReason::StructConstantComponent, component);
+}
 
 // The loop was assigned to the device by the unsupported-construct check,
 // so a decline here is a lowering this pass is missing and is reported as
@@ -49,22 +474,6 @@ void GpuOffloadVisitor::report_clause_ignored(
     pass_options.diagnostics->message_label(
         "the '" + name + "' clause is ignored on the gpu",
         {where}, "the device decides how to run the iterations",
-        diag::Level::Warning, diag::Stage::ASRPass);
-}
-
-// A `stop` the device runs as a trap. The loop is offloaded and the
-// statement does halt the launch, which is the part of it a device can
-// honour, but a grid returns no status: the stop code is not delivered and
-// a normal termination cannot be told apart from an error one. The program
-// ends with a failure status either way, so say what was dropped rather
-// than let the difference go unmentioned.
-void GpuOffloadVisitor::report_stop_degraded(
-        const Location &where, const std::string &name) {
-    if (pass_options.diagnostics == nullptr) return;
-    pass_options.diagnostics->message_label(
-        "'" + name + "' in an offloaded loop does not deliver its stop code",
-        {where}, "the device halts the launch here and the program exits "
-            "with a failure status",
         diag::Level::Warning, diag::Stage::ASRPass);
 }
 
@@ -104,6 +513,8 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
     // shares with the rest of the program.
     ParallelLoopNest work;
     kernel_blocks.clear();
+    non_elemental_alias_blocks.clear();
+    bound_copies.clear();
     {
         ASRUtils::ExprStmtDuplicator dup(al);
         dup.allow_procedure_calls = true;
@@ -128,6 +539,12 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
     // when resolving inner AssociateBlockCalls in the loop body.
     std::map<ASR::symbol_t*, ASR::expr_t*> enclosing_assoc_map;
     resolve_enclosing_associates(work, n_dims, enclosing_assoc_map);
+    Vec<ASR::stmt_t*> private_shapes;
+    private_shapes.reserve(al, 4);
+    if (!privatize_iteration_arrays(region, work,
+            enclosing_assoc_map, private_shapes)) {
+        return;
+    }
 
     // Detect if the do concurrent is inside a Block scope. If so,
     // block-local variables need to be collected as kernel parameters
@@ -174,6 +591,8 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
             GpuDecline(GpuDeclineReason::StructElementGather));
         return;
     }
+    gpu_hoist_present_tests(al, current_scope, work.body, work.n_body,
+        gather_stmts);
 
     // What can be asked of the loop as it was written is asked before the
     // inline_* helpers below rewrite the body, so that an error names what
@@ -196,7 +615,12 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
         // Run-time sized alias temporaries become BLOCK locals here,
         // ahead of the workspace pre-flight below, so that the
         // pre-flight sizes them too.
-        materialize_runtime_alias_blocks(work);
+        {
+            std::vector<std::string> alias_arg_names;
+            collect_kernel_arg_names(work, enclosing_block_scopes,
+                alias_arg_names);
+            materialize_runtime_alias_blocks(work, alias_arg_names);
+        }
         size_scope_array_temporaries(work.body, work.n_body);
     }
 
@@ -230,6 +654,11 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
     }
 
     rewrite_loop_body_for_kernel(work, enclosing_assoc_map);
+    size_t fastest_dimension = store_dimension(work, 0, 0);
+    // The dimension the stores step through next in memory, if they agree
+    // on one: a tiled launch (below) runs the height of its tiles along it.
+    size_t next_store_dimension = store_dimension(work, 1,
+        fastest_dimension);
 
     // 1. Collect all symbols from body AND head expressions
     std::map<std::string, std::pair<ASR::ttype_t*, ASR::expr_t*>> involved_syms;
@@ -252,6 +681,8 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
     for (size_t i = 0; i < work.n_body; i++) {
         lv_collector.visit_stmt(*work.body[i]);
     }
+    std::set<std::string> &may_define = lv_collector.may_define;
+    for (auto &name : assigned_vars) may_define.erase(name);
 
     // Separate into kernel params vs local vars
     // Params: arrays + scalars that are read but NOT assigned in loop body
@@ -267,69 +698,69 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
     // Identify which symbols are local temporaries (assigned scalar, non-array)
     // vs kernel parameters (arrays or read-only scalars).
     // Assigned scalars are kernel-local unless they are reduction
-    // targets from inlined all(), or are referenced after the do
-    // concurrent loop (liveout) — those need to be communicated back
-    // to the host via 1-element array device buffers.
+    // targets from inlined all(), or their value can be read once the
+    // loop has run (liveout): a statement that can run after the loop or a
+    // contained procedure references them, or they outlive the procedure
+    // holding the loop -- a dummy argument, the function result, a saved,
+    // module or host variable. A variable defined in only one iteration
+    // has that value after the loop (Fortran 2018, 11.1.7.5), so those
+    // have to be communicated back to the host (plan_liveouts).
+    bool everything_live = false;
+    std::set<std::string> post_loop_vars = gpu_names_referenced_after_loop(
+        region, current_scope, everything_live);
 
-    // Collect variables referenced in statements after this parallel loop
-    // in the parent body, to identify liveout scalars.
-    std::set<std::string> post_loop_vars;
-    {
-        ASR::stmt_t **parent_body = nullptr;
-        size_t parent_n_body = 0;
-        SymbolTable *scope = current_scope;
-        while (scope && scope->asr_owner) {
-            if (scope->asr_owner->type == ASR::asrType::symbol) {
-                ASR::symbol_t *owner_sym = ASR::down_cast<ASR::symbol_t>(
-                    scope->asr_owner);
-                if (ASR::is_a<ASR::Program_t>(*owner_sym)) {
-                    ASR::Program_t *prog = ASR::down_cast<ASR::Program_t>(
-                        owner_sym);
-                    parent_body = prog->m_body;
-                    parent_n_body = prog->n_body;
-                    break;
-                } else if (ASR::is_a<ASR::Function_t>(*owner_sym)) {
-                    ASR::Function_t *fn = ASR::down_cast<ASR::Function_t>(
-                        owner_sym);
-                    parent_body = fn->m_body;
-                    parent_n_body = fn->n_body;
-                    break;
-                } else if (ASR::is_a<ASR::Block_t>(*owner_sym)) {
-                    ASR::Block_t *blk = ASR::down_cast<ASR::Block_t>(
-                        owner_sym);
-                    parent_body = blk->m_body;
-                    parent_n_body = blk->n_body;
-                    break;
-                }
-            }
-            scope = scope->parent;
-        }
-        if (parent_body) {
-            bool found_dc = false;
-            for (size_t si = 0; si < parent_n_body; si++) {
-                if (!found_dc) {
-                    if (parent_body[si]->base.loc.first == loc.first &&
-                            parent_body[si]->base.loc.last == loc.last) {
-                        found_dc = true;
-                    }
-                    continue;
-                }
-                PostLoopVarCollector plvc(post_loop_vars);
-                plvc.visit_stmt(*parent_body[si]);
+    // A `reduce` accumulator is live after the loop by definition, whether
+    // or not anything the scan above found reads it: an intent(out) dummy
+    // at the end of a procedure, or a loop nested in another construct,
+    // leaves no later statement in the body it scans. It is never a
+    // kernel local.
+    std::set<std::string> reduction_names;
+    for (auto &r : pending_reductions) reduction_names.insert(r.orig_name);
+
+    std::set<std::string> live_vars;
+    for (auto *names : {&assigned_vars, &may_define}) {
+        for (auto &name : *names) {
+            if (inner_loop_vars.count(name)) continue;
+            if (everything_live || post_loop_vars.count(name) > 0
+                    || gpu_visible_outside_procedure(
+                        current_scope->resolve_symbol(name), current_scope)) {
+                live_vars.insert(name);
             }
         }
     }
-
-    std::set<std::string> local_scalar_names;
-    for (auto &name : assigned_vars) {
-        if (loop_var_set.count(name)) continue;
-        if (all_reduction_targets.count(name)) continue;
-        if (post_loop_vars.count(name) && !inner_loop_vars.count(name)) continue;
-        auto it = involved_syms.find(name);
-        if (it != involved_syms.end()) {
-            ASR::ttype_t *type = it->second.first;
-            if (!ASRUtils::is_array(type)) {
-                local_scalar_names.insert(name);
+    // A later statement that names a scalar keeps the value the loop leaves
+    // in it only if it may read that value: `t = 0` does not, nor does a
+    // later loop every iteration of which assigns `t` first. One the body
+    // may read before assigning it stays live, which copies its value in.
+    if (!everything_live && !live_vars.empty()) {
+        live_vars = scalars_read_after_region(region, work, live_vars,
+            enclosing_assoc_map);
+    }
+    // Where the kernel keeps each variable the loop defines or may define
+    // (gpu_locality).
+    std::set<std::string> local_scalar_names, liveout_candidates;
+    for (auto *names : {&assigned_vars, &may_define}) {
+        for (auto &name : *names) {
+            if (loop_var_set.count(name)) continue;
+            if (reduction_names.count(name)) continue;
+            // The result of an inlined all() goes back to the host.
+            if (all_reduction_targets.count(name)) {
+                liveout_candidates.insert(name);
+                continue;
+            }
+            auto it = involved_syms.find(name);
+            if (it == involved_syms.end()) continue;
+            switch (gpu_locality(current_scope, name, it->second.first,
+                    live_vars.count(name) > 0, assigned_vars.count(name) > 0,
+                    work.body, work.n_body)) {
+                case GpuLocality::KernelLocal:
+                    local_scalar_names.insert(name);
+                    break;
+                case GpuLocality::PrivateCopies:
+                    liveout_candidates.insert(name);
+                    break;
+                case GpuLocality::KernelArgument:
+                    break;
             }
         }
     }
@@ -339,81 +770,16 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
         involved_syms.erase(name);
     }
 
-    // Collect optional variables from involved_syms. When an optional
-    // argument is used inside a loop body guarded by present(),
-    // the kernel launch and all buffer setup must be skipped when the
-    // argument is not present, otherwise the host will segfault trying
-    // to read a null descriptor.
-    std::vector<ASR::symbol_t*> optional_syms;
-    for (auto &[sym_name, sym_info] : involved_syms) {
-        ASR::symbol_t *sym = this->current_scope->resolve_symbol(sym_name);
-        if (!sym) continue;
-        ASR::symbol_t *resolved = ASRUtils::symbol_get_past_external(sym);
-        if (!ASR::is_a<ASR::Variable_t>(*resolved)) continue;
-        ASR::Variable_t *var = ASR::down_cast<ASR::Variable_t>(resolved);
-        if (var->m_presence == ASR::presenceType::Optional) {
-            optional_syms.push_back(sym);
-        }
+    // What the loop defines and the host reads after it: each thread keeps
+    // a private copy of it, and puts what it defines back where the value
+    // is shared (gpu_offload_liveout.cpp).
+    GpuLiveoutPlan liveouts;
+    if (!plan_liveouts(loc, work.body, work.n_body, liveout_candidates,
+            live_vars, loop_var_set, reduction_names,
+            local_scalar_names, involved_syms, liveouts)) {
+        return;
     }
-
-    // Wrap liveout scalars (assigned user variables still in
-    // involved_syms) in 1-element FixedSizeArrays so they can be
-    // passed as writable device buffers and read back after the kernel.
-    std::vector<LiveoutScalarInfo> liveout_scalars;
     {
-        ASR::ttype_t *int4_type = ASRUtils::TYPE(
-            ASR::make_Integer_t(al, loc, 4));
-        std::vector<std::string> liveout_names;
-        std::set<std::string> reduction_names;
-        for (auto &r : pending_reductions) reduction_names.insert(r.orig_name);
-        for (auto &name : assigned_vars) {
-            if (loop_var_set.count(name)) continue;
-            if (local_scalar_names.count(name)) continue;
-            // A reduction accumulator is written by every thread. One
-            // shared slot would be a race, so it gets a slot per thread
-            // below instead of the single liveout buffer.
-            if (reduction_names.count(name)) continue;
-            auto it = involved_syms.find(name);
-            if (it != involved_syms.end()) {
-                ASR::ttype_t *type = it->second.first;
-                if (!ASRUtils::is_array(type)) {
-                    liveout_names.push_back(name);
-                }
-            }
-        }
-        for (auto &name : liveout_names) {
-            auto it = involved_syms.find(name);
-            ASR::ttype_t *scalar_type = it->second.first;
-            ASR::symbol_t *orig_sym = current_scope->resolve_symbol(name);
-
-            ASR::dimension_t dim;
-            dim.loc = loc;
-            dim.m_start = ASRUtils::EXPR(
-                ASR::make_IntegerConstant_t(al, loc, 1, int4_type,
-                    ASR::integerbozType::Decimal));
-            dim.m_length = ASRUtils::EXPR(
-                ASR::make_IntegerConstant_t(al, loc, 1, int4_type,
-                    ASR::integerbozType::Decimal));
-            Vec<ASR::dimension_t> dims_vec;
-            dims_vec.reserve(al, 1);
-            dims_vec.push_back(al, dim);
-            ASR::ttype_t *arr_type = ASRUtils::TYPE(
-                ASR::make_Array_t(al, loc,
-                    ASRUtils::duplicate_type(al, scalar_type),
-                    dims_vec.p, 1,
-                    ASR::array_physical_typeType::FixedSizeArray, ASR::memory_spaceType::Global));
-
-            std::string buf_name = current_scope->get_unique_name(
-                "__gpu_buf_" + name);
-            ASR::symbol_t *buf_sym = gpu_new_variable(al, loc,
-                current_scope, buf_name, ASRUtils::duplicate_type(al,
-                    arr_type));
-            it->second.first = arr_type;
-
-            liveout_scalars.push_back(
-                {name, buf_name, buf_sym, orig_sym, scalar_type});
-        }
-
         // One accumulator per iteration. The extent is only known when the
         // launch has worked out how many threads it is dispatching, so the
         // host array is deferred-shape and the launch allocates it.
@@ -483,11 +849,14 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
         std::string param_name;
         ASR::symbol_t *orig_mem_sym;
         ASR::ttype_t *alloc_type;
+        ASR::expr_t *host_arg = nullptr;
     };
     std::vector<DecompInfo> decomp_infos;
     for (auto &[struct_name, members] :
             alloc_collector.alloc_members) {
         if (involved_syms.find(struct_name) == involved_syms.end())
+            continue;
+        if (alloc_collector.has_non_alloc_access.count(struct_name))
             continue;
         for (auto &[mem_name, mem_info] : members) {
             std::string param_name = struct_name + "__" + mem_name;
@@ -507,7 +876,7 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
     // 2. Create kernel scope and parameters
     SymbolTable *tu_symtab = tu.m_symtab;
     std::string kernel_name = tu_symtab->get_unique_name(
-        "__lfortran_gpu_kernel_" + std::to_string(gpu_kernel_counter++));
+        gpu_kernel_name(this->current_scope));
     SymbolTable *kernel_scope = al.make_new<SymbolTable>(tu_symtab);
 
     Vec<ASR::expr_t*> kernel_args;
@@ -543,8 +912,16 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
             orig_sym = ASR::down_cast<ASR::Var_t>(sym_info.second)->m_v;
         }
         if (orig_sym) {
-            type_decl = import_struct_type(orig_sym,
+            type_decl = import_struct_type(
+                ASRUtils::symbol_get_past_external(orig_sym),
                 orig_scope, kernel_scope, loc);
+        }
+
+        // A named constant, which is cloned below, is checked too.
+        GpuDecline param_decline = gpu_entity_decline(type, orig_sym);
+        if (param_decline.declined()) {
+            report_not_offloaded(loc, param_decline);
+            return;
         }
 
         // Parameter variables are compile-time constants without
@@ -558,18 +935,21 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
                     ASR::down_cast<ASR::Variable_t>(resolved);
                 if (orig_var->m_storage ==
                         ASR::storage_typeType::Parameter) {
+                    ASR::expr_t *value = type_decl
+                        ? import_constant_value(orig_var->m_value,
+                            orig_scope, kernel_scope, loc)
+                        : orig_var->m_value;
                     ASR::symbol_t *cloned =
                         ASR::down_cast<ASR::symbol_t>(
                             ASRUtils::make_Variable_t_util(al, loc,
                                 kernel_scope, s2c(al, sym_name),
                                 nullptr, 0,
                                 ASR::intentType::Local,
-                                orig_var->m_value,
-                                orig_var->m_value,
+                                value, value,
                                 ASR::storage_typeType::Parameter,
                                 ASRUtils::duplicate_type(al,
                                     orig_var->m_type),
-                                nullptr, orig_var->m_abi,
+                                type_decl, orig_var->m_abi,
                                 orig_var->m_access,
                                 ASR::presenceType::Required, false));
                     kernel_scope->add_symbol(sym_name, cloned);
@@ -596,24 +976,17 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
                 ASR::intentType::InOut, nullptr, nullptr,
                 ASR::storage_typeType::Default, dup_type,
                 type_decl, ASR::abiType::Source,
-                ASR::accessType::Public, ASR::presenceType::Required, false));
+                ASR::accessType::Public,
+                ASR::down_cast<ASR::Variable_t>(
+                    ASRUtils::symbol_get_past_external(orig_sym))->m_presence,
+                false));
         kernel_scope->add_symbol(sym_name, param);
         kernel_args.push_back(al,
             ASRUtils::EXPR(ASR::make_Var_t(al, loc, param)));
 
         ASR::call_arg_t carg;
         carg.loc = loc;
-        // For liveout scalars, use the host-side 1-element array
-        // buffer as the call arg so it's passed as a device buffer
         bool is_liveout = false;
-        for (auto &ls : liveout_scalars) {
-            if (ls.orig_name == sym_name) {
-                carg.m_value = ASRUtils::EXPR(
-                    ASR::make_Var_t(al, loc, ls.host_buf_sym));
-                is_liveout = true;
-                break;
-            }
-        }
         for (auto &r : pending_reductions) {
             if (r.host_buf_sym && r.orig_name == sym_name) {
                 carg.m_value = ASRUtils::EXPR(
@@ -633,6 +1006,12 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
     // members. Each allocatable array member becomes a separate
     // flat-array buffer parameter.
     for (auto &di : decomp_infos) {
+        GpuDecline param_decline = gpu_entity_decline(di.alloc_type,
+            di.orig_mem_sym);
+        if (param_decline.declined()) {
+            report_not_offloaded(loc, param_decline);
+            return;
+        }
         ASR::ttype_t *flat_type = ASRUtils::duplicate_type(al,
             ASRUtils::type_get_past_allocatable(di.alloc_type));
 
@@ -684,14 +1063,61 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
                 ASRUtils::EXPR(ASR::make_Var_t(al, loc,
                     orig_struct_sym)),
                 di.orig_mem_sym, di.alloc_type, nullptr));
+        if (ASR::down_cast<ASR::Variable_t>(
+                ASRUtils::symbol_get_past_external(orig_struct_sym))
+                    ->m_presence == ASR::presenceType::Optional) {
+            // Decomposition removes the optional root from the kernel's
+            // dummies. Guard the host association before evaluating any
+            // component address, extent or lower bound.
+            ASRUtils::ASRBuilder b(al, loc);
+            ASR::symbol_t *type_decl = ASR::down_cast<ASR::Variable_t>(
+                ASRUtils::symbol_get_past_external(di.orig_mem_sym))
+                    ->m_type_declaration;
+            ASR::expr_t *view = b.Variable(orig_scope,
+                orig_scope->get_unique_name("__gpu_optional_component"),
+                ASRUtils::TYPE(ASR::make_Pointer_t(al, loc,
+                    ASRUtils::duplicate_type_with_empty_dims(al, flat_type))),
+                ASR::intentType::Local, type_decl);
+            ASRUtils::EXPR2VAR(view)->m_contiguous_attr =
+                ASRUtils::is_simply_contiguous(carg.m_value);
+            ASR::expr_t *empty = b.Variable(orig_scope,
+                orig_scope->get_unique_name("__gpu_absent_component"),
+                b.Array(std::vector<int64_t>(
+                    ASRUtils::extract_n_dims_from_ttype(flat_type), 0),
+                    ASRUtils::duplicate_type(al,
+                        ASRUtils::extract_type(flat_type))),
+                ASR::intentType::Local, type_decl);
+            Vec<ASR::expr_t*> present_args;
+            present_args.reserve(al, 1);
+            present_args.push_back(al,
+                ASRUtils::EXPR(ASR::make_Var_t(al, loc, orig_struct_sym)));
+            ASR::expr_t *present = ASRUtils::EXPR(
+                ASR::make_IntrinsicElementalFunction_t(al, loc,
+                    static_cast<int64_t>(
+                        ASRUtils::IntrinsicElementalFunctions::Present),
+                    present_args.p, present_args.n, 0,
+                    ASRUtils::TYPE(ASR::make_Logical_t(al, loc, 4)),
+                    nullptr));
+            auto associate = [&](ASR::expr_t *target) {
+                return ASRUtils::STMT(ASR::make_Associate_t(al, loc,
+                    view, target,
+                    ASR::pointer_bounds_formType::NoPointerBounds));
+            };
+            gather_stmts.push_back(al, b.If(present,
+                {associate(carg.m_value)}, {associate(empty)}));
+            carg.m_value = view;
+        }
+        di.host_arg = carg.m_value;
         call_args.push_back(al, carg);
     }
 
     // Pass dimension sizes for decomposed allocatable struct
-    // members so the kernel can compute ArraySize and strides.
+    // members so the kernel can compute ArraySize and strides. The extents
+    // and lower bounds are passed in the kind the kernel computes element
+    // offsets in, like those of the arrays below.
     {
         ASR::ttype_t *int_type_dim = ASRUtils::TYPE(
-            ASR::make_Integer_t(al, loc, 4));
+            ASR::make_Integer_t(al, loc, device_caps.offset_kind));
         for (auto &di : decomp_infos) {
             ASR::ttype_t *inner =
                 ASRUtils::type_get_past_allocatable(di.alloc_type);
@@ -706,13 +1132,7 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
             ASR::Array_t *k_arr = ASR::down_cast<ASR::Array_t>(
                 ASRUtils::type_get_past_allocatable(k_var->m_type));
 
-            ASR::symbol_t *orig_struct_sym =
-                orig_scope->resolve_symbol(di.struct_name);
-            ASR::expr_t *host_member_expr = ASRUtils::EXPR(
-                ASR::make_StructInstanceMember_t(al, loc,
-                    ASRUtils::EXPR(ASR::make_Var_t(al, loc,
-                        orig_struct_sym)),
-                    di.orig_mem_sym, di.alloc_type, nullptr));
+            ASR::expr_t *host_member_expr = di.host_arg;
 
             for (size_t d = 0; d < arr->n_dims; d++) {
                 std::string dim_name =
@@ -819,8 +1239,9 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
                 break;
             }
         }
+        // In the offset kind, as for the components above.
         ASR::ttype_t *int_type_dim = ASRUtils::TYPE(
-            ASR::make_Integer_t(al, loc, 4));
+            ASR::make_Integer_t(al, loc, device_caps.offset_kind));
 
         for (size_t d = 0; d < k_arr->n_dims; d++) {
             if (shape_from_type && d < orig_arr->n_dims
@@ -880,11 +1301,13 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
         }
     }
 
-    // Add total-size kernel parameters for allocatable array members
-    // of struct-typed kernel parameters. These sizes are needed by
-    // Metal inline functions that call size() on struct members.
-    // Skip array-of-structs variables — StructInstanceMember requires
-    // a scalar struct base, not an array of structs.
+    // The allocatable array components of a struct-typed kernel parameter
+    // reach the device as kernel parameters of their own (see
+    // gpu_struct_member_arguments): first the extents and lower bounds of
+    // every parameter's components, then their data. Skip array-of-structs
+    // variables -- StructInstanceMember requires a scalar struct base, not
+    // an array of structs.
+    std::vector<std::pair<std::string, ASR::Variable_t*>> struct_params;
     for (auto &[sym_name, sym_info] : involved_syms) {
         ASR::ttype_t *type = sym_info.first;
         ASR::ttype_t *inner_t = ASRUtils::type_get_past_allocatable(type);
@@ -910,195 +1333,44 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
             ASRUtils::symbol_get_past_external(
                 orig_var->m_type_declaration);
         if (!is_a<ASR::Struct_t>(*struct_sym)) continue;
-        ASR::Struct_t *st = down_cast<ASR::Struct_t>(struct_sym);
-        ASR::ttype_t *int_type_sz = ASRUtils::TYPE(
-            ASR::make_Integer_t(al, loc, 4));
-        for (auto &component : gpu_decomposed_components(st)) {
-            std::string mem_name = component.name();
-            ASR::symbol_t *mem_sym = component.component;
-            ASR::Variable_t *mv = ASR::down_cast<ASR::Variable_t>(mem_sym);
-            std::string size_name = GpuNames::member_size(
-                sym_name, mem_name);
-            ASR::symbol_t *size_sym = gpu_new_variable(al, loc,
-                kernel_scope, size_name, ASRUtils::duplicate_type(al,
-                    int_type_sz), ASR::intentType::InOut);
-            kernel_args.push_back(al,
-                ASRUtils::EXPR(ASR::make_Var_t(al, loc,
-                    size_sym)));
-            // Host-side: size(struct%member) (total size)
-            // Look up the member symbol in the original struct's
-            // scope for the ExternalSymbol reference used in the
-            // program scope (needed for StructInstanceMember).
-            ASR::symbol_t *orig_mem_ref = nullptr;
-            for (auto &scope_item :
-                    orig_scope->get_scope()) {
-                if (!is_a<ASR::ExternalSymbol_t>(
-                        *scope_item.second)) continue;
-                ASR::ExternalSymbol_t *es =
-                    down_cast<ASR::ExternalSymbol_t>(
-                        scope_item.second);
-                ASR::symbol_t *resolved =
-                    ASRUtils::symbol_get_past_external(
-                        es->m_external);
-                if (resolved == mem_sym) {
-                    orig_mem_ref = scope_item.second;
-                    break;
-                }
-            }
-            if (!orig_mem_ref) orig_mem_ref = mem_sym;
-            ASR::expr_t *host_member = ASRUtils::EXPR(
-                ASR::make_StructInstanceMember_t(al, loc,
-                    ASRUtils::EXPR(ASR::make_Var_t(al, loc,
-                        orig_sym)),
-                    orig_mem_ref, mv->m_type, nullptr));
-            ASR::expr_t *host_size = ASRUtils::EXPR(
-                ASR::make_ArraySize_t(al, loc,
-                    host_member, nullptr, int_type_sz,
-                    nullptr));
-            ASR::call_arg_t carg;
-            carg.loc = loc;
-            carg.m_value = host_size;
-            call_args.push_back(al, carg);
-
-            // For a component of rank > 1 the total size is not the
-            // extent of any single dimension, so also pass each
-            // per-dimension extent; size(struct%member, dim) in the
-            // kernel reads these.
-            ASR::ttype_t *mem_inner =
-                ASRUtils::type_get_past_allocatable(mv->m_type);
-            size_t rank = ASR::down_cast<ASR::Array_t>(
-                mem_inner)->n_dims;
-            if (rank <= 1) continue;
-            for (size_t d = 0; d < rank; d++) {
-                std::string dim_size_name = GpuNames::member_dim_size(
-                    sym_name, mem_name, d);
-                ASR::symbol_t *dim_size_sym = gpu_new_variable(al, loc,
-                    kernel_scope, dim_size_name,
-                    ASRUtils::duplicate_type(al, int_type_sz),
-                    ASR::intentType::InOut);
-                kernel_args.push_back(al,
-                    ASRUtils::EXPR(ASR::make_Var_t(al, loc,
-                        dim_size_sym)));
-                ASR::expr_t *dim_expr = ASRUtils::EXPR(
-                    ASR::make_IntegerConstant_t(al, loc,
-                        (int64_t)(d + 1), int_type_sz,
-                        ASR::integerbozType::Decimal));
-                ASR::expr_t *dim_member = ASRUtils::EXPR(
-                    ASR::make_StructInstanceMember_t(al, loc,
-                        ASRUtils::EXPR(ASR::make_Var_t(al, loc,
-                            orig_sym)),
-                        orig_mem_ref, mv->m_type, nullptr));
-                ASR::call_arg_t dim_carg;
-                dim_carg.loc = loc;
-                dim_carg.m_value = ASRUtils::EXPR(
-                    ASR::make_ArraySize_t(al, loc, dim_member,
-                        dim_expr, int_type_sz, nullptr));
-                call_args.push_back(al, dim_carg);
-            }
-        }
+        struct_params.push_back({sym_name, orig_var});
     }
-
-    // Add allocatable-member data kernel parameters for struct-typed
-    // kernel parameters that were NOT fully decomposed. These provide
-    // the actual array data as separate device buffers so that Metal
-    // inline functions can index into allocatable members.
-    // Skip array-of-structs variables — StructInstanceMember requires
-    // a scalar struct base, not an array of structs.
-    for (auto &[sym_name, sym_info] : involved_syms) {
-        ASR::ttype_t *type = sym_info.first;
-        ASR::ttype_t *inner_t = ASRUtils::type_get_past_allocatable(type);
-        if (ASRUtils::is_array(inner_t)) continue;
-        if (!ASR::is_a<ASR::StructType_t>(
-                *ASRUtils::extract_type(inner_t)))
-            continue;
-        ASR::symbol_t *orig_sym = orig_scope->resolve_symbol(sym_name);
-        // A reduction accumulator reaches the kernel as its per-thread
-        // buffer, so that is the actual whose shape is measured and
-        // passed; the scalar the source named has none.
-        for (auto &r : pending_reductions) {
-            if (r.host_buf_sym && r.orig_name == sym_name) {
-                orig_sym = r.host_buf_sym;
+    // The host value of a component of `orig_var`, through the external
+    // symbol the scope of the loop has for the component when it has one.
+    auto host_member = [&](ASR::Variable_t *orig_var, ASR::symbol_t *mem_sym) {
+        ASR::symbol_t *orig_mem_ref = nullptr;
+        for (auto &scope_item : orig_scope->get_scope()) {
+            if (!is_a<ASR::ExternalSymbol_t>(*scope_item.second)) continue;
+            ASR::ExternalSymbol_t *es =
+                down_cast<ASR::ExternalSymbol_t>(scope_item.second);
+            if (ASRUtils::symbol_get_past_external(es->m_external)
+                    == mem_sym) {
+                orig_mem_ref = scope_item.second;
                 break;
             }
         }
-        if (!orig_sym || !is_a<ASR::Variable_t>(*orig_sym)) continue;
-        ASR::Variable_t *orig_var =
-            down_cast<ASR::Variable_t>(orig_sym);
-        if (!orig_var->m_type_declaration) continue;
-        ASR::symbol_t *struct_sym =
-            ASRUtils::symbol_get_past_external(
-                orig_var->m_type_declaration);
-        if (!is_a<ASR::Struct_t>(*struct_sym)) continue;
-        ASR::Struct_t *st = down_cast<ASR::Struct_t>(struct_sym);
-        for (auto &component : gpu_decomposed_components(st)) {
-            std::string mem_name = component.name();
-            ASR::symbol_t *mem_sym = component.component;
-            ASR::Variable_t *mv = ASR::down_cast<ASR::Variable_t>(mem_sym);
-            ASR::ttype_t *mem_inner = component.type;
-            std::string data_name = GpuNames::member_data(
-                sym_name, mem_name);
-            ASR::ttype_t *data_type =
-                ASRUtils::duplicate_type(al, mem_inner);
-            ASR::symbol_t *data_type_decl = nullptr;
-            if (ASR::is_a<ASR::StructType_t>(
-                    *ASRUtils::extract_type(data_type)) &&
-                    mv->m_type_declaration) {
-                ASR::symbol_t *inner_struct_sym =
-                    ASRUtils::symbol_get_past_external(
-                        mv->m_type_declaration);
-                if (is_a<ASR::Struct_t>(*inner_struct_sym)) {
-                    data_type_decl = import_struct_def(
-                        down_cast<ASR::Struct_t>(inner_struct_sym),
-                        orig_scope, kernel_scope, loc);
-                }
-            }
-            SetChar deps_vec;
-            deps_vec.reserve(al, 1);
-            ASRUtils::collect_variable_dependencies(
-                al, deps_vec, data_type, nullptr, nullptr,
-                data_name);
-            ASR::symbol_t *data_sym =
-                ASR::down_cast<ASR::symbol_t>(
-                    ASRUtils::make_Variable_t_util(al, loc,
-                        kernel_scope, s2c(al, data_name),
-                        deps_vec.p, deps_vec.size(),
-                        ASR::intentType::InOut, nullptr,
-                        nullptr,
-                        ASR::storage_typeType::Default,
-                        data_type,
-                        data_type_decl, ASR::abiType::Source,
-                        ASR::accessType::Public,
-                        ASR::presenceType::Required, false));
-            kernel_scope->add_symbol(data_name, data_sym);
-            kernel_args.push_back(al,
-                ASRUtils::EXPR(ASR::make_Var_t(al, loc,
-                    data_sym)));
-            ASR::symbol_t *orig_mem_ref = nullptr;
-            for (auto &scope_item :
-                    orig_scope->get_scope()) {
-                if (!is_a<ASR::ExternalSymbol_t>(
-                        *scope_item.second)) continue;
-                ASR::ExternalSymbol_t *es =
-                    down_cast<ASR::ExternalSymbol_t>(
-                        scope_item.second);
-                ASR::symbol_t *resolved =
-                    ASRUtils::symbol_get_past_external(
-                        es->m_external);
-                if (resolved == mem_sym) {
-                    orig_mem_ref = scope_item.second;
-                    break;
-                }
-            }
-            if (!orig_mem_ref) orig_mem_ref = mem_sym;
-            ASR::call_arg_t carg;
-            carg.loc = loc;
-            carg.m_value = ASRUtils::EXPR(
-                ASR::make_StructInstanceMember_t(al, loc,
-                    ASRUtils::EXPR(ASR::make_Var_t(al, loc,
-                        orig_sym)),
-                    orig_mem_ref, mv->m_type, nullptr));
-            call_args.push_back(al, carg);
-        }
+        if (!orig_mem_ref) orig_mem_ref = mem_sym;
+        return ASRUtils::EXPR(ASR::make_StructInstanceMember_t(al, loc,
+            ASRUtils::EXPR(ASR::make_Var_t(al, loc, &orig_var->base)),
+            orig_mem_ref, ASRUtils::symbol_type(mem_sym), nullptr));
+    };
+    for (auto &[sym_name, orig_var] : struct_params) {
+        ASR::Variable_t *v = orig_var;
+        gpu_struct_member_extent_arguments(al, loc, kernel_scope, sym_name,
+            gpu_struct_definition(orig_var->m_type_declaration),
+            [&](ASR::symbol_t *m) { return host_member(v, m); },
+            device_caps.offset_kind, kernel_args, call_args);
+    }
+    for (auto &[sym_name, orig_var] : struct_params) {
+        ASR::Variable_t *v = orig_var;
+        gpu_struct_member_data_arguments(al, loc, kernel_scope, sym_name,
+            gpu_struct_definition(orig_var->m_type_declaration),
+            [&](ASR::symbol_t *m) { return host_member(v, m); },
+            [&](ASR::Struct_t *element) {
+                return import_struct_def(element, orig_scope, kernel_scope,
+                    loc);
+            },
+            kernel_args, call_args);
     }
 
     // Create loop variables in kernel scope (local, not parameters)
@@ -1122,10 +1394,18 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
             ASR::intentType::Local, type_decl);
     }
 
+    declare_liveout_copies(loc, kernel_scope, liveouts);
+
     // Import functions/subroutines called in the loop body
     // into the kernel scope so FunctionCall/SubroutineCall nodes
     // can reference them after symbol remapping.
     // Collect transitively: if f() calls g(), both must be imported.
+    // A procedure, by identity, to its copy in the kernel scope: calls are
+    // retargeted by it, so that procedures of one name each reach their
+    // own copy.
+    std::map<ASR::symbol_t*, ASR::symbol_t*> procedure_copies;
+    // The copies themselves, the values of `procedure_copies`.
+    std::set<ASR::symbol_t*> copied_procedures;
     {
         GpuFunctionCollector func_collector;
         for (size_t i = 0; i < work.n_body; i++) {
@@ -1160,22 +1440,75 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
                             transitive_collector.visit_stmt(
                                 *fn_impl->m_body[i]);
                         }
+                        // A function the declaration of a local calls,
+                        // `real :: w(f(n))`, is called on entry.
+                        std::vector<SymbolTable*> scopes;
+                        gpu_routine_scopes(fn_impl->m_symtab, scopes);
+                        for (SymbolTable *scope : scopes) {
+                            for (auto &local : scope->get_scope()) {
+                                if (ASR::is_a<ASR::Variable_t>(
+                                        *local.second)) {
+                                    transitive_collector.visit_symbol(
+                                        *local.second);
+                                }
+                            }
+                        }
                     }
                 }
                 for (auto &[name, sym] : transitive_collector.functions) {
-                    if (func_collector.functions.find(name) ==
-                            func_collector.functions.end()) {
-                        func_collector.functions[name] = sym;
-                        added = true;
-                    }
+                    if (func_collector.add(name, sym)) added = true;
                 }
             }
         }
         ASRUtils::SymbolDuplicator sym_dup(al);
+        auto copy_procedure = [&](ASR::Function_t *orig,
+                SymbolTable *dest) -> ASR::symbol_t* {
+            ASR::symbol_t *dup = sym_dup.duplicate_Function(orig, dest);
+            if (dup) {
+                gpu_rebind_host_association(orig,
+                    ASR::down_cast<ASR::Function_t>(dup));
+                inline_entry_initialized_locals(al, dup, &orig->base);
+            }
+            return dup;
+        };
+        // A procedure contained in a procedure copied here comes with the
+        // copy of its host, which its host's calls name; a copy of it on
+        // its own would reference the original host's entities.
+        std::set<ASR::symbol_t*> copied_hosts;
+        for (auto &item : func_collector.functions) {
+            ASR::symbol_t *resolved =
+                ASRUtils::symbol_get_past_external(item.second);
+            copied_hosts.insert(resolved);
+            if (ASR::is_a<ASR::Function_t>(*resolved)) {
+                copied_hosts.insert(&resolve_function_implementation(
+                    ASR::down_cast<ASR::Function_t>(resolved))->base);
+            }
+        }
+        auto has_copied_host = [&](ASR::symbol_t *sym) {
+            for (SymbolTable *s = ASRUtils::symbol_parent_symtab(sym);
+                    s != nullptr; s = s->parent) {
+                if (s->asr_owner
+                        && s->asr_owner->type == ASR::asrType::symbol
+                        && copied_hosts.count(
+                            ASR::down_cast<ASR::symbol_t>(s->asr_owner))) {
+                    return true;
+                }
+            }
+            return false;
+        };
         for (auto &[func_name, func_sym] : func_collector.functions) {
             ASR::symbol_t *resolved =
                 ASRUtils::symbol_get_past_external(func_sym);
-            if (kernel_scope->get_symbol(func_name)) {
+            if (ASR::is_a<ASR::Function_t>(*resolved)
+                    && has_copied_host(resolved)) {
+                continue;
+            }
+            // A copy of another procedure of this name, imported
+            // above, does not stand for this one.
+            ASR::symbol_t *existing = kernel_scope->get_symbol(func_name);
+            bool existing_is_other_copy =
+                copied_procedures.count(existing) > 0;
+            if (existing && !existing_is_other_copy) {
                 // ExternalSymbol already created (e.g., by
                 // import_struct_def). Still need to import the
                 // function body for StructMethodDeclaration calls
@@ -1344,17 +1677,22 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
                 // name (e.g., both have "my_construct"), the first
                 // gets added under real_name. For subsequent
                 // collisions, sanitize the ExternalSymbol name to
-                // a valid C identifier to disambiguate.
+                // a valid C identifier to disambiguate, and make it
+                // unique if that is taken too.
                 std::string dup_name = real_name;
                 if (kernel_scope->get_symbol(real_name)) {
                     dup_name = func_name;
                     for (char &c : dup_name) {
                         if (c == '~' || c == '@') c = '_';
                     }
+                    if (kernel_scope->get_symbol(dup_name)) {
+                        dup_name = kernel_scope->get_unique_name(
+                            dup_name, false);
+                    }
                 }
-                if (!kernel_scope->get_symbol(dup_name)) {
+                {
                     ASR::symbol_t *dup =
-                        sym_dup.duplicate_Function(
+                        copy_procedure(
                             ASR::down_cast<ASR::Function_t>(
                                 resolved),
                             kernel_scope);
@@ -1362,6 +1700,10 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
                         ASR::down_cast<ASR::Function_t>(dup)
                             ->m_name = s2c(al, dup_name);
                         kernel_scope->add_symbol(dup_name, dup);
+                        procedure_copies[ASRUtils::symbol_get_past_external(
+                            func_sym)] = dup;
+                        procedure_copies[resolved] = dup;
+                        copied_procedures.insert(dup);
                         // The duplicated function still references
                         // the module's struct definitions. Remap
                         // ExternalSymbol targets and Variable
@@ -1402,11 +1744,28 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
                         continue;
                     }
                 }
-                ASR::symbol_t *dup = sym_dup.duplicate_Function(
-                    ASR::down_cast<ASR::Function_t>(resolved),
+                // A separate module procedure a routine of its module
+                // calls is named by its interface, whose body is in a
+                // submodule.
+                ASR::Function_t *implementation =
+                    resolve_function_implementation(
+                        ASR::down_cast<ASR::Function_t>(resolved));
+                ASR::symbol_t *dup = copy_procedure(implementation,
                     kernel_scope);
                 if (dup) {
-                    kernel_scope->add_symbol(func_name, dup);
+                    // A procedure of another scope can have the name of
+                    // one imported already.
+                    std::string dup_name = func_name;
+                    if (kernel_scope->get_symbol(dup_name)) {
+                        dup_name = kernel_scope->get_unique_name(dup_name,
+                            false);
+                        ASR::down_cast<ASR::Function_t>(dup)->m_name =
+                            s2c(al, dup_name);
+                    }
+                    kernel_scope->add_symbol(dup_name, dup);
+                    procedure_copies[resolved] = dup;
+                    procedure_copies[&implementation->base] = dup;
+                    copied_procedures.insert(dup);
                 }
             } else if (ASR::is_a<ASR::StructMethodDeclaration_t>(
                            *resolved)) {
@@ -1476,10 +1835,19 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
                         ASR::down_cast<ASR::Function_t>(proc_sym);
                     std::string pname =
                         ASRUtils::symbol_name(proc_sym);
+                    // The kernel's copy of the procedure, found by
+                    // identity: a procedure bound to a type of another
+                    // module can have its name.
+                    ASR::symbol_t *kernel_func = nullptr;
+                    auto known = procedure_copies.find(proc_sym);
+                    if (known != procedure_copies.end()) {
+                        kernel_func = known->second;
+                    }
                     ASR::symbol_t *existing =
                         kernel_scope->get_symbol(pname);
-                    bool already_has_body = false;
-                    if (existing &&
+                    bool already_has_body = kernel_func != nullptr;
+                    if (!kernel_func && existing &&
+                            !copied_procedures.count(existing) &&
                             ASR::is_a<ASR::Function_t>(*existing)) {
                         ASR::FunctionType_t *eft =
                             ASR::down_cast<ASR::FunctionType_t>(
@@ -1489,10 +1857,29 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
                         if (eft->m_deftype ==
                                 ASR::deftypeType::Implementation) {
                             already_has_body = true;
+                            kernel_func = existing;
                         }
                     }
+                    // The copy is added under the procedure's name,
+                    // unless that names the copy of another procedure.
+                    std::string copy_name = pname;
+                    auto add_copy = [&](ASR::Function_t *impl) {
+                        ASR::symbol_t *dup =
+                            copy_procedure(impl, kernel_scope);
+                        if (!dup) return;
+                        ASR::down_cast<ASR::Function_t>(dup)->m_name =
+                            s2c(al, copy_name);
+                        kernel_scope->add_symbol(copy_name, dup);
+                        procedure_copies[proc_sym] = dup;
+                        procedure_copies[&impl->base] = dup;
+                        copied_procedures.insert(dup);
+                        kernel_func = dup;
+                    };
                     if (!already_has_body) {
-                        if (existing) {
+                        if (existing && copied_procedures.count(existing)) {
+                            copy_name = kernel_scope->get_unique_name(
+                                pname, false);
+                        } else if (existing) {
                             kernel_scope->erase_symbol(pname);
                         }
                         ASR::FunctionType_t *ftype =
@@ -1527,13 +1914,7 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
                                 if (impl_ft->m_deftype !=
                                         ASR::deftypeType::Implementation)
                                     continue;
-                                ASR::symbol_t *dup =
-                                    sym_dup.duplicate_Function(
-                                        impl_func, kernel_scope);
-                                if (dup) {
-                                    kernel_scope->add_symbol(
-                                        pname, dup);
-                                }
+                                add_copy(impl_func);
                                 found = true;
                                 break;
                             }
@@ -1644,16 +2025,7 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
                                                     deftypeType::
                                                     Implementation)
                                                 continue;
-                                            ASR::symbol_t *dup =
-                                                sym_dup
-                                                    .duplicate_Function(
-                                                    impl_func,
-                                                    kernel_scope);
-                                            if (dup) {
-                                                kernel_scope
-                                                    ->add_symbol(
-                                                        pname, dup);
-                                            }
+                                            add_copy(impl_func);
                                             found = true;
                                             break;
                                         }
@@ -1671,20 +2043,16 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
                             }
                         } else {
                             // Non-submodule: function has a body.
-                            ASR::symbol_t *dup =
-                                sym_dup.duplicate_Function(
-                                    proc_func, kernel_scope);
-                            if (dup) {
-                                kernel_scope->add_symbol(pname, dup);
-                            }
+                            add_copy(proc_func);
                         }
                     }
                     // Update the StructMethodDeclaration in the
                     // kernel's struct to point to the kernel-scope
                     // function copy instead of the original module
                     // interface (which may have no body).
-                    ASR::symbol_t *kernel_func =
-                        kernel_scope->get_symbol(pname);
+                    if (!kernel_func && copy_name == pname) {
+                        kernel_func = kernel_scope->get_symbol(pname);
+                    }
                     if (kernel_func) {
                         SymbolTable *method_st =
                             ASRUtils::symbol_parent_symtab(resolved);
@@ -1739,99 +2107,202 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
                 item.second);
             fixup_struct_refs_in_scope(dfunc->m_symtab,
                 kernel_scope, s2c(al, kernel_name));
+            if (copied_procedures.count(item.second)) {
+                import_folded_struct_constants(dfunc->m_body,
+                    dfunc->n_body, orig_scope, kernel_scope, loc);
+                import_folded_struct_constants(dfunc->m_symtab,
+                    orig_scope, kernel_scope, loc);
+            }
+        }
+    }
+
+    // The kernel's copies of procedures and every procedure they contain,
+    // contained ones first.
+    std::vector<ASR::Function_t*> kernel_funcs;
+    std::function<void(SymbolTable*)> collect_funcs =
+            [&](SymbolTable *scope) {
+        for (auto &item : scope->get_scope()) {
+            if (!ASR::is_a<ASR::Function_t>(*item.second)) continue;
+            ASR::Function_t *f = ASR::down_cast<ASR::Function_t>(
+                item.second);
+            collect_funcs(f->m_symtab);
+            kernel_funcs.push_back(f);
+        }
+    };
+    collect_funcs(kernel_scope);
+
+    // A procedure of a module read from its module file is an external
+    // declaration on the host (ExternalUndefined), which the passes need
+    // not prepare for code generation: they drop the values of its
+    // variables, the named constants included. Its copy in the kernel,
+    // and every procedure the copy contains, is the definition the
+    // device code is generated from.
+    for (ASR::Function_t *f : kernel_funcs) {
+        ASR::FunctionType_t *ftype = ASRUtils::get_FunctionType(f);
+        if (ftype->m_abi == ASR::abiType::ExternalUndefined
+                && ftype->m_deftype == ASR::deftypeType::Implementation) {
+            ftype->m_abi = ASR::abiType::Source;
         }
     }
 
     // Fix dangling variable references in duplicated kernel functions.
-    // When a contained function references variables from the original
-    // enclosing scope (e.g., a program-scope Parameter used by a
-    // contained function), the duplicated function body retains the
-    // original Var references which are unreachable from the kernel.
-    // For Parameter variables, clone them into the function's scope.
-    // For other variables, add them as extra kernel parameters.
+    // When a copied procedure references entities of the scope its
+    // original was defined in (e.g., a variable of its module, or a
+    // program-scope Parameter used by a contained function), the
+    // duplicated function body retains the original Var references
+    // which are unreachable from the kernel. An entity the kernel
+    // already receives is read through its kernel parameter. Otherwise,
+    // Parameter variables are cloned into the function's scope and other
+    // variables are added as extra kernel parameters, whose actual
+    // argument names the entity itself from the caller, imported there
+    // if the caller cannot name it.
     {
-        for (auto &item : kernel_scope->get_scope()) {
-            if (!ASR::is_a<ASR::Function_t>(*item.second)) continue;
-            ASR::Function_t *func = ASR::down_cast<ASR::Function_t>(
-                item.second);
+        // An entity that cannot become a kernel parameter declines the
+        // loop once the search for dangling references stops.
+        GpuDecline param_decline;
+        // The entity of the caller that the kernel symbol `name` stands
+        // for, if any.
+        auto host_entity = [&](const std::string &name) -> ASR::symbol_t* {
+            ASR::symbol_t *host_sym = orig_scope->resolve_symbol(name);
+            return host_sym ? ASRUtils::symbol_get_past_external(host_sym)
+                : nullptr;
+        };
+        std::map<ASR::symbol_t*, ASR::symbol_t*> entity_params;
+        auto kernel_symbol_of = [&](ASR::symbol_t *entity)
+                -> ASR::symbol_t* {
+            auto it = entity_params.find(entity);
+            if (it != entity_params.end()) return it->second;
+            for (auto &item : kernel_scope->get_scope()) {
+                if (ASR::is_a<ASR::Variable_t>(*item.second)
+                        && host_entity(item.first) == entity) {
+                    return item.second;
+                }
+            }
+            return nullptr;
+        };
+        for (ASR::Function_t *func : kernel_funcs) {
+            // The declarations of its variables, such as the expression
+            // a named constant is declared with or an array bound, can
+            // name such entities as well as its body.
+            std::vector<ASR::symbol_t*> local_vars;
+            for (auto &item : func->m_symtab->get_scope()) {
+                if (ASR::is_a<ASR::Variable_t>(*item.second)) {
+                    local_vars.push_back(item.second);
+                }
+            }
             DanglingVarCollector dvc(func->m_symtab);
             for (size_t bi = 0; bi < func->n_body; bi++) {
                 dvc.visit_stmt(*func->m_body[bi]);
             }
+            for (ASR::symbol_t *v : local_vars) {
+                dvc.visit_symbol(*v);
+            }
             if (dvc.dangling.empty()) continue;
 
-            std::set<std::string> fixed_names;
-            for (auto &[name, orig_sym] : dvc.dangling) {
+            std::map<ASR::symbol_t*, ASR::symbol_t*> replacements;
+            for (ASR::symbol_t *orig_sym : dvc.dangling) {
                 ASR::symbol_t *resolved_sym =
                     ASRUtils::symbol_get_past_external(orig_sym);
                 if (!ASR::is_a<ASR::Variable_t>(*resolved_sym)) continue;
                 ASR::Variable_t *orig_var =
                     ASR::down_cast<ASR::Variable_t>(resolved_sym);
+                std::string name = ASRUtils::symbol_name(orig_sym);
+                if (ASR::symbol_t *ksym = kernel_symbol_of(resolved_sym)) {
+                    replacements[orig_sym] = ksym;
+                    continue;
+                }
+                param_decline = gpu_entity_decline(orig_var->m_type,
+                    resolved_sym);
+                if (param_decline.declined()) break;
                 if (orig_var->m_storage ==
                         ASR::storage_typeType::Parameter) {
+                    // Its value, rather than the expression it was
+                    // declared with, which names other constants of the
+                    // original scope.
+                    std::string local_name =
+                        func->m_symtab->get_unique_name(name, false);
+                    ASR::symbol_t *type_decl = import_struct_type(
+                        resolved_sym, orig_scope, kernel_scope, loc);
+                    ASR::expr_t *value = orig_var->m_value;
+                    if (type_decl) {
+                        value = import_constant_value(value, orig_scope,
+                            kernel_scope, loc);
+                    }
                     ASR::symbol_t *new_var =
                         ASR::down_cast<ASR::symbol_t>(
                             ASRUtils::make_Variable_t_util(al, loc,
-                                func->m_symtab, s2c(al, name),
+                                func->m_symtab, s2c(al, local_name),
                                 nullptr, 0,
                                 ASR::intentType::Local,
-                                orig_var->m_symbolic_value,
-                                orig_var->m_value,
+                                value ? value
+                                    : orig_var->m_symbolic_value,
+                                value,
                                 ASR::storage_typeType::Parameter,
                                 ASRUtils::duplicate_type(al,
                                     orig_var->m_type),
-                                nullptr, orig_var->m_abi,
+                                type_decl,
+                                orig_var->m_abi,
                                 orig_var->m_access,
                                 ASR::presenceType::Required, false));
-                    func->m_symtab->add_symbol(name, new_var);
-                    fixed_names.insert(name);
+                    func->m_symtab->add_symbol(local_name, new_var);
+                    replacements[orig_sym] = new_var;
                 } else {
-                    if (!kernel_scope->get_symbol(name)) {
-                        ASR::ttype_t *dup_type =
-                            ASRUtils::duplicate_type(al,
-                                ASRUtils::type_get_past_allocatable(
-                                    orig_var->m_type));
-                        SetChar deps_vec;
-                        deps_vec.reserve(al, 1);
-                        ASRUtils::collect_variable_dependencies(
-                            al, deps_vec, dup_type, nullptr,
-                            nullptr, name);
-                        ASR::symbol_t *param =
-                            ASR::down_cast<ASR::symbol_t>(
-                                ASRUtils::make_Variable_t_util(al,
-                                    loc, kernel_scope,
-                                    s2c(al, name),
-                                    deps_vec.p, deps_vec.size(),
-                                    ASR::intentType::InOut,
-                                    nullptr, nullptr,
-                                    ASR::storage_typeType::Default,
-                                    dup_type, nullptr,
-                                    ASR::abiType::Source,
-                                    ASR::accessType::Public,
-                                    ASR::presenceType::Required,
-                                    false));
-                        kernel_scope->add_symbol(name, param);
-                        kernel_args.push_back(al,
-                            ASRUtils::EXPR(ASR::make_Var_t(
-                                al, loc, param)));
-                        ASR::symbol_t *host_sym =
-                            orig_scope->resolve_symbol(name);
-                        ASR::call_arg_t carg;
-                        carg.loc = loc;
-                        carg.m_value = ASRUtils::EXPR(
-                            ASR::make_Var_t(al, loc,
-                                host_sym ? host_sym : orig_sym));
-                        call_args.push_back(al, carg);
-                    }
-                    fixed_names.insert(name);
+                    std::string param_name =
+                        kernel_scope->get_unique_name(name, false);
+                    ASR::ttype_t *dup_type =
+                        ASRUtils::duplicate_type(al,
+                            ASRUtils::type_get_past_allocatable(
+                                orig_var->m_type));
+                    SetChar deps_vec;
+                    deps_vec.reserve(al, 1);
+                    ASRUtils::collect_variable_dependencies(
+                        al, deps_vec, dup_type, nullptr,
+                        nullptr, param_name);
+                    ASR::symbol_t *param =
+                        ASR::down_cast<ASR::symbol_t>(
+                            ASRUtils::make_Variable_t_util(al,
+                                loc, kernel_scope,
+                                s2c(al, param_name),
+                                deps_vec.p, deps_vec.size(),
+                                ASR::intentType::InOut,
+                                nullptr, nullptr,
+                                ASR::storage_typeType::Default,
+                                dup_type,
+                                import_struct_type(resolved_sym,
+                                    orig_scope, kernel_scope, loc),
+                                ASR::abiType::Source,
+                                ASR::accessType::Public,
+                                ASR::presenceType::Required,
+                                false));
+                    kernel_scope->add_symbol(param_name, param);
+                    kernel_args.push_back(al,
+                        ASRUtils::EXPR(ASR::make_Var_t(
+                            al, loc, param)));
+                    ASR::call_arg_t carg;
+                    carg.loc = loc;
+                    carg.m_value = ASRUtils::EXPR(
+                        ASR::make_Var_t(al, loc,
+                            ASRUtils::import_symbol(al, orig_sym,
+                                orig_scope)));
+                    call_args.push_back(al, carg);
+                    entity_params[resolved_sym] = param;
+                    replacements[orig_sym] = param;
                 }
             }
-            if (!fixed_names.empty()) {
-                DanglingVarFixer fixer(func->m_symtab, fixed_names);
+            if (param_decline.declined()) break;
+            if (!replacements.empty()) {
+                DanglingVarFixer fixer(replacements);
                 for (size_t bi = 0; bi < func->n_body; bi++) {
                     fixer.visit_stmt(*func->m_body[bi]);
                 }
+                for (ASR::symbol_t *v : local_vars) {
+                    fixer.visit_symbol(*v);
+                }
             }
+        }
+        if (param_decline.declined()) {
+            report_not_offloaded(loc, param_decline);
+            return;
         }
     }
 
@@ -1845,6 +2316,49 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
     // them (e.g., type-bound procedure calls in associate blocks)
     // still point to the original scope after duplication.
     {
+        // The procedures a routine contains were copied with it and call
+        // the kernel's copies as well. The entities of the routine and of
+        // its hosts are named through their own scopes already.
+        std::function<void(ASR::Function_t&, std::set<SymbolTable*>)>
+        remap_routine_calls = [&](ASR::Function_t &fn,
+                std::set<SymbolTable*> host_scopes) {
+            host_scopes.insert(fn.m_symtab);
+            GpuReplaceSymbolsVisitor fn_replacer(*kernel_scope);
+            fn_replacer.replacer.skip_scopes = host_scopes;
+            fn_replacer.replacer.procedure_copies = &procedure_copies;
+            for (size_t bi = 0; bi < fn.n_body; bi++) {
+                fn_replacer.visit_stmt(*fn.m_body[bi]);
+            }
+            // A construct nested in another one has its scope in that
+            // construct's, not in the routine's.
+            std::vector<SymbolTable*> construct_scopes;
+            gpu_routine_scopes(fn.m_symtab, construct_scopes);
+            for (SymbolTable *scope : construct_scopes) {
+                if (scope == fn.m_symtab) continue;
+                ASR::symbol_t *construct =
+                    ASR::down_cast<ASR::symbol_t>(scope->asr_owner);
+                if (ASR::is_a<ASR::AssociateBlock_t>(*construct)) {
+                    ASR::AssociateBlock_t *ab =
+                        ASR::down_cast<ASR::AssociateBlock_t>(construct);
+                    for (size_t bi = 0; bi < ab->n_body; bi++) {
+                        fn_replacer.visit_stmt(*ab->m_body[bi]);
+                    }
+                } else if (ASR::is_a<ASR::Block_t>(*construct)) {
+                    ASR::Block_t *block =
+                        ASR::down_cast<ASR::Block_t>(construct);
+                    for (size_t bi = 0; bi < block->n_body; bi++) {
+                        fn_replacer.visit_stmt(*block->m_body[bi]);
+                    }
+                }
+            }
+            for (auto &fn_item : fn.m_symtab->get_scope()) {
+                if (ASR::is_a<ASR::Function_t>(*fn_item.second)) {
+                    remap_routine_calls(
+                        *ASR::down_cast<ASR::Function_t>(fn_item.second),
+                        host_scopes);
+                }
+            }
+        };
         for (auto &item : kernel_scope->get_scope()) {
             if (!ASR::is_a<ASR::Function_t>(*item.second)) continue;
             ASR::Function_t *func = ASR::down_cast<ASR::Function_t>(
@@ -1855,29 +2369,29 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
             // left naming the original. Point every such extent at the
             // copy's own symbols.
             retarget_local_extents(func->m_symtab);
-            GpuReplaceSymbolsVisitor fn_replacer(*kernel_scope);
-            fn_replacer.replacer.skip_scopes.insert(func->m_symtab);
-            for (size_t bi = 0; bi < func->n_body; bi++) {
-                fn_replacer.visit_stmt(*func->m_body[bi]);
-            }
-            for (auto &fn_item : func->m_symtab->get_scope()) {
-                if (ASR::is_a<ASR::AssociateBlock_t>(
-                        *fn_item.second)) {
-                    ASR::AssociateBlock_t *ab =
-                        ASR::down_cast<ASR::AssociateBlock_t>(
-                            fn_item.second);
-                    for (size_t bi = 0; bi < ab->n_body; bi++) {
-                        fn_replacer.visit_stmt(*ab->m_body[bi]);
-                    }
-                } else if (ASR::is_a<ASR::Block_t>(
-                               *fn_item.second)) {
-                    ASR::Block_t *block =
-                        ASR::down_cast<ASR::Block_t>(fn_item.second);
-                    for (size_t bi = 0; bi < block->n_body; bi++) {
-                        fn_replacer.visit_stmt(*block->m_body[bi]);
-                    }
-                }
-            }
+            retarget_declaration_calls(func->m_symtab, *kernel_scope);
+            // `sum(f(x))` in a routine becomes a loop, as in the loop body,
+            // so that it needs no temporary for the array `f` returns. The
+            // routine is the kernel's own copy: the host's is left as it is.
+            inline_sum_in_stmts(func->m_body, func->n_body, func->m_symtab);
+            gather_strided_sections_in_routine(*func);
+            remap_routine_calls(*func, {});
+        }
+    }
+
+    for (auto &item : kernel_scope->get_scope()) {
+        if (ASR::is_a<ASR::Function_t>(*item.second)) {
+            gpu_alias_scalar_associate_names(al,
+                *ASR::down_cast<ASR::Function_t>(item.second));
+        }
+    }
+
+    // Which allocatable dummies a routine hands on to another routine is
+    // read from the calls, so they have to name the kernel's copies first.
+    for (auto &item : kernel_scope->get_scope()) {
+        if (ASR::is_a<ASR::Function_t>(*item.second)) {
+            plain_allocatable_dummies(
+                ASR::down_cast<ASR::Function_t>(item.second));
         }
     }
 
@@ -1942,11 +2456,44 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
     }
 
     ASR::ttype_t *loop_int_type = ASRUtils::expr_type(work.head(0).m_v);
+    // The iterations are numbered in a type at least as wide as every loop
+    // index, so an integer(8) index keeps 64-bit index arithmetic in a nest
+    // that mixes it with integer(4) ones.
+    ASR::ttype_t *widest_index_type = loop_int_type;
+    for (size_t d = 1; d < n_dims; d++) {
+        ASR::ttype_t *type = ASRUtils::expr_type(work.head(d).m_v);
+        if (ASRUtils::extract_kind_from_ttype_t(type)
+                > ASRUtils::extract_kind_from_ttype_t(widest_index_type)) {
+            widest_index_type = type;
+        }
+    }
+    ASR::ttype_t *index_type = gpu_iteration_number_type(al, loc,
+        widest_index_type, device_caps);
+    // Unlike the launch's widen (gpu_offload_launch.cpp), this does not copy
+    // `value`: it widens kernel-scope expressions built for the kernel.
+    auto widen = [&](ASR::expr_t *value) {
+        if (ASRUtils::extract_kind_from_ttype_t(ASRUtils::expr_type(value))
+                == ASRUtils::extract_kind_from_ttype_t(index_type)) {
+            return value;
+        }
+        int64_t constant = 0;
+        if (ASRUtils::extract_value(ASRUtils::expr_value(value), constant)) {
+            return ASRUtils::EXPR(ASR::make_IntegerConstant_t(al, loc,
+                constant, index_type, ASR::integerbozType::Decimal));
+        }
+        return ASRUtils::EXPR(ASR::make_Cast_t(al, loc, value,
+            ASR::cast_kindType::IntegerToInteger, index_type, nullptr,
+            nullptr));
+    };
 
     // Save host-side head expressions BEFORE in-place replacement
     std::vector<DimInfo> dim_info;
+    // The kind of each loop index, which bounds the values it takes.
+    std::vector<int> index_kinds;
     for (size_t d = 0; d < n_dims; d++) {
         dim_info.push_back({work.head(d).m_start, work.head(d).m_end});
+        index_kinds.push_back(ASRUtils::extract_kind_from_ttype_t(
+            ASRUtils::expr_type(work.head(d).m_v)));
     }
 
     // Deep-copy the body statements so that in-place symbol remapping
@@ -1985,6 +2532,18 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
             decomp_visitor.visit_stmt(*body_copy.p[i]);
         }
     }
+    privatize_liveout_body(loc, kernel_scope, body_copy, liveouts);
+
+    // The kernel parameter that holds the accumulators of a reduction, or
+    // nullptr when it has none (the body never references its variable).
+    auto accumulators_of = [&](const GpuReductionInfo &r) -> ASR::symbol_t* {
+        return r.host_buf_sym ? kernel_scope->get_symbol(r.orig_name)
+            : nullptr;
+    };
+    bool has_accumulators = std::any_of(pending_reductions.begin(),
+        pending_reductions.end(), [&](const GpuReductionInfo &r) {
+            return accumulators_of(r) != nullptr;
+        });
 
     // The accumulator slot this thread owns. Created here because the
     // substitution below has to run before the body is remapped into
@@ -1992,8 +2551,39 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
     // and what replaces it already names the kernel's buffer, so the
     // replacement contains nothing that would be replaced again.
     ASR::expr_t *slot_index = nullptr;
+    // A launch with a reduction runs a grid-stride loop (see below), unless
+    // a cycle of the offloaded loop ends the thread, which would skip the
+    // thread's later iterations, or a scalar it assigns is live after it.
+    // A thread then accumulates in a local variable, which it combines into
+    // its slot once, after the loop: in the slot itself every iteration
+    // would read and write memory.
+    bool strided = false;
+    if (has_accumulators && liveouts.scalars.empty()) {
+        GpuOffloadedLoopLeaves cycles(nullptr);
+        cycles.transform_stmts(body_copy.p, body_copy.n);
+        strided = cycles.offloaded_cycles == 0;
+    }
+    // On a device whose warps combine values, the threads of a warp fold
+    // their accumulators with shuffles and the warp owns one slot, for the
+    // operations and types the shuffle combines.
+    bool warp_slots = strided && device_caps.reduction_warp_slots;
+    for (auto &r : pending_reductions) {
+        if (!warp_slots || !accumulators_of(r)) continue;
+        warp_slots = (r.op == ASR::reduction_opType::ReduceAdd
+                || r.op == ASR::reduction_opType::ReduceMul
+                || r.op == ASR::reduction_opType::ReduceMIN
+                || r.op == ASR::reduction_opType::ReduceMAX)
+            && (ASRUtils::is_real(*r.scalar_type)
+                || ASRUtils::is_integer(*r.scalar_type))
+            && (ASRUtils::extract_kind_from_ttype_t(r.scalar_type) == 4
+                || ASRUtils::extract_kind_from_ttype_t(r.scalar_type) == 8);
+    }
+    // The local accumulator of each reduction of a grid-stride loop, in the
+    // order of pending_reductions (nullptr for one the body never uses).
+    std::vector<ASR::expr_t*> local_accumulators(pending_reductions.size(),
+        nullptr);
     if (!pending_reductions.empty()) {
-        ASR::ttype_t *slot_type = ASRUtils::duplicate_type(al, loop_int_type);
+        ASR::ttype_t *slot_type = ASRUtils::duplicate_type(al, index_type);
         gpu_new_variable(al, loc, kernel_scope, "__gpu_slot",
             ASRUtils::duplicate_type(al, slot_type));
         slot_index = ASRUtils::EXPR(ASR::make_IntegerBinOp_t(al, loc,
@@ -2005,12 +2595,20 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
                 ASR::integerbozType::Decimal)),
             ASRUtils::duplicate_type(al, slot_type), nullptr));
         std::map<ASR::symbol_t*, ASR::expr_t*> slot_map;
-        for (auto &r : pending_reductions) {
-            if (!r.host_buf_sym) continue;
-            ASR::symbol_t *param = kernel_scope->get_symbol(r.orig_name);
+        for (size_t ri = 0; ri < pending_reductions.size(); ri++) {
+            auto &r = pending_reductions[ri];
+            ASR::symbol_t *param = accumulators_of(r);
             if (!param) continue;
-            slot_map[r.orig_scalar_sym] = gpu_reduction_slot(al, loc,
-                param, slot_index, r.scalar_type);
+            if (strided) {
+                local_accumulators[ri] = ASRUtils::EXPR(ASR::make_Var_t(al,
+                    loc, gpu_new_variable(al, loc, kernel_scope,
+                        kernel_scope->get_unique_name("__gpu_accumulator"),
+                        ASRUtils::duplicate_type(al, r.scalar_type))));
+                slot_map[r.orig_scalar_sym] = local_accumulators[ri];
+            } else {
+                slot_map[r.orig_scalar_sym] = gpu_reduction_slot(al, loc,
+                    param, slot_index, r.scalar_type);
+            }
         }
         if (!slot_map.empty()) {
             AssociateVarResolverVisitor slot_replacer(al, slot_map);
@@ -2022,9 +2620,12 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
 
     // 3. Replace Var references in copied body to point to kernel scope
     GpuReplaceSymbolsVisitor sym_replacer(*kernel_scope);
+    sym_replacer.replacer.procedure_copies = &procedure_copies;
     for (size_t i = 0; i < body_copy.n; i++) {
         sym_replacer.visit_stmt(*body_copy.p[i]);
     }
+    import_folded_struct_constants(body_copy.p, body_copy.n, orig_scope,
+        kernel_scope, loc);
 
     // 4. Build kernel body
     Vec<ASR::stmt_t*> kernel_body;
@@ -2032,19 +2633,60 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
 
     ASR::ttype_t *int_type = loop_int_type;
 
+    // The device's thread and block built-ins are 32-bit whatever the kind
+    // of the loop indices, so they are integer(4) and widen() casts them to
+    // the iteration-number type before any arithmetic: typed as integer(8)
+    // indices, they would be multiplied unwidened and wrap at 2**32.
+    ASR::ttype_t *builtin_type = ASRUtils::TYPE(
+        ASR::make_Integer_t(al, loc, 4));
     ASR::expr_t *thread_idx = ASRUtils::EXPR(
-        ASR::make_GpuThreadIndex_t(al, loc, 0, int_type, nullptr));
+        ASR::make_GpuThreadIndex_t(al, loc, 0, builtin_type, nullptr));
     ASR::expr_t *block_idx = ASRUtils::EXPR(
-        ASR::make_GpuBlockIndex_t(al, loc, 0, int_type, nullptr));
+        ASR::make_GpuBlockIndex_t(al, loc, 0, builtin_type, nullptr));
     ASR::expr_t *block_sz = ASRUtils::EXPR(
-        ASR::make_GpuBlockSize_t(al, loc, 0, int_type, nullptr));
+        ASR::make_GpuBlockSize_t(al, loc, 0, builtin_type, nullptr));
+    // `op` of the thread index and a constant, in the built-ins' type.
+    auto thread_idx_op = [&](ASR::binopType op, int64_t value) {
+        return ASRUtils::EXPR(ASR::make_IntegerBinOp_t(al, loc, thread_idx,
+            op, ASRUtils::EXPR(ASR::make_IntegerConstant_t(al, loc, value,
+                builtin_type, ASR::integerbozType::Decimal)),
+            builtin_type, nullptr));
+    };
 
-    // flat_idx = block_idx * block_size + thread_idx
-    ASR::expr_t *flat_idx = ASRUtils::EXPR(
-        ASR::make_IntegerBinOp_t(al, loc,
-            ASRUtils::EXPR(ASR::make_IntegerBinOp_t(al, loc,
-                block_idx, ASR::binopType::Mul, block_sz, int_type, nullptr)),
-            ASR::binopType::Add, thread_idx, int_type, nullptr));
+    auto index_binop = [&](ASR::expr_t *left, ASR::binopType op,
+            ASR::expr_t *right) {
+        return ASRUtils::EXPR(ASR::make_IntegerBinOp_t(al, loc,
+            left, op, right, index_type, nullptr));
+    };
+    // ASR has no integer remainder operator: a - (a/b)*b.
+    auto index_mod = [&](ASR::expr_t *left, ASR::expr_t *right) {
+        return index_binop(left, ASR::binopType::Sub, index_binop(
+            index_binop(left, ASR::binopType::Div, right),
+            ASR::binopType::Mul, right));
+    };
+    // A loop index, recovered from the iteration number by adding its start
+    // to its ordinal in the iteration-number type, fits its kind.
+    auto narrow = [&](ASR::expr_t *value) {
+        if (ASRUtils::extract_kind_from_ttype_t(index_type)
+                == ASRUtils::extract_kind_from_ttype_t(int_type)) {
+            return value;
+        }
+        return ASRUtils::EXPR(ASR::make_Cast_t(al, loc, value,
+            ASR::cast_kindType::IntegerToInteger, int_type, nullptr,
+            nullptr));
+    };
+
+    // flat_idx = block_idx * block_size + thread_idx, in the type that
+    // numbers the iterations: the product of the device's (unsigned 32-bit)
+    // built-ins would wrap. Numbered in integer(4) (gpu_iteration_number_type)
+    // it fits: one launch starts at most the chunk limit's threads, at most
+    // huge(0), rounded up to whole blocks of a power of two, so its largest
+    // thread number is at most huge(0) (gpu_offload_launch.cpp). A launch
+    // that runs an iteration on several lanes starts at most huge(0) threads
+    // as well (pass_gpu_vector_lanes).
+    ASR::expr_t *flat_idx = index_binop(index_binop(widen(block_idx),
+        ASR::binopType::Mul, widen(block_sz)), ASR::binopType::Add,
+        widen(thread_idx));
 
     // For multi-dimensional: linearize index
     // For an iteration space (i=1:m, j=1:n, k=1:p):
@@ -2059,15 +2701,106 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
     // ArrayBound/ArraySize on allocatable arrays that cannot be
     // correctly evaluated in the kernel scope), pass the loop
     // bounds as pre-computed scalar parameters from the host.
+    // A nest of two or more dimensions can be launched in tiles where the
+    // device asks for them (GpuDeviceCapabilities::tile_width): a block
+    // covers tile_width iterations of the fastest dimension by the rest of
+    // its threads along a second one, the dimension the stores step through
+    // next in memory (or else the next one in loop order), and the block
+    // index numbers the tiles. The launch runs whole tiles, and a thread of
+    // a partial tile that falls outside the nest returns. Where whole tiles
+    // would pad the nest by more than a quarter, as a short dimension
+    // does, the launch passes __tiled = 0 instead and the kernel numbers
+    // the iterations flat, one thread each (gpu_offload_launch.cpp). Tile
+    // widths and block sizes are powers of two, so a thread finds its place
+    // in a tile with constant shifts and masks, which a device compiler
+    // folds, and one division of the block index finds the tile. A
+    // reduction keeps the flat numbering, which gives every thread an
+    // accumulator slot.
+    auto is_power_of_two = [](int64_t value) {
+        return value > 0 && (value & (value - 1)) == 0;
+    };
+    bool tiled = device_caps.tile_width > 0 && n_dims >= 2
+        && slot_index == nullptr
+        && is_power_of_two(device_caps.tile_width)
+        && is_power_of_two(device_caps.threads_per_block)
+        && device_caps.threads_per_block % device_caps.tile_width == 0;
+    LCOMPILERS_ASSERT(!(strided && tiled));
+    // The number of iterations and the stride of the grid-stride loop.
+    ASR::expr_t *stride_total = nullptr, *stride_var = nullptr;
+    std::vector<ASR::expr_t*> host_starts, host_ends;
+    for (const DimInfo &dim : dim_info) {
+        host_starts.push_back(dim.host_start);
+        host_ends.push_back(dim.host_end);
+    }
+    // The second dimension iterations are numbered along: `tile_down`, the
+    // one a tile's height runs along, when the launch is tiled, and
+    // `flat_second` otherwise.
+    size_t flat_second = fastest_dimension == 0 ? 1 : 0;
+    size_t tile_down = next_store_dimension != fastest_dimension
+        ? next_store_dimension : flat_second;
+    // Where every extent is a constant, the number of threads a tiled
+    // launch would run is known now, padding included. When it is more than
+    // the chunk limit, the most threads one launch runs, the kernel numbers
+    // the iterations flat, one thread each, as the launch would at run time
+    // anyway (gpu_offload_launch.cpp): the iterations then decide, below,
+    // whether the launch is ever split.
+    if (tiled && gpu_constant_tile_threads(host_starts, host_ends,
+                fastest_dimension, tile_down,
+                device_caps.tile_width, device_caps.threads_per_block)
+                > static_cast<uint64_t>(pass_options.gpu_chunk_limit)) {
+        tiled = false;
+    }
+    // The dimensions in the order the iterations are numbered along: the
+    // fastest first, then the one a tile's height runs along, then the
+    // others in the order the loop names them.
+    std::vector<size_t> order;
+    order.push_back(fastest_dimension);
+    if (n_dims >= 2) {
+        order.push_back(tiled ? tile_down : flat_second);
+    }
+    for (size_t d = 0; d < n_dims; d++) {
+        if (std::find(order.begin(), order.end(), d) == order.end()) {
+            order.push_back(d);
+        }
+    }
+    // A launch with a reduction may run in chunks too: the threads of each
+    // chunk number their accumulators from zero, so the first chunk starts
+    // them and the later ones keep combining into them.
+    int64_t chunk_fixed_iterations = 0;
+    std::vector<bool> splittable = gpu_splittable_dimensions(host_starts,
+        host_ends, index_kinds, order,
+        device_caps.chunked_launches, pass_options.gpu_chunk_limit,
+        chunk_fixed_iterations);
+    std::vector<ASR::symbol_t*> start_parameters(n_dims, nullptr);
+    std::vector<ASR::symbol_t*> end_parameters(n_dims, nullptr);
+
+    // A bound whose value is known at compile time, a literal, a named
+    // constant or a constant expression of them, as gpu_splittable_dimensions
+    // takes it, is that value in the kernel, of the bound's own type: the
+    // device compiler then turns division by a constant extent into a
+    // multiply and shift. nullptr when the value is not known.
+    auto constant_bound = [&](ASR::expr_t *bound) -> ASR::expr_t* {
+        int64_t value = 0;
+        if (!ASRUtils::extract_value(ASRUtils::expr_value(bound), value)) {
+            return nullptr;
+        }
+        return ASRUtils::EXPR(ASR::make_IntegerConstant_t(al, loc, value,
+            ASRUtils::duplicate_type(al, ASRUtils::expr_type(bound)),
+            ASR::integerbozType::Decimal));
+    };
     std::vector<ASR::expr_t*> kernel_starts, kernel_ends;
     for (size_t d = 0; d < n_dims; d++) {
         ASR::expr_t *host_start = dim_info[d].host_start;
         ASR::expr_t *host_end = dim_info[d].host_end;
-        bool start_is_const = ASR::is_a<ASR::IntegerConstant_t>(*host_start);
-        bool end_is_const = ASR::is_a<ASR::IntegerConstant_t>(*host_end);
+        // A dimension a launch may split has the bounds of the chunk it
+        // runs, which the launch passes, even when they are constants.
+        ASR::expr_t *start_constant = splittable[d] ? nullptr
+            : constant_bound(host_start);
+        ASR::expr_t *end_constant = splittable[d] ? nullptr
+            : constant_bound(host_end);
 
-        if (start_is_const) {
-            kernel_starts.push_back(dup_expr_to_scope(host_start, kernel_scope));
+        if (start_constant) {
+            kernel_starts.push_back(start_constant);
         } else {
             std::string name = "__loop_start_" + std::to_string(d);
             ASR::symbol_t *param = gpu_new_variable(al, loc, kernel_scope,
@@ -2081,10 +2814,11 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
             call_args.push_back(al, carg);
             kernel_starts.push_back(
                 ASRUtils::EXPR(ASR::make_Var_t(al, loc, param)));
+            if (splittable[d]) start_parameters[d] = param;
         }
 
-        if (end_is_const) {
-            kernel_ends.push_back(dup_expr_to_scope(host_end, kernel_scope));
+        if (end_constant) {
+            kernel_ends.push_back(end_constant);
         } else {
             std::string name = "__loop_end_" + std::to_string(d);
             ASR::symbol_t *param = gpu_new_variable(al, loc, kernel_scope,
@@ -2098,7 +2832,29 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
             call_args.push_back(al, carg);
             kernel_ends.push_back(
                 ASRUtils::EXPR(ASR::make_Var_t(al, loc, param)));
+            if (splittable[d]) end_parameters[d] = param;
         }
+    }
+
+    // A kernel whose launch may run in chunks and that has accumulators to
+    // start takes a flag that is 1 when the launch runs as one or for its
+    // first chunk, and 0 for the later chunks
+    // (GpuKernelLaunch.first_chunk_parameter). The launch sets it itself
+    // (device_launch_expand.cpp), whatever the argument passed here.
+    ASR::expr_t *first_chunk_flag = nullptr;
+    ASR::symbol_t *first_chunk_parameter = nullptr;
+    if (chunk_fixed_iterations > 0 && has_accumulators) {
+        first_chunk_parameter = gpu_new_variable(al, loc, kernel_scope,
+            "__gpu_first_chunk", ASRUtils::duplicate_type(al, int_type),
+            ASR::intentType::InOut);
+        first_chunk_flag = ASRUtils::EXPR(ASR::make_Var_t(al, loc,
+            first_chunk_parameter));
+        kernel_args.push_back(al, first_chunk_flag);
+        ASR::call_arg_t carg;
+        carg.loc = loc;
+        carg.m_value = ASRUtils::EXPR(ASR::make_IntegerConstant_t(al, loc,
+            1, int_type, ASR::integerbozType::Decimal));
+        call_args.push_back(al, carg);
     }
 
     // Decompose StructInstanceMember references in kernel head
@@ -2128,129 +2884,301 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
         ASR::make_IntegerConstant_t(al, loc, 1, int_type,
             ASR::integerbozType::Decimal));
 
-    // Compute total flat size for guard
-    ASR::expr_t *total_size_kernel = nullptr;
-    for (size_t d = 0; d < n_dims; d++) {
-        // dim_range = kernel_end - kernel_start + 1
-        ASR::expr_t *dim_range = ASRUtils::EXPR(
-            ASR::make_IntegerBinOp_t(al, loc,
-                ASRUtils::EXPR(ASR::make_IntegerBinOp_t(al, loc,
-                    kernel_ends[d], ASR::binopType::Sub,
-                    kernel_starts[d], int_type, nullptr)),
-                ASR::binopType::Add, one_const, int_type, nullptr));
-        if (total_size_kernel == nullptr) {
-            total_size_kernel = dim_range;
-        } else {
-            total_size_kernel = ASRUtils::EXPR(
-                ASR::make_IntegerBinOp_t(al, loc,
-                    total_size_kernel, ASR::binopType::Mul,
-                    dim_range, int_type, nullptr));
-        }
+    auto assign = [&](ASR::expr_t *target, ASR::expr_t *value) {
+        kernel_body.push_back(al, ASRUtils::STMT(ASR::make_Assignment_t(al,
+            loc, target, value, nullptr, false, false, false, false)));
+    };
+    auto return_if = [&](ASR::expr_t *test) {
+        Vec<ASR::stmt_t*> exit_body;
+        exit_body.reserve(al, 1);
+        exit_body.push_back(al, ASRUtils::STMT(ASR::make_Return_t(al, loc)));
+        Vec<ASR::stmt_t*> no_else;
+        no_else.reserve(al, 0);
+        kernel_body.push_back(al, ASRUtils::STMT(ASR::make_If_t(al, loc,
+            nullptr, test, exit_body.p, exit_body.n, no_else.p, no_else.n)));
+    };
+    auto kernel_local = [&](const std::string &name, ASR::ttype_t *type) {
+        return ASRUtils::EXPR(ASR::make_Var_t(al, loc, gpu_new_variable(al,
+            loc, kernel_scope, name, ASRUtils::duplicate_type(al, type))));
+    };
+    // The number of iterations of dimension d, in a launch that has some,
+    // in the type that numbers the iterations: a dimension can have more
+    // of them than the largest value of its indices' kind.
+    auto kernel_range = [&](size_t d) {
+        return index_binop(index_binop(widen(kernel_ends[d]),
+            ASR::binopType::Sub, widen(kernel_starts[d])),
+            ASR::binopType::Add, widen(one_const));
+    };
+    // The loop index of dimension d at the 0-based `ordinal`, an
+    // iteration number.
+    auto index_at = [&](size_t d, ASR::expr_t *ordinal) {
+        return narrow(index_binop(ordinal, ASR::binopType::Add,
+            widen(kernel_starts[d])));
+    };
+    auto loop_var = [&](size_t d) {
+        return ASRUtils::EXPR(ASR::make_Var_t(al, loc,
+            kernel_scope->get_symbol(loop_var_names[d])));
+    };
+
+    ASR::expr_t *tiled_flag = nullptr;
+    int tiled_arg = -1;
+    if (tiled) {
+        ASR::symbol_t *param = gpu_new_variable(al, loc, kernel_scope,
+            "__tiled", ASRUtils::duplicate_type(al, int_type),
+            ASR::intentType::InOut);
+        tiled_flag = ASRUtils::EXPR(ASR::make_Var_t(al, loc, param));
+        kernel_args.push_back(al, tiled_flag);
+        // The launch replaces this with the numbering it picks.
+        ASR::call_arg_t carg;
+        carg.loc = loc;
+        carg.m_value = ASRUtils::EXPR(ASR::make_IntegerConstant_t(al, loc,
+            0, int_type, ASR::integerbozType::Decimal));
+        call_args.push_back(al, carg);
+        tiled_arg = static_cast<int>(call_args.n) - 1;
     }
 
-    // Guard: if (flat_idx >= total_size) return
-    ASR::expr_t *guard = ASRUtils::EXPR(
-        ASR::make_IntegerCompare_t(al, loc, flat_idx,
-            ASR::cmpopType::GtE, total_size_kernel,
-            ASRUtils::TYPE(ASR::make_Logical_t(al, loc, 4)), nullptr));
-    Vec<ASR::stmt_t*> guard_body;
-    guard_body.reserve(al, 1);
-    guard_body.push_back(al, ASRUtils::STMT(ASR::make_Return_t(al, loc)));
-    Vec<ASR::stmt_t*> guard_else;
-    guard_else.reserve(al, 0);
-    kernel_body.push_back(al, ASRUtils::STMT(
-        ASR::make_If_t(al, loc, nullptr, guard,
-            guard_body.p, guard_body.n,
-            guard_else.p, guard_else.n)));
+    // Every thread past the number of iterations returns, so the per-dim
+    // ranges below are only computed when none is empty.
+    auto return_past_iterations = [&]() {
+        ASR::expr_t *total_size_kernel = nullptr;
+        for (size_t d = 0; d < n_dims; d++) {
+            // dim_range = max(0, kernel_end - kernel_start + 1)
+            ASR::expr_t *dim_range = gpu_loop_extent(al, loc,
+                widen(kernel_starts[d]), widen(kernel_ends[d]), index_type);
+            total_size_kernel = total_size_kernel == nullptr ? dim_range
+                : index_binop(total_size_kernel, ASR::binopType::Mul,
+                    dim_range);
+        }
+
+        // Guard: if (flat_idx >= total_size) return
+        return_if(ASRUtils::EXPR(ASR::make_IntegerCompare_t(al, loc,
+            flat_idx, ASR::cmpopType::GtE, total_size_kernel,
+            ASRUtils::TYPE(ASR::make_Logical_t(al, loc, 4)), nullptr)));
+    };
 
     // Compute per-dim loop variable from flat_idx
     // We need a "remaining" variable in kernel scope
-    std::string remain_name = "__flat_idx";
-    {
-        gpu_new_variable(al, loc, kernel_scope, remain_name,
-            ASRUtils::duplicate_type(al, int_type));
-    }
-    ASR::expr_t *remain_var = ASRUtils::EXPR(
-        ASR::make_Var_t(al, loc, kernel_scope->get_symbol(remain_name)));
+    ASR::expr_t *remain_var = kernel_local("__flat_idx", index_type);
+    // The loop indices at positions [first, last) of the order, recovered
+    // by dividing __flat_idx down.
+    auto number_flat = [&](size_t first, size_t last) {
+        for (size_t position = first; position < last; position++) {
+            size_t d = order[position];
+            if (position < n_dims - 1) {
+                // loop_var = __flat_idx % dim_range + start
+                assign(loop_var(d), index_at(d, index_mod(remain_var,
+                    kernel_range(d))));
+                // __flat_idx = __flat_idx / dim_range
+                assign(remain_var, index_binop(remain_var,
+                    ASR::binopType::Div, kernel_range(d)));
+            } else {
+                // Last dim: loop_var = __flat_idx + start
+                assign(loop_var(d), index_at(d, remain_var));
+            }
+        }
+    };
 
-    // __flat_idx = flat_idx (the raw thread index)
-    kernel_body.push_back(al, ASRUtils::STMT(
-        ASR::make_Assignment_t(al, loc, remain_var, flat_idx, nullptr, false, false)));
+    size_t first_flat_position = 0;
+    if (tiled) {
+        // __tiled = 0: one thread per iteration, numbered flat.
+        Vec<ASR::stmt_t*> enclosing_body = kernel_body;
+        kernel_body.reserve(al, 8);
+        return_past_iterations();
+        assign(remain_var, flat_idx);
+        number_flat(0, 2);
+        Vec<ASR::stmt_t*> flat_body = kernel_body;
+        kernel_body.reserve(al, 16);
+        // The tile, then the thread's place in it: its width runs along the
+        // fastest dimension, its height along the second one.
+        size_t across = order[0], down = order[1];
+        int64_t width_shift = 0, block_shift = 0;
+        while ((int64_t(1) << width_shift) < device_caps.tile_width) {
+            width_shift++;
+        }
+        while ((int64_t(1) << block_shift) < device_caps.threads_per_block) {
+            block_shift++;
+        }
+        int64_t height_shift = block_shift - width_shift;
+        auto constant = [&](int64_t value) {
+            return ASRUtils::EXPR(ASR::make_IntegerConstant_t(al, loc, value,
+                int_type, ASR::integerbozType::Decimal));
+        };
+        // ceil(range / 2**shift)
+        auto tiles_of = [&](ASR::expr_t *range, int64_t shift) {
+            return index_binop(index_binop(range, ASR::binopType::Add,
+                widen(constant((int64_t(1) << shift) - 1))),
+                ASR::binopType::BitRShift, widen(constant(shift)));
+        };
+        ASR::expr_t *tiles = kernel_local("__tiles", index_type);
+        // The thread's ordinal along a dimension, an iteration number.
+        ASR::expr_t *ordinal = kernel_local("__ordinal", index_type);
+        // Reject a padded ordinal before adding the lower bound: a padded
+        // index could overflow even when every valid index fits.
+        auto index_in_tile = [&](size_t d) {
+            return_if(ASRUtils::EXPR(ASR::make_IntegerCompare_t(al, loc,
+                ordinal, ASR::cmpopType::GtE, kernel_range(d),
+                ASRUtils::TYPE(ASR::make_Logical_t(al, loc, 4)), nullptr)));
+            assign(loop_var(d), index_at(d, ordinal));
+        };
+        assign(remain_var, widen(block_idx));
+        assign(tiles, tiles_of(kernel_range(across), width_shift));
+        assign(ordinal, index_binop(
+            index_binop(index_mod(remain_var, tiles),
+                ASR::binopType::BitLShift, widen(constant(width_shift))),
+            ASR::binopType::Add, widen(thread_idx_op(ASR::binopType::BitAnd,
+                device_caps.tile_width - 1))));
+        index_in_tile(across);
+        assign(remain_var, index_binop(remain_var, ASR::binopType::Div,
+            tiles));
+        ASR::expr_t *row_tile = remain_var;
+        if (n_dims > 2) {
+            // The tiles of the first two dimensions repeat over the others.
+            assign(tiles, tiles_of(kernel_range(down), height_shift));
+            row_tile = index_mod(remain_var, tiles);
+        }
+        assign(ordinal, index_binop(
+            index_binop(row_tile, ASR::binopType::BitLShift,
+                widen(constant(height_shift))),
+            ASR::binopType::Add, widen(thread_idx_op(
+                ASR::binopType::BitRShift, width_shift))));
+        index_in_tile(down);
+        if (n_dims > 2) {
+            assign(remain_var, index_binop(remain_var, ASR::binopType::Div,
+                tiles));
+        }
+        Vec<ASR::stmt_t*> tiled_body = kernel_body;
+        kernel_body = enclosing_body;
+        kernel_body.push_back(al, ASRUtils::STMT(ASR::make_If_t(al, loc,
+            nullptr, ASRUtils::EXPR(ASR::make_IntegerCompare_t(al, loc,
+                tiled_flag, ASR::cmpopType::Eq, constant(0),
+                ASRUtils::TYPE(ASR::make_Logical_t(al, loc, 4)), nullptr)),
+            flat_body.p, flat_body.n, tiled_body.p, tiled_body.n)));
+        first_flat_position = 2;
+    } else if (strided) {
+        // A reduction runs its iterations in a grid-stride loop: at most
+        // device_caps.reduction_threads threads, the first `stride` of the launch,
+        // each run every stride-th iteration from its own number and
+        // accumulate them in one slot. The host then folds `stride` slots
+        // rather than one per iteration (gpu_offload_launch.cpp launches no
+        // more threads than that, and allocates as many slots).
+        stride_total = kernel_local("__gpu_iterations", index_type);
+        ASR::expr_t *total = nullptr;
+        for (size_t d = 0; d < n_dims; d++) {
+            ASR::expr_t *dim_range = gpu_loop_extent(al, loc,
+                widen(kernel_starts[d]), widen(kernel_ends[d]), index_type);
+            total = total == nullptr ? dim_range
+                : index_binop(total, ASR::binopType::Mul, dim_range);
+        }
+        assign(stride_total, total);
+        stride_var = kernel_local("__gpu_stride", index_type);
+        ASR::expr_t *limit = ASRUtils::EXPR(ASR::make_IntegerConstant_t(al,
+            loc, device_caps.reduction_threads, index_type,
+            ASR::integerbozType::Decimal));
+        assign(stride_var, ASRUtils::EXPR(ASR::make_IfExp_t(al, loc,
+            ASRUtils::EXPR(ASR::make_IntegerCompare_t(al, loc, stride_total,
+                ASR::cmpopType::Gt, limit,
+                ASRUtils::TYPE(ASR::make_Logical_t(al, loc, 4)), nullptr)),
+            limit, stride_total, ASRUtils::duplicate_type(al, index_type),
+            nullptr)));
+        // The threads past the stride are not done: the threads of a warp
+        // combine their accumulators together, so these take part with the
+        // identity, and run no iterations.
+        if (!warp_slots) {
+            return_if(ASRUtils::EXPR(ASR::make_IntegerCompare_t(al, loc,
+                flat_idx, ASR::cmpopType::GtE, stride_var,
+                ASRUtils::TYPE(ASR::make_Logical_t(al, loc, 4)), nullptr)));
+        }
+        assign(remain_var, flat_idx);
+    } else {
+        return_past_iterations();
+        // __flat_idx = flat_idx (the raw thread index)
+        assign(remain_var, flat_idx);
+    }
 
     // The loop indices below are recovered by dividing __flat_idx down,
     // which destroys it, so the thread keeps its own number separately.
     // Every slot starts at the identity, so a thread whose body never
-    // reaches the accumulator still leaves something the fold can use.
+    // reaches the accumulator still leaves something the fold can use. In
+    // a launch that runs in chunks only the threads of the first chunk, the
+    // largest, set it: a thread of a later chunk keeps combining into what
+    // the thread of the same number left in it, and one past the end of a
+    // partial chunk has returned above without touching it.
+    // For a warp that owns a slot: whether this thread is the warp's first,
+    // and in the launch (those past the stride only take part).
+    ASR::expr_t *owns_slot = nullptr;
+    if (warp_slots) {
+        auto bool_type = ASRUtils::TYPE(ASR::make_Logical_t(al, loc, 4));
+        auto index_const = [&](int64_t value) {
+            return ASRUtils::EXPR(ASR::make_IntegerConstant_t(al, loc, value,
+                index_type, ASR::integerbozType::Decimal));
+        };
+        owns_slot = ASRUtils::EXPR(ASR::make_LogicalBinOp_t(al, loc,
+            ASRUtils::EXPR(ASR::make_IntegerCompare_t(al, loc,
+                index_mod(flat_idx, index_const(32)), ASR::cmpopType::Eq,
+                index_const(0), bool_type, nullptr)),
+            ASR::logicalbinopType::And,
+            ASRUtils::EXPR(ASR::make_IntegerCompare_t(al, loc, flat_idx,
+                ASR::cmpopType::Lt, stride_var, bool_type, nullptr)),
+            ASRUtils::duplicate_type(al, bool_type), nullptr));
+    }
     if (slot_index != nullptr) {
-        kernel_body.push_back(al, ASRUtils::STMT(
-            ASR::make_Assignment_t(al, loc,
-                ASRUtils::EXPR(ASR::make_Var_t(al, loc,
-                    kernel_scope->get_symbol("__gpu_slot"))),
-                remain_var, nullptr, false, false)));
+        assign(ASRUtils::EXPR(ASR::make_Var_t(al, loc,
+            kernel_scope->get_symbol("__gpu_slot"))), warp_slots
+            ? index_binop(remain_var, ASR::binopType::Div,
+                ASRUtils::EXPR(ASR::make_IntegerConstant_t(al, loc, 32,
+                    index_type, ASR::integerbozType::Decimal)))
+            : remain_var);
+        Vec<ASR::stmt_t*> starts;
+        starts.reserve(al, pending_reductions.size());
         for (auto &r : pending_reductions) {
-            if (!r.host_buf_sym) continue;
-            ASR::symbol_t *param = kernel_scope->get_symbol(r.orig_name);
+            ASR::symbol_t *param = accumulators_of(r);
             if (!param) continue;
-            kernel_body.push_back(al, ASRUtils::STMT(
-                ASR::make_Assignment_t(al, loc,
-                    gpu_reduction_slot(al, loc, param, slot_index,
-                        r.scalar_type),
-                    gpu_reduction_identity(al, loc, r.op, r.scalar_type),
-                    nullptr, false, false)));
+            starts.push_back(al, ASRUtils::STMT(ASR::make_Assignment_t(al,
+                loc, gpu_reduction_slot(al, loc, param, slot_index,
+                    r.scalar_type),
+                gpu_reduction_identity(al, loc, r.op, r.scalar_type),
+                nullptr, false, false, false, false)));
         }
-    }
-
-    for (size_t d = 0; d < n_dims; d++) {
-        ASR::expr_t *dim_range = ASRUtils::EXPR(
-            ASR::make_IntegerBinOp_t(al, loc,
-                ASRUtils::EXPR(ASR::make_IntegerBinOp_t(al, loc,
-                    kernel_ends[d], ASR::binopType::Sub,
-                    kernel_starts[d], int_type, nullptr)),
-                ASR::binopType::Add, one_const, int_type, nullptr));
-
-        ASR::symbol_t *kvar = kernel_scope->get_symbol(loop_var_names[d]);
-        ASR::expr_t *kvar_expr = ASRUtils::EXPR(
-            ASR::make_Var_t(al, loc, kvar));
-
-        if (d < n_dims - 1) {
-            // loop_var = __flat_idx % dim_range + start
-            // Since ASR has no Mod binop, compute as: a - (a/b)*b
-            ASR::expr_t *div_part = ASRUtils::EXPR(
-                ASR::make_IntegerBinOp_t(al, loc,
-                    remain_var, ASR::binopType::Div,
-                    dim_range, int_type, nullptr));
-            ASR::expr_t *mul_part = ASRUtils::EXPR(
-                ASR::make_IntegerBinOp_t(al, loc,
-                    div_part, ASR::binopType::Mul,
-                    dim_range, int_type, nullptr));
-            ASR::expr_t *mod_val = ASRUtils::EXPR(
-                ASR::make_IntegerBinOp_t(al, loc,
-                    remain_var, ASR::binopType::Sub,
-                    mul_part, int_type, nullptr));
-            ASR::expr_t *val = ASRUtils::EXPR(
-                ASR::make_IntegerBinOp_t(al, loc,
-                    mod_val, ASR::binopType::Add,
-                    kernel_starts[d], int_type, nullptr));
-            kernel_body.push_back(al, ASRUtils::STMT(
-                ASR::make_Assignment_t(al, loc, kvar_expr, val, nullptr, false, false)));
-
-            // __flat_idx = __flat_idx / dim_range
-            ASR::expr_t *div_val = ASRUtils::EXPR(
-                ASR::make_IntegerBinOp_t(al, loc,
-                    remain_var, ASR::binopType::Div,
-                    dim_range, int_type, nullptr));
-            kernel_body.push_back(al, ASRUtils::STMT(
-                ASR::make_Assignment_t(al, loc, remain_var, div_val, nullptr, false, false)));
+        if (warp_slots && starts.n > 0) {
+            // Only the first thread of the warp starts its slot.
+            Vec<ASR::stmt_t*> first_only = starts;
+            starts.reserve(al, 1);
+            starts.n = 0;
+            starts.push_back(al, ASRUtils::STMT(ASR::make_If_t(al, loc,
+                nullptr, owns_slot, first_only.p, first_only.n, nullptr,
+                0)));
+        }
+        if (first_chunk_flag == nullptr) {
+            for (size_t i = 0; i < starts.n; i++) {
+                kernel_body.push_back(al, starts[i]);
+            }
         } else {
-            // Last dim: loop_var = __flat_idx + start
-            ASR::expr_t *val = ASRUtils::EXPR(
-                ASR::make_IntegerBinOp_t(al, loc,
-                    remain_var, ASR::binopType::Add,
-                    kernel_starts[d], int_type, nullptr));
-            kernel_body.push_back(al, ASRUtils::STMT(
-                ASR::make_Assignment_t(al, loc, kvar_expr, val, nullptr, false, false)));
+            kernel_body.push_back(al, ASRUtils::STMT(ASR::make_If_t(al, loc,
+                nullptr, ASRUtils::EXPR(ASR::make_IntegerCompare_t(al, loc,
+                    first_chunk_flag, ASR::cmpopType::NotEq,
+                    ASRUtils::EXPR(ASR::make_IntegerConstant_t(al, loc, 0,
+                        int_type, ASR::integerbozType::Decimal)),
+                    ASRUtils::TYPE(ASR::make_Logical_t(al, loc, 4)),
+                    nullptr)),
+                starts.p, starts.n, nullptr, 0)));
         }
     }
+
+    for (size_t ri = 0; ri < pending_reductions.size(); ri++) {
+        if (!local_accumulators[ri]) continue;
+        auto &r = pending_reductions[ri];
+        assign(local_accumulators[ri],
+            gpu_reduction_identity(al, loc, r.op, r.scalar_type));
+    }
+    // In a grid-stride loop, what follows runs once per iteration: from
+    // here on the kernel body is the loop's body (see below).
+    size_t stride_loop_start = kernel_body.n;
+    ASR::expr_t *stride_iteration = nullptr;
+    if (strided) {
+        stride_iteration = kernel_local("__gpu_iteration", index_type);
+        assign(remain_var, stride_iteration);
+    }
+    number_flat(first_flat_position, n_dims);
 
     // This helper processes a block and recursively handles any nested
     // BlockCall statements, since GpuReplaceSymbolsVisitor does not
@@ -2374,37 +3302,24 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
                 }
             }
         }
-        // The ArrayBroadcast lowering (inline_elemental_array_var_
-        // in_body) may have created DoLoop statements whose bounds
-        // copied the old VLA dimension expression pointers before
-        // the pre-computation above replaced them. Walk the block
-        // body and patch any DoLoop bounds that still reference the
-        // old expressions.
+        // The ArrayBroadcast, SUM, MATMUL and alias-temporary lowerings
+        // embedded the old extents, or copies of them (copy_bound), in
+        // the block's statements before the pre-computation above
+        // replaced them in the declarations. Replace them there too, so
+        // that the kernel uses the host's value wherever the extent
+        // appears.
         if (!dim_replacements.empty()) {
-            std::function<void(ASR::stmt_t**, size_t)>
-                patch_do_loop_bounds = [&](ASR::stmt_t **stmts,
-                                           size_t n_stmts) {
-                for (size_t si = 0; si < n_stmts; si++) {
-                    if (ASR::is_a<ASR::DoLoop_t>(*stmts[si])) {
-                        ASR::DoLoop_t *dl =
-                            ASR::down_cast<ASR::DoLoop_t>(
-                                stmts[si]);
-                        for (auto &[old_e, new_e] :
-                                dim_replacements) {
-                            if (dl->m_head.m_start == old_e)
-                                dl->m_head.m_start = new_e;
-                            if (dl->m_head.m_end == old_e)
-                                dl->m_head.m_end = new_e;
-                        }
-                        patch_do_loop_bounds(dl->m_body,
-                            dl->n_body);
-                    }
-                }
-            };
-            patch_do_loop_bounds(block->m_body, block->n_body);
+            std::function<ASR::expr_t*(ASR::expr_t*)> origin =
+                [&](ASR::expr_t *e) { return bound_origin(e); };
+            GpuHostExtentReplacer extent_replacer(origin,
+                dim_replacements);
+            for (size_t j = 0; j < block->n_body; j++) {
+                extent_replacer.visit_stmt(*block->m_body[j]);
+            }
         }
         // Remap Var references inside the block body
         GpuReplaceSymbolsVisitor block_replacer(*kernel_scope);
+        block_replacer.replacer.procedure_copies = &procedure_copies;
         for (size_t j = 0; j < block->n_body; j++) {
             block_replacer.visit_stmt(*block->m_body[j]);
         }
@@ -2419,6 +3334,16 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
                     item.second);
             for (size_t j = 0; j < ab->n_body; j++) {
                 block_replacer.visit_stmt(*ab->m_body[j]);
+            }
+        }
+        privatize_liveout_block(kernel_scope, block->m_body, block->n_body,
+            liveouts);
+        for (auto &item : block->m_symtab->get_scope()) {
+            if (ASR::is_a<ASR::AssociateBlock_t>(*item.second)) {
+                ASR::AssociateBlock_t *ab =
+                    ASR::down_cast<ASR::AssociateBlock_t>(item.second);
+                privatize_liveout_block(kernel_scope, ab->m_body,
+                    ab->n_body, liveouts);
             }
         }
         // Replace StructInstanceMember references to decomposed
@@ -2461,50 +3386,26 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
                 }
             }
         }
-        // Recursively process nested BlockCall statements, including
-        // those inside a loop or an IF of the block.
-        std::function<void(ASR::stmt_t**, size_t)> process_nested =
-            [&](ASR::stmt_t **stmts, size_t n_stmts) {
-            for (size_t j = 0; j < n_stmts; j++) {
-                ASR::stmt_t *s = stmts[j];
-                if (ASR::is_a<ASR::DoLoop_t>(*s)) {
-                    ASR::DoLoop_t *dl = ASR::down_cast<ASR::DoLoop_t>(s);
-                    process_nested(dl->m_body, dl->n_body);
-                } else if (ASR::is_a<ASR::DoConcurrentLoop_t>(*s)) {
-                    ASR::DoConcurrentLoop_t *dc =
-                        ASR::down_cast<ASR::DoConcurrentLoop_t>(s);
-                    process_nested(dc->m_body, dc->n_body);
-                } else if (ASR::is_a<ASR::If_t>(*s)) {
-                    ASR::If_t *ifs = ASR::down_cast<ASR::If_t>(s);
-                    process_nested(ifs->m_body, ifs->n_body);
-                    process_nested(ifs->m_orelse, ifs->n_orelse);
-                } else if (ASR::is_a<ASR::WhileLoop_t>(*s)) {
-                    ASR::WhileLoop_t *wl = ASR::down_cast<ASR::WhileLoop_t>(s);
-                    process_nested(wl->m_body, wl->n_body);
-                } else if (ASR::is_a<ASR::Select_t>(*s)) {
-                    gpu_for_each_case_body(ASR::down_cast<ASR::Select_t>(s),
-                        process_nested);
-                }
-                if (!ASR::is_a<ASR::BlockCall_t>(*s)) continue;
-                ASR::BlockCall_t *inner_bc =
-                    ASR::down_cast<ASR::BlockCall_t>(s);
-                if (!ASR::is_a<ASR::Block_t>(*inner_bc->m_m)) continue;
+        GpuConstructCallVisitor process_nested(
+            [&](ASR::BlockCall_t &inner_bc) {
+                if (!ASR::is_a<ASR::Block_t>(*inner_bc.m_m)) return;
                 ASR::Block_t *inner =
-                    ASR::down_cast<ASR::Block_t>(inner_bc->m_m);
+                    ASR::down_cast<ASR::Block_t>(inner_bc.m_m);
                 std::string inner_name = inner->m_name;
                 bool host_owned = orig_scope->get_symbol(inner_name)
-                    == inner_bc->m_m;
+                    == inner_bc.m_m;
                 process_block_for_kernel(inner, host_owned);
                 if (host_owned) {
                     orig_scope->erase_symbol(inner_name);
                     if (!kernel_scope->get_symbol(inner_name)) {
                         kernel_scope->add_symbol(inner_name,
-                            inner_bc->m_m);
+                            inner_bc.m_m);
                     }
                 }
-            }
-        };
-        process_nested(block->m_body, block->n_body);
+            });
+        for (size_t j = 0; j < block->n_body; j++) {
+            process_nested.visit_stmt(*block->m_body[j]);
+        }
         // Remap type expressions of block-local variables
         // (e.g., VLA dimensions like n(i) in real :: a(n(i)))
         GpuReplaceSymbols block_type_replacer(*kernel_scope);
@@ -2535,63 +3436,40 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
     // Recursively find and move all BlockCall targets from any
     // nesting depth (e.g., BlockCall inside a DoLoop inside the
     // loop body) into the kernel scope.
-    std::function<void(ASR::stmt_t**, size_t)>
-        move_blocks_to_kernel = [&](ASR::stmt_t **stmts,
-                                    size_t n_stmts) {
-        for (size_t i = 0; i < n_stmts; i++) {
-            if (ASR::is_a<ASR::BlockCall_t>(*stmts[i])) {
-                ASR::BlockCall_t *bc =
-                    ASR::down_cast<ASR::BlockCall_t>(stmts[i]);
-                if (ASR::is_a<ASR::Block_t>(*bc->m_m)) {
-                    ASR::Block_t *block =
-                        ASR::down_cast<ASR::Block_t>(bc->m_m);
-                    std::string block_name = block->m_name;
-                    // Only a copy this pass made is safe to take. A
-                    // BlockCall that still names the host's own block
-                    // is a copy_loop_stmt miss; mutating it here
-                    // would steal the host nest if the launch is then
-                    // declined.
-                    bool is_copy = false;
-                    for (ASR::symbol_t *b : kernel_blocks) {
-                        if (b == bc->m_m) {
-                            is_copy = true;
-                            break;
-                        }
-                    }
-                    if (!is_copy) continue;
-                    process_block_for_kernel(block, true);
-                    if (orig_scope->get_symbol(block_name) == bc->m_m) {
-                        orig_scope->erase_symbol(block_name);
-                    }
-                    if (!kernel_scope->get_symbol(block_name)) {
-                        kernel_scope->add_symbol(block_name, bc->m_m);
-                    }
+    GpuConstructCallVisitor move_blocks_to_kernel(
+        [&](ASR::BlockCall_t &bc) {
+            if (!ASR::is_a<ASR::Block_t>(*bc.m_m)) return;
+            ASR::Block_t *block = ASR::down_cast<ASR::Block_t>(bc.m_m);
+            std::string block_name = block->m_name;
+            // Only a copy this pass made is safe to take. A BlockCall
+            // that still names the host's own block is a copy_loop_stmt
+            // miss; mutating it here would steal the host nest if the
+            // launch is then declined.
+            bool is_copy = false;
+            for (ASR::symbol_t *b : kernel_blocks) {
+                if (b == bc.m_m) {
+                    is_copy = true;
+                    break;
                 }
-            } else if (ASR::is_a<ASR::DoLoop_t>(*stmts[i])) {
-                ASR::DoLoop_t *dl =
-                    ASR::down_cast<ASR::DoLoop_t>(stmts[i]);
-                move_blocks_to_kernel(dl->m_body, dl->n_body);
-            } else if (ASR::is_a<ASR::DoConcurrentLoop_t>(*stmts[i])) {
-                ASR::DoConcurrentLoop_t *dc =
-                    ASR::down_cast<ASR::DoConcurrentLoop_t>(stmts[i]);
-                move_blocks_to_kernel(dc->m_body, dc->n_body);
-            } else if (ASR::is_a<ASR::If_t>(*stmts[i])) {
-                ASR::If_t *ifs =
-                    ASR::down_cast<ASR::If_t>(stmts[i]);
-                move_blocks_to_kernel(ifs->m_body, ifs->n_body);
-                move_blocks_to_kernel(ifs->m_orelse, ifs->n_orelse);
-            } else if (ASR::is_a<ASR::WhileLoop_t>(*stmts[i])) {
-                ASR::WhileLoop_t *wl =
-                    ASR::down_cast<ASR::WhileLoop_t>(stmts[i]);
-                move_blocks_to_kernel(wl->m_body, wl->n_body);
-            } else if (ASR::is_a<ASR::Select_t>(*stmts[i])) {
-                gpu_for_each_case_body(
-                    ASR::down_cast<ASR::Select_t>(stmts[i]),
-                    move_blocks_to_kernel);
             }
-        }
-    };
-    move_blocks_to_kernel(body_copy.p, body_copy.n);
+            if (!is_copy) return;
+            process_block_for_kernel(block, true);
+            // The copy of the loop body names the block, whose
+            // statements were not part of it above.
+            import_folded_struct_constants(block->m_body,
+                block->n_body, orig_scope, kernel_scope, loc);
+            import_folded_struct_constants(block->m_symtab,
+                orig_scope, kernel_scope, loc);
+            if (orig_scope->get_symbol(block_name) == bc.m_m) {
+                orig_scope->erase_symbol(block_name);
+            }
+            if (!kernel_scope->get_symbol(block_name)) {
+                kernel_scope->add_symbol(block_name, bc.m_m);
+            }
+        });
+    for (size_t i = 0; i < body_copy.n; i++) {
+        move_blocks_to_kernel.visit_stmt(*body_copy.p[i]);
+    }
 
     {
         std::vector<std::string> kernel_arg_names;
@@ -2616,32 +3494,203 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
         }
     }
 
+    // A thread runs one iteration of the loop, so a cycle of the loop ends
+    // the thread: it returns from the kernel, whose body comes last in it.
+    {
+        GpuOffloadedLoopLeaves leaves(&al);
+        leaves.transform_stmts(body_copy.p, body_copy.n);
+        LCOMPILERS_ASSERT(leaves.reason == GpuDeclineReason::None);
+    }
+
+    enter_liveouts(loc, kernel_scope, kernel_body, liveouts);
+
     // Add copied loop body (already remapped)
     for (size_t i = 0; i < body_copy.n; i++) {
         kernel_body.push_back(al, body_copy.p[i]);
     }
+    if (strided) {
+        Vec<ASR::stmt_t*> loop_body;
+        loop_body.reserve(al, kernel_body.n - stride_loop_start);
+        for (size_t i = stride_loop_start; i < kernel_body.n; i++) {
+            loop_body.push_back(al, kernel_body.p[i]);
+        }
+        kernel_body.n = stride_loop_start;
+        ASR::ttype_t *it_type = ASRUtils::duplicate_type(al, index_type);
+        auto it_const = [&](int64_t value) {
+            return ASRUtils::EXPR(ASR::make_IntegerConstant_t(al, loc, value,
+                ASRUtils::duplicate_type(al, it_type),
+                ASR::integerbozType::Decimal));
+        };
+        auto do_loop = [&](ASR::expr_t *v, ASR::expr_t *start,
+                ASR::expr_t *end, ASR::expr_t *step, Vec<ASR::stmt_t*> &b) {
+            ASR::do_loop_head_t head;
+            head.loc = loc;
+            head.m_v = v;
+            head.m_start = start;
+            head.m_end = end;
+            head.m_increment = step;
+            return ASRUtils::STMT(ASRUtils::make_DoLoop_t_util(al, loc,
+                nullptr, head, b.p, b.n, nullptr, 0));
+        };
+        // A thread waits for the loads of an iteration of a body without
+        // loops of its own before the next iteration issues its own, so the
+        // loop runs its iterations `unroll` at a time, the bodies one after
+        // another, which lets the device compiler issue their loads
+        // together. About four loads in flight per thread is best: an MI300A
+        // reads 2.2 TB/s with one and 3.7 TB/s with four, for a sum over one
+        // array unrolled four times and a dot product unrolled twice, and
+        // both get slower with eight. So `unroll` is four divided by the
+        // number of arrays the body reads (one when it reads more than two).
+        // The rest of the iterations run one at a time after it.
+        //
+        //     do __gpu_group = 0, (__gpu_iterations - __flat_idx)
+        //             / (unroll * __gpu_stride) - 1
+        //         __gpu_iteration = __flat_idx + __gpu_group * unroll
+        //             * __gpu_stride
+        //         body
+        //         __gpu_iteration = __gpu_iteration + __gpu_stride
+        //         body ...
+        //     end do
+        //     do __gpu_iteration = __flat_idx + (__gpu_iterations
+        //             - __flat_idx) / (unroll * __gpu_stride) * unroll
+        //             * __gpu_stride, __gpu_iterations - 1, __gpu_stride
+        //         body
+        //     end do
+        bool has_loop = false;
+        std::set<ASR::symbol_t*> arrays_read;
+        {
+            class BodyFinder : public ASR::BaseWalkVisitor<BodyFinder> {
+            public:
+                bool found = false;
+                std::set<ASR::symbol_t*> &arrays;
+                BodyFinder(std::set<ASR::symbol_t*> &arrays_)
+                    : arrays(arrays_) {}
+                void visit_DoLoop(const ASR::DoLoop_t &) { found = true; }
+                void visit_WhileLoop(const ASR::WhileLoop_t &) {
+                    found = true;
+                }
+                void visit_DoConcurrentLoop(const ASR::DoConcurrentLoop_t &) {
+                    found = true;
+                }
+                void visit_ArrayItem(const ASR::ArrayItem_t &x) {
+                    if (ASR::is_a<ASR::Var_t>(*x.m_v)) {
+                        arrays.insert(ASR::down_cast<ASR::Var_t>(x.m_v)->m_v);
+                    } else {
+                        arrays.insert(nullptr);
+                    }
+                    ASR::BaseWalkVisitor<BodyFinder>::visit_ArrayItem(x);
+                }
+                void visit_BlockCall(const ASR::BlockCall_t &x) {
+                    ASR::symbol_t *b = ASRUtils::symbol_get_past_external(
+                        x.m_m);
+                    if (!ASR::is_a<ASR::Block_t>(*b)) return;
+                    ASR::Block_t *block = ASR::down_cast<ASR::Block_t>(b);
+                    for (size_t i = 0; i < block->n_body; i++) {
+                        visit_stmt(*block->m_body[i]);
+                    }
+                }
+            } finder(arrays_read);
+            for (size_t i = 0; i < loop_body.n && !finder.found; i++) {
+                finder.visit_stmt(*loop_body.p[i]);
+            }
+            has_loop = finder.found;
+        }
+        const int64_t unroll = arrays_read.size() <= 1 ? 4
+            : arrays_read.size() == 2 ? 2 : 1;
+        Vec<ASR::stmt_t*> unrolled;
+        unrolled.reserve(al, unroll * (loop_body.n + 1));
+        bool copied = !has_loop && unroll > 1;
+        ASR::expr_t *group = kernel_local("__gpu_group", it_type);
+        ASR::expr_t *span = index_binop(it_const(unroll),
+            ASR::binopType::Mul, stride_var);
+        ASR::expr_t *groups = index_binop(index_binop(stride_total,
+            ASR::binopType::Sub, flat_idx), ASR::binopType::Div, span);
+        for (int64_t u = 0; copied && u < unroll; u++) {
+            unrolled.push_back(al, ASRUtils::STMT(ASR::make_Assignment_t(al,
+                loc, stride_iteration, u == 0
+                    ? index_binop(flat_idx, ASR::binopType::Add,
+                        index_binop(group, ASR::binopType::Mul, span))
+                    : index_binop(stride_iteration, ASR::binopType::Add,
+                        stride_var),
+                nullptr, false, false, false, false)));
+            for (size_t i = 0; i < loop_body.n && copied; i++) {
+                ASRUtils::ExprStmtDuplicator dup(al);
+                dup.success = true;
+                ASR::stmt_t *copy = dup.duplicate_stmt(loop_body.p[i]);
+                if (!dup.success || !copy) {
+                    copied = false;
+                } else {
+                    unrolled.push_back(al, copy);
+                }
+            }
+        }
+        // The loops: the threads past the stride run none of them.
+        size_t loops_start = kernel_body.n;
+        ASR::expr_t *rest_start = flat_idx;
+        if (copied) {
+            kernel_body.push_back(al, do_loop(group, it_const(0),
+                index_binop(groups, ASR::binopType::Sub, it_const(1)),
+                nullptr, unrolled));
+            rest_start = index_binop(flat_idx, ASR::binopType::Add,
+                index_binop(groups, ASR::binopType::Mul, span));
+        }
+        // do __gpu_iteration = rest_start, __gpu_iterations - 1, __gpu_stride
+        kernel_body.push_back(al, do_loop(stride_iteration, rest_start,
+            index_binop(stride_total, ASR::binopType::Sub, it_const(1)),
+            stride_var, loop_body));
+        if (warp_slots) {
+            Vec<ASR::stmt_t*> loops;
+            loops.reserve(al, kernel_body.n - loops_start);
+            for (size_t i = loops_start; i < kernel_body.n; i++) {
+                loops.push_back(al, kernel_body.p[i]);
+            }
+            kernel_body.n = loops_start;
+            kernel_body.push_back(al, ASRUtils::STMT(ASR::make_If_t(al, loc,
+                nullptr, ASRUtils::EXPR(ASR::make_IntegerCompare_t(al, loc,
+                    flat_idx, ASR::cmpopType::Lt, stride_var,
+                    ASRUtils::TYPE(ASR::make_Logical_t(al, loc, 4)),
+                    nullptr)),
+                loops.p, loops.n, nullptr, 0)));
+        }
+        // slot = slot op accumulator, as the host folds the slots. With a
+        // slot per warp, the threads of the warp combine their accumulators
+        // first, and the first of them combines the result into the slot.
+        Vec<ASR::stmt_t*> combines;
+        combines.reserve(al, pending_reductions.size());
+        for (size_t ri = 0; ri < pending_reductions.size(); ri++) {
+            if (!local_accumulators[ri]) continue;
+            auto &r = pending_reductions[ri];
+            ASR::expr_t *slot = gpu_reduction_slot(al, loc,
+                accumulators_of(r), slot_index, r.scalar_type);
+            ASR::expr_t *acc = local_accumulators[ri];
+            if (warp_slots) {
+                kernel_body.push_back(al, ASRUtils::STMT(
+                    ASR::make_Assignment_t(al, loc, acc, ASRUtils::EXPR(
+                        ASR::make_GpuLaneReduce_t(al, loc, acc, r.op,
+                            ASRUtils::duplicate_type(al, r.scalar_type),
+                            nullptr)),
+                        nullptr, false, false, false, false)));
+                combines.push_back(al, gpu_reduction_combine(al, loc, r.op,
+                    slot, acc, r.scalar_type));
+            } else {
+                kernel_body.push_back(al, gpu_reduction_combine(al, loc,
+                    r.op, slot, acc, r.scalar_type));
+            }
+        }
+        if (combines.n > 0) {
+            kernel_body.push_back(al, ASRUtils::STMT(ASR::make_If_t(al, loc,
+                nullptr, owns_slot, combines.p, combines.n, nullptr, 0)));
+        }
+    }
 
     // 5. Build function signature
-    // FunctionType arg_types must not contain scope-bound expressions,
-    // so strip dimension expressions that reference variables.
+    // FunctionType arg_types must not contain scope-bound expressions.
     Vec<ASR::ttype_t*> arg_types;
     arg_types.reserve(al, kernel_args.n);
     for (size_t i = 0; i < kernel_args.n; i++) {
         ASR::Var_t *v = down_cast<ASR::Var_t>(kernel_args.p[i]);
-        ASR::ttype_t *t = ASRUtils::symbol_type(v->m_v);
-        if (ASR::is_a<ASR::Array_t>(*t)) {
-            ASR::Array_t *arr = ASR::down_cast<ASR::Array_t>(t);
-            ASR::dimension_t *new_dims = al.allocate<ASR::dimension_t>(arr->n_dims);
-            for (size_t d = 0; d < arr->n_dims; d++) {
-                new_dims[d].loc = arr->m_dims[d].loc;
-                new_dims[d].m_start = nullptr;
-                new_dims[d].m_length = nullptr;
-            }
-            t = ASRUtils::TYPE(ASR::make_Array_t(al, arr->base.base.loc,
-                arr->m_type, new_dims, arr->n_dims,
-                arr->m_physical_type, arr->m_memory_space));
-        }
-        arg_types.push_back(al, t);
+        arg_types.push_back(al,
+            gpu_signature_type(al, ASRUtils::symbol_type(v->m_v)));
     }
     ASR::ttype_t *fn_sig = ASRUtils::TYPE(
         ASR::make_FunctionType_t(al, loc,
@@ -2660,7 +3709,20 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
         kernel_args.p, kernel_args.n,
         kernel_body.p, kernel_body.n,
         nullptr, ASR::accessType::Public, false, false,
-        nullptr, nullptr, nullptr, nullptr);
+        nullptr, nullptr, nullptr, nullptr, nullptr);
+    {
+        std::string unresolved = gpu_specialize_dummy_procedures(al,
+            *ASR::down_cast2<ASR::Function_t>(kernel_func));
+        if (!unresolved.empty()) {
+            report_not_offloaded(loc, GpuDecline(
+                GpuDeclineReason::DummyProcedureUnbound, unresolved));
+            return;
+        }
+    }
+    write_back_liveouts(*ASR::down_cast2<ASR::Function_t>(kernel_func),
+        liveouts);
+    gpu_lift_host_association(al,
+        *ASR::down_cast2<ASR::Function_t>(kernel_func));
 
     GpuLaunchPlan plan;
     plan.kernel_func = kernel_func;
@@ -2669,12 +3731,22 @@ void GpuOffloadVisitor::visit_OMPRegion(const ASR::OMPRegion_t &region) {
     plan.int_type = int_type;
     plan.n_dims = n_dims;
     plan.call_args = call_args;
+    plan.private_shapes = private_shapes;
     plan.gather_stmts = gather_stmts;
     plan.scatter_stmts = scatter_stmts;
-    plan.liveout_scalars = liveout_scalars;
+    plan.liveout_scalars = liveouts.scalars;
     plan.reductions = pending_reductions;
     plan.dim_info = dim_info;
-    plan.optional_syms = optional_syms;
+    plan.tiled_arg = tiled_arg;
+    plan.order = order;
+    plan.start_parameters = start_parameters;
+    plan.end_parameters = end_parameters;
+    plan.chunk_fixed_iterations = chunk_fixed_iterations;
+    plan.first_chunk_parameter = first_chunk_parameter;
+    plan.strided = strided;
+    plan.warp_slots = warp_slots;
+    plan.tile_dims[0] = tiled ? order[0] : 0;
+    plan.tile_dims[1] = tiled ? order[1] : 0;
     build_kernel_launch(region, work, loc, plan);
 }
 

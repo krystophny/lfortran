@@ -8,13 +8,11 @@
                         5
                         {
                             a:
-                                (ExternalSymbol
+                                (GenericProcedure
                                     5
                                     a
-                                    2 a
-                                    interface_05_mod
-                                    []
-                                    a
+                                    [5 a1@a
+                                    5 a2@a]
                                     Public
                                 ),
                             a1@a:
@@ -25,32 +23,12 @@
                                     interface_05_mod
                                     []
                                     a1
-                                    Public
+                                    Private
                                 ),
                             a2@a:
                                 (ExternalSymbol
                                     5
                                     a2@a
-                                    2 a2
-                                    interface_05_mod
-                                    []
-                                    a2
-                                    Public
-                                ),
-                            a@a1:
-                                (ExternalSymbol
-                                    5
-                                    a@a1
-                                    2 a1
-                                    interface_05_mod
-                                    []
-                                    a1
-                                    Private
-                                ),
-                            a@a2:
-                                (ExternalSymbol
-                                    5
-                                    a@a2
                                     2 a2
                                     interface_05_mod
                                     []
@@ -77,9 +55,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             r:
                                 (Variable
@@ -101,9 +81,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     interface_05
@@ -114,11 +96,13 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 5 i)
                         (FunctionCall
-                            5 a@a1
+                            5 a1@a
                             5 a
                             [((Var 5 i))]
                             (Integer 4)
@@ -126,6 +110,8 @@
                             ()
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -158,11 +144,13 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 5 r)
                         (FunctionCall
-                            5 a@a2
+                            5 a2@a
                             5 a
                             [((Var 5 r))]
                             (Real 4)
@@ -170,6 +158,8 @@
                             ()
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -202,11 +192,13 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 5 i)
                         (FunctionCall
-                            5 a@a1
+                            5 a1@a
                             5 a
                             [((Var 5 i))]
                             (Integer 4)
@@ -214,6 +206,8 @@
                             ()
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -271,9 +265,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             a1:
                                                 (Variable
@@ -295,9 +291,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     a1
@@ -328,6 +326,8 @@
                                             ()
                                         )
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )]
@@ -362,9 +362,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             a2:
                                                 (Variable
@@ -386,9 +388,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     a2
@@ -430,6 +434,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )]
                                     (Var 4 a2)
                                     Public
@@ -441,6 +447,7 @@
                     interface_05_mod
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.

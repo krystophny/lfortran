@@ -1,0 +1,13 @@
+{
+    "basename": "asr_json-json_loc_continuation-51accb3",
+    "cmd": "lfortran --show-asr --no-indent --json {infile} -o {outfile}",
+    "infile": "tests/json_loc_continuation.f90",
+    "infile_hash": "d4550255e4e1c54312676cb32cc195262605711ee528ed24f2d43a10",
+    "outfile": null,
+    "outfile_hash": null,
+    "stdout": "asr_json-json_loc_continuation-51accb3.stdout",
+    "stdout_hash": "9591b8cfe4e19c2ad7a484b17192e719fc6e275d7f570c3a26becb68",
+    "stderr": null,
+    "stderr_hash": null,
+    "returncode": 0
+}

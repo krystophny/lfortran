@@ -1,0 +1,39 @@
+#include <metal_stdlib>
+using namespace metal;
+
+inline void maybe_set_gpu_9(thread float& x_gpu, int i_gpu) {
+    if ((i_gpu == 7)) {
+        x_gpu =   7.50000000000000000e+00;
+    }
+}
+
+struct __ScalarArgs___lfortran_gpu_kernel_0_14gpu_liveout_10 {
+    int __dim_a_0_gpu;
+    int __lb_a_0_gpu;
+};
+
+kernel void __lfortran_gpu_kernel_0_14gpu_liveout_10(
+    device float* __gpu_buf_x_gpu [[buffer(0)]],
+    device int* a_gpu [[buffer(1)]],
+    constant __ScalarArgs___lfortran_gpu_kernel_0_14gpu_liveout_10& __scalar_args [[buffer(2)]],
+    uint __thread_id [[thread_position_in_grid]])
+{
+    int __lb_a_0_gpu = __scalar_args.__lb_a_0_gpu;
+    int __flat_idx_gpu;
+    float __gpu_before_gpu;
+    int i__dc_gpu;
+    float x_gpu;
+    if ((((0 * 0) + __thread_id) >= 100000)) {
+        return;
+    }
+    __flat_idx_gpu = ((0 * 0) + __thread_id);
+    i__dc_gpu = (__flat_idx_gpu + 1);
+    x_gpu = __gpu_buf_x_gpu[((int)(1) - (1))];
+    a_gpu[((int)(i__dc_gpu) - (__lb_a_0_gpu))] = i__dc_gpu;
+    __gpu_before_gpu = x_gpu;
+    maybe_set_gpu_9(x_gpu, i__dc_gpu);
+    if (((int)((x_gpu != __gpu_before_gpu) && ((int)((x_gpu == x_gpu) || (__gpu_before_gpu == __gpu_before_gpu)))))) {
+        __gpu_buf_x_gpu[((int)(1) - (1))] = x_gpu;
+    }
+}
+

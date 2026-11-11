@@ -35,9 +35,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     arrays_10
@@ -71,9 +73,13 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (ExplicitDeallocate
                         [(Var 2 x)]
+                        ()
+                        ()
                     )]
                     ()
                 )

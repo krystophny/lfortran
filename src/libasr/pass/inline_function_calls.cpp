@@ -113,6 +113,26 @@ class InlineFunctionCalls: public ASR::BaseExprReplacer<InlineFunctionCalls> {
         return false;
     }
 
+    // Whether every lower bound of the array type `type` is one: stated
+    // as one, or not stated by an array that is neither allocatable nor a
+    // pointer.
+    static bool lower_bounds_are_one(ASR::ttype_t* type) {
+        if( ASRUtils::is_allocatable(type) || ASRUtils::is_pointer(type) ) {
+            return false;
+        }
+        ASR::dimension_t* dims = nullptr;
+        size_t n_dims = ASRUtils::extract_dimensions_from_ttype(type, dims);
+        for( size_t d = 0; d < n_dims; d++ ) {
+            int64_t start = 1;
+            if( dims[d].m_start != nullptr &&
+                !(ASRUtils::extract_value(ASRUtils::expr_value(dims[d].m_start),
+                    start) && start == 1) ) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     bool check_inline_possibility(ASR::symbol_t* func, ASR::FunctionCall_t* func_call) {
         if( current_body == nullptr ) {
             // Inlining not possible because the function call is not
@@ -138,6 +158,19 @@ class InlineFunctionCalls: public ASR::BaseExprReplacer<InlineFunctionCalls> {
         // in function definition.
         if( function->n_args != func_call->n_args ) {
             return false;
+        }
+
+        // Inlining not possible as target dummy is copied into a local variable
+        // before the inlined body runs.
+        for( size_t i = 0; i < function->n_args; i++ ) {
+            if( ASR::is_a<ASR::Var_t>(*function->m_args[i]) ) {
+                ASR::symbol_t* sym =
+                    ASR::down_cast<ASR::Var_t>(function->m_args[i])->m_v;
+                if( ASR::is_a<ASR::Variable_t>(*sym) &&
+                    ASR::down_cast<ASR::Variable_t>(sym)->m_target_attr ) {
+                    return false;
+                }
+            }
         }
 
         // ⁠Function should have only Variable symbols in its symtab.
@@ -190,9 +223,24 @@ class InlineFunctionCalls: public ASR::BaseExprReplacer<InlineFunctionCalls> {
         }
 
         for( size_t i = 0; i < func_call->n_args; i++ ) {
+            // A raw pointer to an array element is sequence associated with
+            // the dummy, which a pointer association cannot express.
             if( ASR::is_a<ASR::ArrayPhysicalCast_t>(*func_call->m_args[i].m_value) ||
+                ASR::is_a<ASR::GetPointer_t>(*func_call->m_args[i].m_value) ||
                 ASRUtils::is_pointer(ASRUtils::expr_type(func_call->m_args[i].m_value)) ||
                 ASRUtils::is_allocatable(ASRUtils::expr_type(func_call->m_args[i].m_value)) ) {
+                return false;
+            }
+            // An array dummy is bound to its actual by pointer association,
+            // which gives it the bounds of the actual, while a dummy that
+            // is neither allocatable nor a pointer has the lower bounds it
+            // declares. The two agree when both are one.
+            ASR::ttype_t* dummy_type = ASRUtils::expr_type(function->m_args[i]);
+            if( ASRUtils::is_array(dummy_type) &&
+                !(lower_bounds_are_one(dummy_type) &&
+                  (ASR::is_a<ASR::ArraySection_t>(*func_call->m_args[i].m_value) ||
+                   lower_bounds_are_one(ASRUtils::expr_type(
+                        func_call->m_args[i].m_value)))) ) {
                 return false;
             }
         }
@@ -201,6 +249,16 @@ class InlineFunctionCalls: public ASR::BaseExprReplacer<InlineFunctionCalls> {
         for( size_t i = 0; i < function->n_dependencies; i++ ) {
             if( global_scope->resolve_symbol(
                     function->m_dependencies[i]) == nullptr ) {
+                return false;
+            }
+        }
+
+        // The variables of the host that an internal procedure refers to
+        // are bound when it is entered, through its frame dummy argument.
+        for( auto& item: function->m_symtab->get_scope() ) {
+            if( ASR::is_a<ASR::Variable_t>(*item.second) &&
+                    ASRUtils::is_host_associated(
+                        *ASR::down_cast<ASR::Variable_t>(item.second)) ) {
                 return false;
             }
         }
@@ -320,6 +378,10 @@ class InlineFunctionCalls: public ASR::BaseExprReplacer<InlineFunctionCalls> {
     void replace_OverloadedCompare(ASR::OverloadedCompare_t* /*x*/) {
     }
 
+    // See InlineFunctionCallsVisitor::visit_FunctionType.
+    void replace_FunctionType(ASR::FunctionType_t* /*x*/) {
+    }
+
 };
 
 class InlineFunctionCallsVisitor: public ASR::CallReplacerOnExpressionsVisitor<InlineFunctionCallsVisitor> {
@@ -420,6 +482,12 @@ class InlineFunctionCallsVisitor: public ASR::CallReplacerOnExpressionsVisitor<I
     }
 
     void visit_OverloadedCompare(const ASR::OverloadedCompare_t& /*x*/) {
+    }
+
+    // A procedure type is never evaluated where it appears and must stay
+    // free of scoped references, so calls in it (e.g. in the bounds of a
+    // dummy argument) are not inlined.
+    void visit_FunctionType(const ASR::FunctionType_t& /*x*/) {
     }
 
     void visit_WhileLoop(const ASR::WhileLoop_t &x) {

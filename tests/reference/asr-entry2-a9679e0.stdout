@@ -103,9 +103,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             messpr:
                                 (Function
@@ -118,7 +120,7 @@
                                     (FunctionType
                                         []
                                         ()
-                                        BindC
+                                        Source
                                         ImplicitInterface
                                         ()
                                         .false.
@@ -150,7 +152,7 @@
                                     (FunctionType
                                         []
                                         ()
-                                        BindC
+                                        Source
                                         Interface
                                         ()
                                         .false.
@@ -184,7 +186,7 @@
                                         (FunctionType
                                             []
                                             ()
-                                            BindC
+                                            Source
                                             Interface
                                             ()
                                             .false.
@@ -207,9 +209,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     prini_main__lcompilers
@@ -230,53 +234,7 @@
                     )
                     []
                     [(Var 4 entry__lcompilers)]
-                    [(Associate
-                        (Var 4 messpr~fpcast_ptr)
-                        (FunctionPointerCast
-                            (Var 4 messpr)
-                            4 messpr~fpcast
-                            (FunctionType
-                                []
-                                ()
-                                BindC
-                                Interface
-                                ()
-                                .false.
-                                .false.
-                                .false.
-                                .false.
-                                .false.
-                                []
-                                .false.
-                                Host
-                            )
-                            ()
-                        )
-                    )
-                    (Associate
-                        (Var 4 messpr~fpcast_ptr)
-                        (FunctionPointerCast
-                            (Var 4 messpr)
-                            4 messpr~fpcast
-                            (FunctionType
-                                []
-                                ()
-                                BindC
-                                Interface
-                                ()
-                                .false.
-                                .false.
-                                .false.
-                                .false.
-                                .false.
-                                []
-                                .false.
-                                Host
-                            )
-                            ()
-                        )
-                    )
-                    (If
+                    [(If
                         ()
                         (IntegerCompare
                             (Var 4 entry__lcompilers)
@@ -314,6 +272,30 @@
                     (GoToTarget
                         2
                         2
+                    )
+                    (Associate
+                        (Var 4 messpr~fpcast_ptr)
+                        (FunctionPointerCast
+                            (Var 4 messpr)
+                            4 messpr~fpcast
+                            (FunctionType
+                                []
+                                ()
+                                Source
+                                Interface
+                                ()
+                                .false.
+                                .false.
+                                .false.
+                                .false.
+                                .false.
+                                []
+                                .false.
+                                Host
+                            )
+                            ()
+                        )
+                        NoPointerBounds
                     )
                     (SubroutineCall
                         4 messpr~fpcast_ptr

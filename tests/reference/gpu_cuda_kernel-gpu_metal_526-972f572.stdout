@@ -1,0 +1,193 @@
+#include <stdint.h>
+
+struct __ScalarArgs___lfortran_gpu_kernel_0_13gpu_metal_526 {
+    int n;
+    int __loop_start_0;
+    int __loop_end_0;
+};
+
+extern "C" __global__ void __launch_bounds__(256) __lfortran_gpu_kernel_0_13gpu_metal_526(
+    int* __restrict__ b,
+    __ScalarArgs___lfortran_gpu_kernel_0_13gpu_metal_526 __scalar_args)
+{
+    int n = __scalar_args.n;
+    int __loop_start_0 = __scalar_args.__loop_start_0;
+    int __loop_end_0 = __scalar_args.__loop_end_0;
+    int __flat_idx;
+    int i__dc;
+    int m;
+    if ((((blockIdx.x * blockDim.x) + threadIdx.x) >= (((__loop_end_0 >= __loop_start_0)) ? (((__loop_end_0 - __loop_start_0) + 1)) : (0)))) {
+        return;
+    }
+    __flat_idx = ((blockIdx.x * blockDim.x) + threadIdx.x);
+    i__dc = (__flat_idx + __loop_start_0);
+    {
+        long __gpu_frame;
+        int __gpu_frame_i__dc;
+        if ((((long)i__dc) < (((long)1) + ((long)1)))) {
+            __gpu_frame = ((((long)i__dc) - ((((long)1) + ((long)1)) - ((((long)2) + (((long)1) - ((long)1))) / ((long)1)))) * ((long)1));
+            if ((__gpu_frame < ((long)2))) {
+                if ((__gpu_frame < ((long)1))) {
+                    __gpu_frame_i__dc = ((int)(((long)1) + __gpu_frame));
+                } else {
+                    __gpu_frame_i__dc = ((int)(((((long)n) + ((long)1)) - ((long)1)) + (__gpu_frame - ((long)1))));
+                }
+                if ((__gpu_frame_i__dc == 1)) {
+                    m = (__gpu_frame_i__dc + 5);
+                }
+                if ((__gpu_frame_i__dc == n)) {
+                    b[((int)(__gpu_frame_i__dc) - (1))] = 0;
+                } else {
+                    if ((m == (__gpu_frame_i__dc + 5))) {
+                        b[((int)(__gpu_frame_i__dc) - (1))] = 1;
+                    } else {
+                        b[((int)(__gpu_frame_i__dc) - (1))] = 2;
+                    }
+                }
+            }
+        } else {
+            if ((m == (i__dc + 5))) {
+                b[((int)(i__dc) - (1))] = 1;
+            } else {
+                b[((int)(i__dc) - (1))] = 2;
+            }
+        }
+    }
+}
+
+struct __ScalarArgs___lfortran_gpu_kernel_1_13gpu_metal_526 {
+    int n;
+    int __loop_end_0;
+};
+
+extern "C" __global__ void __launch_bounds__(256) __lfortran_gpu_kernel_1_13gpu_metal_526(
+    int* __restrict__ b,
+    __ScalarArgs___lfortran_gpu_kernel_1_13gpu_metal_526 __scalar_args)
+{
+    int n = __scalar_args.n;
+    int __loop_end_0 = __scalar_args.__loop_end_0;
+    int __flat_idx;
+    int i__dc;
+    int m;
+    if ((((blockIdx.x * blockDim.x) + threadIdx.x) >= (((__loop_end_0 >= 1)) ? (((__loop_end_0 - 1) + 1)) : (0)))) {
+        return;
+    }
+    __flat_idx = ((blockIdx.x * blockDim.x) + threadIdx.x);
+    i__dc = (__flat_idx + 1);
+    if ((i__dc == 1)) {
+        m = (i__dc + 5);
+    }
+    if ((i__dc == n)) {
+        b[((int)(i__dc) - (1))] = 0;
+    } else {
+        if ((m == (i__dc + 5))) {
+            b[((int)(i__dc) - (1))] = 1;
+        } else {
+            b[((int)(i__dc) - (1))] = 2;
+        }
+    }
+}
+
+struct __ScalarArgs___lfortran_gpu_kernel_2_13gpu_metal_526 {
+    int n;
+    int __loop_start_0;
+    int __loop_end_0;
+};
+
+extern "C" __global__ void __launch_bounds__(256) __lfortran_gpu_kernel_2_13gpu_metal_526(
+    int* __restrict__ c,
+    __ScalarArgs___lfortran_gpu_kernel_2_13gpu_metal_526 __scalar_args)
+{
+    int n = __scalar_args.n;
+    int __loop_start_0 = __scalar_args.__loop_start_0;
+    int __loop_end_0 = __scalar_args.__loop_end_0;
+    int __flat_idx;
+    int i__dc1;
+    int k;
+    if ((((blockIdx.x * blockDim.x) + threadIdx.x) >= (((__loop_end_0 >= __loop_start_0)) ? (((__loop_end_0 - __loop_start_0) + 1)) : (0)))) {
+        return;
+    }
+    __flat_idx = ((blockIdx.x * blockDim.x) + threadIdx.x);
+    i__dc1 = (__flat_idx + __loop_start_0);
+    {
+        long __gpu_frame1;
+        int __gpu_frame_i__dc1;
+        if ((((long)i__dc1) < (((long)1) + ((long)1)))) {
+            __gpu_frame1 = ((((long)i__dc1) - ((((long)1) + ((long)1)) - ((((long)1) + (((long)1) - ((long)1))) / ((long)1)))) * ((long)1));
+            if ((__gpu_frame1 < ((long)1))) {
+                if ((__gpu_frame1 < ((long)1))) {
+                    __gpu_frame_i__dc1 = ((int)(((long)1) + __gpu_frame1));
+                } else {
+                    __gpu_frame_i__dc1 = ((int)(((((long)n) + ((long)1)) - ((long)0)) + (__gpu_frame1 - ((long)1))));
+                }
+                if ((__gpu_frame_i__dc1 == 1)) {
+                    k = (__gpu_frame_i__dc1 + 50);
+                } else {
+                    if ((k == (__gpu_frame_i__dc1 + 50))) {
+                        c[((int)(__gpu_frame_i__dc1) - (1))] = 5;
+                    } else {
+                        c[((int)(__gpu_frame_i__dc1) - (1))] = 6;
+                    }
+                }
+                if ((__gpu_frame_i__dc1 == 1)) {
+                    c[((int)(__gpu_frame_i__dc1) - (1))] = 7;
+                } else {
+                    if (((int)((__gpu_frame_i__dc1 < n) && (k == (__gpu_frame_i__dc1 + 50))))) {
+                        c[((int)(__gpu_frame_i__dc1) - (1))] = (c[((int)(__gpu_frame_i__dc1) - (1))] + 10);
+                    }
+                }
+            }
+        } else {
+            if ((i__dc1 == 1)) {
+                k = (i__dc1 + 50);
+            } else {
+                if ((k == (i__dc1 + 50))) {
+                    c[((int)(i__dc1) - (1))] = 5;
+                } else {
+                    c[((int)(i__dc1) - (1))] = 6;
+                }
+            }
+            if (((int)((i__dc1 < n) && (k == (i__dc1 + 50))))) {
+                c[((int)(i__dc1) - (1))] = (c[((int)(i__dc1) - (1))] + 10);
+            }
+        }
+    }
+}
+
+struct __ScalarArgs___lfortran_gpu_kernel_3_13gpu_metal_526 {
+    int n;
+    int __loop_end_0;
+};
+
+extern "C" __global__ void __launch_bounds__(256) __lfortran_gpu_kernel_3_13gpu_metal_526(
+    int* __restrict__ c,
+    __ScalarArgs___lfortran_gpu_kernel_3_13gpu_metal_526 __scalar_args)
+{
+    int n = __scalar_args.n;
+    int __loop_end_0 = __scalar_args.__loop_end_0;
+    int __flat_idx;
+    int i__dc1;
+    int k;
+    if ((((blockIdx.x * blockDim.x) + threadIdx.x) >= (((__loop_end_0 >= 1)) ? (((__loop_end_0 - 1) + 1)) : (0)))) {
+        return;
+    }
+    __flat_idx = ((blockIdx.x * blockDim.x) + threadIdx.x);
+    i__dc1 = (__flat_idx + 1);
+    if ((i__dc1 == 1)) {
+        k = (i__dc1 + 50);
+    } else {
+        if ((k == (i__dc1 + 50))) {
+            c[((int)(i__dc1) - (1))] = 5;
+        } else {
+            c[((int)(i__dc1) - (1))] = 6;
+        }
+    }
+    if ((i__dc1 == 1)) {
+        c[((int)(i__dc1) - (1))] = 7;
+    } else {
+        if (((int)((i__dc1 < n) && (k == (i__dc1 + 50))))) {
+            c[((int)(i__dc1) - (1))] = (c[((int)(i__dc1) - (1))] + 10);
+        }
+    }
+}
+

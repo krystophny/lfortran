@@ -18,10 +18,17 @@ struct MetalDialect {
 
     // Metal has no double precision. This silently narrows real(8), and is
     // only correct because pass_replace_gpu_offload refuses to offload a loop
-    // that touches real(8) or integer(8) and reports it instead. Do not lift
-    // that guard without also giving real(8) a correct lowering here.
+    // that touches real(8) and reports it instead. Do not lift that guard
+    // without also giving real(8) a correct lowering here.
     std::string real_type(int /*kind*/) const {
         return "float";
+    }
+
+    // The integer kind an element's offset in an array is computed in.
+    // Metal indexes in 32 bits (GpuDeviceCapabilities::max_index_kind); an
+    // integer(8) subscript is narrowed once its lower bound is subtracted.
+    int offset_kind() const {
+        return 4;
     }
 
     void emit_prologue(std::stringstream &src) const {
@@ -33,7 +40,8 @@ struct MetalDialect {
         return "inline ";
     }
 
-    std::string kernel_qualifier() const {
+    std::string kernel_qualifier(int64_t /*threads_per_block*/,
+            bool /*few_blocks*/) const {
         return "kernel void ";
     }
 
@@ -42,11 +50,76 @@ struct MetalDialect {
         return " [[buffer(" + std::to_string(index) + ")]]";
     }
 
+    // The Metal Shading Language has no way to say that a buffer is not
+    // aliased.
+    std::string noalias_qualifier() const {
+        return "";
+    }
+
     // The grid position is a parameter of the kernel rather than a built-in.
     void emit_thread_id_param(std::stringstream &src, bool has_prev) const {
         if (has_prev) src << ",\n";
         src << "    uint __thread_id [[thread_position_in_grid]]";
     }
+
+    // A kernel whose iterations each run on several lanes (see
+    // gpu_vector_lanes.cpp) takes its grid position under another name,
+    // and its position within its SIMD-group too.
+    void emit_lane_thread_params(std::stringstream &src, bool has_prev) const {
+        if (has_prev) src << ",\n";
+        src << "    uint __gpu_grid_thread [[thread_position_in_grid]],\n";
+        src << "    uint __gpu_simd_lane [[thread_index_in_simdgroup]]";
+    }
+
+    // The lanes of an iteration are consecutive threads of one SIMD-group,
+    // as `lanes` divides the SIMD-group width (the lanes a device's
+    // capabilities give), and the threads of a threadgroup fill its
+    // SIMD-groups in order.
+    void emit_lane_prologue(std::stringstream &src, const std::string &indent,
+            const std::string &lanes) const {
+        src << indent << "uint __thread_id = __gpu_grid_thread / (uint)"
+            << lanes << ";\n";
+        src << indent << "int __gpu_lane = (int)(__gpu_grid_thread % (uint)"
+            << lanes << ");\n";
+    }
+
+    std::string lane_index() const { return "__gpu_lane"; }
+    // The prologue renames the grid position, so a kernel with lanes reads
+    // it under its usual name.
+    std::string lane_thread_index() const { return thread_index(); }
+    std::string lane_block_size() const { return block_size(); }
+    // What the lanes of the iteration hold, combined, in every lane. It is
+    // only reached with more than one lane (gpu_vector_lanes.cpp), and
+    // then the lanes are the whole SIMD-group (emit_lane_prologue): 0 adds,
+    // 1 multiplies, 2 takes the smallest, 3 the largest.
+    std::string lane_reduce(const std::string &value, int op,
+            bool /*has_lanes*/, bool /*block*/) const {
+        static const char *names[] = {"simd_sum", "simd_product", "simd_min",
+            "simd_max"};
+        LCOMPILERS_ASSERT(op >= 0 && op < 4);
+        return std::string(names[op]) + "(" + value + ")";
+    }
+    std::string lane_reduce_helper() const { return ""; }
+
+    // The value in the first lane of the iteration. With one lane per
+    // iteration, that is the thread's own.
+    std::string lane_broadcast(const std::string &value,
+            bool /*block*/) const {
+        return "simd_shuffle(" + value
+            + ", (ushort)(__gpu_simd_lane - (uint)__gpu_lane))";
+    }
+
+    // With one lane per iteration, the threads of a SIMD-group run
+    // different iterations, which need not reach the same barriers.
+    void emit_lane_barrier(std::stringstream &src, const std::string &indent,
+            const std::string &lanes, bool /*block*/) const {
+        src << indent << "if (" << lanes << " > 1) simdgroup_barrier("
+            "mem_flags::mem_device | mem_flags::mem_threadgroup);\n";
+    }
+
+    // Metal's short loops are unrolled in the ASR (gpu_sequential_unroll).
+    std::string unroll_pragma(bool /*deep*/ = false) const { return ""; }
+    std::string unroll_few_pragma() const { return ""; }
 
     // Every real is single precision, so a literal needs no suffix to say
     // which precision it is.
@@ -54,23 +127,30 @@ struct MetalDialect {
         return double_to_scientific(value);
     }
 
-    // A Metal shader has no trap and no way to end the program, so there is
-    // nothing to spell here. The offload pass declines a loop holding a
-    // STOP for this device, so no such statement reaches the emitter.
-    std::string abort_stmt() const {
-        return "";
-    }
-
     // The grid position already accounts for the block, so a kernel that
     // asks for its block coordinates is asking about a grid Metal does not
     // divide up: the block is the whole grid and its index is zero.
     std::string thread_index() const { return "__thread_id"; }
     std::string global_thread_id() const { return "__thread_id"; }
+    std::string lane_global_thread_id() const { return "__thread_id"; }
     std::string block_index() const { return "0"; }
     std::string block_size() const { return "0"; }
 
     std::string uint_type() const {
         return "uint";
+    }
+
+    // The bits of `value` read as a `type` of the same width.
+    std::string bit_cast(const std::string &type, bool /*to_real*/,
+            int /*kind*/, const std::string &value) const {
+        return "as_type<" + type + ">(" + value + ")";
+    }
+
+    // A relaxed atomic add to an `int` in device memory, giving the old value.
+    std::string atomic_fetch_add(const std::string &address,
+            const std::string &increment) const {
+        return "atomic_fetch_add_explicit((device atomic_int*)(" + address
+            + "), " + increment + ", memory_order_relaxed)";
     }
 
     // The scalars a kernel takes travel together in one read-only buffer.

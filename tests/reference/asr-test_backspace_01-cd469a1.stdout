@@ -27,9 +27,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             lfortran_iomsg1:
                                 (Variable
@@ -51,9 +53,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             lfortran_iomsg2:
                                 (Variable
@@ -75,9 +79,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             line:
                                 (Variable
@@ -99,9 +105,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             u:
                                 (Variable
@@ -123,9 +131,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     test_backspace_01
@@ -149,6 +159,7 @@
                             "read"
                             (String 1 (IntegerConstant 4 (Integer 4) Decimal) ExpressionLength DescriptorString)
                         )
+                        ()
                         ()
                         ()
                         ()
@@ -194,6 +205,8 @@
                             )
                             [(Var 2 line)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -253,6 +266,8 @@
                                 (String 1 (IntegerConstant 37 (Integer 4) Decimal) ExpressionLength DescriptorString)
                             )]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -281,6 +296,8 @@
                             )
                             [(Var 2 line)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )

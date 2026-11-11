@@ -4,6 +4,7 @@
 #include <libasr/exception.h>
 #include <lfortran/utils.h>
 #include <lfortran/parser/parser.h>
+#include <lfortran/parser/source_offset.h>
 
 namespace LCompilers::LFortran {
 
@@ -28,16 +29,28 @@ public:
     cpp_symtab macro_definitions;
     CPreprocessor(CompilerOptions &compiler_options);
     std::string token(unsigned char *tok, unsigned char* cur) const;
+    // `macro_expansion` is true when `input` is a macro expansion or a macro
+    // argument rather than source lines (no fixed-form comment lines there)
     Result<std::string> run(const std::string &input, LocationManager &lm,
-        cpp_symtab &macro_definitions, diag::Diagnostics &diagnostics) const;
+        cpp_symtab &macro_definitions, diag::Diagnostics &diagnostics,
+        bool macro_expansion=false) const;
 
     // Return the current token's location
     void token_loc(Location &loc, unsigned char *tok, unsigned char* cur,
             unsigned char *string_start) const
     {
-        loc.first = tok-string_start;
-        loc.last = cur-string_start-1;
+        loc.first = source_offset(tok-string_start);
+        loc.last = source_offset(cur-string_start-1);
     }
+
+private:
+    // Preprocess `input` in which backslash-newline sequences have already
+    // been spliced (called by `run`). `newlines` are the positions in `input`
+    // that end the original lines (if nullptr, the newlines of `input`).
+    Result<std::string> run_spliced(const std::string &input,
+        LocationManager &lm, cpp_symtab &macro_definitions,
+        diag::Diagnostics &diagnostics, bool macro_expansion,
+        const std::vector<uint32_t> *newlines) const;
 };
 
 std::string function_like_macro_expansion(

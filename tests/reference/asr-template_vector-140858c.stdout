@@ -54,8 +54,9 @@
                                                     7
                                                     1_intvector_elements
                                                     8 elements
-                                                    intvector
-                                                    []
+                                                    template_vector_m
+                                                    [main
+                                                    intvector]
                                                     elements
                                                     Public
                                                 ),
@@ -79,8 +80,9 @@
                                                                     9
                                                                     1_intvector_elements
                                                                     8 elements
-                                                                    intvector
-                                                                    []
+                                                                    template_vector_m
+                                                                    [main
+                                                                    intvector]
                                                                     elements
                                                                     Public
                                                                 ),
@@ -89,8 +91,9 @@
                                                                     9
                                                                     1_intvector_resize
                                                                     8 resize
-                                                                    intvector
-                                                                    []
+                                                                    template_vector_m
+                                                                    [main
+                                                                    intvector]
                                                                     resize
                                                                     Public
                                                                 ),
@@ -99,8 +102,9 @@
                                                                     9
                                                                     1_intvector_sz
                                                                     8 sz
-                                                                    intvector
-                                                                    []
+                                                                    template_vector_m
+                                                                    [main
+                                                                    intvector]
                                                                     sz
                                                                     Public
                                                                 ),
@@ -124,9 +128,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             new_size:
                                                                 (Variable
@@ -148,9 +154,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             this:
                                                                 (Variable
@@ -177,9 +185,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     __asr_push_back
@@ -224,6 +234,8 @@
                                                         ()
                                                         .false.
                                                         .false.
+                                                        .false.
+                                                        .false.
                                                     )
                                                     (SubroutineCall
                                                         9 1_intvector_resize
@@ -255,9 +267,12 @@
                                                             (Integer 4)
                                                             ColMajor
                                                             ()
+                                                            .false.
                                                         )
                                                         (Var 9 item)
                                                         ()
+                                                        .false.
+                                                        .false.
                                                         .false.
                                                         .false.
                                                     )
@@ -272,6 +287,8 @@
                                                         ()
                                                         .false.
                                                         .false.
+                                                        .false.
+                                                        .false.
                                                     )]
                                                     ()
                                                     Private
@@ -284,13 +301,25 @@
                                                     (SymbolTable
                                                         10
                                                         {
+                                                            1_intvector_elements:
+                                                                (ExternalSymbol
+                                                                    10
+                                                                    1_intvector_elements
+                                                                    8 elements
+                                                                    template_vector_m
+                                                                    [main
+                                                                    intvector]
+                                                                    elements
+                                                                    Public
+                                                                ),
                                                             1_intvector_sz:
                                                                 (ExternalSymbol
                                                                     10
                                                                     1_intvector_sz
                                                                     8 sz
-                                                                    intvector
-                                                                    []
+                                                                    template_vector_m
+                                                                    [main
+                                                                    intvector]
                                                                     sz
                                                                     Public
                                                                 ),
@@ -314,9 +343,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             n:
                                                                 (Variable
@@ -338,9 +369,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             this:
                                                                 (Variable
@@ -367,9 +400,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             tmp:
                                                                 (Variable
@@ -399,9 +434,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     __asr_resize
@@ -436,7 +473,7 @@
                                                                 Allocated
                                                                 [(StructInstanceMember
                                                                     (Var 10 this)
-                                                                    7 1_intvector_elements
+                                                                    10 1_intvector_elements
                                                                     (Allocatable
                                                                         (Array
                                                                             (Integer 4)
@@ -458,7 +495,7 @@
                                                         [(Allocate
                                                             [((StructInstanceMember
                                                                 (Var 10 this)
-                                                                7 1_intvector_elements
+                                                                10 1_intvector_elements
                                                                 (Allocatable
                                                                     (Array
                                                                         (Integer 4)
@@ -527,7 +564,7 @@
                                                             (Integer 4)
                                                             ()
                                                         )
-                                                        ())
+                                                        (IntegerConstant 1 (Integer 4) Decimal))
                                                         [(Assignment
                                                             (ArrayItem
                                                                 (Var 10 tmp)
@@ -537,11 +574,12 @@
                                                                 (Integer 4)
                                                                 ColMajor
                                                                 ()
+                                                                .false.
                                                             )
                                                             (ArrayItem
                                                                 (StructInstanceMember
                                                                     (Var 10 this)
-                                                                    7 1_intvector_elements
+                                                                    10 1_intvector_elements
                                                                     (Allocatable
                                                                         (Array
                                                                             (Integer 4)
@@ -559,8 +597,11 @@
                                                                 (Integer 4)
                                                                 ColMajor
                                                                 ()
+                                                                .false.
                                                             )
                                                             ()
+                                                            .false.
+                                                            .false.
                                                             .false.
                                                             .false.
                                                         )]
@@ -569,7 +610,7 @@
                                                     (Allocate
                                                         [((StructInstanceMember
                                                             (Var 10 this)
-                                                            7 1_intvector_elements
+                                                            10 1_intvector_elements
                                                             (Allocatable
                                                                 (Array
                                                                     (Integer 4)
@@ -595,7 +636,7 @@
                                                         (ArraySection
                                                             (StructInstanceMember
                                                                 (Var 10 this)
-                                                                7 1_intvector_elements
+                                                                10 1_intvector_elements
                                                                 (Allocatable
                                                                     (Array
                                                                         (Integer 4)
@@ -626,6 +667,8 @@
                                                         )
                                                         (Var 10 tmp)
                                                         ()
+                                                        .false.
+                                                        .false.
                                                         .false.
                                                         .false.
                                                     )]
@@ -668,9 +711,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             push_back:
                                                                 (StructMethodDeclaration
@@ -682,6 +727,7 @@
                                                                     Source
                                                                     .false.
                                                                     .false.
+                                                                    Public
                                                                 ),
                                                             resize:
                                                                 (StructMethodDeclaration
@@ -693,6 +739,7 @@
                                                                     Source
                                                                     .false.
                                                                     .false.
+                                                                    Public
                                                                 ),
                                                             sz:
                                                                 (Variable
@@ -714,9 +761,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     intvector
@@ -731,7 +780,7 @@
                                                     sz]
                                                     []
                                                     Source
-                                                    Private
+                                                    Public
                                                     .false.
                                                     .false.
                                                     .false.
@@ -765,9 +814,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     main
@@ -820,6 +871,7 @@
                                                 (Integer 4)
                                                 ColMajor
                                                 ()
+                                                .false.
                                             )
                                             NotEq
                                             (IntegerConstant 10 (Integer 4) Decimal)
@@ -852,8 +904,9 @@
                                                                     5
                                                                     1_vector_elements
                                                                     4 elements
-                                                                    vector
-                                                                    []
+                                                                    template_vector_m
+                                                                    [vector_t
+                                                                    vector]
                                                                     elements
                                                                     Public
                                                                 ),
@@ -872,8 +925,9 @@
                                                                     5
                                                                     1_vector_sz
                                                                     4 sz
-                                                                    vector
-                                                                    []
+                                                                    template_vector_m
+                                                                    [vector_t
+                                                                    vector]
                                                                     sz
                                                                     Public
                                                                 ),
@@ -901,9 +955,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             new_size:
                                                                 (Variable
@@ -925,9 +981,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             this:
                                                                 (Variable
@@ -967,9 +1025,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     push_back
@@ -1031,6 +1091,8 @@
                                                         ()
                                                         .false.
                                                         .false.
+                                                        .false.
+                                                        .false.
                                                     )
                                                     (SubroutineCall
                                                         5 1_vector_resize
@@ -1070,9 +1132,12 @@
                                                             )
                                                             ColMajor
                                                             ()
+                                                            .false.
                                                         )
                                                         (Var 5 item)
                                                         ()
+                                                        .false.
+                                                        .false.
                                                         .false.
                                                         .false.
                                                     )
@@ -1085,6 +1150,8 @@
                                                         )
                                                         (Var 5 new_size)
                                                         ()
+                                                        .false.
+                                                        .false.
                                                         .false.
                                                         .false.
                                                     )]
@@ -1104,8 +1171,9 @@
                                                                     6
                                                                     1_vector_elements
                                                                     4 elements
-                                                                    vector
-                                                                    []
+                                                                    template_vector_m
+                                                                    [vector_t
+                                                                    vector]
                                                                     elements
                                                                     Public
                                                                 ),
@@ -1114,8 +1182,9 @@
                                                                     6
                                                                     1_vector_sz
                                                                     4 sz
-                                                                    vector
-                                                                    []
+                                                                    template_vector_m
+                                                                    [vector_t
+                                                                    vector]
                                                                     sz
                                                                     Public
                                                                 ),
@@ -1139,9 +1208,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             n:
                                                                 (Variable
@@ -1163,9 +1234,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             this:
                                                                 (Variable
@@ -1205,9 +1278,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             tmp:
                                                                 (Variable
@@ -1241,9 +1316,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     resize
@@ -1390,7 +1467,7 @@
                                                             (Integer 4)
                                                             ()
                                                         )
-                                                        ())
+                                                        (IntegerConstant 1 (Integer 4) Decimal))
                                                         [(Assignment
                                                             (ArrayItem
                                                                 (Var 6 tmp)
@@ -1404,6 +1481,7 @@
                                                                 )
                                                                 ColMajor
                                                                 ()
+                                                                .false.
                                                             )
                                                             (ArrayItem
                                                                 (StructInstanceMember
@@ -1434,8 +1512,11 @@
                                                                 )
                                                                 ColMajor
                                                                 ()
+                                                                .false.
                                                             )
                                                             ()
+                                                            .false.
+                                                            .false.
                                                             .false.
                                                             .false.
                                                         )]
@@ -1515,6 +1596,8 @@
                                                         ()
                                                         .false.
                                                         .false.
+                                                        .false.
+                                                        .false.
                                                     )]
                                                     ()
                                                     Private
@@ -1546,9 +1629,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             vector:
                                                 (Struct
@@ -1587,9 +1672,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             push_back:
                                                                 (StructMethodDeclaration
@@ -1601,6 +1688,7 @@
                                                                     Source
                                                                     .false.
                                                                     .false.
+                                                                    Public
                                                                 ),
                                                             resize:
                                                                 (StructMethodDeclaration
@@ -1612,6 +1700,7 @@
                                                                     Source
                                                                     .false.
                                                                     .false.
+                                                                    Public
                                                                 ),
                                                             sz:
                                                                 (Variable
@@ -1633,9 +1722,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     vector
@@ -1663,7 +1754,7 @@
                                                     sz]
                                                     []
                                                     Source
-                                                    Private
+                                                    Public
                                                     .false.
                                                     .false.
                                                     .false.
@@ -1681,6 +1772,7 @@
                     template_vector_m
                     ()
                     [template_vector_m]
+                    .false.
                     .false.
                     .false.
                     .false.

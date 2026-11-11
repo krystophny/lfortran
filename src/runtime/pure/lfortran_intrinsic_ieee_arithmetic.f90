@@ -58,27 +58,27 @@ module lfortran_intrinsic_ieee_arithmetic
     end interface
 
     interface ieee_value
-        module procedure spieee_value, dpieee_value
+        module procedure spieee_value, dpieee_value, qpieee_value
     end interface
 
     interface ieee_is_nan
-        module procedure spieee_is_nan, dpieee_is_nan
+        module procedure spieee_is_nan, dpieee_is_nan, qpieee_is_nan
     end interface
 
     interface ieee_is_finite
-        module procedure spieee_is_finite, dpieee_is_finite
+        module procedure spieee_is_finite, dpieee_is_finite, qpieee_is_finite
     end interface
 
     interface ieee_is_negative
-        module procedure spieee_is_negative, dpieee_is_negative
+        module procedure spieee_is_negative, dpieee_is_negative, qpieee_is_negative
     end interface
 
     interface ieee_copy_sign
-        module procedure spieee_copy_sign, dpieee_copy_sign
+        module procedure spieee_copy_sign, dpieee_copy_sign, qpieee_copy_sign
     end interface
 
     interface ieee_support_datatype
-        module procedure spieee_support_datatype, dpieee_support_datatype
+        module procedure spieee_support_datatype, dpieee_support_datatype, qpieee_support_datatype
     end interface
     
     interface ieee_is_normal
@@ -98,11 +98,11 @@ module lfortran_intrinsic_ieee_arithmetic
     end interface
 
     interface ieee_support_inf
-        module procedure spieee_support_inf, dpieee_support_inf
+        module procedure spieee_support_inf, dpieee_support_inf, qpieee_support_inf
     end interface
 
     interface ieee_support_nan
-        module procedure spieee_support_nan, dpieee_support_nan
+        module procedure spieee_support_nan, dpieee_support_nan, qpieee_support_nan
     end interface
 
     ! New functions for complete IEEE support
@@ -135,6 +135,10 @@ module lfortran_intrinsic_ieee_arithmetic
         module procedure spieee_real_i64, dpieee_real_i64
     end interface
 
+    ! In the IEEE_SUPPORT_* inquiries below, X is optional only in the
+    ! single precision specific, which also answers a reference without X:
+    ! two specifics whose only real argument is optional would not be
+    ! distinguishable (F2018 C1514).
     interface ieee_support_denormal
         module procedure spieee_support_denormal, dpieee_support_denormal
     end interface
@@ -429,14 +433,14 @@ module lfortran_intrinsic_ieee_arithmetic
         use iso_fortran_env, only: real32
         real(real32), intent(in) :: x
         logical :: r
-        r = x /= 0.0_real32 .and. abs(x) >= tiny(x) .and. abs(x) <= huge(x) .and. x == x
+        r = x == 0.0_real32 .or. (abs(x) >= tiny(x) .and. abs(x) <= huge(x))
     end function
 
     elemental function dpieee_is_normal(x) result(r)
         use iso_fortran_env, only: real64
         real(real64), intent(in) :: x
         logical :: r
-        r = x /= 0.0_real64 .and. abs(x) >= tiny(x) .and. abs(x) <= huge(x) .and. x == x
+        r = x == 0.0_real64 .or. (abs(x) >= tiny(x) .and. abs(x) <= huge(x))
     end function
 
     elemental function spieee_unordered(x, y) result(r)
@@ -756,7 +760,7 @@ module lfortran_intrinsic_ieee_arithmetic
 
     pure function dpieee_support_denormal(x) result(r)
         use iso_fortran_env, only: real64
-        real(real64), intent(in), optional :: x
+        real(real64), intent(in) :: x
         logical :: r
         r = .true.
     end function
@@ -771,7 +775,7 @@ module lfortran_intrinsic_ieee_arithmetic
 
     pure function dpieee_support_divide(x) result(r)
         use iso_fortran_env, only: real64
-        real(real64), intent(in), optional :: x
+        real(real64), intent(in) :: x
         logical :: r
         r = .true.
     end function
@@ -786,7 +790,7 @@ module lfortran_intrinsic_ieee_arithmetic
 
     pure function dpieee_support_sqrt(x) result(r)
         use iso_fortran_env, only: real64
-        real(real64), intent(in), optional :: x
+        real(real64), intent(in) :: x
         logical :: r
         r = .true.
     end function
@@ -802,7 +806,7 @@ module lfortran_intrinsic_ieee_arithmetic
 
     pure function dpieee_support_standard(x) result(r)
         use iso_fortran_env, only: real64
-        real(real64), intent(in), optional :: x
+        real(real64), intent(in) :: x
         logical :: r
         r = .true.
     end function
@@ -818,7 +822,7 @@ module lfortran_intrinsic_ieee_arithmetic
 
     pure function dpieee_support_io(x) result(r)
         use iso_fortran_env, only: real64
-        real(real64), intent(in), optional :: x
+        real(real64), intent(in) :: x
         logical :: r
         r = .true.
     end function
@@ -837,7 +841,7 @@ module lfortran_intrinsic_ieee_arithmetic
     pure function dpieee_support_rounding(round_value, x) result(r)
         use iso_fortran_env, only: real64
         type(ieee_round_type), intent(in) :: round_value
-        real(real64), intent(in), optional :: x
+        real(real64), intent(in) :: x
         logical :: r
         r = .true.
     end function
@@ -948,6 +952,89 @@ module lfortran_intrinsic_ieee_arithmetic
         type(ieee_flag_type), intent(in) :: flag
         logical :: r
         ! Halting on exceptions is typically supported but platform-dependent
+        r = .true.
+    end function
+
+    elemental function qpieee_value(x, cls) result(y)
+        use iso_fortran_env, only: real128
+        real(real128), intent(in) :: x
+        type(ieee_class_type), intent(in) :: cls
+        real(real128) :: y
+        ! The low 64 bits of each special value come first, then the high 64.
+        select case (cls%value)
+        case (1)  ! ieee_signaling_nan
+            y = transfer([0_8, int(z'7FFF400000000000', kind=8)], 1.0_real128)
+        case (2)  ! ieee_quiet_nan
+            y = transfer([0_8, int(z'7FFF800000000000', kind=8)], 1.0_real128)
+        case (3)  ! ieee_negative_inf
+            y = transfer([0_8, int(z'FFFF000000000000', kind=8)], 1.0_real128)
+        case (4)  ! ieee_negative_normal
+            y = -1.0_real128
+        case (5)  ! ieee_negative_denormal
+            y = transfer([1_8, int(z'8000000000000000', kind=8)], 1.0_real128)
+        case (6)  ! ieee_negative_zero
+            y = transfer([0_8, int(z'8000000000000000', kind=8)], 1.0_real128)
+        case (7)  ! ieee_positive_zero
+            y = 0.0_real128
+        case (8)  ! ieee_positive_denormal
+            y = transfer([1_8, 0_8], 1.0_real128)
+        case (9)  ! ieee_positive_normal
+            y = 1.0_real128
+        case (10)  ! ieee_positive_inf
+            y = transfer([0_8, int(z'7FFF000000000000', kind=8)], 1.0_real128)
+        case (11)  ! ieee_other_value
+            y = x
+        case default
+            y = x
+        end select
+    end function
+
+    elemental function qpieee_is_nan(x) result(r)
+        use iso_fortran_env, only: real128
+        real(real128), intent(in) :: x
+        logical :: r
+        r = x /= x
+    end function
+
+    elemental function qpieee_is_finite(x) result(r)
+        use iso_fortran_env, only: real128
+        real(real128), intent(in) :: x
+        logical :: r
+        r = x == x .and. .not. (abs(x) > huge(x))
+    end function
+
+    elemental function qpieee_is_negative(x) result(r)
+        use iso_fortran_env, only: real128
+        real(real128), intent(in) :: x
+        logical :: r
+        r = sign(1.0_real128, x) < 0.0_real128
+    end function
+
+    elemental function qpieee_copy_sign(x, y) result(r)
+        use iso_fortran_env, only: real128
+        real(real128), intent(in) :: x, y
+        real(real128) :: r
+        r = abs(x) * sign(1.0_real128, y)
+    end function
+
+    elemental function qpieee_support_datatype(x) result(r)
+        use iso_fortran_env, only: real128
+        real(real128), intent(in) :: x
+        logical :: r
+        r = .true.
+    end function
+
+    elemental function qpieee_support_inf(x) result(r)
+        use iso_fortran_env, only: real128
+        real(real128), intent(in) :: x
+        logical :: r
+        r = .true.
+    end function
+
+    elemental function qpieee_support_nan(x) result(r)
+        use iso_fortran_env, only: real128
+        real(real128), intent(in) :: x
+        logical :: r
         r = .true.
     end function
 

@@ -150,6 +150,7 @@
                     .false.
                     .false.
                     .false.
+                    .false.
                     ()
                 ),
             test_scan_verify:
@@ -192,9 +193,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     test_verify_intrinsic
@@ -399,6 +402,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )]
                                     (Var 5 r)
                                     Public
@@ -428,6 +433,8 @@
                                 ()
                             )]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )

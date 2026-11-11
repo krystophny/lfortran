@@ -3,16 +3,21 @@
 
 #include <libasr/asr.h>
 #include <libasr/containers.h>
+#include <libasr/c_cpp_keywords.h>
 #include <libasr/codegen/gpu_utils.h>
 #include <libasr/pass/gpu_kernel_abi.h>
+#include <libasr/pass/gpu_device_struct_storage.h>
+#include <libasr/pass/gpu_offload_designator.h>
 #include <libasr/codegen/gpu_symbol_map.h>
 #include <libasr/codegen/c_utils.h>
+#include <libasr/codegen/c_loop_control.h>
 #include <libasr/exception.h>
 #include <libasr/asr_utils.h>
 #include <libasr/string_utils.h>
 #include <libasr/pass/intrinsic_functions.h>
 #include <libasr/pass/intrinsic_function_registry.h>
 
+#include <limits>
 #include <sstream>
 #include <map>
 #include <set>
@@ -54,6 +59,28 @@ class GpuMathHelperScanner : public ASR::BaseWalkVisitor<GpuMathHelperScanner> {
 public:
     bool needs_erf = false;
     bool needs_erfc = false;
+    bool needs_lane_reduce = false;
+    void visit_GpuLaneReduce(const ASR::GpuLaneReduce_t &x) {
+        needs_lane_reduce = true;
+        ASR::BaseWalkVisitor<GpuMathHelperScanner>::visit_GpuLaneReduce(x);
+    }
+    void visit_GpuLaneBroadcast(const ASR::GpuLaneBroadcast_t &x) {
+        needs_lane_reduce = true;
+        ASR::BaseWalkVisitor<GpuMathHelperScanner>::visit_GpuLaneBroadcast(x);
+    }
+    void visit_GpuLaneBarrier(const ASR::GpuLaneBarrier_t &x) {
+        needs_lane_reduce = true;
+        ASR::BaseWalkVisitor<GpuMathHelperScanner>::visit_GpuLaneBarrier(x);
+    }
+    // The type of an integer power device code computes, by kind.
+    std::map<int64_t, ASR::ttype_t*> integer_power_types;
+    void visit_IntegerBinOp(const ASR::IntegerBinOp_t &x) {
+        if (x.m_op == ASR::binopType::Pow) {
+            integer_power_types.emplace(
+                ASRUtils::extract_kind_from_ttype_t(x.m_type), x.m_type);
+        }
+        ASR::BaseWalkVisitor<GpuMathHelperScanner>::visit_IntegerBinOp(x);
+    }
     void visit_FunctionCall(const ASR::FunctionCall_t &x) {
         std::string fn_name(ASRUtils::symbol_name(
             ASRUtils::symbol_get_past_external(x.m_name)));
@@ -112,6 +139,44 @@ inline bool is_gpu_intercepted_intrinsic(const std::string &name) {
     }
     return false;
 }
+
+// Whether an exit or a cycle of the loop named `name` is in a loop of the
+// statements walked, so that it leaves that inner loop on its way out.
+class GpuLeavesThroughLoop
+        : public ASRUtils::BlockBodyWalkVisitor<GpuLeavesThroughLoop> {
+public:
+    const std::string name;
+    size_t depth = 0;
+    bool found = false;
+
+    explicit GpuLeavesThroughLoop(const char *name_) : name(name_) {}
+
+    void leave(const char *target) {
+        if (depth > 0 && target != nullptr && name == target) found = true;
+    }
+
+    void visit_Exit(const ASR::Exit_t &x) { leave(x.m_stmt_name); }
+
+    void visit_Cycle(const ASR::Cycle_t &x) { leave(x.m_stmt_name); }
+
+    void visit_DoLoop(const ASR::DoLoop_t &x) {
+        depth++;
+        BlockBodyWalkVisitor::visit_DoLoop(x);
+        depth--;
+    }
+
+    void visit_WhileLoop(const ASR::WhileLoop_t &x) {
+        depth++;
+        BlockBodyWalkVisitor::visit_WhileLoop(x);
+        depth--;
+    }
+
+    void visit_DoConcurrentLoop(const ASR::DoConcurrentLoop_t &x) {
+        depth++;
+        BlockBodyWalkVisitor::visit_DoConcurrentLoop(x);
+        depth--;
+    }
+};
 
 template <typename D>
 class ASRToGpuCVisitor
@@ -190,14 +255,54 @@ public:
         in_workspace_extent = outer;
     }
 
-    // The element count of one thread's slice of a workspace: the product
-    // of its extents, as the shader spells them. Empty when the shader
-    // cannot spell one of them.
+    // The element count of an array backed by a workspace: the product of
+    // its extents, as the shader spells them. Empty when the shader cannot
+    // spell one of them.
     std::string workspace_extent_str(const GpuVlaWorkspace &ws) {
         std::string out;
         for (size_t d = 0; d < ws.dims.size(); d++) {
             std::string one = workspace_dim_str(ws.var, d);
             if (one.empty()) return "";
+            out = out.empty() ? one : out + " * " + one;
+        }
+        return out;
+    }
+
+    // The thread's slice of the workspace, or nullptr when the array is
+    // empty or not allocated. The slice starts at the thread's index (the
+    // iteration's, for the lanes of an iteration, which share its slice)
+    // times the slice size, which is multiplied in 64 bits whatever the dialect's
+    // kind for element offsets: one thread's slice is an array the kernel
+    // indexes in that kind, but the slices of all threads together hold
+    // more than 2**32 elements of a buffer with modest slices and many
+    // threads (#15380). The extents of the slice multiply that 64-bit
+    // product one at a time, so a slice of several extents is counted in
+    // 64 bits too.
+    std::string workspace_pointer_str(const GpuVlaWorkspace &ws) {
+        std::string slice = workspace_slice_str(ws);
+        std::string active = "((" + slice + ") > 0";
+        if (ws.allocation_parameter) {
+            active += " && (";
+            if (!ws.allocation_on_true) active += "!";
+            active += ASRUtils::symbol_name(ws.allocation_parameter);
+            active += ")";
+        }
+        return active + ") ? (" + gpu_workspace_buffer_name(ws.buffer_index) +
+            " + ((" + gpu_offset_type(8) + ")" + (kernel_has_lanes()
+                ? dialect.lane_global_thread_id() : dialect.global_thread_id())
+            + ") * " + slice + ") : nullptr";
+    }
+
+    // The element count of one thread's slice of a workspace, which the
+    // host sized the buffer by. It is the array's own element count unless
+    // an extent changes from thread to thread: every slice then has room
+    // for the largest one, and the thread uses the leading part of it.
+    std::string workspace_slice_str(const GpuVlaWorkspace &ws) {
+        std::string out;
+        for (const GpuVlaDim &dim : ws.dims) {
+            std::string one = dim.is_constant
+                ? std::to_string(dim.constant_value)
+                : ASRUtils::symbol_name(dim.extent_parameter);
             out = out.empty() ? one : out + " * " + one;
         }
         return out;
@@ -212,6 +317,11 @@ public:
             const GpuVlaDim &dim = ws.dims[d];
             if (dim.is_constant) return std::to_string(dim.constant_value);
             LCOMPILERS_ASSERT(dim.extent_parameter != nullptr);
+            // Written over the kernel's parameters and the thread index
+            // alone, so it means the same wherever the kernel reads it.
+            if (dim.per_thread) {
+                return "(" + expr_str(dim.source_extent) + ")";
+            }
             return ASRUtils::symbol_name(dim.extent_parameter);
         }
         return "";
@@ -296,6 +406,13 @@ public:
                     src << "), (float)(";
                     emit_derived_extent(e.children[1]);
                     src << "))";
+                } else if (e.binop == ASR::binopType::LBitRShift) {
+                    // A logical right shift: see visit of IntegerBinOp.
+                    src << "((int)((unsigned int)(";
+                    emit_derived_extent(e.children[0]);
+                    src << ") >> (";
+                    emit_derived_extent(e.children[1]);
+                    src << ")))";
                 } else {
                     src << "(";
                     emit_derived_extent(e.children[0]);
@@ -326,6 +443,18 @@ public:
                 emit_derived_extent(e.children[1]);
                 src << ") : (";
                 emit_derived_extent(e.children[2]);
+                src << "))";
+                break;
+            }
+            case GpuExtentKind::Max: {
+                src << "(((";
+                emit_derived_extent(e.children[0]);
+                src << ") > (";
+                emit_derived_extent(e.children[1]);
+                src << ")) ? (";
+                emit_derived_extent(e.children[0]);
+                src << ") : (";
+                emit_derived_extent(e.children[1]);
                 src << "))";
                 break;
             }
@@ -403,6 +532,13 @@ public:
     // by visit_expr when emitting ArraySize.
     std::map<std::string, std::string> func_array_size_params;
 
+    // The lower bound of each dimension of an array whose type does not
+    // carry it, keyed as a per-dimension extent of func_array_size_params
+    // is (see dim_size_key): an allocatable component of a derived-type
+    // argument, `key` "var.member", and a name bound to one. A dimension
+    // with no entry starts at one.
+    std::map<std::string, std::string> func_array_lb_params;
+
     // Maps "struct_var.member" to the device-pointer parameter name
     // for allocatable array members passed alongside the struct. Holds a
     // scalar struct argument's components and a device function's own
@@ -413,6 +549,17 @@ public:
     // The layout of the kernel whose arguments are currently bound, the
     // one `emit_kernel_signature` wrote the parameter list from.
     const ASR::gpu_kernel_layout_t *current_kernel_layout = nullptr;
+
+    // A loop of the device code being written, innermost last. `leave`
+    // names the variable an exit (1) or a cycle (2) of the loop sets when
+    // it comes from a loop inside it, which breaks out of the loops in
+    // between first; it is empty when no such exit or cycle exists.
+    struct GpuLoopFrame {
+        const char *name;
+        std::string leave;
+    };
+    std::vector<GpuLoopFrame> loop_frames;
+    size_t leave_count = 0;
 
     // How the signature spelled a layout entry. The body asks the layout
     // for the name rather than rebuilding it, so the two halves cannot
@@ -590,6 +737,10 @@ public:
     // host runtime binds them. A dialect epilogue reads this back.
     std::vector<GpuKernelParam> kernel_params;
 
+    // What the kernel being emitted declares ahead of its body, which it
+    // writes once the body shows which of them it refers to.
+    std::vector<GpuDeclaration> kernel_declarations;
+
     // The spellings this instantiation emits. It is a value rather than a
     // set of static members so that a dialect can carry per-invocation state,
     // such as whether the CUDA backend is emitting for the CPU emulation.
@@ -628,17 +779,7 @@ public:
     // dialects. Fortran allows them as user-defined names, so we must rename
     // them when emitting device code.
     static std::string sanitize_name(const std::string &name) {
-        static const std::set<std::string> cpp_reserved = {
-            "and", "and_eq", "bitand", "bitor", "compl",
-            "not", "not_eq", "or", "or_eq", "xor", "xor_eq",
-            "true", "false", "bool", "class", "new", "delete",
-            "this", "throw", "try", "catch", "template",
-            "typename", "namespace", "using", "virtual",
-            "private", "protected", "public", "operator",
-            "friend", "inline", "register", "volatile",
-            "mutable", "explicit", "export"
-        };
-        if (cpp_reserved.count(name)) {
+        if (is_cpp_keyword(name)) {
             return "_lfortran_" + name;
         }
         return name;
@@ -657,10 +798,64 @@ public:
             ") on the gpu */";
     }
 
+    // C and MSL promote integer(1)/(2) operands of arithmetic to int, so
+    // such an expression has to spell its own device type to keep the
+    // Fortran kind ASR gives it (overloaded calls such as min need it).
+    static bool is_narrow_integer(ASR::ttype_t *type) {
+        return ASRUtils::is_integer(*type) &&
+            ASRUtils::extract_kind_from_ttype_t(type) < 4;
+    }
+
+    // min/max of two arguments, each spelled with the result's device type
+    // when that is narrower than int.
+    void emit_min_max(const char *name, ASR::ttype_t *type,
+            ASR::expr_t *a, ASR::expr_t *b) {
+        std::string open = "", close = "";
+        if (type && is_narrow_integer(type)) {
+            open = "((" + gpu_type(type) + ")(";
+            close = "))";
+        }
+        src << name << "(" << open;
+        if (a) visit_expr(a);
+        src << close << ", " << open;
+        if (b) visit_expr(b);
+        src << close << ")";
+    }
+
+    // The unsigned integer type of the same width as gpu_type(type), for an
+    // integer type.
+    std::string unsigned_gpu_type(ASR::ttype_t *type) {
+        int kind = checked_integer_cast<int>(
+            ASR::down_cast<ASR::Integer_t>(type)->m_kind);
+        if (kind == 1) return "uint8_t";
+        if (kind == 2) return "uint16_t";
+        if (kind == 4) return "unsigned int";
+        if (kind == 8) return "unsigned long";
+        return unsupported_gpu_type("integer", kind);
+    }
+
+    // The text around an extent or bound of an array that gives it the
+    // integer type `type` of the size, lbound or ubound asking for it. The
+    // value is rendered from what describes the array -- the int extents a
+    // device routine is handed with 32-bit offsets, a literal lower bound
+    // of 1, the declared dimensions -- in their own kind, so a kind wider
+    // than int has to be spelled, or an overloaded call such as
+    // max(1_8, size(v, kind=8)) sees an int beside a long.
+    std::pair<std::string, std::string> widened_extent_parts(
+            ASR::ttype_t *type) {
+        if (ASRUtils::is_integer(*type) &&
+                ASRUtils::extract_kind_from_ttype_t(type) > 4) {
+            return {"((" + gpu_type(type) + ")(", "))"};
+        }
+        return {"", ""};
+    }
+
     std::string gpu_type(ASR::ttype_t *type) {
         switch (type->type) {
             case ASR::ttypeType::Integer: {
-                int kind = ASR::down_cast<ASR::Integer_t>(type)->m_kind;
+                int kind = checked_integer_cast<int>(ASR::down_cast<ASR::Integer_t>(type)->m_kind);
+                if (kind == 1) return "int8_t";
+                if (kind == 2) return "int16_t";
                 if (kind == 4) return "int";
                 if (kind == 8) return "long";
                 // gpu_scalar_width_supported keeps the launch from handing
@@ -670,13 +865,13 @@ public:
                 return unsupported_gpu_type("integer", kind);
             }
             case ASR::ttypeType::Real: {
-                int kind = ASR::down_cast<ASR::Real_t>(type)->m_kind;
+                int kind = checked_integer_cast<int>(ASR::down_cast<ASR::Real_t>(type)->m_kind);
                 if (kind == 4 || kind == 8) return dialect.real_type(kind);
                 return unsupported_gpu_type("real", kind);
             }
             case ASR::ttypeType::Logical: {
                 // Use int to match LLVM's i32 representation for Logical(4)
-                int kind = ASR::down_cast<ASR::Logical_t>(type)->m_kind;
+                int kind = checked_integer_cast<int>(ASR::down_cast<ASR::Logical_t>(type)->m_kind);
                 if (kind == 1) return "char";
                 if (kind == 2) return "short";
                 if (kind == 4) return "int";
@@ -729,6 +924,29 @@ public:
     // the initialiser leaves every reference reading whatever the thread's
     // stack happened to hold.
     void emit_named_constant_decl(ASR::Variable_t *var) {
+        // A derived-type constant device code cannot be given the value of,
+        // an array of derived-type values or one with such a component, is
+        // not declared: the kernel plan declines a loop whose device code
+        // reads one, so only one nothing reads, whose declaration would be
+        // left out anyway, gets here.
+        if (ASR::is_a<ASR::StructType_t>(
+                *ASRUtils::extract_type(var->m_type))) {
+            if (ASRUtils::is_array(var->m_type)
+                    || !ASR::is_a<ASR::StructConstant_t>(*var->m_value)) {
+                return;
+            }
+            ASR::StructConstant_t *sc =
+                ASR::down_cast<ASR::StructConstant_t>(var->m_value);
+            ASR::symbol_t *st = ASRUtils::symbol_get_past_external(
+                sc->m_dt_sym);
+            size_t next_arg = 0;
+            if (!ASR::is_a<ASR::Struct_t>(*st)
+                    || !gpu_struct_constant_unsupported_component(
+                        ASR::down_cast<ASR::Struct_t>(st), sc, next_arg)
+                        .empty()) {
+                return;
+            }
+        }
         if (ASR::is_a<ASR::Array_t>(*var->m_type)) {
             ASR::Array_t *arr = ASR::down_cast<ASR::Array_t>(var->m_type);
             int64_t total = 1;
@@ -753,12 +971,88 @@ public:
             }
             src << "};\n";
         } else {
-            src << get_indent() << "const " << gpu_type(var->m_type)
+            src << get_indent() << "const "
+                << (is_struct_type(var->m_type) ? get_struct_name(var)
+                    : gpu_type(var->m_type))
                 << " " << sanitize_name(std::string(var->m_name))
                 << " = ";
             visit_expr(var->m_value);
             src << ";\n";
         }
+    }
+
+    // The brace initialiser of the device struct `st` from the values of a
+    // derived-type constant, starting at its value `next_arg`: those of the
+    // parent's components come first, as the parent member of the device
+    // struct does. False for a component the device cannot be given a
+    // value of this way.
+    bool struct_constant_initializer(ASR::Struct_t *st,
+            ASR::StructConstant_t *sc, size_t &next_arg, std::string &init) {
+        std::string out = "{";
+        bool first = true;
+        if (st->m_parent) {
+            ASR::symbol_t *parent = ASRUtils::symbol_get_past_external(
+                st->m_parent);
+            std::string parent_init;
+            if (!ASR::is_a<ASR::Struct_t>(*parent)
+                    || !struct_constant_initializer(
+                        ASR::down_cast<ASR::Struct_t>(parent), sc, next_arg,
+                        parent_init)) {
+                return false;
+            }
+            out += parent_init;
+            first = false;
+        }
+        for (size_t i = 0; i < st->n_members; i++) {
+            ASR::symbol_t *mem = st->m_symtab->get_symbol(st->m_members[i]);
+            if (!mem || !ASR::is_a<ASR::Variable_t>(*mem)) continue;
+            ASR::Variable_t *mv = ASR::down_cast<ASR::Variable_t>(mem);
+            if (next_arg >= sc->n_args) return false;
+            ASR::expr_t *value = sc->m_args[next_arg++].m_value;
+            if (!value || ASRUtils::is_allocatable_or_pointer(mv->m_type)) {
+                return false;
+            }
+            if (!first) out += ", ";
+            first = false;
+            ASR::ttype_t *elem = ASRUtils::type_get_past_array(mv->m_type);
+            if (is_struct_type(mv->m_type)) {
+                if (is_array_type(mv->m_type) || !mv->m_type_declaration
+                        || !ASR::is_a<ASR::StructConstant_t>(*value)) {
+                    return false;
+                }
+                ASR::symbol_t *inner = ASRUtils::symbol_get_past_external(
+                    mv->m_type_declaration);
+                if (!ASR::is_a<ASR::Struct_t>(*inner)) return false;
+                size_t inner_arg = 0;
+                std::string inner_init;
+                if (!struct_constant_initializer(
+                        ASR::down_cast<ASR::Struct_t>(inner),
+                        ASR::down_cast<ASR::StructConstant_t>(value),
+                        inner_arg, inner_init)) {
+                    return false;
+                }
+                out += inner_init;
+            } else if (is_array_type(mv->m_type)) {
+                if (!ASR::is_a<ASR::ArrayConstant_t>(*value)
+                        || (!ASR::is_a<ASR::Integer_t>(*elem)
+                            && !ASR::is_a<ASR::Real_t>(*elem))) {
+                    return false;
+                }
+                ASR::ArrayConstant_t *ac =
+                    ASR::down_cast<ASR::ArrayConstant_t>(value);
+                int64_t total = get_total_elements(mv->m_type);
+                out += "{";
+                for (int64_t k = 0; k < total; k++) {
+                    if (k > 0) out += ", ";
+                    out += ASRUtils::fetch_ArrayConstant_value(ac, k);
+                }
+                out += "}";
+            } else {
+                out += expr_str(value);
+            }
+        }
+        init = out + "}";
+        return true;
     }
 
     void emit_local_var_decl(ASR::Variable_t *var) {
@@ -778,16 +1072,18 @@ public:
             if (ASR::is_a<ASR::Array_t>(*ptr_inner)) {
                 ASR::Array_t *arr = ASR::down_cast<ASR::Array_t>(ptr_inner);
                 std::string vname(var->m_name);
+                std::string elem_type = is_struct_type(arr->m_type)
+                    ? get_struct_name(var) : gpu_type(arr->m_type);
                 if (ptr_to_local_alloc.count((ASR::symbol_t*)var)) {
                     src << get_indent()
                         << space_prefix(ASR::memory_spaceType::Thread)
-                        << gpu_type(arr->m_type)
+                        << elem_type
                         << "* " << sanitize_name(vname) << ";\n";
                 } else {
                     std::string ptr_addr =
                         space_prefix(arr->m_memory_space);
                     src << get_indent() << ptr_addr
-                        << gpu_type(arr->m_type)
+                        << elem_type
                         << "* " << sanitize_name(vname) << ";\n";
                 }
                 return;
@@ -814,9 +1110,7 @@ public:
                     std::string extent = workspace_extent_str(*vla_it);
                     src << get_indent() << global_prefix() << elem_type
                         << "* " << vname << " = "
-                        << gpu_workspace_buffer_name(vla_it->buffer_index)
-                        << " + " << dialect.global_thread_id() << " * ("
-                        << extent << ");\n";
+                        << workspace_pointer_str(*vla_it) << ";\n";
                     local_alloc_arrays.insert(&var->base);
                     int64_t total_const_size = 1;
                     bool all_const = true;
@@ -965,6 +1259,14 @@ public:
                         func_struct_deps, struct_origin_array);
                     break;
                 }
+                case ASR::stmtType::DoConcurrentLoop: {
+                    ASR::DoConcurrentLoop_t *dc =
+                        ASR::down_cast<ASR::DoConcurrentLoop_t>(stmts[i]);
+                    scan_stmts_recursive(dc->m_body, dc->n_body,
+                        func_allocs, func_param_copies,
+                        func_struct_deps, struct_origin_array);
+                    break;
+                }
                 case ASR::stmtType::If: {
                     ASR::If_t *if_s =
                         ASR::down_cast<ASR::If_t>(stmts[i]);
@@ -1021,6 +1323,13 @@ public:
                     ASR::DoLoop_t *dl =
                         ASR::down_cast<ASR::DoLoop_t>(stmts[i]);
                     propagate_stmts_recursive(dl->m_body, dl->n_body,
+                        changed);
+                    break;
+                }
+                case ASR::stmtType::DoConcurrentLoop: {
+                    ASR::DoConcurrentLoop_t *dc =
+                        ASR::down_cast<ASR::DoConcurrentLoop_t>(stmts[i]);
+                    propagate_stmts_recursive(dc->m_body, dc->n_body,
                         changed);
                     break;
                 }
@@ -1319,6 +1628,10 @@ public:
                     ASR::DoLoop_t *dl =
                         ASR::down_cast<ASR::DoLoop_t>(s);
                     scan_struct_origins(dl->m_body, dl->n_body);
+                } else if (s->type == ASR::stmtType::DoConcurrentLoop) {
+                    ASR::DoConcurrentLoop_t *dc =
+                        ASR::down_cast<ASR::DoConcurrentLoop_t>(s);
+                    scan_struct_origins(dc->m_body, dc->n_body);
                 } else if (s->type == ASR::stmtType::If) {
                     ASR::If_t *ifs =
                         ASR::down_cast<ASR::If_t>(s);
@@ -1609,7 +1922,15 @@ public:
                     // local_alloc_arrays) are also thread-space.
                     // VLA workspaces backed by device buffers stay
                     // device.
-                    if (!kernel_arg_vars.count(val_sym)) {
+                    // A pointer bound to a pointer points where that
+                    // one does.
+                    if (ASR::is_a<ASR::Variable_t>(*val_sym) &&
+                            ASRUtils::is_pointer(ASR::down_cast<
+                                ASR::Variable_t>(val_sym)->m_type)) {
+                        if (ptr_to_local_alloc.count(val_sym)) {
+                            ptr_to_local_alloc.insert(tgt_sym);
+                        }
+                    } else if (!kernel_arg_vars.count(val_sym)) {
                         if (!vla_workspace_vars.count(val_sym) &&
                                 (local_alloc_arrays.count(val_sym) ||
                                 alloc_array_sizes.count(val) ||
@@ -1716,43 +2037,54 @@ public:
     // array, emits: z + linearized_index_of_section_start
     // Also records the section size in last_section_size for later use.
     void emit_array_section_pointer(ASR::expr_t *expr) {
+        last_section_strides.clear();
         if (!ASR::is_a<ASR::ArraySection_t>(*expr)) {
             visit_expr(expr);
             return;
         }
         ASR::ArraySection_t *as = ASR::down_cast<ASR::ArraySection_t>(expr);
-        // A section of a name that is already stepping through its own base
-        // compounds the address this cannot express, so it is refused here
-        // as an indexed use would be.
-        reject_strided_section_use(as->m_v, as->base.base.loc);
-        last_section_dropped_step = false;
-        for (size_t d = 0; d < as->n_args; d++) {
-            bool is_range = as->m_args[d].m_left && as->m_args[d].m_right
-                && as->m_args[d].m_step;
-            if (is_range && !section_step_is_one(as->m_args[d].m_step)) {
-                last_section_dropped_step = true;
-            }
-        }
         std::string arr_name;
         if (ASR::is_a<ASR::Var_t>(*as->m_v)) {
             arr_name = ASRUtils::symbol_name(
                 ASR::down_cast<ASR::Var_t>(as->m_v)->m_v);
         }
-        ASR::ttype_t *arr_type = ASRUtils::expr_type(as->m_v);
+        ASR::ttype_t *arr_type = ASRUtils::type_get_past_allocatable_pointer(
+            ASRUtils::expr_type(as->m_v));
         ASR::Array_t *arr = nullptr;
         if (ASR::is_a<ASR::Array_t>(*arr_type)) {
             arr = ASR::down_cast<ASR::Array_t>(arr_type);
         }
-        // Compute linearized offset of the section's first element
-        // and the section size using column-major layout.
-        // For range dims, use the lower bound as the index.
-        // Section size is the product of range extents.
+        // How far apart consecutive elements of each dimension of the base
+        // are: what the base was registered with when it is itself a
+        // strided view, the column-major products of its extents
+        // otherwise. The extent is the one dim_extent_str() settles on,
+        // the same one an ArrayItem is strided by: an array bound to a
+        // workspace carries no extents in its own type and reads them off
+        // the workspace the host sized the buffer from.
+        std::vector<std::string> base_strides;
+        if (!registered_strides(arr_name, as->n_args, base_strides)) {
+            base_strides.clear();
+            std::string stride = "1";
+            for (size_t d = 0; d < as->n_args; d++) {
+                base_strides.push_back(stride);
+                if (arr && d + 1 < as->n_args && d < arr->n_dims) {
+                    std::string len_str = dim_extent_str(arr, d, arr_name,
+                        as->base.base.loc);
+                    stride = stride == "1" ? len_str
+                        : gpu_index_product(stride, len_str,
+                            dialect.offset_kind());
+                }
+            }
+        }
+        // The section starts at the element its first subscripts select,
+        // and steps through the base by the stride of each ranged
+        // dimension times its step: a pointer to the first element and
+        // these strides describe it, contiguous or not.
         std::stringstream size_ss;
         bool first_size = true;
         last_section_dim_sizes.clear();
         src << arr_name << " + ";
         bool first_dim = true;
-        std::string stride = "1";
         for (size_t d = 0; d < as->n_args; d++) {
             bool is_range = as->m_args[d].m_left && as->m_args[d].m_right
                 && as->m_args[d].m_step;
@@ -1760,48 +2092,28 @@ public:
                 ? as->m_args[d].m_left
                 : (as->m_args[d].m_right
                     ? as->m_args[d].m_right : as->m_args[d].m_left);
+            const std::string &stride = base_strides[d];
             if (idx_expr) {
                 if (!first_dim) src << " + ";
                 first_dim = false;
-                std::string lb = get_lower_bound_str(arr, d, arr_name);
-                if (stride == "1") {
-                    src << "((int)(";
-                    visit_expr(idx_expr);
-                    src << ") - (" << lb << "))";
-                } else {
-                    src << "(" << stride << " * ((int)(";
-                    visit_expr(idx_expr);
-                    src << ") - (" << lb << ")))";
-                }
+                std::string lb = arr ? deferred_lower_bound_str(as->m_v,
+                    arr, d) : std::string("1");
+                if (stride != "1") src << "(" << stride << " * ";
+                emit_offset_term(idx_expr, lb);
+                if (stride != "1") src << ")";
             }
-            // Compute section extent for range dims
             if (is_range) {
-                std::stringstream save;
-                save << src.str();
-                src.str("");
-                emit_section_range_extent(&as->m_args[d]);
-                std::string dim_size = src.str();
-                src.str("");
-                src << save.str();
+                std::string dim_size = expr_str_of_range_extent(
+                    &as->m_args[d]);
                 if (!first_size) size_ss << " * ";
                 first_size = false;
                 size_ss << dim_size;
                 last_section_dim_sizes.push_back(dim_size);
-            }
-            // Update stride for next dimension. The extent is the one
-            // dim_extent_str() settles on, the same one an ArrayItem is
-            // strided by: an array bound to a workspace carries no extents
-            // in its own type and reads them off the workspace the host
-            // sized the buffer from, and one that carries an extent *and*
-            // has a workspace must not be strided by one here and sized by
-            // the other there.
-            if (arr && d < arr->n_dims) {
-                std::string len_str = dim_extent_str(arr, d, arr_name,
-                    as->base.base.loc);
-                if (stride == "1") {
-                    stride = len_str;
+                if (section_step_is_one(as->m_args[d].m_step)) {
+                    last_section_strides.push_back(stride);
                 } else {
-                    stride = "(" + stride + " * " + len_str + ")";
+                    last_section_strides.push_back("(" + stride + " * ("
+                        + expr_str(as->m_args[d].m_step) + "))");
                 }
             }
         }
@@ -1811,27 +2123,53 @@ public:
         }
     }
 
+    // The extent of a ranged section dimension as device source.
+    std::string expr_str_of_range_extent(ASR::array_index_t *index) {
+        std::stringstream save;
+        save << src.str();
+        src.str("");
+        emit_section_range_extent(index);
+        std::string out = src.str();
+        src.str("");
+        src << save.str();
+        return out;
+    }
+
+    // The strides, in elements, of the ranged dimensions of the section
+    // last rendered by emit_array_section_pointer.
+    std::vector<std::string> last_section_strides;
+
+    // The stride of each dimension of the array `name`, when it is a view
+    // whose elements are not laid out by its own extents -- a pointer to a
+    // section, or a descriptor dummy handed one -- registered under the
+    // keys its extents are (see dim_size_key).
+    std::map<std::string, std::string> func_array_stride_params;
+
+    bool registered_strides(const std::string &name, size_t rank,
+            std::vector<std::string> &strides) {
+        strides.clear();
+        if (name.empty()) return false;
+        for (size_t d = 0; d < rank; d++) {
+            auto it = func_array_stride_params.find(dim_size_key(name, d));
+            if (it == func_array_stride_params.end()) return false;
+            strides.push_back(it->second);
+        }
+        return rank > 0;
+    }
+
+    void register_strides(const std::string &name,
+            const std::vector<std::string> &strides) {
+        for (size_t d = 0; d < strides.size(); d++) {
+            func_array_stride_params[dim_size_key(name, d)] = strides[d];
+        }
+    }
+
     std::string last_section_size;
 
     // The extent of each ranged dimension of the section last rendered by
     // emit_array_section_pointer, so that a routine the section is passed to
     // can be given them one by one.
     std::vector<std::string> last_section_dim_sizes;
-
-    // Whether the section last rendered by emit_array_section_pointer steps
-    // through its base array by something other than one.
-    bool last_section_dropped_step = false;
-
-    // The names an Associate bound to such a section. A device pointer is an
-    // address and nothing else: it cannot carry a step, so walking one reads
-    // consecutive elements of the base array rather than every step-th one.
-    // The element *count* is right -- an extent is derived through
-    // gpu_device_range_extent(), which does honour the step -- so the wrong
-    // elements get read exactly the right number of times, which is a wrong
-    // answer with nothing to show for it. Sizing such a name is still exact,
-    // and `size(p)` is what most of them are for, so the name is recorded
-    // here and only indexing it is refused.
-    std::set<ASR::symbol_t*> section_pointers_dropping_step;
 
     // Whether `e` names a step the device pointer can express, which is a
     // step of one: absent, or folding to the literal 1. A step only known at
@@ -1845,19 +2183,27 @@ public:
         return value == 1;
     }
 
-    // Refuses an indexed read or write through a name bound to a section the
-    // device pointer cannot express. Called wherever such a name could be
-    // subscripted, so that the shape is a compile error rather than a silent
-    // wrong answer.
-    void reject_strided_section_use(ASR::expr_t *base, const Location &loc) {
-        if (base == nullptr || !ASR::is_a<ASR::Var_t>(*base)) return;
-        ASR::symbol_t *sym = ASR::down_cast<ASR::Var_t>(base)->m_v;
-        if (section_pointers_dropping_step.count(sym) == 0) return;
-        throw CodeGenError(std::string("gpu offload: '")
-            + ASRUtils::symbol_name(sym) + "' is associated with an array "
-            "section whose stride is not one, and a gpu kernel addresses it "
-            "with a pointer that cannot carry a stride; only its size can be "
-            "used inside the kernel", loc);
+    // The integer kind of a subscript, which gpu_offset_term() takes into
+    // account when it converts the subscript's offset to the dialect's
+    // offset kind.
+    static int subscript_kind(ASR::expr_t *idx) {
+        return ASRUtils::extract_kind_from_ttype_t(ASRUtils::expr_type(idx));
+    }
+
+    // The device C type of the extents, strides and lower bounds a device
+    // routine is handed beside an array dummy, which its subscripts are
+    // counted by in the dialect's kind for element offsets.
+    std::string offset_type() const {
+        return gpu_offset_type(dialect.offset_kind());
+    }
+
+    // Emits gpu_offset_term() of the subscript `idx` and lower bound `lb`.
+    void emit_offset_term(ASR::expr_t *idx, const std::string &lb) {
+        auto parts = gpu_offset_term_parts(lb, subscript_kind(idx),
+            dialect.offset_kind());
+        src << parts.first;
+        visit_expr(idx);
+        src << parts.second;
     }
 
     // Renders an expression to device source without disturbing the output
@@ -1915,6 +2261,48 @@ public:
             total += total.empty() ? len : (" * " + len);
         }
         func_array_size_params[name] = "(" + total + ")";
+    }
+
+    // A component of a derived-type local of device code is stored in an
+    // array of its own (see gpu_device_struct_storage.cpp). Handing the
+    // local to a procedure hands that array over as the component's data,
+    // with its extents, as for a component of a dummy argument.
+    void bind_struct_component_storage(
+            ASR::StructInstanceMember_t *component, ASR::expr_t *storage) {
+        std::string key = std::string(ASRUtils::symbol_name(
+            ASR::down_cast<ASR::Var_t>(component->m_v)->m_v)) + "."
+            + ASRUtils::symbol_name(ASRUtils::symbol_get_past_external(
+                component->m_m));
+        func_array_data_params[key] = expr_str(storage);
+        ASR::Array_t *arr = ASR::down_cast<ASR::Array_t>(
+            ASRUtils::type_get_past_allocatable_pointer(
+                ASRUtils::expr_type(storage)));
+        std::string total;
+        for (size_t d = 0; d < arr->n_dims; d++) {
+            std::string len = "(" + expr_str(arr->m_dims[d].m_length) + ")";
+            if (arr->n_dims > 1) {
+                func_array_size_params[dim_size_key(key, d)] = len;
+            }
+            func_array_lb_params[dim_size_key(key, d)] =
+                get_lower_bound_str(arr, d);
+            total += total.empty() ? len : (" * " + len);
+        }
+        func_array_size_params[key] = "(" + total + ")";
+    }
+
+    // The element count of an array type whose every extent is given, or
+    // "" when one is not.
+    std::string explicit_array_size_str(ASR::ttype_t *type) {
+        type = ASRUtils::type_get_past_allocatable_pointer(type);
+        if (!ASR::is_a<ASR::Array_t>(*type)) return "";
+        ASR::Array_t *arr = ASR::down_cast<ASR::Array_t>(type);
+        std::string total;
+        for (size_t d = 0; d < arr->n_dims; d++) {
+            if (arr->m_dims[d].m_length == nullptr) return "";
+            std::string len = "(" + expr_str(arr->m_dims[d].m_length) + ")";
+            total += total.empty() ? len : (" * " + len);
+        }
+        return total.empty() ? "" : "(" + total + ")";
     }
 
     // True when the callee's signature carries a synthesised size parameter
@@ -2028,13 +2416,42 @@ public:
                         }
                     }
                     if (has_null) {
-                        emit_per_dim_sizes_for_call(actual_arg, farr);
+                        std::vector<std::string> extents;
+                        if (!per_dim_size_strs(actual_arg, farr, extents)) {
+                            emit_array_size_expr(actual_arg);
+                            return;
+                        }
+                        for (size_t d = 0; d < extents.size(); d++) {
+                            if (d > 0) src << ", ";
+                            src << extents[d];
+                        }
+                        emit_descriptor_strides_for_call(actual_arg,
+                            extents);
                         return;
                     }
                 }
             }
         }
         emit_array_size_expr(actual_arg);
+    }
+
+    // The strides of the actual argument handed to a descriptor dummy, one
+    // per dimension: those a strided view was registered with, or the
+    // column-major products of the extents of a contiguous array.
+    void emit_descriptor_strides_for_call(ASR::expr_t *actual_arg,
+            const std::vector<std::string> &extents) {
+        std::string key = array_shape_key(actual_arg);
+        std::vector<std::string> strides;
+        if (!registered_strides(key, extents.size(), strides)) {
+            strides.clear();
+            std::string stride = "1";
+            for (size_t d = 0; d < extents.size(); d++) {
+                strides.push_back(stride);
+                stride = stride == "1" ? "(" + extents[d] + ")"
+                    : "(" + stride + " * (" + extents[d] + "))";
+            }
+        }
+        for (const std::string &stride : strides) src << ", " << stride;
     }
 
     // Emit the extents an allocatable dummy needs, one per dimension, at a
@@ -2052,6 +2469,23 @@ public:
     // DescriptorArray formal parameter with null dimension lengths.
     void emit_per_dim_sizes_for_call(ASR::expr_t *actual_arg,
             ASR::Array_t *formal_arr) {
+        std::vector<std::string> extents;
+        if (!per_dim_size_strs(actual_arg, formal_arr, extents)) {
+            // Fallback: single total size
+            emit_array_size_expr(actual_arg);
+            return;
+        }
+        for (size_t d = 0; d < extents.size(); d++) {
+            if (d > 0) src << ", ";
+            src << extents[d];
+        }
+    }
+
+    // The extent of each dimension of the formal `formal_arr` the actual
+    // argument gives it, as device source; false when the actual is not
+    // an array.
+    bool per_dim_size_strs(ASR::expr_t *actual_arg,
+            ASR::Array_t *formal_arr, std::vector<std::string> &extents) {
         // Unwrap ArrayPhysicalCast
         if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*actual_arg)) {
             actual_arg = ASR::down_cast<ASR::ArrayPhysicalCast_t>(
@@ -2060,61 +2494,59 @@ public:
         ASR::ttype_t *atype = ASRUtils::expr_type(actual_arg);
         ASR::ttype_t *inner = ASRUtils::type_get_past_allocatable(
             ASRUtils::type_get_past_pointer(atype));
-        bool first_dim = true;
-        if (ASR::is_a<ASR::Array_t>(*inner)) {
-            ASR::Array_t *arr = ASR::down_cast<ASR::Array_t>(inner);
-            // Emit each dimension's length
-            for (size_t d = 0; d < formal_arr->n_dims; d++) {
-                if (!first_dim) src << ", ";
-                first_dim = false;
-                if (d < arr->n_dims && arr->m_dims[d].m_length) {
-                    visit_expr(arr->m_dims[d].m_length);
-                } else if (ASR::is_a<ASR::Var_t>(*actual_arg)) {
-                    // Assumed-shape: use __size_var_dimN from kernel
-                    ASR::symbol_t *vsym =
-                        ASRUtils::symbol_get_past_external(
-                            ASR::down_cast<ASR::Var_t>(actual_arg)->m_v);
-                    std::string vname = ASRUtils::symbol_name(vsym);
-                    const ASR::gpu_kernel_argument_t *extent =
-                        array_extent_params.find(vsym, d);
-                    auto dit = func_array_size_params.find(
-                        dim_size_key(vname, d));
-                    auto sect = ptr_section_dim_sizes.find(vname);
-                    if (extent) {
-                        src << kernel_parameter(extent);
-                    } else if (dit != func_array_size_params.end()) {
-                        src << dit->second;
-                    } else if (sect != ptr_section_dim_sizes.end()
-                            && d < sect->second.size()) {
-                        src << sect->second[d];
-                    } else if (local_alloc_arrays.count(vsym)) {
-                        auto ait = alloc_array_sizes.find(vname);
-                        if (ait != alloc_array_sizes.end()) {
-                            src << ait->second;
-                        } else {
-                            auto eit = alloc_array_size_exprs.find(
-                                vname);
-                            if (eit != alloc_array_size_exprs.end()) {
-                                src << eit->second;
-                            } else {
-                                src << GpuNames::dim_size(vname, d);
-                            }
-                        }
+        if (!ASR::is_a<ASR::Array_t>(*inner)) return false;
+        ASR::Array_t *arr = ASR::down_cast<ASR::Array_t>(inner);
+        std::stringstream out;
+        out.swap(src);
+        for (size_t d = 0; d < formal_arr->n_dims; d++) {
+            src.str("");
+            if (d < arr->n_dims && arr->m_dims[d].m_length) {
+                visit_expr(arr->m_dims[d].m_length);
+            } else if (ASR::is_a<ASR::Var_t>(*actual_arg)) {
+                // Assumed-shape: use __size_var_dimN from kernel
+                ASR::symbol_t *vsym =
+                    ASRUtils::symbol_get_past_external(
+                        ASR::down_cast<ASR::Var_t>(actual_arg)->m_v);
+                std::string vname = ASRUtils::symbol_name(vsym);
+                const ASR::gpu_kernel_argument_t *extent =
+                    array_extent_params.find(vsym, d);
+                auto dit = func_array_size_params.find(
+                    dim_size_key(vname, d));
+                auto sect = ptr_section_dim_sizes.find(vname);
+                if (extent) {
+                    src << kernel_parameter(extent);
+                } else if (dit != func_array_size_params.end()) {
+                    src << dit->second;
+                } else if (sect != ptr_section_dim_sizes.end()
+                        && d < sect->second.size()) {
+                    src << sect->second[d];
+                } else if (local_alloc_arrays.count(vsym)) {
+                    auto ait = alloc_array_sizes.find(vname);
+                    if (ait != alloc_array_sizes.end()) {
+                        src << ait->second;
                     } else {
-                        src << GpuNames::dim_size(vname, d);
+                        auto eit = alloc_array_size_exprs.find(
+                            vname);
+                        if (eit != alloc_array_size_exprs.end()) {
+                            src << eit->second;
+                        } else {
+                            src << GpuNames::dim_size(vname, d);
+                        }
                     }
-                } else if (ASR::is_a<ASR::StructInstanceMember_t>(
-                        *actual_arg)) {
-                    emit_struct_member_array_size_dim(actual_arg,
-                        (int64_t)(d + 1));
                 } else {
-                    src << "0";
+                    src << GpuNames::dim_size(vname, d);
                 }
+            } else if (ASR::is_a<ASR::StructInstanceMember_t>(
+                    *actual_arg)) {
+                emit_struct_member_array_size_dim(actual_arg,
+                    (int64_t)(d + 1));
+            } else {
+                src << "0";
             }
-        } else {
-            // Fallback: single total size
-            emit_array_size_expr(actual_arg);
+            extents.push_back(src.str());
         }
+        out.swap(src);
+        return true;
     }
 
     // Rank of an allocatable array component, or 0 when it is not one.
@@ -2130,23 +2562,30 @@ public:
     }
 
     // The sizes buffer of an allocatable component of a struct-array kernel
-    // argument holds the extents of the component, one entry per dimension
-    // per element (see `gpu_struct_member_rank` in gpu_utils.h). These two
-    // render the extent of one dimension and the element count of a whole
-    // element out of it; a rank-one component reads back exactly the single
-    // entry it has always had.
+    // argument holds `2 * rank` entries per element (see
+    // device_launch_expand.cpp): the extent of each dimension, then its
+    // lower bound. These render the extent and the lower bound of one
+    // dimension and the element count of a whole element out of it.
     static std::string struct_member_extent_expr(
             const std::string &sizes_param, const std::string &idx_str,
             size_t rank, size_t d) {
-        if (rank <= 1) return sizes_param + "[" + idx_str + "]";
         return sizes_param + "[(" + idx_str + ") * "
-            + std::to_string(rank) + " + " + std::to_string(d) + "]";
+            + std::to_string(2 * rank) + " + " + std::to_string(d) + "]";
+    }
+
+    static std::string struct_member_lower_bound_expr(
+            const std::string &sizes_param, const std::string &idx_str,
+            size_t rank, size_t d) {
+        return struct_member_extent_expr(sizes_param, idx_str, rank,
+            rank + d);
     }
 
     static std::string struct_member_total_size_expr(
             const std::string &sizes_param, const std::string &idx_str,
             size_t rank) {
-        if (rank <= 1) return sizes_param + "[" + idx_str + "]";
+        if (rank <= 1) {
+            return struct_member_extent_expr(sizes_param, idx_str, rank, 0);
+        }
         std::string res;
         for (size_t d = 0; d < rank; d++) {
             if (d > 0) res += " * ";
@@ -2207,7 +2646,152 @@ public:
         for (auto &e : copied) {
             func_array_size_params[e.first] = e.second;
         }
+        copied.clear();
+        for (auto &entry : func_array_lb_params) {
+            std::string base;
+            size_t d = 0;
+            if (!dim_size_key_parts(entry.first, base, d)) continue;
+            if (base != from) continue;
+            copied.push_back({dim_size_key(to, d), entry.second});
+        }
+        for (auto &e : copied) {
+            func_array_lb_params[e.first] = e.second;
+        }
+        copied.clear();
+        for (auto &entry : func_array_stride_params) {
+            std::string base;
+            size_t d = 0;
+            if (!dim_size_key_parts(entry.first, base, d)) continue;
+            if (base != from) continue;
+            copied.push_back({dim_size_key(to, d), entry.second});
+        }
+        for (auto &e : copied) {
+            func_array_stride_params[e.first] = e.second;
+        }
     }
+
+    // The key the shape of an array designator is registered under: the
+    // name of a variable, or "var.member" for a component of one.
+    static std::string array_shape_key(ASR::expr_t *e) {
+        while (e && ASR::is_a<ASR::ArrayPhysicalCast_t>(*e)) {
+            e = ASR::down_cast<ASR::ArrayPhysicalCast_t>(e)->m_arg;
+        }
+        if (e == nullptr) return "";
+        if (ASR::is_a<ASR::Var_t>(*e)) {
+            return ASRUtils::symbol_name(ASR::down_cast<ASR::Var_t>(e)->m_v);
+        }
+        if (ASR::is_a<ASR::StructInstanceMember_t>(*e)) {
+            ASR::StructInstanceMember_t *sm =
+                ASR::down_cast<ASR::StructInstanceMember_t>(e);
+            if (!ASR::is_a<ASR::Var_t>(*sm->m_v)) return "";
+            return std::string(ASRUtils::symbol_name(
+                ASR::down_cast<ASR::Var_t>(sm->m_v)->m_v)) + "."
+                + ASRUtils::symbol_name(
+                    ASRUtils::symbol_get_past_external(sm->m_m));
+        }
+        return "";
+    }
+
+    // The lower bound of dimension `d` of the deferred-shape array `e`: a
+    // component of an element of an array of a derived type reads it from
+    // the sizes buffer of the component, anything else from what is
+    // registered under its shape key.
+    std::string deferred_lower_bound_str(ASR::expr_t *e, ASR::Array_t *arr,
+            size_t d) {
+        ASR::expr_t *v = e;
+        while (v && ASR::is_a<ASR::ArrayPhysicalCast_t>(*v)) {
+            v = ASR::down_cast<ASR::ArrayPhysicalCast_t>(v)->m_arg;
+        }
+        if (v && ASR::is_a<ASR::StructInstanceMember_t>(*v)) {
+            ASR::StructInstanceMember_t *sm =
+                ASR::down_cast<ASR::StructInstanceMember_t>(v);
+            if (ASR::is_a<ASR::ArrayItem_t>(*sm->m_v)) {
+                ASR::ArrayItem_t *arr_ai =
+                    ASR::down_cast<ASR::ArrayItem_t>(sm->m_v);
+                if (ASR::is_a<ASR::Var_t>(*arr_ai->m_v)) {
+                    const GpuComponentLayout *component =
+                        struct_components.find(ASR::down_cast<ASR::Var_t>(
+                            arr_ai->m_v)->m_v, sm->m_m);
+                    std::string idx_str =
+                        struct_array_element_index_str(arr_ai);
+                    if (component && component->sizes && !idx_str.empty()) {
+                        return struct_member_lower_bound_expr(
+                            kernel_parameter(component->sizes), idx_str,
+                            component->rank, d);
+                    }
+                }
+            }
+        }
+        return get_lower_bound_str(arr, d, array_shape_key(e));
+    }
+
+    // A name bound to the component `key` ("var.member") has its shape:
+    // its element count, and the extent and lower bound of each dimension.
+    void bind_component_alias(const std::string &key,
+            const std::string &alias) {
+        auto it = func_array_size_params.find(key);
+        if (it != func_array_size_params.end()
+                && !func_array_size_params.count(alias)) {
+            func_array_size_params[alias] = it->second;
+        }
+        copy_dim_size_keys(key, alias);
+    }
+
+    // The tables above are keyed by name, so an entry about a variable a
+    // block declares holds only while that block is emitted, as the
+    // declaration the block emits does. Two blocks may declare variables of
+    // one name -- a routine inlined twice brings two copies of its locals --
+    // and an entry the first left behind would describe the second's
+    // variable; a variable of the block may also hide one of the same name
+    // outside it, whose entries return once the block is closed.
+    class BlockNameScope {
+        ASRToGpuCVisitor &v;
+        SymbolTable *block;
+        std::vector<std::pair<std::map<std::string, std::string>*,
+            std::map<std::string, std::string>>> hidden;
+
+        std::vector<std::map<std::string, std::string>*> tables() {
+            return {&v.func_array_size_params, &v.func_array_data_params};
+        }
+
+        // Whether `key` describes a variable `block` declares: its name,
+        // "var.member" for a component of it, either with the mark of one
+        // dimension.
+        bool declared_in_block(const std::string &key) const {
+            std::string base = key.substr(0, key.find('.'));
+            std::string array;
+            size_t d = 0;
+            if (dim_size_key_parts(base, array, d)) base = array;
+            return block->get_symbol(base) != nullptr;
+        }
+
+        std::map<std::string, std::string> take_block_entries(
+                std::map<std::string, std::string> &table) const {
+            std::map<std::string, std::string> taken;
+            for (auto it = table.begin(); it != table.end();) {
+                if (declared_in_block(it->first)) {
+                    taken.insert(*it);
+                    it = table.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            return taken;
+        }
+    public:
+        BlockNameScope(ASRToGpuCVisitor &v, SymbolTable *block)
+                : v(v), block(block) {
+            for (auto *table : tables()) {
+                hidden.push_back({table, take_block_entries(*table)});
+            }
+        }
+        ~BlockNameScope() {
+            for (auto &h : hidden) {
+                take_block_entries(*h.first);
+                h.first->insert(h.second.begin(), h.second.end());
+            }
+        }
+    };
 
     // Name of the kernel/function parameter holding that extent.
     static std::string struct_member_dim_param(const std::string &var_name,
@@ -2287,6 +2871,7 @@ public:
                 ai->base.base.loc);
         }
         std::vector<std::string> subscripts;
+        std::vector<int> subscript_kinds;
         for (size_t d = 0; d < ai->n_args; d++) {
             ASR::expr_t *idx = ai->m_args[d].m_right
                 ? ai->m_args[d].m_right : ai->m_args[d].m_left;
@@ -2297,16 +2882,18 @@ public:
                     ai->base.base.loc);
             }
             subscripts.push_back(expr_str(idx));
+            subscript_kinds.push_back(subscript_kind(idx));
         }
-        return gpu_linearized_index_str(subscripts,
+        return gpu_linearized_index_str(subscripts, subscript_kinds,
             [&](size_t d) {
-                return get_lower_bound_str(mem_arr, d,
-                    arr_name + "%" + mem_name);
+                if (sizes_param.empty()) return std::string("1");
+                return struct_member_lower_bound_expr(sizes_param,
+                    arr_idx_str, rank, d);
             },
             [&](size_t d) {
                 return struct_member_extent_expr(sizes_param, arr_idx_str,
                     rank, d);
-            });
+            }, dialect.offset_kind());
     }
 
     // Emit the array size for a StructInstanceMember expression whose
@@ -2376,7 +2963,14 @@ public:
     // allocatable array member of a struct-typed function/subroutine
     // call argument, matching the parameter order in emit_function_def:
     // (data_member1, size_member1, data_member2, size_member2, ...)
-    void emit_struct_member_args_interleaved(ASR::expr_t *expr) {
+    void emit_struct_member_args_interleaved(ASR::expr_t *expr,
+            ASR::Function_t *callee, size_t argument) {
+        if (callee && argument < callee->n_args &&
+                gpu_struct_has_component_arguments(*callee,
+                    ASR::down_cast<ASR::Var_t>(
+                        callee->m_args[argument])->m_v)) {
+            return;
+        }
         ASR::Variable_t *var = nullptr;
         std::string var_name;
         if (ASR::is_a<ASR::Var_t>(*expr)) {
@@ -2455,6 +3049,8 @@ public:
                                 arr_name, mem_name, d);
                         }
                     }
+                    emit_component_lower_bounds(component, idx_str, key,
+                        rank);
                 }
                 return;
             }
@@ -2574,25 +3170,101 @@ public:
                     }
                 }
             }
+
+            // The lower bound of each dimension, matching the callee
+            // signature.
+            if (arr_it != struct_from_array_elem.end()) {
+                std::string arr_name = arr_it->second.first;
+                emit_component_lower_bounds(
+                    struct_components.find(arr_name, &mv->base),
+                    arr_it->second.second, arr_name + "." + mem_name, rank);
+            } else {
+                emit_component_lower_bounds(nullptr, "",
+                    var_name + "." + mem_name, rank);
+            }
+        }
+    }
+
+    // The lower bounds of a component, one argument per dimension: those
+    // of the element `element_index` of an array of a derived type in its
+    // sizes buffer, or those registered under `key` ("var.member").
+    void emit_component_lower_bounds(const GpuComponentLayout *component,
+            const std::string &element_index, const std::string &key,
+            size_t rank) {
+        for (size_t d = 0; d < rank; d++) {
+            if (component && component->sizes && !element_index.empty()) {
+                src << ", " << struct_member_lower_bound_expr(
+                    kernel_parameter(component->sizes), element_index,
+                    rank, d);
+                continue;
+            }
+            auto it = func_array_lb_params.find(dim_size_key(key, d));
+            src << ", " << (it != func_array_lb_params.end()
+                ? it->second : std::string("1"));
         }
     }
 
 
     bool needs_erf_helper = false;
     bool needs_erfc_helper = false;
+    bool needs_lane_reduce_helper = false;
+    std::map<int64_t, ASR::ttype_t*> integer_power_types;
 
     void scan_for_math_helpers(const ASR::TranslationUnit_t &tu) {
         GpuMathHelperScanner scanner;
         for (auto &item : tu.m_symtab->get_scope()) {
             if (ASRUtils::is_device_kernel(item.second)) {
                 scanner.visit_symbol(*item.second);
+                // The device functions of a kernel can be declared outside
+                // it, and are emitted with it.
+                const ASR::Function_t *kernel =
+                    ASR::down_cast<ASR::Function_t>(item.second);
+                for (size_t i = 0; i < kernel->m_gpu->n_device_functions;
+                        i++) {
+                    scanner.visit_symbol(
+                        *kernel->m_gpu->m_device_functions[i]);
+                }
             }
         }
         needs_erf_helper = scanner.needs_erf;
         needs_erfc_helper = scanner.needs_erfc;
+        needs_lane_reduce_helper = scanner.needs_lane_reduce;
+        integer_power_types = scanner.integer_power_types;
+    }
+
+    static std::string integer_power_helper(int64_t kind) {
+        return "_lf_ipow_i" + std::to_string(kind);
+    }
+
+    // An integer power, exactly, in the operands' own type: `pow` on
+    // `float`s rounds results past 2**24, and could not hold an
+    // integer(8) result at all. A negative exponent gives 0, except of a
+    // base of 1 or -1, as integer division would.
+    void emit_integer_power_helpers() {
+        for (auto &[kind, type] : integer_power_types) {
+            std::string t = gpu_type(type);
+            src << dialect.device_fn_qualifier() << t << " "
+                << integer_power_helper(kind) << "(" << t << " base, " << t
+                << " exponent) {\n";
+            src << "    if (exponent < 0) {\n";
+            src << "        if (base == 1) return 1;\n";
+            src << "        if (base == -1) return (exponent & 1) ? -1 : 1;\n";
+            src << "        return 0;\n";
+            src << "    }\n";
+            src << "    " << t << " result = 1;\n";
+            src << "    while (exponent > 0) {\n";
+            src << "        if (exponent & 1) result *= base;\n";
+            src << "        exponent >>= 1;\n";
+            src << "        if (exponent > 0) base *= base;\n";
+            src << "    }\n";
+            src << "    return result;\n";
+            src << "}\n\n";
+        }
     }
 
     void emit_math_helpers() {
+        emit_integer_power_helpers();
+        if (needs_lane_reduce_helper) src << dialect.lane_reduce_helper();
         if (needs_erf_helper) {
             src << "// Abramowitz & Stegun approximation (7.1.26), max error ~1.5e-7\n";
             src << dialect.device_fn_qualifier()
@@ -2628,7 +3300,7 @@ public:
         // Collect and emit struct definitions from all kernels once,
         // before any kernel code, to avoid redefinition errors when
         // multiple kernels reference the same struct type.
-        std::set<std::string> emitted_structs;
+        std::set<ASR::Struct_t*> emitted_structs;
         std::vector<ASR::Struct_t*> ordered_structs;
         for (auto &item : tu.m_symtab->get_scope()) {
             if (!ASRUtils::is_device_kernel(item.second)) continue;
@@ -2641,9 +3313,26 @@ public:
                         kf.m_symtab, emitted_structs, ordered_structs);
                 }
             }
+            // A derived type the kernel's routines declare a value of,
+            // such as a local a constructor gives a value, is laid out on
+            // the device like one handed to the kernel.
+            collect_variable_structs(kf.m_symtab, emitted_structs,
+                ordered_structs);
         }
+        // Every kernel has its own copy of a derived type it holds. Copies
+        // of one type are one device struct; two types of one name, from
+        // two modules, are two, the second under a name of its own.
+        std::map<std::string, std::string> bodies;
         for (ASR::Struct_t *st : ordered_structs) {
-            emit_struct_def(st);
+            std::string body = struct_body(st);
+            std::string name = st->m_name;
+            for (int n = 1; bodies.count(name) && bodies[name] != body; n++) {
+                name = std::string(st->m_name) + "_" + std::to_string(n);
+            }
+            struct_c_names[st] = name;
+            if (bodies.count(name)) continue;
+            bodies[name] = body;
+            src << "struct " << name << " {\n" << body << "};\n\n";
         }
 
         emit_math_helpers();
@@ -2668,10 +3357,19 @@ public:
             ASR::symbol_t *s = ASRUtils::symbol_get_past_external(
                 var->m_type_declaration);
             if (ASR::is_a<ASR::Struct_t>(*s)) {
-                return ASR::down_cast<ASR::Struct_t>(s)->m_name;
+                return struct_c_name(ASR::down_cast<ASR::Struct_t>(s));
             }
         }
         return "unknown_struct";
+    }
+
+    // The device struct each derived type is emitted as.
+    std::map<ASR::Struct_t*, std::string> struct_c_names;
+
+    std::string struct_c_name(ASR::Struct_t *st) {
+        auto it = struct_c_names.find(st);
+        return it != struct_c_names.end() ? it->second
+            : std::string(st->m_name);
     }
 
     bool is_struct_type(ASR::ttype_t *type) {
@@ -2696,16 +3394,16 @@ public:
         return !gpu_decomposed_components(st).empty();
     }
 
-    // Emit a device struct definition for a Struct symbol
-    void emit_struct_def(ASR::Struct_t *st) {
-        src << "struct " << st->m_name << " {\n";
+    // The members of the device struct of a Struct symbol.
+    std::string struct_body(ASR::Struct_t *st) {
+        std::stringstream src;
         if (st->m_parent) {
             ASR::symbol_t *parent = ASRUtils::symbol_get_past_external(
                 st->m_parent);
             if (ASR::is_a<ASR::Struct_t>(*parent)) {
                 src << "    "
-                    << ASR::down_cast<ASR::Struct_t>(parent)->m_name << " "
-                    << gpu_parent_field << ";\n";
+                    << struct_c_name(ASR::down_cast<ASR::Struct_t>(parent))
+                    << " " << gpu_parent_field << ";\n";
             }
         }
         for (size_t i = 0; i < st->n_members; i++) {
@@ -2713,10 +3411,15 @@ public:
             if (mem && ASR::is_a<ASR::Variable_t>(*mem)) {
                 ASR::Variable_t *mv = ASR::down_cast<ASR::Variable_t>(mem);
                 if (ASRUtils::is_allocatable(mv->m_type)) {
-                    // Allocatable members are passed as separate device
-                    // buffers. Emit a long placeholder matching the host
-                    // pointer size to keep the struct layout aligned.
-                    src << "    long " << mv->m_name << ";\n";
+                    // The device does not interpret an allocatable member:
+                    // an array is passed as separate device buffers, and a
+                    // scalar is never read there. Emit a placeholder the
+                    // size of its host representation to keep the struct
+                    // layout aligned.
+                    size_t words = gpu_opaque_component_words(mem);
+                    src << "    long " << mv->m_name;
+                    if (words > 1) src << "[" << words << "]";
+                    src << ";\n";
                 } else if (is_struct_type(mv->m_type)) {
                     // A component that is an array of a derived type keeps
                     // its extent: the element count is the same on the host,
@@ -2741,7 +3444,7 @@ public:
                 }
             }
         }
-        src << "};\n\n";
+        return src.str();
     }
 
     // Static Struct type an expression is read from. Only the forms that
@@ -2786,12 +3489,41 @@ public:
         }
     }
 
+    // The derived types of the variables of a scope and of every scope it
+    // contains, collected as collect_structs_ordered does.
+    void collect_variable_structs(SymbolTable *scope,
+            std::set<ASR::Struct_t*> &emitted,
+            std::vector<ASR::Struct_t*> &ordered) {
+        for (auto &item : scope->get_scope()) {
+            ASR::symbol_t *sym = item.second;
+            if (ASR::is_a<ASR::Variable_t>(*sym)) {
+                ASR::Variable_t *var = ASR::down_cast<ASR::Variable_t>(sym);
+                if (is_struct_type(var->m_type)) {
+                    if (ASR::Struct_t *st = get_struct_decl(var)) {
+                        collect_structs_ordered(st, scope, emitted, ordered);
+                    }
+                }
+            } else if (ASR::is_a<ASR::Function_t>(*sym)) {
+                collect_variable_structs(
+                    ASR::down_cast<ASR::Function_t>(sym)->m_symtab,
+                    emitted, ordered);
+            } else if (ASR::is_a<ASR::Block_t>(*sym)) {
+                collect_variable_structs(
+                    ASR::down_cast<ASR::Block_t>(sym)->m_symtab,
+                    emitted, ordered);
+            } else if (ASR::is_a<ASR::AssociateBlock_t>(*sym)) {
+                collect_variable_structs(
+                    ASR::down_cast<ASR::AssociateBlock_t>(sym)->m_symtab,
+                    emitted, ordered);
+            }
+        }
+    }
+
     // Collect struct definitions in dependency order (nested structs first)
     void collect_structs_ordered(ASR::Struct_t *st, SymbolTable *scope,
-            std::set<std::string> &emitted,
+            std::set<ASR::Struct_t*> &emitted,
             std::vector<ASR::Struct_t*> &ordered) {
-        std::string name = st->m_name;
-        if (emitted.count(name)) return;
+        if (!emitted.insert(st).second) return;
         // Emit dependencies first: the parent type is an inline field of
         // this one, so it must be defined before it.
         if (st->m_parent) {
@@ -2818,7 +3550,6 @@ public:
                 }
             }
         }
-        emitted.insert(name);
         ordered.push_back(st);
     }
 
@@ -2844,6 +3575,8 @@ public:
             const std::string &device_name) {
         GpuEmissionScope emission_scope(active_scope, fn->m_symtab);
         func_array_size_params.clear();
+        func_array_lb_params.clear();
+        func_array_stride_params.clear();
         func_array_data_params.clear();
         func_array_params.clear();
         // A device function is emitted before the kernel that calls it
@@ -2875,18 +3608,20 @@ public:
                 && !is_array_type(arg->m_type)) {
                 if (!first) src << ", ";
                 first = false;
-                // Out/InOut struct args are passed by reference
-                // using device address space since they typically
-                // originate from device buffer arrays in kernels
+                // Out/InOut struct args are passed by reference to a
+                // value in the calling thread's memory: a kernel copies
+                // one that lives in device memory around the call (see
+                // gpu_memory_space.cpp).
                 if (arg->m_intent == ASR::intentType::Out ||
                     arg->m_intent == ASR::intentType::InOut) {
-                    src << global_prefix() << get_struct_name(arg) << "& "
-                        << arg->m_name;
+                    src << space_prefix(ASR::memory_spaceType::Thread)
+                        << get_struct_name(arg) << "& " << arg->m_name;
                 } else {
                     src << get_struct_name(arg) << " " << arg->m_name;
                 }
                 // Add data pointer and size parameters for allocatable array members
-                if (arg->m_type_declaration) {
+                if (arg->m_type_declaration &&
+                        !gpu_struct_has_component_arguments(*fn, &arg->base)) {
                     ASR::symbol_t *st_sym =
                         ASRUtils::symbol_get_past_external(
                             arg->m_type_declaration);
@@ -2924,7 +3659,8 @@ public:
                             std::string size_name =
                                 GpuNames::member_size(arg->m_name,
                                     mem_name);
-                            src << ", int " << size_name;
+                            src << ", " << offset_type() << " "
+                                << size_name;
                             func_array_size_params[key] = size_name;
                             // Per-dimension extents, so that
                             // size(arg%member, dim) inside the function
@@ -2936,11 +3672,22 @@ public:
                                     std::string dim_name =
                                         struct_member_dim_param(
                                             arg->m_name, mem_name, d);
-                                    src << ", int " << dim_name;
+                                    src << ", " << offset_type() << " "
+                                        << dim_name;
                                     func_array_size_params[
                                         dim_size_key(key, d)]
                                         = dim_name;
                                 }
+                            }
+                            // The lower bound of each dimension.
+                            for (size_t d = 0; d < rank; d++) {
+                                std::string lb_name =
+                                    GpuNames::member_lower_bound(
+                                        arg->m_name, mem_name, d);
+                                src << ", " << offset_type() << " "
+                                    << lb_name;
+                                func_array_lb_params[dim_size_key(key, d)]
+                                    = lb_name;
                             }
                         }
                     }
@@ -2982,10 +3729,23 @@ public:
                     for (size_t d = 0; d < arr->n_dims; d++) {
                         std::string dim_name = GpuNames::dim_size(
                             aname, d);
-                        src << ", int " << dim_name;
+                        src << ", " << offset_type() << " "
+                            << dim_name;
                         func_array_size_params[dim_size_key(aname, d)]
                             = dim_name;
                     }
+                    // A descriptor carries how far apart the elements of
+                    // each dimension are, so that the routine can be
+                    // handed a section that is not contiguous.
+                    std::vector<std::string> strides;
+                    for (size_t d = 0; d < arr->n_dims; d++) {
+                        std::string stride_name = GpuNames::dim_stride(
+                            aname, d);
+                        src << ", " << offset_type() << " "
+                            << stride_name;
+                        strides.push_back(stride_name);
+                    }
+                    register_strides(aname, strides);
                     // Register total size as the product
                     std::string total = GpuNames::dim_size(aname, 0);
                     for (size_t d = 1; d < arr->n_dims; d++) {
@@ -2997,7 +3757,7 @@ public:
                 if (!extents_explicit && !desc_per_dim) {
                     std::string size_name = GpuNames::array_size(
                         arg->m_name);
-                    src << ", int " << size_name;
+                    src << ", " << offset_type() << " " << size_name;
                     func_array_size_params[std::string(arg->m_name)]
                         = size_name;
                 }
@@ -3028,7 +3788,8 @@ public:
                     for (size_t d = 0; d < aarr->n_dims; d++) {
                         std::string dim_name = GpuNames::dim_size(
                             aname, d);
-                        src << ", int " << dim_name;
+                        src << ", " << offset_type() << " "
+                            << dim_name;
                         func_array_size_params[dim_size_key(aname, d)]
                             = dim_name;
                         total += total.empty()
@@ -3036,18 +3797,32 @@ public:
                     }
                     func_array_size_params[aname] = "(" + total + ")";
                 }
+            } else if (arg->m_intent == ASR::intentType::Out ||
+                    arg->m_intent == ASR::intentType::InOut) {
+                // A scalar the procedure writes is passed by reference, as
+                // Fortran passes it. The actual is a variable of the
+                // calling thread, such as the stop status a procedure
+                // that can stop hands back (see gpu_offload_stop.h).
+                src << space_prefix(ASR::memory_spaceType::Thread)
+                    << gpu_type(arg->m_type) << "& " << arg->m_name;
             } else {
                 src << gpu_type(arg->m_type) << " " << arg->m_name;
             }
         }
         src << ") {\n";
         indent_level++;
-        // Declare return variable if present
+        // Declare the return variable if present. It is value-initialized:
+        // a path that leaves it unassigned (a `stop` the function records
+        // and returns from) would otherwise return an indeterminate value,
+        // which lets an optimizer drop the path, the record of the stop
+        // included, as the AMD GPU compiler does.
         if (fn->m_return_var) {
             ASR::Variable_t *rv = ASR::down_cast<ASR::Variable_t>(
                 ASR::down_cast<ASR::Var_t>(fn->m_return_var)->m_v);
-            src << get_indent() << ret_type << " " << sanitize_name(rv->m_name) << ";\n";
+            src << get_indent() << ret_type << " " << sanitize_name(rv->m_name) << "{};\n";
         }
+        // The function writes only the declarations its body refers to.
+        std::vector<GpuDeclaration> declarations;
         // Declare Parameter (constant) variables from the function scope
         for (auto &item : fn->m_symtab->get_scope()) {
             if (!ASR::is_a<ASR::Variable_t>(*item.second)) continue;
@@ -3055,7 +3830,8 @@ public:
                 item.second);
             if (var->m_storage != ASR::storage_typeType::Parameter) continue;
             if (!var->m_value) continue;
-            emit_named_constant_decl(var);
+            declarations.push_back(variable_declaration(*var,
+                [&]() { emit_named_constant_decl(var); }));
         }
         // Declare local variables (non-argument, non-return, non-parameter)
         in_inline_function = true;
@@ -3075,10 +3851,14 @@ public:
                 if (!ASR::is_a<ASR::Variable_t>(*item.second)) continue;
                 ASR::Variable_t *var = ASR::down_cast<ASR::Variable_t>(
                     item.second);
-                if (var->m_storage == ASR::storage_typeType::Parameter)
+                // A named constant whose value a pass moved into an
+                // assignment, as of a derived type, is declared here.
+                if (var->m_storage == ASR::storage_typeType::Parameter
+                        && var->m_value)
                     continue;
                 if (declared_by_signature.count(item.second)) continue;
-                emit_local_var_decl(var);
+                declarations.push_back(variable_declaration(*var,
+                    [&]() { emit_local_var_decl(var); }));
             }
         }
         // Pre-scan the inline function body for Allocate statements
@@ -3156,12 +3936,8 @@ public:
                         if (ASR::is_a<ASR::Var_t>(*sm->m_v)) {
                             std::string struct_name = ASRUtils::symbol_name(
                                 ASR::down_cast<ASR::Var_t>(sm->m_v)->m_v);
-                            std::string key = struct_name + "." + mem_name;
-                            auto spit = func_array_size_params.find(key);
-                            if (spit != func_array_size_params.end() &&
-                                    !func_array_size_params.count(tgt_name)) {
-                                func_array_size_params[tgt_name] = spit->second;
-                            }
+                            bind_component_alias(
+                                struct_name + "." + mem_name, tgt_name);
                         }
                         continue;
                     }
@@ -3192,9 +3968,12 @@ public:
                     ASR::down_cast<ASR::Var_t>(fn->m_return_var)->m_v)
                         ->m_name);
         }
-        for (size_t i = 0; i < fn->n_body; i++) {
-            visit_stmt(fn->m_body[i]);
-        }
+        std::string body = captured_source([&]() {
+            for (size_t i = 0; i < fn->n_body; i++) {
+                visit_stmt(fn->m_body[i]);
+            }
+        });
+        src << gpu_referenced_declarations(declarations, body) << body;
         current_return_name.clear();
         in_inline_function = false;
         if (fn->m_return_var) {
@@ -3205,6 +3984,8 @@ public:
         indent_level--;
         src << "}\n\n";
         func_array_size_params.clear();
+        func_array_lb_params.clear();
+        func_array_stride_params.clear();
         func_array_data_params.clear();
         alloc_pointer_params.clear();
         func_array_params.clear();
@@ -3212,6 +3993,23 @@ public:
         array_extent_params.clear();
         struct_from_array_elem.clear();
         current_kernel_layout = nullptr;
+    }
+
+    // What `emit` writes to `src`, which it leaves as it was.
+    template <typename F>
+    std::string captured_source(F emit) {
+        std::stringstream saved;
+        saved.swap(src);
+        emit();
+        saved.swap(src);
+        return saved.str();
+    }
+
+    // The declaration `emit` writes for `var`.
+    template <typename F>
+    GpuDeclaration variable_declaration(const ASR::Variable_t &var, F emit) {
+        std::string name(var.m_name);
+        return {{name, sanitize_name(name)}, captured_source(emit)};
     }
 
     void emit_kernel_signature(const ASR::Function_t &x);
@@ -3266,17 +4064,390 @@ public:
         }
         for (ASR::Variable_t *var : gpu_scope_declaration_order(
                 x.m_symtab, current_vla_infos, arg_names)) {
-            emit_local_var_decl(var);
+            kernel_declarations.push_back(variable_declaration(*var,
+                [&]() { emit_local_var_decl(var); }));
         }
 
-        for (size_t i = 0; i < x.n_body; i++) {
-            visit_stmt(x.m_body[i]);
-        }
+        std::string body = captured_source([&]() {
+            for (size_t i = 0; i < x.n_body; i++) {
+                visit_stmt(x.m_body[i]);
+            }
+        });
+        src << gpu_referenced_declarations(kernel_declarations, body)
+            << body;
+        kernel_declarations.clear();
 
         indent_level--;
         src << "}\n\n";
 
         dialect.emit_kernel_epilogue(src, name, kernel_params);
+    }
+
+    // Opens a loop: one that an exit or a cycle of its own leaves from a
+    // loop inside it gets the variable that says which one did.
+    GpuLoopFrame begin_loop(const char *name, ASR::stmt_t **body,
+            size_t n_body) {
+        GpuLoopFrame frame{name, ""};
+        if (name != nullptr) {
+            GpuLeavesThroughLoop leaves(name);
+            for (size_t i = 0; i < n_body; i++) {
+                leaves.visit_stmt(*body[i]);
+            }
+            if (leaves.found) {
+                frame.leave = "__lfortran_leave_"
+                    + std::to_string(leave_count++);
+                src << get_indent() << "int " << frame.leave << " = 0;\n";
+            }
+        }
+        return frame;
+    }
+
+    // Writes the body of a loop whose header is written, and closes it.
+    // An exit or a cycle of an enclosing loop that broke out of it goes
+    // on to that loop.
+    void emit_loop_body(const GpuLoopFrame &frame, ASR::stmt_t **body,
+            size_t n_body) {
+        emit_loop_body(frame, [&]() {
+            for (size_t i = 0; i < n_body; i++) {
+                visit_stmt(body[i]);
+            }
+        });
+    }
+
+    template <typename F>
+    void emit_loop_body(const GpuLoopFrame &frame, F emit_body) {
+        indent_level++;
+        loop_frames.push_back(frame);
+        emit_body();
+        loop_frames.pop_back();
+        indent_level--;
+        src << get_indent() << "}\n";
+        for (size_t f = 0; f < loop_frames.size(); f++) {
+            const std::string &leave = loop_frames[f].leave;
+            if (leave.empty()) continue;
+            if (f + 1 < loop_frames.size()) {
+                src << get_indent() << "if (" << leave << " != 0) break;\n";
+            } else {
+                src << get_indent() << "if (" << leave << " == 1) break;\n";
+                src << get_indent() << "if (" << leave << " == 2) {\n";
+                src << get_indent() << "    " << leave << " = 0;\n";
+                src << get_indent() << "    continue;\n";
+                src << get_indent() << "}\n";
+            }
+        }
+    }
+
+    // Everything the statements of a loop body can modify (see
+    // GpuWrittenRootCollector), and the indices of the DO CONCURRENT
+    // loops among them.
+    static std::set<ASR::symbol_t*> loop_written(ASR::stmt_t **body,
+            size_t n_body) {
+        struct ConcurrentIndices : public ASRUtils::BlockBodyWalkVisitor<
+                ConcurrentIndices> {
+            std::set<ASR::symbol_t*> indices;
+            void visit_DoConcurrentLoop(const ASR::DoConcurrentLoop_t &x) {
+                for (size_t i = 0; i < x.n_head; i++) {
+                    indices.insert(gpu_designator_base(x.m_head[i].m_v).root);
+                }
+                ASRUtils::BlockBodyWalkVisitor<ConcurrentIndices>
+                    ::visit_DoConcurrentLoop(x);
+            }
+        };
+        GpuWrittenRootCollector collector;
+        ConcurrentIndices concurrent;
+        for (size_t i = 0; i < n_body; i++) {
+            collector.visit_stmt(*body[i]);
+            concurrent.visit_stmt(*body[i]);
+        }
+        std::set<ASR::symbol_t*> written = collector.roots;
+        written.insert(concurrent.indices.begin(), concurrent.indices.end());
+        return written;
+    }
+
+    // Opens the nested `for` loops of the indices of a DO CONCURRENT from
+    // the `h`-th on, the first index outermost, and writes its body in the
+    // innermost. Device code runs its iterations in order.
+    void emit_concurrent_loops(const ASR::DoConcurrentLoop_t &x, size_t h,
+            const std::set<ASR::symbol_t*> &written, const Location &loc) {
+        GpuLoopFrame frame{nullptr, ""};
+        emit_counted_for(x.m_head[h], written, loc);
+        if (h + 1 == x.n_head) {
+            emit_loop_body(frame, x.m_body, x.n_body);
+        } else {
+            emit_loop_body(frame, [&]() {
+                emit_concurrent_loops(x, h + 1, written, loc);
+            });
+        }
+    }
+
+    size_t loop_control_count = 0;
+
+    // Whether the kernel being written streams down rows of a matrix
+    // (streams_strided_rows).
+    bool kernel_streams_strided_rows = false;
+
+    // Whether the kernel being written runs each iteration on lanes.
+    bool kernel_has_lanes() const {
+        return current_kernel_layout != nullptr
+            && current_kernel_layout->m_lanes != nullptr;
+    }
+
+    // Whether a launch may give an iteration of the kernel being written
+    // the lanes of a whole block, more than a SIMD-group has.
+    bool kernel_has_block_lanes() const {
+        return kernel_has_lanes() && current_kernel_layout->m_lanes_max > 32;
+    }
+
+    // Whether a sequential loop with this body is unrolled
+    // (dialect.unroll_pragma): one of at most 8 statements with no loop in
+    // it, such as the inner product of a matrix-vector product. Unrolled,
+    // a thread has the loads of several iterations in flight at once,
+    // which a GPU needs to keep its memory busy with few threads.
+    static bool small_innermost_loop(ASR::stmt_t **body, size_t n_body) {
+        class HasLoop : public ASR::BaseWalkVisitor<HasLoop> {
+        public:
+            bool found = false;
+            void visit_DoLoop(const ASR::DoLoop_t &) { found = true; }
+            void visit_WhileLoop(const ASR::WhileLoop_t &) { found = true; }
+            void visit_DoConcurrentLoop(const ASR::DoConcurrentLoop_t &) {
+                found = true;
+            }
+            void visit_BlockCall(const ASR::BlockCall_t &) { found = true; }
+        };
+        if (n_body == 0 || n_body > 8) return false;
+        HasLoop h;
+        for (size_t i = 0; i < n_body && !h.found; i++) h.visit_stmt(*body[i]);
+        return !h.found;
+    }
+
+    // Whether the statements combine the values of the lanes of an
+    // iteration (GpuLaneReduce).
+    static bool holds_lane_reduce(ASR::stmt_t **body, size_t n_body) {
+        class Found : public ASR::BaseWalkVisitor<Found> {
+        public:
+            bool found = false;
+            void visit_GpuLaneReduce(const ASR::GpuLaneReduce_t &) {
+                found = true;
+            }
+            void visit_BlockCall(const ASR::BlockCall_t &x) {
+                ASR::Block_t *block = ASR::down_cast<ASR::Block_t>(
+                    ASRUtils::symbol_get_past_external(x.m_m));
+                for (size_t i = 0; i < block->n_body; i++) {
+                    this->visit_stmt(*block->m_body[i]);
+                }
+            }
+        };
+        Found f;
+        for (size_t i = 0; i < n_body && !f.found; i++) f.visit_stmt(*body[i]);
+        return f.found;
+    }
+
+    // Whether `kernel` has a small innermost loop (small_innermost_loop)
+    // that reads an array through its variable times a stride that is not
+    // a constant: each thread then streams down a row of a matrix that the
+    // threads of the launch read a column of together (`a(i, j)` over `j`,
+    // laid out as `(i - lb1) + n*(j - lb2)`). Such a thread needs the loads
+    // of the unrolled iterations in flight at once, and the registers for
+    // them, rather than many other threads to hide each load.
+    static bool streams_strided_rows(const ASR::Function_t &kernel) {
+        class Rows : public ASR::BaseWalkVisitor<Rows> {
+        public:
+            bool found = false;
+            ASR::symbol_t *v = nullptr;
+            static bool mentions(ASR::expr_t *e, ASR::symbol_t *s) {
+                class M : public ASR::BaseWalkVisitor<M> {
+                public:
+                    ASR::symbol_t *s; bool found = false;
+                    void visit_Var(const ASR::Var_t &x) {
+                        if (ASRUtils::symbol_get_past_external(x.m_v) == s) {
+                            found = true;
+                        }
+                    }
+                } m;
+                m.s = s;
+                m.visit_expr(*e);
+                return m.found;
+            }
+            void visit_IntegerBinOp(const ASR::IntegerBinOp_t &x) {
+                if (v != nullptr && x.m_op == ASR::binopType::Mul) {
+                    bool l = mentions(x.m_left, v), r = mentions(x.m_right, v);
+                    if ((l && !r && !ASRUtils::expr_value(x.m_right))
+                            || (r && !l && !ASRUtils::expr_value(x.m_left))) {
+                        found = true;
+                    }
+                }
+                ASR::BaseWalkVisitor<Rows>::visit_IntegerBinOp(x);
+            }
+            void visit_ArrayItem(const ASR::ArrayItem_t &x) {
+                // A later subscript of an array not yet laid out flat.
+                for (size_t i = 1; v != nullptr && i < x.n_args; i++) {
+                    if (x.m_args[i].m_right && mentions(x.m_args[i].m_right, v)
+                            && !(x.m_args[0].m_right
+                                && mentions(x.m_args[0].m_right, v))) {
+                        found = true;
+                    }
+                }
+                ASR::BaseWalkVisitor<Rows>::visit_ArrayItem(x);
+            }
+            void visit_DoLoop(const ASR::DoLoop_t &x) {
+                if (small_innermost_loop(x.m_body, x.n_body)
+                        && x.m_head.m_v != nullptr
+                        && ASR::is_a<ASR::Var_t>(*x.m_head.m_v)) {
+                    ASR::symbol_t *saved = v;
+                    v = ASRUtils::symbol_get_past_external(
+                        ASR::down_cast<ASR::Var_t>(x.m_head.m_v)->m_v);
+                    for (size_t i = 0; i < x.n_body; i++) {
+                        this->visit_stmt(*x.m_body[i]);
+                    }
+                    v = saved;
+                    return;
+                }
+                ASR::BaseWalkVisitor<Rows>::visit_DoLoop(x);
+            }
+            void visit_BlockCall(const ASR::BlockCall_t &x) {
+                ASR::Block_t *block = ASR::down_cast<ASR::Block_t>(
+                    ASRUtils::symbol_get_past_external(x.m_m));
+                for (size_t i = 0; i < block->n_body; i++) {
+                    this->visit_stmt(*block->m_body[i]);
+                }
+            }
+        } rows;
+        for (size_t i = 0; i < kernel.n_body && !rows.found; i++) {
+            rows.visit_stmt(*kernel.m_body[i]);
+        }
+        return rows.found;
+    }
+
+    // The scalars of the kernel being written that are positive by
+    // construction: the lanes of an iteration.
+    std::set<ASR::symbol_t*> positive_scalars() const {
+        std::set<ASR::symbol_t*> positive;
+        if (current_kernel_layout != nullptr
+                && current_kernel_layout->m_lanes != nullptr) {
+            positive.insert(ASRUtils::symbol_get_past_external(
+                current_kernel_layout->m_lanes));
+        }
+        return positive;
+    }
+
+    // The end or the step of a counted loop as its `for` header writes
+    // it. Fortran evaluates both once, before the loop: one that the loop
+    // cannot change is written as it is, anything else is copied into a
+    // constant first.
+    std::string loop_control(ASR::expr_t *e, const char *role,
+            ASR::ttype_t *type, const std::set<ASR::symbol_t*> &written) {
+        std::set<ASR::symbol_t*> private_scalars;
+        if (current_kernel_layout != nullptr) {
+            // A kernel reads its scalar arguments into locals of its own.
+            for (size_t i = 0; i < current_kernel_layout->n_scalars; i++) {
+                const ASR::gpu_kernel_argument_t &a =
+                    current_kernel_layout->m_scalars[i];
+                if (a.m_member == nullptr) {
+                    private_scalars.insert(
+                        ASRUtils::symbol_get_past_external(a.m_variable));
+                }
+            }
+        }
+        if (CUtils::loop_control_invariant(e, written, private_scalars)) {
+            return captured_source([&]() { visit_expr(e); });
+        }
+        std::string name = std::string("__lfortran_") + role + "_"
+            + std::to_string(loop_control_count++);
+        src << get_indent() << "const " << gpu_type(type) << " " << name
+            << " = ";
+        visit_expr(e);
+        src << ";\n";
+        return name;
+    }
+
+    // Opens the C `for` of the counted loop `head`, whose body modifies
+    // `written`, its own index included. The loop tests `<=` for a
+    // positive step and `>=` for a negative one, so it ends with the index
+    // one step past the last iteration, and a loop that runs no iteration
+    // leaves it at the start, as Fortran has it. Only a step whose sign is
+    // not evident (see CUtils::loop_step_sign) needs a test that depends
+    // on it.
+    void emit_counted_for(const ASR::do_loop_head_t &head,
+            const std::set<ASR::symbol_t*> &written, const Location &loc,
+            bool unroll = false, bool unroll_few = false) {
+        if (head.m_v == nullptr) {
+            src << get_indent() << "for (;;) {\n";
+            return;
+        }
+        LCOMPILERS_ASSERT(head.m_start != nullptr && head.m_end != nullptr
+            && head.m_increment != nullptr);
+        ASR::ttype_t *type = ASRUtils::expr_type(head.m_v);
+        int64_t step = 0;
+        bool step_known = ASRUtils::extract_value(
+            ASRUtils::expr_value(head.m_increment), step);
+        if (step_known && step == 0) {
+            throw CodeGenError("gpu offload: a DO loop with a zero step "
+                "reached the device code generator", loc);
+        }
+        std::string end = loop_control(head.m_end, "end", type, written);
+        std::string inc = step_known ? std::string()
+            : loop_control(head.m_increment, "step", type, written);
+        std::string v = captured_source([&]() { visit_expr(head.m_v); });
+        int sign = step_known ? (step > 0 ? 1 : -1)
+            : CUtils::loop_step_sign(head.m_increment, positive_scalars());
+        bool pragma = unroll && !dialect.unroll_pragma().empty();
+        // The loops the compiler made of a grid-stride reduction keep the
+        // short unroll: they run few iterations, and a deep one only costs
+        // registers.
+        bool deep = kernel_streams_strided_rows && v.rfind("__gpu_", 0) != 0;
+        if (pragma && !step_known && sign > 0) {
+            // A loop whose step is a run-time value, as the loop of one lane
+            // of an iteration is (gpu_vector_lanes.cpp), is counted by the
+            // number of its iterations: nvcc unrolls this form, but not
+            // `for (i = start + lane; i <= end; i += lanes)`, whose
+            // iterations it cannot count ahead. A column sum over
+            // 12,288 rows reads 3.7 TB/s on an H200 in the second form and
+            // 4.4 TB/s in the first. The index still ends one step past the
+            // last iteration.
+            std::string trips = "__lfortran_trips_"
+                + std::to_string(loop_control_count);
+            std::string count = "__lfortran_count_"
+                + std::to_string(loop_control_count++);
+            std::string type_name = gpu_type(type);
+            src << get_indent() << v << " = ";
+            visit_expr(head.m_start);
+            src << ";\n";
+            src << get_indent() << "const " << type_name << " " << trips
+                << " = " << end << " >= " << v << " ? (" << end << " - " << v
+                << ") / " << inc << " + 1 : 0;\n";
+            src << get_indent() << dialect.unroll_pragma(deep) << "\n";
+            src << get_indent() << "for (" << type_name << " " << count
+                << " = 0; " << count << " < " << trips << "; " << count
+                << "++, " << v << " += " << inc << ") {\n";
+            return;
+        }
+        if (pragma) {
+            src << get_indent() << dialect.unroll_pragma(deep) << "\n";
+        } else if (unroll_few && !dialect.unroll_few_pragma().empty()) {
+            src << get_indent() << dialect.unroll_few_pragma() << "\n";
+        }
+        src << get_indent() << "for (" << v << " = ";
+        visit_expr(head.m_start);
+        src << "; ";
+        if (sign != 0) {
+            src << v << (sign > 0 ? " <= " : " >= ") << end;
+        } else {
+            src << inc << " > 0 ? " << v << " <= " << end << " : " << v
+                << " >= " << end;
+        }
+        src << "; " << v;
+        if (!step_known) {
+            src << " += " << inc;
+        } else if (step == 1) {
+            src << "++";
+        } else if (step == -1) {
+            src << "--";
+        } else if (step > 0) {
+            src << " += " << step;
+        } else {
+            src << " -= " << -step;
+        }
+        src << ") {\n";
     }
 
     void visit_stmt(ASR::stmt_t *stmt) {
@@ -3316,6 +4487,34 @@ public:
                         }
                     }
                 }
+                // A copy of a derived-type value made for a call (see
+                // gpu_memory_space.cpp) hands the routine the buffers of
+                // the allocatable components of the original.
+                if (ASR::is_a<ASR::Var_t>(*a->m_target) &&
+                        ASR::is_a<ASR::Var_t>(*a->m_value) &&
+                        is_struct_type(ASRUtils::expr_type(a->m_target)) &&
+                        !is_array_type(ASRUtils::expr_type(a->m_target))) {
+                    std::string from = std::string(ASRUtils::symbol_name(
+                        ASR::down_cast<ASR::Var_t>(a->m_value)->m_v)) + ".";
+                    std::string to = std::string(ASRUtils::symbol_name(
+                        ASR::down_cast<ASR::Var_t>(a->m_target)->m_v)) + ".";
+                    for (auto *table : {&func_array_data_params,
+                            &func_array_size_params, &func_array_lb_params}) {
+                        std::vector<std::pair<std::string, std::string>>
+                            copies;
+                        for (auto &entry : *table) {
+                            // A target with components of its own keeps
+                            // them: the assignment copies into them.
+                            if (entry.first.compare(0, from.size(), from)
+                                    == 0 && !table->count(to
+                                        + entry.first.substr(from.size()))) {
+                                copies.push_back({to + entry.first.substr(
+                                    from.size()), entry.second});
+                            }
+                        }
+                        for (auto &c : copies) (*table)[c.first] = c.second;
+                    }
+                }
 
                 // Track pointer aliases: when a local pointer is
                 // assigned from a variable whose array size is known
@@ -3343,18 +4542,8 @@ public:
                                 ASRUtils::symbol_name(
                                     ASR::down_cast<ASR::Var_t>(
                                         sm->m_v)->m_v);
-                            std::string key =
-                                struct_name + "." + mem_name;
-                            if (!func_array_size_params.count(
-                                    tgt_name)) {
-                                auto spit =
-                                    func_array_size_params.find(key);
-                                if (spit !=
-                                        func_array_size_params.end()) {
-                                    func_array_size_params[tgt_name]
-                                        = spit->second;
-                                }
-                            }
+                            bind_component_alias(
+                                struct_name + "." + mem_name, tgt_name);
                         }
                     } else if (ASR::is_a<ASR::Var_t>(*val)) {
                         std::string val_name = ASRUtils::symbol_name(
@@ -3550,7 +4739,8 @@ public:
                                     }
                                     src << "{\n";
                                     indent_level++;
-                                    src << get_indent() << "int __off = "
+                                    src << get_indent() << offset_type()
+                                        << " __off = "
                                         << kernel_parameter(component->offsets)
                                         << "[" << idx_str << "];\n";
                                     if (sit != alloc_array_sizes.end()) {
@@ -3923,18 +5113,18 @@ public:
             }
             case ASR::stmtType::Stop:
             case ASR::stmtType::ErrorStop: {
-                // A Fortran STOP inside a kernel has no exit code to
-                // deliver -- a grid returns no status -- so what is left of
-                // the statement is the stopping, which the dialect spells
-                // as a trap. A device with no trap of its own never gets
-                // here: pass_replace_gpu_offload declines a loop holding a
-                // STOP unless the device says it can abort.
-                std::string trap = dialect.abort_stmt();
-                if (trap.empty()) {
-                    throw CodeGenError("gpu offload: this device has no way "
-                        "to stop a running kernel", stmt->base.loc);
-                }
-                src << get_indent() << trap << "\n";
+                // The offload pass lowers every stop a kernel reaches into
+                // a write to the launch's status buffer and a return (see
+                // gpu_offload_stop.h), so none is left for a device.
+                throw CodeGenError("gpu offload: a stop statement reached "
+                    "the device code generator", stmt->base.loc);
+            }
+            case ASR::stmtType::GpuLaneBarrier: {
+                LCOMPILERS_ASSERT(current_kernel_layout != nullptr
+                    && current_kernel_layout->m_lanes != nullptr);
+                dialect.emit_lane_barrier(src, get_indent(),
+                    ASRUtils::symbol_name(current_kernel_layout->m_lanes),
+                    kernel_has_block_lanes());
                 break;
             }
             case ASR::stmtType::Return: {
@@ -3950,102 +5140,143 @@ public:
             }
             case ASR::stmtType::WhileLoop: {
                 ASR::WhileLoop_t *wl = ASR::down_cast<ASR::WhileLoop_t>(stmt);
+                GpuLoopFrame frame = begin_loop(wl->m_name, wl->m_body,
+                    wl->n_body);
                 src << get_indent() << "while (";
                 visit_expr(wl->m_test);
                 src << ") {\n";
-                indent_level++;
-                for (size_t i = 0; i < wl->n_body; i++) {
-                    visit_stmt(wl->m_body[i]);
-                }
-                indent_level--;
-                src << get_indent() << "}\n";
+                emit_loop_body(frame, wl->m_body, wl->n_body);
                 break;
             }
             case ASR::stmtType::DoLoop: {
                 ASR::DoLoop_t *dl = ASR::down_cast<ASR::DoLoop_t>(stmt);
-                src << get_indent() << "for (";
-                visit_expr(dl->m_head.m_v);
-                src << " = ";
-                visit_expr(dl->m_head.m_start);
-                src << "; ";
-                visit_expr(dl->m_head.m_v);
-                src << " <= ";
-                visit_expr(dl->m_head.m_end);
-                src << "; ";
-                visit_expr(dl->m_head.m_v);
-                if (dl->m_head.m_increment) {
-                    src << " += ";
-                    visit_expr(dl->m_head.m_increment);
+                if (dl->n_orelse > 0) {
+                    // Only internal lowerings create a loop-else, and none
+                    // of them runs on device code.
+                    throw CodeGenError("gpu offload: a DO loop with an "
+                        "else block reached the device code generator",
+                        stmt->base.loc);
+                }
+                GpuLoopFrame frame = begin_loop(dl->m_name, dl->m_body,
+                    dl->n_body);
+                std::set<ASR::symbol_t*> written = loop_written(
+                    dl->m_body, dl->n_body);
+                if (dl->m_head.m_v != nullptr) {
+                    written.insert(gpu_designator_base(dl->m_head.m_v).root);
+                }
+                emit_counted_for(dl->m_head, written, stmt->base.loc,
+                    small_innermost_loop(dl->m_body, dl->n_body),
+                    holds_lane_reduce(dl->m_body, dl->n_body));
+                emit_loop_body(frame, dl->m_body, dl->n_body);
+                break;
+            }
+            case ASR::stmtType::DoConcurrentLoop: {
+                ASR::DoConcurrentLoop_t *dc =
+                    ASR::down_cast<ASR::DoConcurrentLoop_t>(stmt);
+                LCOMPILERS_ASSERT(dc->n_head > 0);
+                std::set<ASR::symbol_t*> written = loop_written(
+                    dc->m_body, dc->n_body);
+                for (size_t h = 0; h < dc->n_head; h++) {
+                    written.insert(
+                        gpu_designator_base(dc->m_head[h].m_v).root);
+                }
+                emit_concurrent_loops(*dc, 0, written, stmt->base.loc);
+                break;
+            }
+            case ASR::stmtType::Exit:
+            case ASR::stmtType::Cycle: {
+                bool is_exit = ASR::is_a<ASR::Exit_t>(*stmt);
+                const char *target = is_exit
+                    ? ASR::down_cast<ASR::Exit_t>(stmt)->m_stmt_name
+                    : ASR::down_cast<ASR::Cycle_t>(stmt)->m_stmt_name;
+                // The loop it belongs to is loop_frames[f - 1]. The
+                // offload pass turned a cycle of the offloaded loop into a
+                // return and reported the exits and cycles that have no
+                // lowering, so one of the loops being written is left.
+                size_t f = loop_frames.size();
+                if (target != nullptr && target[0] != '\0') {
+                    while (f > 0 && !(loop_frames[f - 1].name != nullptr
+                            && std::string(loop_frames[f - 1].name)
+                                == target)) {
+                        f--;
+                    }
+                }
+                if (f == 0) {
+                    throw CodeGenError("gpu offload: an exit or a cycle "
+                        "that leaves no loop of the device code",
+                        stmt->base.loc);
+                } else if (f == loop_frames.size()) {
+                    src << get_indent()
+                        << (is_exit ? "break;\n" : "continue;\n");
                 } else {
-                    src << "++";
+                    const std::string &leave = loop_frames[f - 1].leave;
+                    LCOMPILERS_ASSERT(!leave.empty());
+                    src << get_indent() << leave << " = "
+                        << (is_exit ? 1 : 2) << ";\n";
+                    src << get_indent() << "break;\n";
                 }
-                src << ") {\n";
-                indent_level++;
-                for (size_t i = 0; i < dl->n_body; i++) {
-                    visit_stmt(dl->m_body[i]);
-                }
-                indent_level--;
-                src << get_indent() << "}\n";
                 break;
             }
             case ASR::stmtType::BlockCall: {
                 ASR::BlockCall_t *bc = ASR::down_cast<ASR::BlockCall_t>(stmt);
                 ASR::Block_t *block = ASR::down_cast<ASR::Block_t>(bc->m_m);
                 GpuEmissionScope emission_scope(active_scope, block->m_symtab);
+                BlockNameScope block_names(*this, block->m_symtab);
                 src << get_indent() << "{\n";
                 indent_level++;
+                // The block writes only the declarations its body refers to.
+                std::vector<GpuDeclaration> declarations;
                 for (ASR::Variable_t *v : gpu_scope_declaration_order(
                         block->m_symtab, current_vla_infos)) {
-                    // Check if this variable is a VLA backed by a workspace
-                    // buffer (populated during kernel signature generation).
-                    std::string vname(v->m_name);
-                    auto vla_it = std::find_if(
-                        current_vla_infos.begin(), current_vla_infos.end(),
-                        [&](const GpuVlaWorkspace &ws) {
-                            return ws.var == &v->base;
-                        });
-                    if (vla_it != current_vla_infos.end()) {
-                        std::string elem_type_str;
-                        ASR::ttype_t *vtype =
-                            ASRUtils::type_get_past_allocatable(v->m_type);
-                        if (ASR::is_a<ASR::Array_t>(*vtype)) {
-                            elem_type_str = gpu_type(
-                                ASR::down_cast<ASR::Array_t>(
-                                    vtype)->m_type);
-                        }
-                        if (elem_type_str.empty()
-                                || elem_type_str.find("unsupported")
-                                    != std::string::npos) {
-                            throw CodeGenError(
-                                "gpu offload: workspace '" + vname +
-                                "' has no gpu type of the same width");
-                        }
-                        // Emit a device pointer into the per-thread slice
-                        std::string extent =
-                            workspace_extent_str(*vla_it);
-                        src << get_indent() << global_prefix()
-                            << elem_type_str << "* " << vname
-                            << " = " << gpu_workspace_buffer_name(
-                                vla_it->buffer_index)
-                            << " + " << dialect.global_thread_id()
-                            << " * ";
-                        if (vla_it->dims.size() == 1) {
-                            src << extent;
+                    declarations.push_back(variable_declaration(*v, [&]() {
+                        // Check if this variable is a VLA backed by a
+                        // workspace buffer (populated during kernel
+                        // signature generation).
+                        std::string vname(v->m_name);
+                        auto vla_it = std::find_if(
+                            current_vla_infos.begin(), current_vla_infos.end(),
+                            [&](const GpuVlaWorkspace &ws) {
+                                return ws.var == &v->base;
+                            });
+                        if (vla_it != current_vla_infos.end()) {
+                            std::string elem_type_str;
+                            ASR::ttype_t *vtype =
+                                ASRUtils::type_get_past_allocatable(v->m_type);
+                            if (ASR::is_a<ASR::Array_t>(*vtype)) {
+                                elem_type_str = gpu_type(
+                                    ASR::down_cast<ASR::Array_t>(
+                                        vtype)->m_type);
+                            }
+                            if (elem_type_str.empty()
+                                    || elem_type_str.find("unsupported")
+                                        != std::string::npos) {
+                                throw CodeGenError(
+                                    "gpu offload: workspace '" + vname +
+                                    "' has no gpu type of the same width");
+                            }
+                            // Emit a device pointer into the per-thread slice
+                            std::string extent =
+                                workspace_extent_str(*vla_it);
+                            src << get_indent() << global_prefix()
+                                << elem_type_str << "* " << vname
+                                << " = " << workspace_pointer_str(*vla_it)
+                                << ";\n";
+                            local_alloc_arrays.insert(&v->base);
+                            // Record the size expression for alloc-assign
+                            // and copy-loop codegen
+                            alloc_array_size_exprs[vname] = extent;
                         } else {
-                            src << "(" << extent << ")";
+                            emit_local_var_decl(v);
                         }
-                        src << ";\n";
-                        local_alloc_arrays.insert(&v->base);
-                        // Record the size expression for alloc-assign
-                        // and copy-loop codegen
-                        alloc_array_size_exprs[vname] = extent;
-                    } else {
-                        emit_local_var_decl(v);
+                    }));
+                }
+                std::string body = captured_source([&]() {
+                    for (size_t i = 0; i < block->n_body; i++) {
+                        visit_stmt(block->m_body[i]);
                     }
-                }
-                for (size_t i = 0; i < block->n_body; i++) {
-                    visit_stmt(block->m_body[i]);
-                }
+                });
+                src << gpu_referenced_declarations(declarations, body)
+                    << body;
                 indent_level--;
                 src << get_indent() << "}\n";
                 break;
@@ -4056,15 +5287,22 @@ public:
                 ASR::AssociateBlock_t *ab =
                     ASR::down_cast<ASR::AssociateBlock_t>(abc->m_m);
                 GpuEmissionScope emission_scope(active_scope, ab->m_symtab);
+                BlockNameScope block_names(*this, ab->m_symtab);
                 src << get_indent() << "{\n";
                 indent_level++;
+                std::vector<GpuDeclaration> declarations;
                 for (ASR::Variable_t *v : gpu_scope_declaration_order(
                         ab->m_symtab, current_vla_infos)) {
-                    emit_local_var_decl(v);
+                    declarations.push_back(variable_declaration(*v,
+                        [&]() { emit_local_var_decl(v); }));
                 }
-                for (size_t i = 0; i < ab->n_body; i++) {
-                    visit_stmt(ab->m_body[i]);
-                }
+                std::string body = captured_source([&]() {
+                    for (size_t i = 0; i < ab->n_body; i++) {
+                        visit_stmt(ab->m_body[i]);
+                    }
+                });
+                src << gpu_referenced_declarations(declarations, body)
+                    << body;
                 indent_level--;
                 src << get_indent() << "}\n";
                 break;
@@ -4172,7 +5410,7 @@ public:
                                 sc->m_args[i].m_value, fn, i);
                         } else if (is_struct_type(arg_type)) {
                             emit_struct_member_args_interleaved(
-                                sc->m_args[i].m_value);
+                                sc->m_args[i].m_value, fn, i);
                         }
                     }
                 }
@@ -4195,8 +5433,14 @@ public:
             }
             case ASR::stmtType::Associate: {
                 ASR::Associate_t *assoc = ASR::down_cast<ASR::Associate_t>(stmt);
+                ASR::StructInstanceMember_t *stored_component = nullptr;
+                ASR::expr_t *storage = nullptr;
+                if (gpu_struct_component_storage(stmt, stored_component,
+                        storage)) {
+                    bind_struct_component_storage(stored_component, storage);
+                    break;
+                }
                 last_section_size.clear();
-                last_section_dropped_step = false;
                 src << get_indent();
                 visit_expr(assoc->m_target);
                 src << " = ";
@@ -4204,20 +5448,15 @@ public:
                 src << ";\n";
                 if (ASR::is_a<ASR::Var_t>(*assoc->m_target)) {
                     // The pointer just written holds the address of the
-                    // section's first element. Where the section steps by
-                    // more than one that address is all it holds, so record
-                    // the name: its size is still exact, and every indexed
-                    // use of it is refused.
-                    if (last_section_dropped_step) {
-                        section_pointers_dropping_step.insert(
-                            ASR::down_cast<ASR::Var_t>(assoc->m_target)->m_v);
-                    }
+                    // section's first element; the section's extents and
+                    // strides describe the rest of it.
                     std::string tgt_name = ASRUtils::symbol_name(
                         ASR::down_cast<ASR::Var_t>(assoc->m_target)->m_v);
                     if (!last_section_size.empty()) {
                         ptr_section_sizes[tgt_name] = last_section_size;
                         ptr_section_dim_sizes[tgt_name] =
                             last_section_dim_sizes;
+                        register_strides(tgt_name, last_section_strides);
                     }
                     // For pointer-to-local-alloc associations, record
                     // the allocatable's size for later use
@@ -4243,21 +5482,8 @@ public:
                                 ASRUtils::symbol_name(
                                     ASR::down_cast<ASR::Var_t>(
                                         sm->m_v)->m_v);
-                            std::string key =
-                                struct_name + "." + mem_name;
-                            if (!func_array_size_params.count(
-                                    tgt_name)) {
-                                auto spit =
-                                    func_array_size_params.find(
-                                        key);
-                                if (spit !=
-                                        func_array_size_params
-                                            .end()) {
-                                    func_array_size_params[
-                                        tgt_name]
-                                        = spit->second;
-                                }
-                            }
+                            bind_component_alias(
+                                struct_name + "." + mem_name, tgt_name);
                         }
                     } else if (ASR::is_a<ASR::Var_t>(*assoc_val)) {
                         std::string val_name = ASRUtils::symbol_name(
@@ -4273,6 +5499,17 @@ public:
                             if (eit != alloc_array_size_exprs.end()) {
                                 ptr_section_sizes[tgt_name] =
                                     eit->second;
+                            } else if (!func_array_size_params.count(
+                                    val_name)) {
+                                // An array of the kernel with explicit
+                                // extents, such as the gathered copy of a
+                                // section an inlined procedure takes: its
+                                // type has the size.
+                                std::string size = explicit_array_size_str(
+                                    ASRUtils::expr_type(assoc_val));
+                                if (!size.empty()) {
+                                    ptr_section_sizes[tgt_name] = size;
+                                }
                             }
                         }
                         // Propagate func_array_size_params so that
@@ -4354,13 +5591,40 @@ public:
             }
             case ASR::exprType::IntegerConstant: {
                 ASR::IntegerConstant_t *c = ASR::down_cast<ASR::IntegerConstant_t>(expr);
-                src << c->m_n;
+                // A bare literal is an int in C, so arithmetic between two
+                // integer(8) constants (e.g. a flattened iteration count with
+                // literal bounds) would be done, and overflow, in 32 bits,
+                // and an integer(1)/(2) one would not match its kind in an
+                // overloaded call. Give it the device type of its kind.
+                if (c->m_n == std::numeric_limits<int64_t>::min()) {
+                    // The magnitude of the most negative integer(8) is no
+                    // signed literal, so it is spelled as an expression.
+                    src << "(-((" << gpu_type(c->m_type) << ")"
+                        << std::numeric_limits<int64_t>::max() << ") - 1)";
+                } else if (ASRUtils::extract_kind_from_ttype_t(c->m_type)
+                        != 4) {
+                    src << "((" << gpu_type(c->m_type) << ")" << c->m_n << ")";
+                } else {
+                    src << c->m_n;
+                }
                 break;
             }
             case ASR::exprType::RealConstant: {
                 ASR::RealConstant_t *c = ASR::down_cast<ASR::RealConstant_t>(expr);
                 src << dialect.real_literal(c->m_r,
                     ASRUtils::extract_kind_from_ttype_t(c->m_type));
+                break;
+            }
+            case ASR::exprType::TypeInquiry: {
+                // huge, tiny, epsilon, digits, ...: a constant of the type
+                // of the argument, whose value the kernel never reads.
+                ASR::TypeInquiry_t *t = ASR::down_cast<ASR::TypeInquiry_t>(
+                    expr);
+                if (t->m_value == nullptr) {
+                    throw CodeGenError("gpu offload: a type inquiry without "
+                        "a value reached the device code", expr->base.loc);
+                }
+                visit_expr(t->m_value);
                 break;
             }
             case ASR::exprType::LogicalConstant: {
@@ -4370,12 +5634,30 @@ public:
             }
             case ASR::exprType::IntegerBinOp: {
                 ASR::IntegerBinOp_t *op = ASR::down_cast<ASR::IntegerBinOp_t>(expr);
+                bool narrow = is_narrow_integer(op->m_type);
+                if (narrow) src << "((" << gpu_type(op->m_type) << ")";
                 if (op->m_op == ASR::binopType::Pow) {
-                    src << "(int)pow((float)(";
+                    int64_t kind = ASRUtils::extract_kind_from_ttype_t(
+                        op->m_type);
+                    LCOMPILERS_ASSERT(integer_power_types.count(kind));
+                    std::string type = gpu_type(op->m_type);
+                    src << integer_power_helper(kind) << "((" << type
+                        << ")(";
                     visit_expr(op->m_left);
-                    src << "), (float)(";
+                    src << "), (" << type << ")(";
                     visit_expr(op->m_right);
                     src << "))";
+                } else if (op->m_op == ASR::binopType::LBitRShift) {
+                    // A logical right shift (ishft, shiftr) fills with
+                    // zeros, but `>>` on a signed integer shifts in copies
+                    // of the sign bit: shift the unsigned integer of the
+                    // same width.
+                    src << "((" << gpu_type(op->m_type) << ")(("
+                        << unsigned_gpu_type(op->m_type) << ")(";
+                    visit_expr(op->m_left);
+                    src << ") >> (";
+                    visit_expr(op->m_right);
+                    src << ")))";
                 } else {
                     src << "(";
                     visit_expr(op->m_left);
@@ -4383,11 +5665,25 @@ public:
                     visit_expr(op->m_right);
                     src << ")";
                 }
+                if (narrow) src << ")";
                 break;
             }
             case ASR::exprType::RealBinOp: {
                 ASR::RealBinOp_t *op = ASR::down_cast<ASR::RealBinOp_t>(expr);
-                if (op->m_op == ASR::binopType::Pow) {
+                ASR::expr_t *rsqrt_arg = nullptr;
+                if (co.po.fast && !co.po.no_fast_math
+                        && op->m_op == ASR::binopType::Div
+                        && is_real_one(op->m_left)) {
+                    rsqrt_arg = sqrt_argument(op->m_right);
+                }
+                if (rsqrt_arg != nullptr) {
+                    // 1/sqrt(x), which the device computes in one
+                    // operation, a little less exactly: a fast-math rewrite.
+                    src << "rsqrt(";
+                    visit_expr(rsqrt_arg);
+                    src << ")";
+                } else if (op->m_op == ASR::binopType::Pow) {
+
                     src << "pow(";
                     visit_expr(op->m_left);
                     src << ", ";
@@ -4422,9 +5718,12 @@ public:
             }
             case ASR::exprType::IntegerUnaryMinus: {
                 ASR::IntegerUnaryMinus_t *u = ASR::down_cast<ASR::IntegerUnaryMinus_t>(expr);
+                bool narrow = is_narrow_integer(u->m_type);
+                if (narrow) src << "((" << gpu_type(u->m_type) << ")";
                 src << "(-(";
                 visit_expr(u->m_arg);
                 src << "))";
+                if (narrow) src << ")";
                 break;
             }
             case ASR::exprType::RealUnaryMinus: {
@@ -4436,15 +5735,22 @@ public:
             }
             case ASR::exprType::LogicalBinOp: {
                 ASR::LogicalBinOp_t *op = ASR::down_cast<ASR::LogicalBinOp_t>(expr);
+                if (op->m_op != ASR::logicalbinopType::And
+                        && op->m_op != ASR::logicalbinopType::Or) {
+                    // .eqv., .neqv. and .xor. compare the truth values,
+                    // each brought to 0 or 1 first.
+                    src << "((int)(!(";
+                    visit_expr(op->m_left);
+                    src << (op->m_op == ASR::logicalbinopType::Eqv
+                        ? ") == !(" : ") != !(");
+                    visit_expr(op->m_right);
+                    src << ")))";
+                    break;
+                }
                 src << "((int)(";
                 visit_expr(op->m_left);
-                if (op->m_op == ASR::logicalbinopType::And) {
-                    src << " && ";
-                } else if (op->m_op == ASR::logicalbinopType::Or) {
-                    src << " || ";
-                } else {
-                    src << " /* unsupported logical op */ ";
-                }
+                src << (op->m_op == ASR::logicalbinopType::And
+                    ? " && " : " || ");
                 visit_expr(op->m_right);
                 src << "))";
                 break;
@@ -4470,6 +5776,8 @@ public:
                 if (ab->m_value) {
                     visit_expr(ab->m_value);
                 } else {
+                    auto widened = widened_extent_parts(ab->m_type);
+                    src << widened.first;
                     // For fixed-size arrays, compute from type info
                     ASR::ttype_t *arr_type = ASRUtils::type_get_past_allocatable_pointer(
                         ASRUtils::expr_type(ab->m_v));
@@ -4478,18 +5786,38 @@ public:
                         int dim_idx = 0;
                         if (ab->m_dim) {
                             if (ASR::is_a<ASR::IntegerConstant_t>(*ab->m_dim)) {
-                                dim_idx = ASR::down_cast<ASR::IntegerConstant_t>(
-                                    ab->m_dim)->m_n - 1;
+                                dim_idx = checked_integer_cast<int>(ASR::down_cast<ASR::IntegerConstant_t>(
+                                    ab->m_dim)->m_n - 1);
                             }
                         }
+                        // A deferred-shape array -- a component of a
+                        // derived-type argument, or a name bound to one --
+                        // has its lower bound registered with its extents.
+                        std::string registered_lb = arr->n_dims > 0
+                            && dim_idx >= 0 && (size_t)dim_idx < arr->n_dims
+                            && !arr->m_dims[dim_idx].m_start
+                            && !arr->m_dims[dim_idx].m_length
+                            ? deferred_lower_bound_str(ab->m_v, arr,
+                                dim_idx)
+                            : "1";
                         if (dim_idx >= 0 && (size_t)dim_idx < arr->n_dims) {
                             if (ab->m_bound == ASR::arrayboundType::LBound) {
                                 if (arr->m_dims[dim_idx].m_start) {
                                     visit_expr(arr->m_dims[dim_idx].m_start);
                                 } else {
-                                    src << "1";
+                                    src << registered_lb;
                                 }
                             } else {
+                                // The branches below without a length
+                                // render the extent of the dimension,
+                                // which is its upper bound when it starts
+                                // at one.
+                                bool offset_extent =
+                                    !arr->m_dims[dim_idx].m_length
+                                    && registered_lb != "1";
+                                if (offset_extent) {
+                                    src << "((" << registered_lb << ") + ";
+                                }
                                 // UBound = start + length - 1
                                 if (arr->m_dims[dim_idx].m_length) {
                                     src << "(";
@@ -4538,6 +5866,7 @@ public:
                                 } else {
                                     unresolved_upper_bound(ab->base.base.loc, "");
                                 }
+                                if (offset_extent) src << " - 1)";
                             }
                         } else {
                             src << "/* dim out of range */";
@@ -4545,7 +5874,12 @@ public:
                     } else {
                         src << "/* non-array bound */";
                     }
+                    src << widened.second;
                 }
+                break;
+            }
+            case ASR::exprType::BitCast: {
+                emit_bit_cast(ASR::down_cast<ASR::BitCast_t>(expr));
                 break;
             }
             case ASR::exprType::Cast: {
@@ -4636,22 +5970,14 @@ public:
                     }
                 } else if (fn_name.find("_lcompilers_min_") == 0 ||
                            fn_name.find("_lcompilers_min0_") == 0) {
-                    src << "min(";
-                    if (fc->n_args > 0 && fc->m_args[0].m_value)
-                        visit_expr(fc->m_args[0].m_value);
-                    src << ", ";
-                    if (fc->n_args > 1 && fc->m_args[1].m_value)
-                        visit_expr(fc->m_args[1].m_value);
-                    src << ")";
+                    emit_min_max("min", fc->m_type,
+                        fc->n_args > 0 ? fc->m_args[0].m_value : nullptr,
+                        fc->n_args > 1 ? fc->m_args[1].m_value : nullptr);
                 } else if (fn_name.find("_lcompilers_max_") == 0 ||
                            fn_name.find("_lcompilers_max0_") == 0) {
-                    src << "max(";
-                    if (fc->n_args > 0 && fc->m_args[0].m_value)
-                        visit_expr(fc->m_args[0].m_value);
-                    src << ", ";
-                    if (fc->n_args > 1 && fc->m_args[1].m_value)
-                        visit_expr(fc->m_args[1].m_value);
-                    src << ")";
+                    emit_min_max("max", fc->m_type,
+                        fc->n_args > 0 ? fc->m_args[0].m_value : nullptr,
+                        fc->n_args > 1 ? fc->m_args[1].m_value : nullptr);
                 } else if (fn_name.find("_lcompilers_merge_") == 0) {
                     // merge(tsource, fsource, mask) -> (mask ? tsource : fsource)
                     src << "(";
@@ -4717,7 +6043,7 @@ public:
                                     fc->m_args[i].m_value, fn, i);
                             } else if (formal_is_struct) {
                                 emit_struct_member_args_interleaved(
-                                    fc->m_args[i].m_value);
+                                    fc->m_args[i].m_value, fn, i);
                             }
                         }
                     }
@@ -4727,10 +6053,6 @@ public:
             }
             case ASR::exprType::ArrayItem: {
                 ASR::ArrayItem_t *ai = ASR::down_cast<ASR::ArrayItem_t>(expr);
-                // Refused here rather than in emit_linearized_index below:
-                // a rank-1 subscript is written out directly and never
-                // reaches it.
-                reject_strided_section_use(ai->m_v, ai->base.base.loc);
                 // For allocatable struct member access like s%a(i),
                 // use the separate data pointer parameter instead of
                 // the struct member (which is not a valid array in device code).
@@ -4821,10 +6143,15 @@ public:
                         if (ASR::is_a<ASR::Array_t>(*inner_1d)) {
                             arr_1d = ASR::down_cast<ASR::Array_t>(inner_1d);
                         }
-                        std::string lb = get_lower_bound_str(arr_1d, 0);
-                        src << "((int)(";
-                        visit_expr(idx);
-                        src << ") - (" << lb << "))";
+                        std::string lb = get_lower_bound_str(arr_1d, 0,
+                            array_shape_key(ai->m_v));
+                        std::vector<std::string> strides;
+                        bool strided = registered_strides(
+                            array_shape_key(ai->m_v), 1, strides)
+                            && strides[0] != "1";
+                        if (strided) src << "(" << strides[0] << " * ";
+                        emit_offset_term(idx, lb);
+                        if (strided) src << ")";
                     } else {
                         src << "0";
                     }
@@ -4844,7 +6171,10 @@ public:
                 break;
             }
             case ASR::exprType::GpuThreadIndex: {
-                src << dialect.thread_index();
+                // In a kernel with lanes, the thread index numbers the
+                // iterations (gpu_vector_lanes.cpp).
+                src << (kernel_has_lanes() ? dialect.lane_thread_index()
+                    : dialect.thread_index());
                 break;
             }
             case ASR::exprType::GpuBlockIndex: {
@@ -4852,7 +6182,45 @@ public:
                 break;
             }
             case ASR::exprType::GpuBlockSize: {
-                src << dialect.block_size();
+                src << (kernel_has_lanes() ? dialect.lane_block_size()
+                    : dialect.block_size());
+                break;
+            }
+            case ASR::exprType::GpuLaneReduce: {
+                ASR::GpuLaneReduce_t *r =
+                    ASR::down_cast<ASR::GpuLaneReduce_t>(expr);
+                int op = r->m_op == ASR::reduction_opType::ReduceAdd ? 0
+                    : r->m_op == ASR::reduction_opType::ReduceMul ? 1
+                    : r->m_op == ASR::reduction_opType::ReduceMIN ? 2 : 3;
+                src << dialect.lane_reduce(expr_str(r->m_arg), op,
+                    kernel_has_lanes(), kernel_has_block_lanes());
+                break;
+            }
+            case ASR::exprType::GpuLaneIndex: {
+                src << dialect.lane_index();
+                break;
+            }
+            case ASR::exprType::GpuLaneBroadcast: {
+                ASR::GpuLaneBroadcast_t *b =
+                    ASR::down_cast<ASR::GpuLaneBroadcast_t>(expr);
+                // A logical travels as an integer.
+                if (ASRUtils::is_logical(*b->m_type)) {
+                    src << "(" << dialect.lane_broadcast("(int)("
+                        + expr_str(b->m_arg) + ")", kernel_has_block_lanes())
+                        << " != 0)";
+                } else {
+                    src << dialect.lane_broadcast(expr_str(b->m_arg),
+                        kernel_has_block_lanes());
+                }
+                break;
+            }
+            case ASR::exprType::GpuAtomicFetchAdd: {
+                ASR::GpuAtomicFetchAdd_t *a =
+                    ASR::down_cast<ASR::GpuAtomicFetchAdd_t>(expr);
+                std::string address = "&(" + expr_str(a->m_target)
+                    + ")";
+                src << dialect.atomic_fetch_add(address,
+                    expr_str(a->m_increment));
                 break;
             }
             case ASR::exprType::RealSqrt: {
@@ -4938,7 +6306,11 @@ public:
                 ASR::expr_t *av = gpu_shape_source(as->m_v, as->m_dim);
                 if (as->m_value) {
                     visit_expr(as->m_value);
-                } else if (ASR::is_a<ASR::Var_t>(*av)) {
+                    break;
+                }
+                auto widened = widened_extent_parts(as->m_type);
+                src << widened.first;
+                if (ASR::is_a<ASR::Var_t>(*av)) {
                     std::string arr_name = ASRUtils::symbol_name(
                         ASR::down_cast<ASR::Var_t>(av)->m_v);
                     std::string ws_size;
@@ -4983,6 +6355,10 @@ public:
                                 bool first_dim = true;
                                 src << "(";
                                 for (size_t d = 0; d < arr->n_dims; d++) {
+                                    if (dim_value > 0
+                                            && (int64_t)d + 1 != dim_value) {
+                                        continue;
+                                    }
                                     if (arr->m_dims[d].m_length) {
                                         if (!first_dim) src << " * ";
                                         first_dim = false;
@@ -5004,6 +6380,7 @@ public:
                 } else {
                     src << "/* unsupported ArraySize */";
                 }
+                src << widened.second;
                 break;
             }
             case ASR::exprType::IntrinsicImpureFunction: {
@@ -5023,9 +6400,73 @@ public:
                 src << "1";
                 break;
             }
+            case ASR::exprType::StructConstant: {
+                // The value of a derived-type named constant, or of an
+                // element of one, as a temporary of its device struct: it
+                // can be the object of a component reference or the value
+                // of an assignment, where a bare brace list is not valid.
+                ASR::StructConstant_t *sc =
+                    ASR::down_cast<ASR::StructConstant_t>(expr);
+                ASR::symbol_t *st = ASRUtils::symbol_get_past_external(
+                    sc->m_dt_sym);
+                std::string init;
+                size_t next_arg = 0;
+                // The kernel plan declines a constant with a component the
+                // device cannot be given a value of this way (see
+                // gpu_struct_constant_unsupported_component).
+                if (!ASR::is_a<ASR::Struct_t>(*st)
+                        || !struct_constant_initializer(
+                            ASR::down_cast<ASR::Struct_t>(st), sc, next_arg,
+                            init)) {
+                    throw CodeGenError("gpu offload: a derived-type "
+                        "constant reached the device code with a component "
+                        "it cannot be given a value of", expr->base.loc);
+                }
+                src << struct_c_name(ASR::down_cast<ASR::Struct_t>(st))
+                    << init;
+                break;
+            }
             default:
                 src << "/* unsupported expr type " << expr->type << " */";
                 break;
+        }
+    }
+
+    // A scalar TRANSFER between an integer and a real of the same kind
+    // reads the bits of its source as the other type, which the dialect
+    // spells; between two values of one type it is that value. The source
+    // is first given its own device type, so that the bit cast is handed an
+    // operand of exactly that width. A value folded at compile time is not
+    // used: a real literal cannot spell every bit pattern.
+    void emit_bit_cast(ASR::BitCast_t *bc) {
+        ASR::ttype_t *from = ASRUtils::type_get_past_allocatable_pointer(
+            ASRUtils::expr_type(bc->m_source));
+        ASR::ttype_t *to = ASRUtils::type_get_past_allocatable_pointer(
+            bc->m_type);
+        if (bc->m_size != nullptr || ASRUtils::is_array(from)
+                || ASRUtils::is_array(to)) {
+            throw CodeGenError("gpu offload: a transfer to or from an array "
+                "is not supported on the GPU", bc->base.base.loc);
+        }
+        bool from_numeric = ASRUtils::is_integer(*from)
+            || ASRUtils::is_real(*from);
+        bool to_numeric = ASRUtils::is_integer(*to) || ASRUtils::is_real(*to);
+        int kind = ASRUtils::extract_kind_from_ttype_t(to);
+        if (!from_numeric || !to_numeric
+                || ASRUtils::extract_kind_from_ttype_t(from) != kind
+                || (from->type != to->type && kind != 4 && kind != 8)) {
+            throw CodeGenError("gpu offload: transfer from "
+                + ASRUtils::type_to_str_with_kind(from, bc->m_source) + " to "
+                + ASRUtils::type_to_str_with_kind(to, nullptr)
+                + " is not supported on the GPU", bc->base.base.loc);
+        }
+        std::string value = "((" + gpu_type(from) + ")("
+            + expr_str(bc->m_source) + "))";
+        if (from->type == to->type) {
+            src << value;
+        } else {
+            src << dialect.bit_cast(gpu_type(to), ASRUtils::is_real(*to),
+                kind, value);
         }
     }
 
@@ -5139,7 +6580,14 @@ public:
     // counting from 1 instead would address a different element.
     std::string get_lower_bound_str(ASR::Array_t *arr, size_t d,
             const std::string &arr_var_name = "") {
-        if (!arr || d >= arr->n_dims || !arr->m_dims[d].m_start) return "1";
+        if (!arr || d >= arr->n_dims || !arr->m_dims[d].m_start) {
+            auto it = func_array_lb_params.find(
+                dim_size_key(arr_var_name, d));
+            if (!arr_var_name.empty() && it != func_array_lb_params.end()) {
+                return it->second;
+            }
+            return "1";
+        }
         ASR::expr_t *start = arr->m_dims[d].m_start;
         if (ASR::is_a<ASR::IntegerConstant_t>(*start)) {
             return std::to_string(
@@ -5159,26 +6607,43 @@ public:
 
     void emit_linearized_index(ASR::ArrayItem_t *ai,
                                ASR::ttype_t *arr_type) {
-        reject_strided_section_use(ai->m_v, ai->base.base.loc);
         ASR::Array_t *arr = nullptr;
         ASR::ttype_t *inner = ASRUtils::type_get_past_allocatable(
             ASRUtils::type_get_past_pointer(arr_type));
         if (ASR::is_a<ASR::Array_t>(*inner)) {
             arr = ASR::down_cast<ASR::Array_t>(inner);
         }
-        // Extract array variable name for assumed-shape __size_ parameters
-        std::string arr_var_name;
-        if (ASR::is_a<ASR::Var_t>(*ai->m_v)) {
-            arr_var_name = ASRUtils::symbol_name(
-                ASR::down_cast<ASR::Var_t>(ai->m_v)->m_v);
-        }
+        // The key the extents and lower bounds of the array are
+        // registered under: an assumed-shape dummy's own name, or
+        // "var.member" for a component of a derived-type argument.
+        std::string arr_var_name = array_shape_key(ai->m_v);
         std::vector<std::string> subscripts;
+        std::vector<int> subscript_kinds;
         for (size_t d = 0; d < ai->n_args; d++) {
             ASR::expr_t *idx = ai->m_args[d].m_right
                 ? ai->m_args[d].m_right : ai->m_args[d].m_left;
             subscripts.push_back(idx ? expr_str(idx) : "");
+            subscript_kinds.push_back(idx ? subscript_kind(idx) : 4);
         }
-        src << gpu_linearized_index_str(subscripts,
+        // A view whose elements are not laid out by its own extents is
+        // stepped through by the strides it was registered with.
+        std::vector<std::string> strides;
+        if (registered_strides(arr_var_name, ai->n_args, strides)) {
+            std::string out;
+            for (size_t d = 0; d < subscripts.size(); d++) {
+                if (subscripts[d].empty()) continue;
+                std::string term = gpu_offset_term(subscripts[d],
+                    get_lower_bound_str(arr, d, arr_var_name),
+                    subscript_kinds[d], dialect.offset_kind());
+                if (strides[d] != "1") {
+                    term = "(" + strides[d] + " * " + term + ")";
+                }
+                out += out.empty() ? term : (" + " + term);
+            }
+            src << out;
+            return;
+        }
+        src << gpu_linearized_index_str(subscripts, subscript_kinds,
             [&](size_t d) {
                 return get_lower_bound_str(arr, d, arr_var_name);
             },
@@ -5188,7 +6653,7 @@ public:
                 if (arr == nullptr || d >= arr->n_dims) return "";
                 return dim_extent_str(arr, d, arr_var_name,
                     ai->base.base.loc);
-            });
+            }, dialect.offset_kind());
     }
 
     void emit_intrinsic(ASR::IntrinsicElementalFunction_t *f) {
@@ -5215,6 +6680,10 @@ public:
             src << "exp(";
             visit_expr(f->m_args[0]);
             src << ")";
+        } else if (id == static_cast<int64_t>(IEF::Log)) {
+            src << "log(";
+            visit_expr(f->m_args[0]);
+            src << ")";
         } else if (id == static_cast<int64_t>(IEF::Mod)) {
             // mod(a,b) in Fortran → a % b for integers, fmod for reals
             ASR::ttype_t *type = ASRUtils::expr_type(f->m_args[0]);
@@ -5232,17 +6701,9 @@ public:
                 src << ")";
             }
         } else if (id == static_cast<int64_t>(IEF::Min)) {
-            src << "min(";
-            visit_expr(f->m_args[0]);
-            src << ", ";
-            visit_expr(f->m_args[1]);
-            src << ")";
+            emit_min_max("min", f->m_type, f->m_args[0], f->m_args[1]);
         } else if (id == static_cast<int64_t>(IEF::Max)) {
-            src << "max(";
-            visit_expr(f->m_args[0]);
-            src << ", ";
-            visit_expr(f->m_args[1]);
-            src << ")";
+            emit_min_max("max", f->m_type, f->m_args[0], f->m_args[1]);
         } else if (id == static_cast<int64_t>(IEF::Real)) {
             // Real cast: just emit the argument with a float cast
             src << "((" << gpu_type(f->m_type) << ")(";
@@ -5274,6 +6735,41 @@ public:
         }
     }
 
+    // Whether `e` has the real value 1 (`1.0`, or `1` converted to real).
+    static bool is_real_one(ASR::expr_t *e) {
+        ASR::expr_t *value = ASRUtils::expr_value(e);
+        if (value == nullptr) value = e;
+        return ASR::is_a<ASR::RealConstant_t>(*value)
+            && ASR::down_cast<ASR::RealConstant_t>(value)->m_r == 1.0;
+    }
+
+    // The argument of `e` when it is the square root of one, else nullptr.
+    static ASR::expr_t *sqrt_argument(ASR::expr_t *e) {
+        if (ASR::is_a<ASR::RealSqrt_t>(*e)) {
+            return ASR::down_cast<ASR::RealSqrt_t>(e)->m_arg;
+        }
+        if (ASR::is_a<ASR::IntrinsicElementalFunction_t>(*e)) {
+            ASR::IntrinsicElementalFunction_t *f =
+                ASR::down_cast<ASR::IntrinsicElementalFunction_t>(e);
+            if (f->m_intrinsic_id == static_cast<int64_t>(
+                        ASRUtils::IntrinsicElementalFunctions::Sqrt)
+                    && f->n_args == 1 && ASRUtils::is_real(
+                        *ASRUtils::expr_type(f->m_args[0]))) {
+                return f->m_args[0];
+            }
+        }
+        if (ASR::is_a<ASR::FunctionCall_t>(*e)) {
+            ASR::FunctionCall_t *fc = ASR::down_cast<ASR::FunctionCall_t>(e);
+            std::string name = ASRUtils::symbol_name(
+                ASRUtils::symbol_get_past_external(fc->m_name));
+            if (name.find("_lcompilers_sqrt_") == 0 && fc->n_args == 1
+                    && fc->m_args[0].m_value != nullptr) {
+                return fc->m_args[0].m_value;
+            }
+        }
+        return nullptr;
+    }
+
     std::string binop_str(ASR::binopType op) {
         switch (op) {
             case ASR::binopType::Add: return "+";
@@ -5285,7 +6781,6 @@ public:
             case ASR::binopType::BitXor: return "^";
             case ASR::binopType::BitLShift: return "<<";
             case ASR::binopType::BitRShift: return ">>";
-            case ASR::binopType::LBitRShift: return ">>";
             default: throw CodeGenError("binop_str: operator " +
                 std::to_string(op) + " not implemented");
         }

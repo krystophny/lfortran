@@ -27,9 +27,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             rp1d:
                                 (Struct
@@ -64,9 +66,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     rp1d
@@ -141,9 +145,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     sds
@@ -189,6 +195,7 @@
                     mod_struct_allocate
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.
@@ -273,9 +280,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             sds:
                                 (ExternalSymbol
@@ -337,6 +346,7 @@
                                 )
                                 ColMajor
                                 ()
+                                .true.
                             )
                             5 1_rp1d_f
                             (Pointer
@@ -407,6 +417,7 @@
                                 )
                                 ColMajor
                                 ()
+                                .true.
                             )
                             5 1_rp1d_f
                             (Pointer

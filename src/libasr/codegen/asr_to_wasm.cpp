@@ -135,6 +135,23 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
     std::vector<void (LCompilers::ASRToWASMVisitor::*)()> m_rt_funcs_map;
     std::vector<int> m_rt_func_used_idx;
 
+    // The constructs being written that an EXIT or a CYCLE can leave,
+    // innermost last: the loops, and the BLOCK and named IF constructs.
+    // `exit_lvl` and `cycle_lvl` are the levels (WASMAssembler::nest_lvl
+    // inside them) of the labels that leaving the construct and going to the
+    // next iteration of the loop branch to.
+    struct ConstructFrame {
+        const char *name;
+        bool is_loop;
+        int exit_lvl;
+        int cycle_lvl;
+    };
+    std::vector<ConstructFrame> construct_frames;
+
+    // The first of the three locals that the counted loop with the head
+    // holds its end, its step and the number of iterations left in.
+    std::map<const ASR::do_loop_head_t*, uint32_t> m_loop_locals;
+
    public:
     ASRToWASMVisitor(Allocator &al, diag::Diagnostics &diagnostics)
         : m_al(al), diag(diagnostics), m_wa(al) {
@@ -651,6 +668,7 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
             // Ignore type variables
             return;
         }
+        reject_common_block_variable(*v);
 
         using namespace wasm;
         uint32_t global_var_idx = UINT_MAX;
@@ -716,6 +734,23 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
         m_global_var_idx_map[get_hash((ASR::asr_t *)v)] = global_var_idx;
     }
 
+    // The frames through which internal procedures reach the variables of
+    // their host (see nested_vars) need addressable variables and derived
+    // types, which this backend does not have.
+    void reject_host_frames(SymbolTable *symtab) {
+        for (auto &item : symtab->get_scope()) {
+            if (!ASR::is_a<ASR::Variable_t>(*item.second)) {
+                continue;
+            }
+            ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(item.second);
+            if (ASRUtils::is_frame_type(v->m_type_declaration) ||
+                    ASRUtils::is_host_associated(*v)) {
+                throw CodeGenError("host association is not supported by the "
+                    "wasm backend yet", v->base.base.loc);
+            }
+        }
+    }
+
     void declare_symbols(const ASR::TranslationUnit_t &x) {
         {
             // Process intrinsic modules in the right order
@@ -754,6 +789,12 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
         if (x.m_global_init != nullptr) {
             throw CodeGenError("a startup initializer of the translation unit "
                 "is not supported by this backend");
+        }
+        for (auto &item : x.m_symtab->get_scope()) {
+            if (ASR::is_a<ASR::BlockData_t>(*item.second)) {
+                throw CodeGenError("BLOCK DATA is not supported by the WASM backend",
+                    item.second->base.loc);
+            }
         }
         // All loose statements must be converted to a function, so the items
         // must be empty:
@@ -996,17 +1037,95 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
                 v->m_intent == ASRUtils::intent_return_var);
     }
 
+    // A variable in a common block has no storage of its own, and this
+    // backend does not lay out the storage of common blocks.
+    void reject_common_block_variable(const ASR::Variable_t &v) {
+        if (ASR::CommonBlock_t *block = ASRUtils::get_common_block(&v)) {
+            throw CodeGenError("COMMON blocks are not supported by the WASM backend",
+                block->base.base.loc);
+        }
+    }
+
     void get_local_vars(SymbolTable* symtab) {
         for (auto &item : symtab->get_scope()) {
             if (ASR::is_a<ASR::Variable_t>(*item.second)) {
                 ASR::Variable_t *v =
                     ASR::down_cast<ASR::Variable_t>(item.second);
+                reject_common_block_variable(*v);
                 if (isLocalVar(v)) {
-                    m_var_idx_map[get_hash((ASR::asr_t *)v)] = cur_sym_info.no_of_params + local_vars.size();
+                    m_var_idx_map[get_hash((ASR::asr_t *)v)] = checked_integer_cast<uint32_t>(cur_sym_info.no_of_params + local_vars.size());
                     get_var_type(v, local_vars);
                 }
             }
         }
+    }
+
+    // Gives the counted loops among `body` the locals of m_loop_locals.
+    // Loops that are not nested in each other share them, so a set of
+    // locals is made for each depth of nesting and type of index.
+    void get_loop_locals(ASR::stmt_t **body, size_t n_body) {
+        class LoopHeads : public ASR::BaseWalkVisitor<LoopHeads> {
+        public:
+            // Each counted head with the number of counted heads around it.
+            std::vector<std::pair<const ASR::do_loop_head_t*, size_t>> heads;
+            size_t depth = 0;
+
+            void visit_DoLoop(const ASR::DoLoop_t &x) {
+                bool counted = x.m_head.m_v != nullptr;
+                if (counted) heads.push_back({&x.m_head, depth++});
+                ASR::BaseWalkVisitor<LoopHeads>::visit_DoLoop(x);
+                if (counted) depth--;
+            }
+
+            void visit_DoConcurrentLoop(const ASR::DoConcurrentLoop_t &x) {
+                for (size_t i = 0; i < x.n_head; i++) {
+                    heads.push_back({&x.m_head[i], depth++});
+                }
+                ASR::BaseWalkVisitor<LoopHeads>::visit_DoConcurrentLoop(x);
+                depth -= x.n_head;
+            }
+
+            void visit_BlockCall(const ASR::BlockCall_t &x) {
+                ASR::Block_t *block = ASR::down_cast<ASR::Block_t>(x.m_m);
+                for (size_t i = 0; i < block->n_body; i++) {
+                    visit_stmt(*block->m_body[i]);
+                }
+            }
+
+            void visit_expr(const ASR::expr_t &/*x*/) {}
+            void visit_ttype(const ASR::ttype_t &/*x*/) {}
+        };
+        LoopHeads loops;
+        for (size_t i = 0; i < n_body; i++) {
+            loops.visit_stmt(*body[i]);
+        }
+        std::map<std::pair<size_t, wasm::var_type>, uint32_t> sets;
+        for (auto &[head, depth] : loops.heads) {
+            wasm::var_type type = loop_index_type(*head);
+            auto set = sets.find({depth, type});
+            if (set == sets.end()) {
+                uint32_t first = checked_integer_cast<uint32_t>(
+                    cur_sym_info.no_of_params + local_vars.size());
+                set = sets.insert({{depth, type}, first}).first;
+                local_vars.insert(local_vars.end(), 3, type);
+            }
+            m_loop_locals[head] = set->second;
+        }
+    }
+
+    // The WASM type of the index of the counted loop `head`.
+    wasm::var_type loop_index_type(const ASR::do_loop_head_t &head) {
+        ASR::ttype_t *type = ASRUtils::expr_type(head.m_v);
+        if (!ASR::is_a<ASR::Var_t>(*head.m_v) || !ASRUtils::is_integer(*type)) {
+            throw CodeGenError("the WASM backend supports only an integer "
+                "variable as the index of a DO loop", head.m_v->base.loc);
+        }
+        int kind = ASRUtils::extract_kind_from_ttype_t(type);
+        if (kind != 4 && kind != 8) {
+            throw CodeGenError("Integers of kind 4 and 8 only supported",
+                head.m_v->base.loc);
+        }
+        return kind == 8 ? wasm::var_type::i64 : wasm::var_type::i32;
     }
 
     void emit_var_get(ASR::Variable_t *v) {
@@ -1143,6 +1262,7 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
     void emit_function_body(const ASR::Function_t &x) {
         LCOMPILERS_ASSERT(m_func_name_idx_map.find(get_hash((ASR::asr_t *)&x)) !=
                         m_func_name_idx_map.end());
+        reject_host_frames(x.m_symtab);
 
         cur_sym_info = m_func_name_idx_map[get_hash((ASR::asr_t *)&x)];
 
@@ -1152,6 +1272,7 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
 
             get_local_vars(x.m_symtab);
             visit_BlockStatements(x);
+            get_loop_locals(x.m_body, x.n_body);
 
             is_local_vars_only = false;
         }
@@ -1197,8 +1318,67 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
         return false;
     }
 
+    // True if `x` is an interface body for an external procedure, rather
+    // than for a dummy procedure, a separate module procedure or a bind(c)
+    // procedure.
+    bool is_external_procedure_interface(const ASR::Function_t &x) {
+        ASR::FunctionType_t *type = ASRUtils::get_FunctionType(x);
+        if (type->m_deftype != ASR::deftypeType::Interface || type->m_module ||
+                type->m_abi != ASR::abiType::Source) {
+            return false;
+        }
+        SymbolTable *parent = x.m_symtab->parent;
+        if (parent->asr_owner && ASR::is_a<ASR::symbol_t>(*parent->asr_owner)) {
+            ASR::symbol_t *owner = ASR::down_cast<ASR::symbol_t>(parent->asr_owner);
+            if (ASR::is_a<ASR::Function_t>(*owner) && ASRUtils::is_dummy_argument(
+                    *ASR::down_cast<ASR::Function_t>(owner), &x.base)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // A WASM module is not linked with other objects, so the external
+    // procedure that an interface body declares has to be the external
+    // procedure of that name defined in this translation unit. It is
+    // called instead, and no function is emitted for the interface body.
+    ASR::Function_t *get_external_procedure_definition(const ASR::Function_t &x) {
+        // A specific procedure named like its generic interface is stored
+        // under a disambiguated name; the procedure's name is the link name.
+        ASR::symbol_t *def = ASRUtils::get_tu_symtab(x.m_symtab)->get_symbol(
+            ASRUtils::strip_genericprocedure_suffix(x.m_name));
+        if (def == nullptr || !ASR::is_a<ASR::Function_t>(*def)) {
+            return nullptr;
+        }
+        ASR::Function_t *def_fn = ASR::down_cast<ASR::Function_t>(def);
+        if (ASRUtils::get_FunctionType(def_fn)->m_deftype !=
+                ASR::deftypeType::Implementation) {
+            return nullptr;
+        }
+        return def_fn;
+    }
+
+    ASR::Function_t *get_called_function(ASR::symbol_t *name, const Location &loc) {
+        ASR::Function_t *fn = ASR::down_cast<ASR::Function_t>(
+            ASRUtils::symbol_get_past_external(name));
+        if (!is_external_procedure_interface(*fn)) {
+            return fn;
+        }
+        ASR::Function_t *def = get_external_procedure_definition(*fn);
+        if (def == nullptr) {
+            throw CodeGenError("the external procedure '" +
+                ASRUtils::strip_genericprocedure_suffix(fn->m_name) +
+                "' is not defined in this file; the WASM backend does not "
+                "support calling an external procedure defined elsewhere", loc);
+        }
+        return def;
+    }
+
     void visit_Function(const ASR::Function_t &x) {
         if (ASRUtils::is_bare_implicit_interface(x)) {
+            return;
+        }
+        if (is_external_procedure_interface(x)) {
             return;
         }
         declare_all_functions(*x.m_symtab);
@@ -1220,9 +1400,15 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
             visit_BlockStatements(*block);
         } else {
             initialize_local_vars(block->m_symtab);
-            for (size_t i = 0; i < block->n_body; i++) {
-                this->visit_stmt(*block->m_body[i]);
-            }
+            // In a `block`, whose end an EXIT of the construct goes to.
+            m_wa.emit_block([&]() {
+                construct_frames.push_back({block->m_name, false,
+                    m_wa.nest_lvl, -1});
+                for (size_t i = 0; i < block->n_body; i++) {
+                    this->visit_stmt(*block->m_body[i]);
+                }
+                construct_frames.pop_back();
+            });
         }
     }
 
@@ -1526,9 +1712,52 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
                 *(ASR::down_cast<ASR::ArrayItem_t>(x.m_target)));
             this->visit_expr(*x.m_value);
             emit_memory_store(x.m_value);
+        } else if (ASR::is_a<ASR::ComplexRe_t>(*x.m_target) ||
+                ASR::is_a<ASR::ComplexIm_t>(*x.m_target)) {
+            emit_complex_part_assignment(x);
         } else {
             LCOMPILERS_ASSERT(false)
         }
+    }
+
+    // `z%re = y` or `z%im = y`: y is evaluated before the other part is read
+    void emit_complex_part_assignment(const ASR::Assignment_t &x) {
+        bool is_re = ASR::is_a<ASR::ComplexRe_t>(*x.m_target);
+        ASR::expr_t* arg = is_re
+            ? ASR::down_cast<ASR::ComplexRe_t>(x.m_target)->m_arg
+            : ASR::down_cast<ASR::ComplexIm_t>(x.m_target)->m_arg;
+        int kind = ASRUtils::extract_kind_from_ttype_t(ASRUtils::expr_type(arg));
+        if (ASR::is_a<ASR::ArrayItem_t>(*arg)) {
+            emit_array_item_address_onto_stack(*ASR::down_cast<ASR::ArrayItem_t>(arg));
+            this->visit_expr(*x.m_value);
+            uint32_t offset = is_re ? 0 : kind;
+            if (kind == 4) {
+                m_wa.emit_f32_store(wasm::mem_align::b8, offset);
+            } else {
+                m_wa.emit_f64_store(wasm::mem_align::b8, offset);
+            }
+            return;
+        }
+        if (!ASR::is_a<ASR::Var_t>(*arg)) {
+            throw CodeGenError("assignment to a part of this complex expression "
+                "is not supported yet");
+        }
+        uint32_t tmp_reg = m_compiler_globals[(kind == 4) ? tmp_reg_f32 : tmp_reg_f64];
+        this->visit_expr(*x.m_value);
+        if (is_re) {
+            // y, re, im -> y, im
+            this->visit_expr(*arg);
+            m_wa.emit_global_set(tmp_reg);
+            m_wa.emit_drop();
+            m_wa.emit_global_get(tmp_reg);
+        } else {
+            // y -> re, y
+            m_wa.emit_global_set(tmp_reg);
+            this->visit_expr(*arg);
+            m_wa.emit_drop();
+            m_wa.emit_global_get(tmp_reg);
+        }
+        emit_var_set(ASRUtils::EXPR2VAR(arg));
     }
 
     void visit_IntegerBinOp(const ASR::IntegerBinOp_t &x) {
@@ -1854,7 +2083,7 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
         this->visit_expr(*x.m_left);
         this->visit_expr(*x.m_right);
         LCOMPILERS_ASSERT(ASR::is_a<ASR::Complex_t>(*ASRUtils::extract_type(x.m_type)));
-        int a_kind = ASR::down_cast<ASR::Complex_t>(ASRUtils::extract_type(x.m_type))->m_kind;
+        int a_kind = checked_integer_cast<int>(ASR::down_cast<ASR::Complex_t>(ASRUtils::extract_type(x.m_type))->m_kind);
         switch (x.m_op) {
             case ASR::binopType::Add: {
                 if (a_kind == 4) {
@@ -2321,7 +2550,7 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
     void get_array_dims(const ASR::Variable_t &x, Vec<uint32_t> &dims) {
         ASR::dimension_t *m_dims;
         uint32_t n_dims =
-            ASRUtils::extract_dimensions_from_ttype(x.m_type, m_dims);
+            checked_integer_cast<uint32_t>(ASRUtils::extract_dimensions_from_ttype(x.m_type, m_dims));
         dims.reserve(m_al, n_dims);
         for (uint32_t i = 0; i < n_dims; i++) {
             ASR::expr_t *length_value =
@@ -2387,8 +2616,8 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
             return;
         }
         ASR::dimension_t *m_dims;
-        int n_dims = ASRUtils::extract_dimensions_from_ttype(
-            ASRUtils::expr_type(x.m_v), m_dims);
+        int n_dims = checked_integer_cast<int>(ASRUtils::extract_dimensions_from_ttype(
+            ASRUtils::expr_type(x.m_v), m_dims));
         if (x.m_dim) {
             int dim_idx = -1;
             ASRUtils::extract_value(ASRUtils::expr_value(x.m_dim), dim_idx);
@@ -2436,7 +2665,7 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
         int a_kind = ASRUtils::extract_kind_from_ttype_t(x.m_type);
         switch (a_kind) {
             case 4: {
-                m_wa.emit_i32_const(val);
+                m_wa.emit_i32_const(static_cast<int32_t>(val));
                 break;
             }
             case 8: {
@@ -2455,7 +2684,7 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
         int a_kind = ASRUtils::extract_kind_from_ttype_t(x.m_type);
         switch (a_kind) {
             case 4: {
-                m_wa.emit_f32_const(val);
+                m_wa.emit_f32_const(static_cast<float>(val));
                 break;
             }
             case 8: {
@@ -2496,8 +2725,8 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
         int a_kind = ASRUtils::extract_kind_from_ttype_t(x.m_type);
         switch( a_kind ) {
             case 4: {
-                m_wa.emit_f32_const(x.m_re);
-                m_wa.emit_f32_const(x.m_im);
+                m_wa.emit_f32_const(static_cast<float>(x.m_re));
+                m_wa.emit_f32_const(static_cast<float>(x.m_im));
                 break;
             }
             case 8: {
@@ -2511,7 +2740,7 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
         }
     }
 
-    std::string convert_int_to_bytes_string(int n) {
+    std::string convert_int_to_bytes_string(uint32_t n) {
         uint8_t bytes[sizeof(n)];
         std::memcpy(&bytes, &n, sizeof(n));
         std::string result = "";
@@ -2522,9 +2751,9 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
     }
 
     void align_str_by_4_bytes(std::string &s) {
-        int n = s.length();
+        size_t n = s.length();
         if (n % 4 == 0) return;
-        for (int i = 0; i < 4 - (n % 4); i++) {
+        for (size_t i = 0; i < 4 - (n % 4); i++) {
             s += " ";
         }
     }
@@ -2540,13 +2769,13 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
         m_string_to_iov_loc_map[str] = avail_mem_loc;
 
         uint32_t string_loc = avail_mem_loc + 8U /* IOV_SIZE */;
-        std::string iov = convert_int_to_bytes_string(string_loc) + convert_int_to_bytes_string(str.length());
+        std::string iov = convert_int_to_bytes_string(string_loc) + convert_int_to_bytes_string(checked_integer_cast<uint32_t>(str.length()));
         m_wa.emit_data_str(avail_mem_loc, iov);
-        avail_mem_loc += iov.length();
+        avail_mem_loc += checked_integer_cast<uint32_t>(iov.length());
 
         align_str_by_4_bytes(str);
         m_wa.emit_data_str(avail_mem_loc, str);
-        avail_mem_loc += str.length();
+        avail_mem_loc += checked_integer_cast<uint32_t>(str.length());
     }
 
     void visit_StringConstant(const ASR::StringConstant_t &x) {
@@ -2554,7 +2783,7 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
         m_wa.emit_i32_const(m_string_to_iov_loc_map[x.m_s]);
     }
 
-    void process_ArrayConstant_value(void* data, ASR::ttype_t* type, int i) {
+    void process_ArrayConstant_value(void* data, ASR::ttype_t* type, size_t i) {
         type = ASRUtils::type_get_past_array(type);
         int kind = ASRUtils::extract_kind_from_ttype_t(type);
 
@@ -2575,7 +2804,8 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
                     }
                     case 8: {
                         int64_t val = ((int64_t*)data)[i];
-                        m_wa.emit_i32_const(val); break;
+                        // Preserves the existing low-32-bit emission.
+                        m_wa.emit_i32_const(static_cast<int32_t>(val)); break;
                     }
                     default:
                         throw CodeGenError("process_ArrayConstant_value: Integer kind not supported");
@@ -2590,7 +2820,8 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
                     }
                     case 8: {
                         double val = ((double*)data)[i];
-                        m_wa.emit_f32_const(val); break;
+                        // Preserves the existing single-precision emission.
+                        m_wa.emit_f32_const(static_cast<float>(val)); break;
                     }
                     default:
                         throw CodeGenError("process_ArrayConstant_value: Real kind not supported");
@@ -2801,8 +3032,7 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
             return;
         }
 
-        ASR::Function_t *fn = ASR::down_cast<ASR::Function_t>(
-            ASRUtils::symbol_get_past_external(x.m_name));
+        ASR::Function_t *fn = get_called_function(x.m_name, x.base.base.loc);
 
         for (size_t i = 0; i < x.n_args; i++) {
             visit_expr(*x.m_args[i].m_value);
@@ -2926,8 +3156,7 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
     }
 
     void visit_SubroutineCall(const ASR::SubroutineCall_t &x) {
-        ASR::Function_t *s = ASR::down_cast<ASR::Function_t>(
-            ASRUtils::symbol_get_past_external(x.m_name));
+        ASR::Function_t *s = get_called_function(x.m_name, x.base.base.loc);
 
         Vec<ASR::expr_t *> vars_passed_by_refs;
         vars_passed_by_refs.reserve(m_al, s->n_args);
@@ -3321,6 +3550,10 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
     }
 
     void visit_StringFormat(const ASR::StringFormat_t &x) {
+        if (x.n_dtio_bindings > 0) {
+            throw CodeGenError("user-defined derived-type output is not "
+                "supported by the WASM backend yet", x.base.base.loc);
+        }
         if(x.m_fmt){
            //TODO :: respect fmt.
         }
@@ -3491,7 +3724,7 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
 
     void visit_ArrayBound(const ASR::ArrayBound_t& x) {
         ASR::dimension_t *m_dims;
-        int n_dims = ASRUtils::extract_dimensions_from_ttype(ASRUtils::expr_type(x.m_v), m_dims);
+        int n_dims = checked_integer_cast<int>(ASRUtils::extract_dimensions_from_ttype(ASRUtils::expr_type(x.m_v), m_dims));
         if (ASRUtils::extract_kind_from_ttype_t(x.m_type) != 4) {
             throw CodeGenError("ArrayBound: Kind 4 only supported currently");
         }
@@ -3548,31 +3781,277 @@ class ASRToWASMVisitor : public ASR::BaseVisitor<ASRToWASMVisitor> {
     }
 
     void visit_If(const ASR::If_t &x) {
-        m_wa.emit_if_else([&](){ this->visit_expr(*x.m_test); }, [&](){
-            for (size_t i = 0; i < x.n_body; i++) {
-                this->visit_stmt(*x.m_body[i]);
-            }
-        }, [&](){
-            for (size_t i = 0; i < x.n_orelse; i++) {
-                this->visit_stmt(*x.m_orelse[i]);
-            }
+        auto emit_if = [&]() {
+            m_wa.emit_if_else([&](){ this->visit_expr(*x.m_test); }, [&](){
+                for (size_t i = 0; i < x.n_body; i++) {
+                    this->visit_stmt(*x.m_body[i]);
+                }
+            }, [&](){
+                for (size_t i = 0; i < x.n_orelse; i++) {
+                    this->visit_stmt(*x.m_orelse[i]);
+                }
+            });
+        };
+        if (x.m_name == nullptr) {
+            emit_if();
+            return;
+        }
+        // A named IF construct is in a `block`, whose end an EXIT of it
+        // goes to.
+        m_wa.emit_block([&]() {
+            construct_frames.push_back({x.m_name, false, m_wa.nest_lvl, -1});
+            emit_if();
+            construct_frames.pop_back();
         });
     }
 
     void visit_WhileLoop(const ASR::WhileLoop_t &x) {
+        // emit_loop opens a `loop`, whose start CYCLE goes to, and in it an
+        // `if` on the test, whose end EXIT goes to.
+        int lvl = m_wa.nest_lvl;
+        construct_frames.push_back({x.m_name, true, lvl + 2, lvl + 1});
         m_wa.emit_loop([&](){ this->visit_expr(*x.m_test); }, [&](){
             for (size_t i = 0; i < x.n_body; i++) {
                 this->visit_stmt(*x.m_body[i]);
             }
         });
+        construct_frames.pop_back();
     }
 
-    void visit_Exit(const ASR::Exit_t & /* x */) {
-        m_wa.emit_br(m_wa.nest_lvl - m_wa.cur_loop_nest_lvl - 2U);  // branch to end of if
+    // The construct that an EXIT or a CYCLE naming `name` leaves: the
+    // innermost loop if it names none.
+    const ConstructFrame &construct_frame(const char *name,
+            const Location &loc) {
+        for (size_t i = construct_frames.size(); i-- > 0;) {
+            const ConstructFrame &f = construct_frames[i];
+            if (name == nullptr ? f.is_loop
+                    : f.name != nullptr && std::string(f.name) == name) {
+                return f;
+            }
+        }
+        throw CodeGenError("exit or cycle outside the construct it leaves",
+            loc);
     }
 
-    void visit_Cycle(const ASR::Cycle_t & /* x */) {
-        m_wa.emit_br(m_wa.nest_lvl - m_wa.cur_loop_nest_lvl - 1U);  // branch to start of loop
+    void visit_Exit(const ASR::Exit_t &x) {
+        const ConstructFrame &f = construct_frame(x.m_stmt_name,
+            x.base.base.loc);
+        m_wa.emit_br(m_wa.nest_lvl - f.exit_lvl);
+    }
+
+    void visit_Cycle(const ASR::Cycle_t &x) {
+        const ConstructFrame &f = construct_frame(x.m_stmt_name,
+            x.base.base.loc);
+        m_wa.emit_br(m_wa.nest_lvl - f.cycle_lvl);
+    }
+
+    // Emits the counted loop `head`, the body of which `body` emits, by the
+    // rules of #16398: the start, the end and the step are evaluated once,
+    // in that order, before the index is set to the start. A loop that
+    // runs no iteration leaves the index at the start. A unit step stops
+    // after the iteration with the index at the end; any other step counts
+    // down |end - start| / |step|, computed without sign so that a
+    // difference that overflows the kind still counts right. Either way the
+    // index ends one step past the last iteration. CYCLE goes to the step,
+    // EXIT to after the loop-else, which runs when the loop completes.
+    void emit_counted_loop(const ASR::do_loop_head_t &head, const char *name,
+            const std::function<void()> &body, ASR::stmt_t **orelse,
+            size_t n_orelse, const Location &loc) {
+        if (head.m_v == nullptr) {
+            // Only an EXIT leaves a loop without loop control.
+            m_wa.emit_block([&]() {
+                int exit_lvl = m_wa.nest_lvl;
+                m_wa.emit_plain_loop([&]() {
+                    int head_lvl = m_wa.nest_lvl;
+                    construct_frames.push_back({name, true, exit_lvl,
+                        head_lvl});
+                    body();
+                    construct_frames.pop_back();
+                    m_wa.emit_br(m_wa.nest_lvl - head_lvl);
+                });
+            });
+            return;
+        }
+        LCOMPILERS_ASSERT(head.m_start != nullptr && head.m_end != nullptr
+            && head.m_increment != nullptr);
+        bool i64 = loop_index_type(head) == wasm::var_type::i64;
+        ASR::Variable_t *v = ASRUtils::EXPR2VAR(head.m_v);
+        uint32_t end = m_loop_locals.at(&head);
+        uint32_t step_local = end + 1;
+        uint32_t remaining = end + 2;
+        int64_t step = 0;
+        bool step_known = ASRUtils::extract_value(
+            ASRUtils::expr_value(head.m_increment), step);
+        if (step_known && step == 0) {
+            throw CodeGenError("a DO loop with a zero step reached the WASM "
+                "backend", loc);
+        }
+        bool unit = step_known && (step == 1 || step == -1);
+        auto constant = [&](int64_t c) {
+            if (i64) m_wa.emit_i64_const(c);
+            else m_wa.emit_i32_const(static_cast<int32_t>(c));
+        };
+        auto get_step = [&]() {
+            if (step_known) {
+                constant(step);
+            } else {
+                m_wa.emit_local_get(step_local);
+            }
+        };
+        // Pushes `step > 0` when the sign of the step is not known.
+        auto step_positive = [&]() {
+            m_wa.emit_local_get(step_local);
+            constant(0);
+            if (i64) m_wa.emit_i64_gt_s(); else m_wa.emit_i32_gt_s();
+        };
+        auto sub = [&]() {
+            if (i64) m_wa.emit_i64_sub(); else m_wa.emit_i32_sub();
+        };
+
+        auto loop = [&](int exit_lvl) {
+            m_wa.emit_block([&]() {
+                int done_lvl = m_wa.nest_lvl;
+                int leave_lvl = exit_lvl < 0 ? done_lvl : exit_lvl;
+                this->visit_expr(*head.m_start);
+                this->visit_expr(*head.m_end);
+                m_wa.emit_local_set(end);
+                if (!step_known) {
+                    this->visit_expr(*head.m_increment);
+                    m_wa.emit_local_set(step_local);
+                    m_wa.emit_local_get(step_local);
+                    if (i64) m_wa.emit_i64_eqz(); else m_wa.emit_i32_eqz();
+                    m_wa.emit_if_else([&]() {}, [&]() {
+                        print_msg("Runtime error: zero step in a DO loop");
+                        m_wa.emit_i32_const(1);
+                        wasm_exit();
+                    }, [&]() {});
+                }
+                emit_var_set(v);
+                // No iteration unless the start is on the side of the end
+                // that the step goes towards.
+                auto compare = [&](bool up) {
+                    emit_var_get(v);
+                    m_wa.emit_local_get(end);
+                    if (up && i64) {
+                        m_wa.emit_i64_le_s();
+                    } else if (up) {
+                        m_wa.emit_i32_le_s();
+                    } else if (i64) {
+                        m_wa.emit_i64_ge_s();
+                    } else {
+                        m_wa.emit_i32_ge_s();
+                    }
+                };
+                if (step_known) {
+                    compare(step > 0);
+                } else {
+                    compare(true);
+                    compare(false);
+                    step_positive();
+                    m_wa.emit_select();
+                }
+                m_wa.emit_i32_eqz();
+                m_wa.emit_br_if(m_wa.nest_lvl - done_lvl);
+                if (!unit) {
+                    // remaining = |end - i| / |step|, without sign.
+                    auto distance = [&](bool up) {
+                        if (up) {
+                            m_wa.emit_local_get(end);
+                            emit_var_get(v);
+                        } else {
+                            emit_var_get(v);
+                            m_wa.emit_local_get(end);
+                        }
+                        sub();
+                    };
+                    if (step_known) {
+                        distance(step > 0);
+                        constant(step > 0 ? step : -step);
+                    } else {
+                        distance(true);
+                        distance(false);
+                        step_positive();
+                        m_wa.emit_select();
+                        m_wa.emit_local_get(step_local);
+                        constant(0);
+                        m_wa.emit_local_get(step_local);
+                        sub();
+                        step_positive();
+                        m_wa.emit_select();
+                    }
+                    if (i64) m_wa.emit_i64_div_u(); else m_wa.emit_i32_div_u();
+                    m_wa.emit_local_set(remaining);
+                }
+                m_wa.emit_plain_loop([&]() {
+                    int head_lvl = m_wa.nest_lvl;
+                    m_wa.emit_block([&]() {
+                        construct_frames.push_back({name, true, leave_lvl,
+                            m_wa.nest_lvl});
+                        body();
+                        construct_frames.pop_back();
+                    });
+                    if (unit) {
+                        // Whether this was the last iteration, before the
+                        // index steps past the end.
+                        emit_var_get(v);
+                        m_wa.emit_local_get(end);
+                        if (i64) m_wa.emit_i64_eq(); else m_wa.emit_i32_eq();
+                    } else {
+                        // Whether iterations are left, counting this one
+                        // off.
+                        m_wa.emit_local_get(remaining);
+                        if (i64) m_wa.emit_i64_eqz(); else m_wa.emit_i32_eqz();
+                        m_wa.emit_local_get(remaining);
+                        constant(1);
+                        sub();
+                        m_wa.emit_local_set(remaining);
+                    }
+                    emit_var_get(v);
+                    get_step();
+                    if (i64) m_wa.emit_i64_add(); else m_wa.emit_i32_add();
+                    emit_var_set(v);
+                    m_wa.emit_i32_eqz();
+                    m_wa.emit_br_if(m_wa.nest_lvl - head_lvl);
+                });
+            });
+        };
+        if (n_orelse == 0) {
+            loop(-1);
+            return;
+        }
+        m_wa.emit_block([&]() {
+            loop(m_wa.nest_lvl);
+            for (size_t i = 0; i < n_orelse; i++) {
+                this->visit_stmt(*orelse[i]);
+            }
+        });
+    }
+
+    void visit_DoLoop(const ASR::DoLoop_t &x) {
+        emit_counted_loop(x.m_head, x.m_name, [&]() {
+            for (size_t i = 0; i < x.n_body; i++) {
+                this->visit_stmt(*x.m_body[i]);
+            }
+        }, x.m_orelse, x.n_orelse, x.base.base.loc);
+    }
+
+    // A DO CONCURRENT runs its iterations in order, as nested loops over its
+    // indices from the `h`-th on, the first index outermost.
+    void emit_concurrent_loops(const ASR::DoConcurrentLoop_t &x, size_t h) {
+        emit_counted_loop(x.m_head[h], nullptr, [&]() {
+            if (h + 1 == x.n_head) {
+                for (size_t i = 0; i < x.n_body; i++) {
+                    this->visit_stmt(*x.m_body[i]);
+                }
+            } else {
+                emit_concurrent_loops(x, h + 1);
+            }
+        }, nullptr, 0, x.base.base.loc);
+    }
+
+    void visit_DoConcurrentLoop(const ASR::DoConcurrentLoop_t &x) {
+        LCOMPILERS_ASSERT(x.n_head > 0);
+        emit_concurrent_loops(x, 0);
     }
 
     void visit_Assert(const ASR::Assert_t &x) {
@@ -3607,7 +4086,7 @@ Result<Vec<uint8_t>> asr_to_wasm_bytes_stream(ASR::TranslationUnit_t &asr,
 
     co.po.always_run = true;
     std::vector<std::string> passes = {"pass_array_by_data", "array_op",
-                "implied_do_loops", "print_arr", "do_loops", "select_case",
+                "implied_do_loops", "print_arr", "select_case",
                 "nested_vars", "unused_functions", "intrinsic_function"};
     LCompilers::PassManager pass_manager;
     double cummulative_time_take_by_passes = 0.0;
@@ -3632,8 +4111,8 @@ Result<Vec<uint8_t>> asr_to_wasm_bytes_stream(ASR::TranslationUnit_t &asr,
 Result<int> asr_to_wasm(ASR::TranslationUnit_t &asr, Allocator &al,
                         const std::string &filename, bool time_report,
                         diag::Diagnostics &diagnostics, CompilerOptions &co) {
-    int time_visit_asr = 0;
-    int time_save = 0;
+    int64_t time_visit_asr = 0;
+    int64_t time_save = 0;
 
     auto t1 = std::chrono::high_resolution_clock::now();
     Result<Vec<uint8_t>> wasm = asr_to_wasm_bytes_stream(asr, al, diagnostics, co);
@@ -3646,7 +4125,12 @@ Result<int> asr_to_wasm(ASR::TranslationUnit_t &asr, Allocator &al,
 
     {
         auto t1 = std::chrono::high_resolution_clock::now();
-        wasm::save_bin(wasm.result, filename);
+        if (!wasm::save_bin(wasm.result, filename)) {
+            diagnostics.add(diag::Diagnostic(
+                "cannot write the output file '" + filename + "'",
+                diag::Level::Error, diag::Stage::CodeGen));
+            return Error();
+        }
         auto t2 = std::chrono::high_resolution_clock::now();
         time_save =
             std::chrono::duration_cast<std::chrono::milliseconds>(t2 - t1)
@@ -3658,7 +4142,7 @@ Result<int> asr_to_wasm(ASR::TranslationUnit_t &asr, Allocator &al,
         std::cout << "ASR -> wasm: " << std::setw(5) << time_visit_asr
                   << std::endl;
         std::cout << "Save:       " << std::setw(5) << time_save << std::endl;
-        int total = time_visit_asr + time_save;
+        int64_t total = time_visit_asr + time_save;
         std::cout << "Total:      " << std::setw(5) << total << std::endl;
     }
     return 0;

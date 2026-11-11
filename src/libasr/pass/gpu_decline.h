@@ -57,18 +57,121 @@ struct GpuDeviceCapabilities {
     int max_integer_kind = 8;
     int max_real_kind = 8;
 
-    // Whether a kernel can bring the program to a halt from a thread. There
-    // is no exit code to deliver either way -- a grid has no status to
-    // return -- but stopping is the part of a Fortran `stop` a device can
-    // honour, and a device that cannot stop can honour none of it.
-    bool device_abort = true;
+    // The widest integer kind the device indexes in: the kind it numbers
+    // the iterations of a launch in, and so the widest loop index of an
+    // offloaded loop it takes, and the widest offset_kind below. This is
+    // about indexing, not values: a device may compute with integers wider
+    // than it indexes in, and a kernel narrows an integer(8) subscript to
+    // its offset kind only after the lower bound is subtracted
+    // (gpu_offset_term_parts).
+    int max_index_kind = 8;
 
     // Whether a device function may declare a local array whose extent is
-    // only known once the kernel runs. Where it may not, the pass splices
-    // such a callee into the kernel body instead, so that the local becomes
-    // a kernel-level one and the per-thread workspace machinery can bind it
-    // to a slice of a device buffer.
+    // only known once the kernel runs. Where it may not, such a local
+    // becomes an argument that every caller gives the function, up to the
+    // kernel, where the per-thread workspace machinery binds it to a slice
+    // of a device buffer (gpu_device_workspace.cpp). A callee that is the
+    // whole value of an assignment is spliced into the kernel body instead,
+    // which turns its locals into kernel-level ones directly.
     bool device_function_runtime_sized_locals = true;
+
+    // How many threads may run one iteration of a kernel together, its
+    // lanes: the threads of one SIMD-group, which wait for each other
+    // cheaply and see each other's writes after such a wait. One means an
+    // iteration runs on one thread (see gpu_vector_lanes.cpp).
+    int lanes_per_iteration = 1;
+    // A launch gets lanes only when it has at most this many iterations;
+    // with more, the iterations alone fill the GPU.
+    int64_t lanes_iterations_max = 1024;
+    // And a kernel whose lanes read along a column of an array that each
+    // iteration takes a column of (gpu_vector_lanes.cpp, `pays_at_any_size`)
+    // gets them up to this many: one lane per iteration would read 32
+    // columns at once there, and lanes read one.
+    int64_t lanes_column_iterations_max = 1024;
+    // The lanes a kernel of that second kind gets, when more than
+    // lanes_per_iteration: the whole block of threads (one iteration per
+    // block), which combine and wait for each other through shared memory.
+    // Zero keeps lanes_per_iteration.
+    int lanes_column_block = 0;
+    // A launch of at most `lanes_block_iterations_max` iterations gives
+    // each the lanes of a whole block, `lanes_block` of them, where the
+    // device combines their values across SIMD-groups; zero or one means
+    // an iteration never has more lanes than lanes_per_iteration. A
+    // launch of so few iterations leaves most of the GPU idle even with
+    // 32 lanes, and the lanes then sit in different warps whose results
+    // meet in shared memory behind a block barrier.
+    int lanes_block = 1;
+    int64_t lanes_block_iterations_max = 1024;
+    // Whether the lanes of an iteration can share a loop that accumulates
+    // into private scalars and combine what each lane accumulated
+    // (GpuLaneReduce).
+    bool lane_reductions = false;
+    // The widest integer or real kind of a value the lanes combine.
+    int lane_reduction_max_kind = 8;
+    // Whether the lanes of an iteration share loops whose iterations are
+    // independent (gpu_vector_lanes.cpp). Off where only reductions are
+    // shared out (NVIDIA GPUs and Metal do).
+    bool lane_independent_loops = true;
+    // Whether, in a reduction loop whose body holds a reduction loop of a
+    // fixed number of iterations of at least half the lanes (the 64 codes
+    // of a group of a quantized matrix-vector product), the lanes share
+    // out the inner loop and all go through the outer one, instead of one
+    // iteration of the outer loop per lane: the lanes then read along the
+    // inner loop's consecutive elements, not a group's length apart.
+    bool lane_inner_reductions_first = false;
+
+    int threads_per_block = 256;
+
+    // The number of iterations the threads of one block of a loop nest
+    // of two or more dimensions cover along the dimension its stores are
+    // contiguous in; the block's other threads cover a second dimension.
+    // A block then reads a two-dimensional neighbourhood of an array
+    // instead of a single run of one of its columns, so a stencil reuses
+    // what its neighbours in the other dimension loaded. Zero numbers the
+    // iterations of a nest in one flat range.
+    int tile_width = 0;
+    int sequential_loop_unroll_factor = 1;
+
+    // The most threads a launch with a reduction runs (gpu_offload.cpp):
+    // each runs every reduction_threads-th iteration in a grid-stride loop
+    // and accumulates them in its own slot, so the host folds at most this
+    // many slots. On an MI300A a dot product of 2**27 elements reads at
+    // 3.6 TB/s with 2**17 threads, and the fold of their 1 MB of slots takes
+    // 0.1 ms.
+    int64_t reduction_threads = 131072;
+
+    // Whether the threads of a warp combine their accumulators of a
+    // reduction with shuffles (GpuLaneReduce), so that a launch with a
+    // reduction has one slot per warp instead of one per thread. The host
+    // then folds a 32nd of the slots, and a launch can run many more
+    // threads than the host could fold the slots of.
+    bool reduction_warp_slots = false;
+
+    // Whether a launch of more iterations than the chunk limit
+    // (PassOptions::gpu_chunk_limit) runs its kernel once per chunk of the
+    // iteration space (device_launch_expand.cpp). Where it does not, one
+    // launch runs every iteration.
+    bool chunked_launches = false;
+
+    // How many bytes of stack a thread of a kernel has. Late kernel storage
+    // placement spills private arrays that do not fit to per-thread slices
+    // of global workspace buffers; it never changes their locality.
+    int64_t thread_stack_bytes = 0;
+
+    // The integer kind a kernel computes the offset of an element in an
+    // array in. Like the host's array descriptors, the offsets are 64-bit
+    // only with --descriptor-index-64, and only on a device that indexes in
+    // 64 bits (offsets_follow_descriptor_index_64); otherwise a launch stops
+    // before it hands a kernel an array of more than huge(0) elements.
+    int offset_kind = 4;
+
+    // Whether --descriptor-index-64 makes offset_kind 8: whether the device
+    // indexes in 64 bits (max_index_kind). Where it does not, the flag does
+    // not help an array of more than huge(0) elements, and a diagnostic
+    // must not suggest it.
+    bool offsets_follow_descriptor_index_64() const {
+        return max_index_kind >= 8;
+    }
 
     // Whether the device has a scalar type of the same in-memory width as
     // `t`. Every dialect shares a floor -- the widths in
@@ -116,11 +219,22 @@ enum class GpuDeclineReason {
     ReductionClause,
     LoopWithoutIndex,
     IncompleteLoopHead,
+    // A loop index of an integer kind wider than the device numbers the
+    // iterations of a launch in (GpuDeviceCapabilities::max_index_kind).
+    LoopIndexKind,
     StridedLoop,
 
     // --- what the pass's own lowering cannot yet do to the body ---
     StructElementGather,
     UnsizedLocalArray,
+    // An array of LOCAL locality that a thread cannot hold a copy of its
+    // own of: its type is not one a thread holds as a local, it is a
+    // coarray, an ASSOCIATE around the loop names it, or the body has an
+    // ASSOCIATE the kernel cannot inline.
+    LocalityElementType,
+    LocalityCoarray,
+    LocalityNamedByAssociate,
+    LocalityAssociateNotInlined,
     AliasTemporaryRuntimeSized,
     UngatherableStridedSection,
     // A section passed to a procedure has to be copied into a contiguous
@@ -138,10 +252,28 @@ enum class GpuDeclineReason {
     SectionCopyNotPlaceable,
     DeviceFunctionInlining,
     DeviceFunctionImplementation,
+    // A call in device code hands a dummy procedure no routine the device
+    // can call in its place: a dummy procedure of the loop's host, a
+    // procedure pointer, or nothing, for an absent optional one (see
+    // gpu_specialize_dummy_procedures).
+    DummyProcedureUnbound,
     RecursiveDeviceFunction,
     FunctionResultAllocation,
     NestedArraySection,
     WorkspaceNotSizeableOnHost,
+    // An allocatable array component of a derived-type local of device
+    // code, which has no heap to allocate it from, whose shape cannot be
+    // told on entry to the routine (see gpu_device_struct_storage.cpp).
+    StructComponentNotSizeable,
+    // An array on the device heap (see gpu_device_heap.cpp) used in a way
+    // the heap does not lower yet; the name says which array and how.
+    HeapArrayUse,
+    // An exit of a construct that is not a loop, such as a BLOCK.
+    ExitOfConstruct,
+    // A named cycle inside a do concurrent nested in the body, which may
+    // be of that loop or of the offloaded one: ASR does not keep the name
+    // of a do concurrent.
+    NamedCycleInNestedConcurrent,
 
     // --- what the device has no type for ---
     LocalTypeWidth,
@@ -152,17 +284,46 @@ enum class GpuDeclineReason {
     // These, and every reason below them, name a thing rather than state a
     // fact, and so read as "the gpu backend does not support <thing>".
     StatementIo,
-    StatementStop,
+    // A `stop` or `error stop` whose stop code is a character value
+    // computed at run time, which the host cannot repeat after the launch
+    // (see gpu_offload_stop.h).
+    StopCodeNotConstant,
+    // A procedure that can stop, which is given hidden arguments, but is
+    // also passed as an actual argument or is not a copy the kernel owns.
+    StoppingProcedureShared,
+    // A scalar the loop defines whose value is kept after it, of a type
+    // the buffer that carries the value back to the host cannot hold:
+    // `type_name` says which ("complex(4)", "character", "allocatable").
+    LiveoutScalar,
+    // An optional dummy argument the loop may define and whose value is
+    // kept after it, which the loop passes on to an optional dummy
+    // argument of a procedure: each thread passes its private copy, which
+    // is present whether or not the argument is.
+    LiveoutOptionalPassedOn,
+    // A part of a derived-type variable the loop defines (`name`) that no
+    // thread can keep a private copy of: an allocatable component, a part
+    // of a polymorphic, allocatable or pointer variable, the whole of a
+    // value with allocatable or pointer parts or too large for a thread,
+    // or a value a procedure defines in place that the loop also keeps a
+    // copy of a part of, or names a scalar part of.
+    LiveoutDerivedType,
 
     // --- the layout of a kernel argument: derived types ---
     StructDeclarationUnknown,
     StructNonDataMember,
     StructPointerMember,
     StructAllocatableArrayMember,
-    StructAllocatableScalarMember,
     StructAssumedShapeArrayMember,
     StructMemberTypeWidth,
     StructMemberNotNumeric,
+    // A derived-type constant device code reads, such as a named constant,
+    // with a component the device struct cannot be given a value of (see
+    // gpu_struct_constant_unsupported_component); the name is the component.
+    StructConstantComponent,
+    // An array of derived-type values given by a constant, such as a named
+    // constant array of a derived type, which device code has no value
+    // representation for.
+    StructArrayConstant,
 
     // --- the layout of a kernel argument: polymorphic arguments ---
     ClassComponentArrayRank,
@@ -176,7 +337,6 @@ enum class GpuDeclineReason {
     // --- the layout of a kernel argument: everything else ---
     ArrayElementTypeWidth,
     ArrayElementNotNumeric,
-    WorkspaceStructElementShape,
     // A per-thread workspace the launch layout cannot size, found when the
     // launch is expanded. The host pre-flight in gpu_offload asks the same
     // question of the loop, but of the loop as it stands before the passes
@@ -184,6 +344,12 @@ enum class GpuDeclineReason {
     LaunchVlaExtentNotRebuildable,
     KernelArgumentCountMismatch,
     NestedAllocatableComponent,
+    // The kernel names an allocatable scalar component, which reaches the
+    // device only as the host's bytes (see `gpu_component_is_opaque`).
+    AllocatableScalarComponentUse,
+    // The kernel assigns a whole value of a derived type holding an
+    // allocatable scalar component, which would have to be allocated.
+    AllocatableScalarComponentCopy,
     MissingArgument,
     ScalarTypeWidth,
     ScalarNotNumeric,
@@ -235,6 +401,9 @@ struct GpuDecline {
     // The element type the decline is about, when the reason is about a
     // type, which the message names.
     ASR::ttype_t *type = nullptr;
+    // The declared type of the variable as the source spells it, for a
+    // type `type` cannot name by itself (a derived type).
+    std::string type_name;
     // Where the section is evaluated, when the reason is about a section,
     // and why no copy placed before the statement serves it.
     GpuSectionSite site = GpuSectionSite::Statement;
@@ -262,6 +431,11 @@ GpuDevice gpu_device_selected(const PassOptions &pass_options);
 // anything.
 GpuDeviceCapabilities gpu_device_capabilities(GpuDevice device);
 GpuDeviceCapabilities gpu_device_capabilities(const PassOptions &pass_options);
+
+// Whether `name` is one the program can have written, which a diagnostic
+// may show. A Fortran name begins with a letter (F2018 6.2.2), and every
+// name the compiler makes up for a temporary does not.
+bool gpu_source_name(const std::string &name);
 
 // The whole clause the diagnostic reads, lowercase and naming nothing
 // internal. This is the only place the wording of a decline is written.

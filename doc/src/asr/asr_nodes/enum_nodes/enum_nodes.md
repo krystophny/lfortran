@@ -15,6 +15,7 @@ arraystorage
 binop
 cmpop
 codimension_type
+common_block_role
 cptr_kind
 deferred_type_attr
 deftype
@@ -26,6 +27,7 @@ intent
 logicalbinop
 memory_space
 pass_attr
+pointer_bounds_form
 presence
 reduction_op
 storage_type

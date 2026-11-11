@@ -27,9 +27,11 @@
               nil
               false
               false
+              false
               :NotMethod
               nil
               []
+              nil
             )
             "helper" (Function
               (SymbolTable
@@ -56,9 +58,11 @@
                     nil
                     false
                     false
+                    false
                     :NotMethod
                     nil
                     []
+                    nil
                   )
                 }
               )

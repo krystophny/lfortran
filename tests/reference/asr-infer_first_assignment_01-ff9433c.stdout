@@ -22,9 +22,11 @@
                     ()
                     .false.
                     .false.
+                    .false.
                     NotMethod
                     ()
                     []
+                    ()
                 ),
             s:
                 (Variable
@@ -46,9 +48,11 @@
                     ()
                     .false.
                     .false.
+                    .false.
                     NotMethod
                     ()
                     []
+                    ()
                 ),
             x:
                 (Variable
@@ -70,9 +74,11 @@
                     ()
                     .false.
                     .false.
+                    .false.
                     NotMethod
                     ()
                     []
+                    ()
                 ),
             y:
                 (Variable
@@ -94,9 +100,11 @@
                     ()
                     .false.
                     .false.
+                    .false.
                     NotMethod
                     ()
                     []
+                    ()
                 ),
             z:
                 (Variable
@@ -118,15 +126,19 @@
                     ()
                     .false.
                     .false.
+                    .false.
                     NotMethod
                     ()
                     []
+                    ()
                 )
         })
     [(Assignment
         (Var 1 x)
         (IntegerConstant 42 (Integer 4) Decimal)
         ()
+        .false.
+        .false.
         .false.
         .false.
     )
@@ -137,6 +149,8 @@
             (Real 4)
         )
         ()
+        .false.
+        .false.
         .false.
         .false.
     )
@@ -161,6 +175,8 @@
         ()
         .false.
         .false.
+        .false.
+        .false.
     )
     (Assignment
         (Var 1 flag)
@@ -171,6 +187,8 @@
         ()
         .false.
         .false.
+        .false.
+        .false.
     )
     (Assignment
         (Var 1 s)
@@ -179,6 +197,8 @@
             (String 1 (IntegerConstant 5 (Integer 4) Decimal) ExpressionLength DescriptorString)
         )
         ()
+        .false.
+        .false.
         .false.
         .false.
     )
@@ -192,6 +212,8 @@
             ()
         )
         ()
+        .false.
+        .false.
         .false.
         .false.
     )]

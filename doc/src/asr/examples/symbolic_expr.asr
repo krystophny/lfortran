@@ -26,10 +26,12 @@
               :contiguous_attr false
               :bindc_name nil
               :is_volatile false
+              :is_asynchronous false
               :is_protected false
               :pass_attr :NotMethod
               :self_argument nil
               :codims []
+              :common_block nil
             )
             "s" (Variable
               :parent_symtab 1
@@ -49,10 +51,12 @@
               :contiguous_attr false
               :bindc_name nil
               :is_volatile false
+              :is_asynchronous false
               :is_protected false
               :pass_attr :NotMethod
               :self_argument nil
               :codims []
+              :common_block nil
             )
           }
         )
@@ -79,6 +83,8 @@
             :overloaded nil
             :realloc_lhs false
             :move_allocation false
+            :new_target false
+            :new_allocation false
           )
         ]
         :global_init nil

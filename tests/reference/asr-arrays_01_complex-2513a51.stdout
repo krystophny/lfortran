@@ -33,9 +33,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             b:
                                 (Variable
@@ -63,9 +65,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             c:
                                 (Variable
@@ -95,9 +99,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             i:
                                 (Variable
@@ -119,9 +125,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             j:
                                 (Variable
@@ -143,9 +151,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     arrays_01_complex
@@ -155,7 +165,7 @@
                         ((Var 2 i)
                         (IntegerConstant 1 (Integer 4) Decimal)
                         (IntegerConstant 3 (Integer 4) Decimal)
-                        ())
+                        (IntegerConstant 1 (Integer 4) Decimal))
                         [(Assignment
                             (ArrayItem
                                 (Var 2 a)
@@ -165,6 +175,7 @@
                                 (Complex 4)
                                 ColMajor
                                 ()
+                                .false.
                             )
                             (Cast
                                 (IntegerBinOp
@@ -182,6 +193,8 @@
                             ()
                             .false.
                             .false.
+                            .false.
+                            .false.
                         )]
                         []
                     )
@@ -196,6 +209,7 @@
                                 (Complex 4)
                                 ColMajor
                                 ()
+                                .true.
                             )
                             NotEq
                             (Cast
@@ -228,6 +242,7 @@
                                 (Complex 4)
                                 ColMajor
                                 ()
+                                .true.
                             )
                             NotEq
                             (Cast
@@ -260,6 +275,7 @@
                                 (Complex 4)
                                 ColMajor
                                 ()
+                                .true.
                             )
                             NotEq
                             (Cast
@@ -286,7 +302,7 @@
                         ((Var 2 i)
                         (IntegerConstant 11 (Integer 4) Decimal)
                         (IntegerConstant 14 (Integer 4) Decimal)
-                        ())
+                        (IntegerConstant 1 (Integer 4) Decimal))
                         [(Assignment
                             (ArrayItem
                                 (Var 2 b)
@@ -302,6 +318,7 @@
                                 (Complex 4)
                                 ColMajor
                                 ()
+                                .false.
                             )
                             (Cast
                                 (Var 2 i)
@@ -311,6 +328,8 @@
                                 ()
                             )
                             ()
+                            .false.
+                            .false.
                             .false.
                             .false.
                         )]
@@ -327,6 +346,7 @@
                                 (Complex 4)
                                 ColMajor
                                 ()
+                                .true.
                             )
                             NotEq
                             (Cast
@@ -359,6 +379,7 @@
                                 (Complex 4)
                                 ColMajor
                                 ()
+                                .true.
                             )
                             NotEq
                             (Cast
@@ -391,6 +412,7 @@
                                 (Complex 4)
                                 ColMajor
                                 ()
+                                .true.
                             )
                             NotEq
                             (Cast
@@ -423,6 +445,7 @@
                                 (Complex 4)
                                 ColMajor
                                 ()
+                                .true.
                             )
                             NotEq
                             (Cast
@@ -449,7 +472,7 @@
                         ((Var 2 i)
                         (IntegerConstant 1 (Integer 4) Decimal)
                         (IntegerConstant 3 (Integer 4) Decimal)
-                        ())
+                        (IntegerConstant 1 (Integer 4) Decimal))
                         [(Assignment
                             (ArrayItem
                                 (Var 2 b)
@@ -459,6 +482,7 @@
                                 (Complex 4)
                                 ColMajor
                                 ()
+                                .false.
                             )
                             (ComplexBinOp
                                 (ArrayItem
@@ -469,6 +493,7 @@
                                     (Complex 4)
                                     ColMajor
                                     ()
+                                    .false.
                                 )
                                 Sub
                                 (Cast
@@ -488,6 +513,8 @@
                             ()
                             .false.
                             .false.
+                            .false.
+                            .false.
                         )]
                         []
                     )
@@ -502,6 +529,7 @@
                                 (Complex 4)
                                 ColMajor
                                 ()
+                                .true.
                             )
                             NotEq
                             (Cast
@@ -534,6 +562,7 @@
                                 (Complex 4)
                                 ColMajor
                                 ()
+                                .true.
                             )
                             NotEq
                             (Cast
@@ -566,6 +595,7 @@
                                 (Complex 4)
                                 ColMajor
                                 ()
+                                .true.
                             )
                             NotEq
                             (Cast
@@ -596,6 +626,7 @@
                             (Complex 4)
                             ColMajor
                             ()
+                            .true.
                         )
                         (ComplexBinOp
                             (ComplexBinOp
@@ -608,6 +639,7 @@
                                         (Complex 4)
                                         ColMajor
                                         ()
+                                        .true.
                                     )
                                     Add
                                     (ArrayItem
@@ -618,6 +650,7 @@
                                         (Complex 4)
                                         ColMajor
                                         ()
+                                        .true.
                                     )
                                     (Complex 4)
                                     ()
@@ -631,6 +664,7 @@
                                     (Complex 4)
                                     ColMajor
                                     ()
+                                    .true.
                                 )
                                 (Complex 4)
                                 ()
@@ -644,11 +678,14 @@
                                 (Complex 4)
                                 ColMajor
                                 ()
+                                .true.
                             )
                             (Complex 4)
                             ()
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -663,6 +700,7 @@
                                 (Complex 4)
                                 ColMajor
                                 ()
+                                .true.
                             )
                             NotEq
                             (Cast
@@ -693,6 +731,7 @@
                             (Complex 4)
                             ColMajor
                             ()
+                            .true.
                         )
                         (ArrayItem
                             (Var 2 a)
@@ -702,8 +741,11 @@
                             (Complex 4)
                             ColMajor
                             ()
+                            .true.
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -718,6 +760,7 @@
                                 (Complex 4)
                                 ColMajor
                                 ()
+                                .true.
                             )
                             NotEq
                             (Cast
@@ -744,13 +787,13 @@
                         ((Var 2 i)
                         (IntegerConstant 1 (Integer 4) Decimal)
                         (IntegerConstant 2 (Integer 4) Decimal)
-                        ())
+                        (IntegerConstant 1 (Integer 4) Decimal))
                         [(DoLoop
                             ()
                             ((Var 2 j)
                             (IntegerConstant 1 (Integer 4) Decimal)
                             (IntegerConstant 2 (Integer 4) Decimal)
-                            ())
+                            (IntegerConstant 1 (Integer 4) Decimal))
                             [(Assignment
                                 (ArrayItem
                                     (Var 2 c)
@@ -763,6 +806,7 @@
                                     (Complex 4)
                                     ColMajor
                                     ()
+                                    .false.
                                 )
                                 (Cast
                                     (IntegerBinOp
@@ -786,6 +830,8 @@
                                 ()
                                 .false.
                                 .false.
+                                .false.
+                                .false.
                             )]
                             []
                         )]
@@ -805,6 +851,7 @@
                                 (Complex 4)
                                 ColMajor
                                 ()
+                                .true.
                             )
                             NotEq
                             (Cast
@@ -840,6 +887,7 @@
                                 (Complex 4)
                                 ColMajor
                                 ()
+                                .true.
                             )
                             NotEq
                             (Cast
@@ -875,6 +923,7 @@
                                 (Complex 4)
                                 ColMajor
                                 ()
+                                .true.
                             )
                             NotEq
                             (Cast
@@ -910,6 +959,7 @@
                                 (Complex 4)
                                 ColMajor
                                 ()
+                                .true.
                             )
                             NotEq
                             (Cast

@@ -39,9 +39,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             r:
                                                 (Variable
@@ -63,9 +65,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             x:
                                                 (Variable
@@ -87,9 +91,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     frexp~genericprocedure
@@ -123,6 +129,7 @@
                     interface_generic_procedure_same_name
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.

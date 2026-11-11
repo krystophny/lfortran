@@ -3,12 +3,16 @@
 import os
 import subprocess as sp
 import sys
+import threading
 from typing import Dict
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__)))
 sys.path.append(os.path.join(ROOT_DIR, "src", "libasr"))
 
-from compiler_tester.tester import color, fg, log, run_test, style, tester_main
+from compiler_tester.tester import (RunException, color, fg, log, run_test,
+                                    style, tester_main)
+
+x86_lock = threading.Lock()
 
 def run_cmd(cmd, cwd=None):
     print(f"+ {cmd}")
@@ -37,6 +41,7 @@ def single_test(test: Dict, verbose: bool, no_llvm: bool, skip_run_with_dbg: boo
     ast_f90 = is_included("ast_f90")
     ast_fixed_form = is_included("ast_fixed_form")
     ast_f90_fixed_form = is_included("ast_f90_fixed_form")
+    fmt = is_included("fmt")
     ast_cpp = is_included("ast_cpp")
     ast_cpp_hip = is_included("ast_cpp_hip")
     ast_openmp = is_included("ast_openmp")
@@ -69,7 +74,6 @@ def single_test(test: Dict, verbose: bool, no_llvm: bool, skip_run_with_dbg: boo
     document_symbols = is_included("document_symbols")
     syntax_only_cc = is_included("syntax_only_cc")
     show_asr_with_cc = is_included("show_asr_with_cc")
-    asr_use_loop_variable_after_loop = is_included("asr_use_loop_variable_after_loop")
     asr_preprocess = is_included("asr_preprocess")
     asr_indent = is_included("asr_indent")
     asr_json = is_included("asr_json")
@@ -85,6 +89,7 @@ def single_test(test: Dict, verbose: bool, no_llvm: bool, skip_run_with_dbg: boo
     is_cumulative_pass = is_included("cumulative")
     julia = is_included("julia")
     gpu_cuda_kernel = is_included("gpu_cuda_kernel")
+    gpu_metal_kernel = is_included("gpu_metal_kernel")
     gpu_offload_cuda = is_included("gpu_offload_cuda")
     gpu_offload_metal = is_included("gpu_offload_metal")
     wat = is_included("wat")
@@ -100,9 +105,27 @@ def single_test(test: Dict, verbose: bool, no_llvm: bool, skip_run_with_dbg: boo
     extrafiles = test.get("extrafiles", "").split(",")
     run = test.get("run")
     run_with_dbg = test.get("run_with_dbg")
-    optimization_passes = ["flip_sign", "div_to_mul", "fma", "sign_from_value",
-                           "inline_function_calls", "loop_unroll",
-                           "dead_code_removal"]
+
+    def compile_extrafiles(step):
+        """Compile the modules listed in `extrafiles`, so that the test can
+        read their modfiles. Compiling them needs LLVM, so without it log the
+        step as skipped and return False."""
+        for extrafile in extrafiles:
+            extrafile_ = extrafile.strip()
+            if len(extrafile_) == 0:
+                continue
+            if no_llvm:
+                log.info(f"{filename} * {step}   SKIPPED because LLVM is not enabled")
+                return False
+            extrafile_ = os.path.join("tests", extrafile_)
+            modfile = extrafile_[:-4] + ".mod"
+            if not os.path.exists(modfile):
+                run_cmd("lfortran -c {}".format(extrafile_))
+        return True
+
+    optimization_passes = ["flip_sign", "div_to_mul", "sign_from_value",
+                           "inline_function_calls",
+                           "dead_code_removal", "loop_fusion"]
 
     if pass_ is not None and not fortran:
         pass_list = pass_.split(",")
@@ -111,14 +134,17 @@ def single_test(test: Dict, verbose: bool, no_llvm: bool, skip_run_with_dbg: boo
             _pass = _pass.rstrip(" ").lstrip(" ")
             if (_pass not in ["do_loops", "global_stmts",
                         "transform_optional_argument_functions",
-                        "array_op", "select_case",
+                        "array_op", "allocate_on_assignment", "select_case",
                         "class_constructor", "implied_do_loops",
                         "pass_array_by_data", "init_expr", "global_init",
                         "global_init_wire",
-                        "where",
+                        "where", "forall",
                         "nested_vars", "intent_out_deallocate", "openmp",
                         "array_struct_temporary", "coarray",
-                        "parallel_canonicalize", "parallel_dispatch"] and
+                        "parallel_canonicalize", "parallel_dispatch",
+                        "function_call_in_declaration",
+                        "string_length_arguments", "dead_array_store",
+                        "intrinsic_function"] and
                 _pass not in optimization_passes):
                 raise Exception(f"Unknown pass: {_pass}")
     if update_reference:
@@ -288,6 +314,18 @@ def single_test(test: Dict, verbose: bool, no_llvm: bool, skip_run_with_dbg: boo
             verify_hash,
             extra_args)
 
+    if fmt:
+        # Format the file with the fmt subcommand. The source form is selected
+        # by `options`, which are passed after the subcommand.
+        run_test(
+            filename,
+            "fmt",
+            "lfortran fmt --no-color {infile}",
+            filename,
+            update_reference,
+            verify_hash,
+            extra_args)
+
     if lookup_name:
         run_test(
             filename,
@@ -365,22 +403,7 @@ def single_test(test: Dict, verbose: bool, no_llvm: bool, skip_run_with_dbg: boo
                 verify_hash,
                 extra_args)
         else:
-            skip_test = False
-            for extrafile in extrafiles:
-                extrafile_ = extrafile.rstrip().lstrip()
-
-                if no_llvm and len(extrafile_) > 0:
-                    log.info(f"{filename} * asr   SKIPPED because LLVM is not enabled")
-                    skip_test = True
-                    break
-
-                if len(extrafile_) > 0:
-                    extrafile_ = os.path.join("tests", extrafile_)
-                    modfile = extrafile_[:-4] + ".mod"
-                    if not os.path.exists(modfile):
-                        run_cmd("lfortran -c {}".format(extrafile_))
-
-            if not skip_test:
+            if compile_extrafiles("asr"):
                 run_test(
                     filename,
                     "asr",
@@ -426,15 +449,6 @@ def single_test(test: Dict, verbose: bool, no_llvm: bool, skip_run_with_dbg: boo
                 update_reference,
                 verify_hash,
                 extra_args)
-    if asr_use_loop_variable_after_loop:
-        run_test(
-            filename,
-            "asr",
-            "lfortran --show-asr --use-loop-variable-after-loop --no-color {infile} -o {outfile}",
-            filename,
-            update_reference,
-            verify_hash,
-            extra_args)
 
     if asr_implicit_argument_casting:
         run_test(
@@ -467,21 +481,7 @@ def single_test(test: Dict, verbose: bool, no_llvm: bool, skip_run_with_dbg: boo
             extra_args)
 
     if document_symbols:
-        skip_test = False
-        for extrafile in extrafiles:
-            extrafile_ = extrafile.rstrip().lstrip()
-
-            if no_llvm and len(extrafile_) > 0:
-                log.info(f"{filename} * asr   SKIPPED because LLVM is not enabled")
-                skip_test = True
-                break
-
-            if len(extrafile_) > 0:
-                extrafile_ = os.path.join("tests", extrafile_)
-                modfile = extrafile_[:-4] + ".mod"
-                if not os.path.exists(modfile):
-                    run_cmd("lfortran -c {}".format(extrafile_))
-        if not skip_test:
+        if compile_extrafiles("document_symbols"):
             run_test(filename, "asr", "lfortran --show-document-symbols --no-color {infile}",
                 filename,
                 update_reference,
@@ -591,7 +591,7 @@ def single_test(test: Dict, verbose: bool, no_llvm: bool, skip_run_with_dbg: boo
             verify_hash,
             extra_args)
 
-    if asr_json:
+    if asr_json and compile_extrafiles("asr_json"):
         run_test(
             filename,
             "asr_json",
@@ -664,21 +664,7 @@ def single_test(test: Dict, verbose: bool, no_llvm: bool, skip_run_with_dbg: boo
         # A pass can need the modfiles of the modules the test uses, the same
         # way an `asr` test does: `--separate-compilation` only reads a module
         # from a modfile if one is there to read.
-        skip_test = False
-        for extrafile in extrafiles:
-            extrafile_ = extrafile.rstrip().lstrip()
-            if len(extrafile_) == 0:
-                continue
-            if no_llvm:
-                log.info(f"{filename} * pass  SKIPPED because LLVM is not enabled")
-                skip_test = True
-                break
-            extrafile_ = os.path.join("tests", extrafile_)
-            modfile = extrafile_[:-4] + ".mod"
-            if not os.path.exists(modfile):
-                run_cmd("lfortran -c {}".format(extrafile_))
-
-        if not skip_test:
+        if compile_extrafiles("pass"):
             cmd = "lfortran "
             if is_cumulative_pass:
                 cmd += "--cumulative "
@@ -737,13 +723,16 @@ def single_test(test: Dict, verbose: bool, no_llvm: bool, skip_run_with_dbg: boo
                 verify_hash,
                 extra_args)
 
-    if gpu_cuda_kernel:
-        run_test(filename, "gpu_cuda_kernel",
-                "lfortran --no-color --gpu=cuda --show-gpu-kernel-source {infile}",
-                filename,
-                update_reference,
-                verify_hash,
-                extra_args)
+    for kernel_source, device in ((gpu_cuda_kernel, "cuda"),
+                                  (gpu_metal_kernel, "metal")):
+        if kernel_source:
+            run_test(filename, "gpu_" + device + "_kernel",
+                    "lfortran --no-color --gpu=" + device +
+                    " --show-gpu-kernel-source {infile}",
+                    filename,
+                    update_reference,
+                    verify_hash,
+                    extra_args)
 
     for gpu_offload, device in ((gpu_offload_cuda, "cuda"),
                                 (gpu_offload_metal, "metal")):
@@ -769,14 +758,22 @@ def single_test(test: Dict, verbose: bool, no_llvm: bool, skip_run_with_dbg: boo
                 extra_args)
 
     if x86:
-        run_test(
-            filename,
-            "x86",
-            "lfortran --no-color --backend=x86 {infile} -o output",
-            filename,
-            update_reference,
-            verify_hash,
-            extra_args)
+        # Every x86 test writes the executable `output`, which the reference
+        # does not record, so run them one at a time and check it was written.
+        with x86_lock:
+            if os.path.isfile("output"):
+                os.remove("output")
+            run_test(
+                filename,
+                "x86",
+                "lfortran --no-color --backend=x86 {infile} -o output",
+                filename,
+                update_reference,
+                verify_hash,
+                extra_args)
+            if not os.path.isfile("output"):
+                raise RunException(
+                    f"{filename} * x86: the executable 'output' was not written")
 
     if fortran:
         if pass_ is not None:

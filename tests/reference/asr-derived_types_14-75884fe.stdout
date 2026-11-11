@@ -32,9 +32,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             datetime:
                                                 (Variable
@@ -56,9 +58,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             float:
                                                 (Variable
@@ -80,9 +84,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             int:
                                                 (Variable
@@ -104,9 +110,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             invalid:
                                                 (Variable
@@ -128,9 +136,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             string:
                                                 (Variable
@@ -152,9 +162,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     enum_type
@@ -255,15 +267,18 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     derived_types_14_module
                     ()
                     []
                     .true.
+                    .false.
                     .false.
                     .false.
                     ()
@@ -273,6 +288,16 @@
                     (SymbolTable
                         2
                         {
+                            1_enum_type:
+                                (ExternalSymbol
+                                    2
+                                    1_enum_type
+                                    4 enum_type
+                                    derived_types_14_module
+                                    []
+                                    enum_type
+                                    Public
+                                ),
                             check:
                                 (Function
                                     (SymbolTable
@@ -298,9 +323,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             res:
                                                 (Variable
@@ -322,9 +349,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     check
@@ -354,22 +383,14 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )]
                                     (Var 7 res)
                                     Public
                                     .true.
                                     .true.
                                     ()
-                                ),
-                            enum_type:
-                                (ExternalSymbol
-                                    2
-                                    enum_type
-                                    4 enum_type
-                                    derived_types_14_module
-                                    []
-                                    enum_type
-                                    Public
                                 ),
                             toml_get_value_type:
                                 (Function
@@ -456,9 +477,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             vtype:
                                                 (Variable
@@ -480,9 +503,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     toml_get_value_type
@@ -524,6 +549,8 @@
                                             ()
                                             .false.
                                             .false.
+                                            .false.
+                                            .false.
                                         )
                                         (Return)]
                                         []
@@ -547,6 +574,8 @@
                                                 (IntegerConstant 102 (Integer 4) Decimal)
                                             )
                                             ()
+                                            .false.
+                                            .false.
                                             .false.
                                             .false.
                                         )
@@ -574,6 +603,8 @@
                                             ()
                                             .false.
                                             .false.
+                                            .false.
+                                            .false.
                                         )
                                         (Return)]
                                         []
@@ -597,6 +628,8 @@
                                                 (IntegerConstant 104 (Integer 4) Decimal)
                                             )
                                             ()
+                                            .false.
+                                            .false.
                                             .false.
                                             .false.
                                         )
@@ -624,6 +657,8 @@
                                             ()
                                             .false.
                                             .false.
+                                            .false.
+                                            .false.
                                         )
                                         (Return)]
                                         []
@@ -637,6 +672,8 @@
                                             (IntegerConstant 100 (Integer 4) Decimal)
                                         )
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )]
@@ -661,6 +698,7 @@
                     ()
                     [derived_types_14_module
                     derived_types_14_module1]
+                    .false.
                     .false.
                     .false.
                     .false.

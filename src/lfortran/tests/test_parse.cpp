@@ -182,10 +182,10 @@ TEST_CASE("Test Big Int") {
     CHECK(is_int_ptr(i)); // this is a pointer
 
     // Smallest integer that is allowed is -2^63
-    i = -9223372036854775808ULL;
+    i = std::numeric_limits<int64_t>::min();
     CHECK(i == MIN_SMALL_INT);
     CHECK(!is_int_ptr(i)); // this is an integer
-    i = -9223372036854775809ULL; // This does not fit into a signed 64bit int
+    i = std::numeric_limits<int64_t>::max(); // Above MAX_SMALL_INT
     CHECK(is_int_ptr(i)); // this is a pointer
 
     /* Pointer tests */
@@ -707,9 +707,20 @@ TEST_CASE("Tokenizer") {
     };
     CHECK(tokens(al, s) == ref);
 
+    // An integer followed by a name at the start of a line is a statement
+    // label, both at the start of the input and after a newline.
     s = "2 x";
     ref = {
-        tt::TK_INTEGER,
+        tt::TK_LABEL,
+        tt::TK_NAME,
+        tt::END_OF_FILE,
+    };
+    CHECK(tokens(al, s) == ref);
+
+    s = "\n2 x";
+    ref = {
+        tt::TK_NEWLINE,
+        tt::TK_LABEL,
         tt::TK_NAME,
         tt::END_OF_FILE,
     };
@@ -1420,4 +1431,56 @@ TEST_CASE("Errors") {
     CHECK(diagnostics.diagnostics[0].labels[0].spans[0].loc.first == 2);
     CHECK(diagnostics.diagnostics[0].labels[0].spans[0].loc.last == 2);
     diagnostics.diagnostics.clear();
+}
+
+// A bare ALLOCATE or DEALLOCATE at interactive top level is that statement.
+// The same name in an expression is still a call.
+TEST_CASE("Interactive allocate statement") {
+    Allocator al(1024*1024);
+    LCompilers::diag::Diagnostics diagnostics;
+    LCompilers::CompilerOptions co;
+    co.interactive = true;
+
+    auto parse_ok = [&](const std::string &input) {
+        diagnostics.diagnostics.clear();
+        Result<LCompilers::LFortran::AST::TranslationUnit_t*> res =
+            parse(al, input, diagnostics, co);
+        REQUIRE(res.ok);
+        return res.result;
+    };
+
+    LCompilers::LFortran::AST::TranslationUnit_t* tu = parse_ok("allocate(a(1))\n");
+    REQUIRE(tu->n_items == 1);
+    REQUIRE(tu->m_items[0]->type == LCompilers::LFortran::AST::astType::decl_stmt);
+    CHECK(LCompilers::LFortran::AST::is_a<LCompilers::LFortran::AST::Allocate_t>(
+        *LCompilers::LFortran::AST::down_cast<LCompilers::LFortran::AST::decl_stmt_t>(
+            tu->m_items[0])));
+
+    tu = parse_ok("deallocate(a)\n");
+    REQUIRE(tu->n_items == 1);
+    REQUIRE(tu->m_items[0]->type == LCompilers::LFortran::AST::astType::decl_stmt);
+    CHECK(LCompilers::LFortran::AST::is_a<LCompilers::LFortran::AST::Deallocate_t>(
+        *LCompilers::LFortran::AST::down_cast<LCompilers::LFortran::AST::decl_stmt_t>(
+            tu->m_items[0])));
+
+    tu = parse_ok("y = allocate(2)\n");
+    REQUIRE(tu->n_items == 1);
+    REQUIRE(tu->m_items[0]->type == LCompilers::LFortran::AST::astType::decl_stmt);
+    auto *asg = LCompilers::LFortran::AST::down_cast<LCompilers::LFortran::AST::Assignment_t>(
+        LCompilers::LFortran::AST::down_cast<LCompilers::LFortran::AST::decl_stmt_t>(
+            tu->m_items[0]));
+    REQUIRE(LCompilers::LFortran::AST::is_a<LCompilers::LFortran::AST::FuncCallOrArray_t>(
+        *asg->m_value));
+    CHECK(std::string(LCompilers::LFortran::AST::down_cast<
+        LCompilers::LFortran::AST::FuncCallOrArray_t>(asg->m_value)->m_func) == "allocate");
+
+    tu = parse_ok("program p\nallocate(a(1))\ndeallocate(a)\nend program\n");
+    REQUIRE(tu->n_items == 1);
+    auto *prog = LCompilers::LFortran::AST::down_cast<LCompilers::LFortran::AST::Program_t>(
+        LCompilers::LFortran::AST::down_cast<LCompilers::LFortran::AST::mod_t>(tu->m_items[0]));
+    REQUIRE(prog->n_items == 2);
+    CHECK(LCompilers::LFortran::AST::is_a<LCompilers::LFortran::AST::Allocate_t>(
+        *prog->m_items[0]));
+    CHECK(LCompilers::LFortran::AST::is_a<LCompilers::LFortran::AST::Deallocate_t>(
+        *prog->m_items[1]));
 }

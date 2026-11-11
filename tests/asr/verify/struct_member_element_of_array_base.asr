@@ -53,9 +53,11 @@
                     nil
                     false
                     false
+                    false
                     :NotMethod
                     nil
                     []
+                    nil
                   )
                 }
               )
@@ -112,6 +114,7 @@
         "m"
         nil
         []
+        false
         false
         false
         false
@@ -202,9 +205,11 @@
               nil
               false
               false
+              false
               :NotMethod
               nil
               []
+              nil
             )
             "x" (Variable
               6
@@ -227,9 +232,11 @@
               nil
               false
               false
+              false
               :NotMethod
               nil
               []
+              nil
             )
           }
         )
@@ -291,8 +298,11 @@
               )
               :ColMajor
               nil
+              false
             )
             nil
+            false
+            false
             false
             false
           )
