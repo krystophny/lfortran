@@ -6490,6 +6490,46 @@ filename = "errors/openmp_threadprivate_common_01.f90"
 asr_openmp = true
 
 [[test]]
+filename = "errors/openmp_threadprivate_01.f90"
+asr_openmp = true
+
+[[test]]
+filename = "errors/openmp_threadprivate_02.f90"
+asr_openmp = true
+
+[[test]]
+filename = "errors/openmp_threadprivate_03.f90"
+asr_openmp = true
+
+[[test]]
+filename = "errors/openmp_threadprivate_04.f90"
+asr_openmp = true
+
+[[test]]
+filename = "errors/openmp_threadprivate_05.f90"
+asr_openmp = true
+
+[[test]]
+filename = "errors/openmp_threadprivate_06.f90"
+asr_openmp = true
+
+[[test]]
+filename = "errors/openmp_threadprivate_07.f90"
+asr_openmp = true
+
+[[test]]
+filename = "errors/openmp_threadprivate_08.f90"
+asr_openmp = true
+
+[[test]]
+filename = "errors/openmp_threadprivate_09.f90"
+asr_openmp = true
+
+[[test]]
+filename = "errors/openmp_threadprivate_10.f90"
+asr_openmp = true
+
+[[test]]
 filename = "errors/openmp_default_02.f90"
 asr_openmp = true
 

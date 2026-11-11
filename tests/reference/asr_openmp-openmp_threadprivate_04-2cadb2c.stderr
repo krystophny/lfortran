@@ -1,0 +1,5 @@
+semantic error: malformed `!$omp threadprivate(...)` directive: unexpected text after variable list
+ --> tests/errors/openmp_threadprivate_04.f90:5:5
+  |
+5 |     !$omp threadprivate(x) extra
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ 

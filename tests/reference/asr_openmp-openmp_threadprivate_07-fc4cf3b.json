@@ -1,0 +1,13 @@
+{
+    "basename": "asr_openmp-openmp_threadprivate_07-fc4cf3b",
+    "cmd": "lfortran --show-asr --no-color --openmp {infile} -o {outfile}",
+    "infile": "tests/errors/openmp_threadprivate_07.f90",
+    "infile_hash": "b8c3aa89bc23b51e37b67567f5b63e7eef13256c76cba9b28004fced",
+    "outfile": null,
+    "outfile_hash": null,
+    "stdout": null,
+    "stdout_hash": null,
+    "stderr": "asr_openmp-openmp_threadprivate_07-fc4cf3b.stderr",
+    "stderr_hash": "8abdd1572afbfdaace735346b1450126d79de921688a71a634ae3137",
+    "returncode": 2
+}

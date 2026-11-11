@@ -1,0 +1,5 @@
+semantic error: malformed `!$omp threadprivate(...)` directive: empty variable name in list
+ --> tests/errors/openmp_threadprivate_05.f90:5:5
+  |
+5 |     !$omp threadprivate(x,)
+  |     ^^^^^^^^^^^^^^^^^^^^^^^ 

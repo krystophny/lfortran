@@ -1,0 +1,5 @@
+semantic error: threadprivate variable 'x' in a common block is not supported yet
+ --> tests/errors/openmp_threadprivate_10.f90:5:22
+  |
+5 |     common /otp_blk/ x
+  |                      ^ 

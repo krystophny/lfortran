@@ -1,0 +1,5 @@
+semantic error: symbol `t` named in `!$omp threadprivate(...)` is not a variable
+ --> tests/errors/openmp_threadprivate_07.f90:7:5
+  |
+7 |     !$omp threadprivate(t)
+  |     ^^^^^^^^^^^^^^^^^^^^^^ 

@@ -1,0 +1,5 @@
+semantic error: symbol `x` named in `!$omp threadprivate(...)` must be a module variable
+ --> tests/errors/openmp_threadprivate_09.f90:5:5
+  |
+5 |     !$omp threadprivate(x)
+  |     ^^^^^^^^^^^^^^^^^^^^^^ 
