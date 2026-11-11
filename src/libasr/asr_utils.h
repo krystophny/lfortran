@@ -1014,7 +1014,7 @@ static inline bool has_own_storage(const ASR::Variable_t &v) {
 // variable: internal procedures reference them directly.
 static inline bool is_reached_through_host_frame(const ASR::Variable_t &v) {
     return v.m_common_block == nullptr &&
-        v.m_storage != ASR::storage_typeType::Threadprivate;
+        v.m_storage != ASR::storage_typeType::ThreadPrivate;
 }
 
 static inline bool is_reference(const ASR::ttype_t *t) {

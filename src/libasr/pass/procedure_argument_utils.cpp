@@ -212,7 +212,7 @@ bool copyable_scope(SymbolTable *scope, bool internal_procedures) {
             case ASR::symbolType::Variable: {
                 ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(sym);
                 if (v->m_storage == ASR::storage_typeType::Save ||
-                        v->m_storage == ASR::storage_typeType::Threadprivate ||
+                        v->m_storage == ASR::storage_typeType::ThreadPrivate ||
                         v->m_common_block != nullptr) {
                     return false;
                 }

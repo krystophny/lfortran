@@ -3087,7 +3087,7 @@ public:
                     Level::Error, Stage::Semantic, { Label("", {loc}) }));
                 throw SemanticAbort();
             }
-            var->m_storage = ASR::storage_typeType::Threadprivate;
+            var->m_storage = ASR::storage_typeType::ThreadPrivate;
         }
     }
 
@@ -7081,7 +7081,7 @@ public:
             reject("variable '" + name + "' with the BIND attribute cannot "
                 "be in a common block");
         }
-        if (v.m_storage == ASR::storage_typeType::Threadprivate) {
+        if (v.m_storage == ASR::storage_typeType::ThreadPrivate) {
             reject("threadprivate variable '" + name + "' in a common block "
                 "is not supported yet");
         }

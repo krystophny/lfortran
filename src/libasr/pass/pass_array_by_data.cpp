@@ -1529,7 +1529,7 @@ class EditProcedureCallsVisitor : public ASR::ASRPassBaseWalkVisitor<EditProcedu
                         ASR::ttype_t* element = ASRUtils::type_get_past_array(
                             ASRUtils::type_get_past_allocatable_pointer(var->m_type));
                         if (var->m_storage == ASR::storage_typeType::Save ||
-                                var->m_storage == ASR::storage_typeType::Threadprivate ||
+                                var->m_storage == ASR::storage_typeType::ThreadPrivate ||
                                 var->m_common_block ||
                                 !(ASRUtils::is_integer(*element) || ASRUtils::is_real(*element) ||
                                   ASRUtils::is_complex(*element) || ASRUtils::is_logical(*element))) {

@@ -355,7 +355,7 @@ cptr_kind = CPointer | CFunPointer | CPtrUnspecified
 -- of its host in a thunk, see nested_vars), bound on entry before
 -- any other declaration of the procedure is evaluated, like a dummy argument
 -- associated by reference. Its type is that of the designated variable.
-storage_type = Default | Save | Parameter | Threadprivate | ResultArgument | HostAssociated
+storage_type = Default | Save | Parameter | ThreadPrivate | ResultArgument | HostAssociated
 -- How a CommonBlock view provides the block's storage: a Tentative view
 -- gives no initial value, an Initialized one gives initial values (even all
 -- zero ones) through its variables, and an External one (in a module read
