@@ -5741,6 +5741,12 @@ semantic error: Call to impure procedure 'cc1_impure_s' is not allowed inside a 
 4853 |         call cc1_impure_s(x)  ! {Error} Call to impure procedure 'cc1_impure_s' is not allowed inside a PURE procedure
      |         ^^^^^^^^^^^^^^^^^^^^ 
 
+semantic error: Argument to 'present' must be an optional dummy argument
+    --> tests/errors/continue_compilation_1.f90:4891:22
+     |
+4891 |     print *, present(not_a_dummy_function) ! {Error} Argument to 'present' must be an optional dummy argument
+     |                      ^^^^^^^^^^^^^^^^^^^^ Expected an optional variable or procedure here
+
 semantic error: branch to label 20 enters a DO loop from outside it
     --> tests/errors/continue_compilation_1.f90:4024:9
      |

@@ -4884,3 +4884,13 @@ module cc1_requirement_undeclared_argument
         end function
     end template
 end module
+
+! PRESENT requires an optional dummy argument, also for a procedure (#9445).
+subroutine present_nondummy_function()
+    implicit none
+    print *, present(not_a_dummy_function) ! {Error} Argument to 'present' must be an optional dummy argument
+contains
+    integer function not_a_dummy_function()
+        not_a_dummy_function = 1
+    end function
+end subroutine
