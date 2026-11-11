@@ -7,25 +7,17 @@
                     (SymbolTable
                         2
                         {
-                            1_block_t:
-                                (ExternalSymbol
+                            common~block:
+                                (CommonBlock
                                     2
-                                    1_block_t
-                                    4 t
+                                    common~block
                                     block
+                                    __module_file_common_block_block_struct_instance_block
+                                    [2 t]
                                     []
-                                    t
-                                    Public
-                                ),
-                            block:
-                                (ExternalSymbol
-                                    2
-                                    block
-                                    3 block
-                                    file_common_block_block
-                                    []
-                                    block
-                                    Public
+                                    Source
+                                    Default
+                                    Tentative
                                 ),
                             i:
                                 (Variable
@@ -47,19 +39,37 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
-                            struct_instance_block:
-                                (ExternalSymbol
+                            t:
+                                (Variable
                                     2
-                                    struct_instance_block
-                                    3 struct_instance_block
-                                    file_common_block_block
+                                    t
                                     []
-                                    struct_instance_block
+                                    Local
+                                    ()
+                                    ()
+                                    Default
+                                    (Integer 4)
+                                    ()
+                                    Source
                                     Public
+                                    Required
+                                    .false.
+                                    .false.
+                                    .false.
+                                    ()
+                                    .false.
+                                    .false.
+                                    .false.
+                                    NotMethod
+                                    ()
+                                    []
+                                    2 common~block
                                 )
                         })
                     cmdo
@@ -84,23 +94,15 @@
                         ()
                         ((Var 2 i)
                         (IntegerConstant 1 (Integer 4) Decimal)
-                        (StructInstanceMember
-                            (Var 2 struct_instance_block)
-                            2 1_block_t
-                            (Integer 4)
-                            ()
-                        )
-                        ())
+                        (Var 2 t)
+                        (IntegerConstant 1 (Integer 4) Decimal))
                         [(Print
                             (StringFormat
                                 ()
-                                [(StructInstanceMember
-                                    (Var 2 struct_instance_block)
-                                    2 1_block_t
-                                    (Integer 4)
-                                    ()
-                                )]
+                                [(Var 2 t)]
                                 FormatFortran
+                                []
+                                ()
                                 (Allocatable
                                     (String 1 () DeferredLength DescriptorString)
                                 )
@@ -111,99 +113,6 @@
                     )]
                     ()
                     Public
-                    .false.
-                    .false.
-                    ()
-                ),
-            file_common_block_block:
-                (Module
-                    (SymbolTable
-                        3
-                        {
-                            block:
-                                (Struct
-                                    (SymbolTable
-                                        4
-                                        {
-                                            t:
-                                                (Variable
-                                                    4
-                                                    t
-                                                    []
-                                                    Local
-                                                    ()
-                                                    ()
-                                                    Default
-                                                    (Integer 4)
-                                                    ()
-                                                    Source
-                                                    Public
-                                                    Required
-                                                    .false.
-                                                    .false.
-                                                    .false.
-                                                    ()
-                                                    .false.
-                                                    .false.
-                                                    NotMethod
-                                                    ()
-                                                    []
-                                                )
-                                        })
-                                    block
-                                    (StructType
-                                        []
-                                        []
-                                        .true.
-                                        .false.
-                                    )
-                                    []
-                                    [t]
-                                    []
-                                    Source
-                                    Public
-                                    .false.
-                                    .false.
-                                    .true.
-                                    []
-                                    ()
-                                    ()
-                                    []
-                                ),
-                            struct_instance_block:
-                                (Variable
-                                    3
-                                    struct_instance_block
-                                    []
-                                    Local
-                                    ()
-                                    ()
-                                    Default
-                                    (StructType
-                                        []
-                                        []
-                                        .true.
-                                        .false.
-                                    )
-                                    3 block
-                                    Source
-                                    Public
-                                    Required
-                                    .false.
-                                    .false.
-                                    .false.
-                                    ()
-                                    .false.
-                                    .false.
-                                    NotMethod
-                                    ()
-                                    []
-                                )
-                        })
-                    file_common_block_block
-                    ()
-                    []
-                    .false.
                     .false.
                     .false.
                     ()
