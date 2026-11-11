@@ -152,14 +152,16 @@ class Parser:
             addresses.append([address, line, column, file_id])
             self.line = self.file.readline()
 
-        self.line = self.file.readline()
+        # llvm-dwarfdump 7 and 8 start the next table right after the rows,
+        # without the blank line that newer versions print.
+        if not self.line.startswith("debug_line"):
+            self.line = self.file.readline()
 
         d = DebugLine(include_directories, file_names, addresses)
         return d
 
 def ast_to_asr(ast):
     lines = []
-    last_address = -1
     global_filename_id = 0
     global_filenames = []
     global_addresses = []
@@ -177,10 +179,12 @@ def ast_to_asr(ast):
             global_filename_id += 1
         for address, line_num, column, file_id in line.addresses:
             filename = global_filenames[filenames[file_id]]
-            assert last_address <= address
-            last_address = address
             if line_num != 0:
                 global_addresses.append([address, line_num, filenames[file_id]])
+    # Compilation units and sequences can arrive out of address order. The
+    # stacktrace consumer binary-searches one global table; preserve row order
+    # for equal addresses while keeping each line and filename with its address.
+    global_addresses.sort(key=lambda row: row[0])
     return ASRDebugLines(global_filenames, global_addresses)
 
 

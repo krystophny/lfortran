@@ -37,9 +37,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     subrout
@@ -83,7 +85,7 @@
                                     (StructType
                                         []
                                         []
-                                        .false.
+                                        .true.
                                         .true.
                                     )
                                     []
@@ -103,6 +105,7 @@
                     abstract_type
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.

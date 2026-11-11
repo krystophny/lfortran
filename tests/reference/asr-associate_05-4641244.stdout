@@ -33,9 +33,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             associate_block:
                                 (AssociateBlock
@@ -66,13 +68,15 @@
                                                     Required
                                                     .false.
                                                     .false.
-                                                    .false.
+                                                    .true.
                                                     ()
+                                                    .false.
                                                     .false.
                                                     .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             z:
                                                 (Variable
@@ -100,9 +104,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     associate_block
@@ -254,10 +260,13 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )
                                     (Associate
                                         (Var 3 v)
                                         (Var 2 myreal)
+                                        NoPointerBounds
                                     )
                                     (Assignment
                                         (Var 3 v)
@@ -277,6 +286,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )
                                     (Assignment
                                         (ArrayItem
@@ -287,6 +298,7 @@
                                             (Real 4)
                                             ColMajor
                                             ()
+                                            .false.
                                         )
                                         (RealBinOp
                                             (ArrayItem
@@ -297,6 +309,7 @@
                                                 (Real 4)
                                                 ColMajor
                                                 ()
+                                                .false.
                                             )
                                             Mul
                                             (RealConstant
@@ -307,6 +320,8 @@
                                             ()
                                         )
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )
@@ -365,6 +380,8 @@
                                             ()
                                         )
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )
@@ -451,6 +468,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )]
                                 ),
                             myreal:
@@ -481,9 +500,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             theta:
                                 (Variable
@@ -511,9 +532,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             x:
                                 (Variable
@@ -541,9 +564,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             y:
                                 (Variable
@@ -571,9 +596,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     associate_05
@@ -632,6 +659,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 2 y)
@@ -675,6 +704,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 2 myreal)
@@ -708,6 +739,8 @@
                             ()
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -753,6 +786,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 2 a)
@@ -796,6 +831,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (AssociateBlockCall
                         2 associate_block
@@ -805,6 +842,8 @@
                             ()
                             [(Var 2 myreal)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )

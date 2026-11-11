@@ -32,9 +32,11 @@
               nil
               false
               false
+              false
               :NotMethod
               nil
               []
+              nil
             )
             "res" (Variable
               1
@@ -57,9 +59,11 @@
               nil
               false
               false
+              false
               :NotMethod
               nil
               []
+              nil
             )
             "~select_rank_block_" (Block
               (SymbolTable
@@ -97,6 +101,8 @@
                     nil
                   )
                   nil
+                  false
+                  false
                   false
                   false
                 )

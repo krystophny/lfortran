@@ -4,7 +4,7 @@
 
 <!-- BEGIN AUTO: asr -->
 ```
-DebugCheckArrayBounds(expr target, expr* components, bool move_allocation)
+DebugCheckArrayBounds(expr target, expr* components, array_extent_check* checks, bool move_allocation)
 ```
 <!-- END AUTO: asr -->
 
@@ -17,6 +17,7 @@ _No documentation yet._
 <!-- BEGIN AUTO: verify -->
 * `DebugCheckArrayBounds::m_target` must have an Array type
 * `DebugCheckArrayBounds::n_components` should be greater than 0
-* `DebugCheckArrayBounds::m_components` element must be Var, ArrayPhysicalCast, StructInstanceMember, BitCast, or ArrayConstant
+* `DebugCheckArrayBounds::m_components` element must be Var, ArrayPhysicalCast, StructInstanceMember, BitCast, ArrayConstant, ArrayConstructor, or ArraySection without vector subscripts
+* `DebugCheckArrayBounds::m_components` ArrayConstructor must have its integer(4) size in its type
 * `DebugCheckArrayBounds::m_components` element must have an Array type
 <!-- END AUTO: verify -->

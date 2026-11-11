@@ -4,7 +4,7 @@
 
 <!-- BEGIN AUTO: asr -->
 ```
-Assignment(expr target, expr value, stmt? overloaded, bool realloc_lhs, bool move_allocation)
+Assignment(expr target, expr value, stmt? overloaded, bool realloc_lhs, bool move_allocation, bool new_target, bool new_allocation)
 ```
 <!-- END AUTO: asr -->
 

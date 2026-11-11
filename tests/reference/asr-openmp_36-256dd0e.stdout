@@ -27,9 +27,37 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
+                                ),
+                            i__dc:
+                                (Variable
+                                    2
+                                    i__dc
+                                    []
+                                    Local
+                                    ()
+                                    ()
+                                    Default
+                                    (Integer 4)
+                                    ()
+                                    Source
+                                    Public
+                                    Required
+                                    .false.
+                                    .false.
+                                    .false.
+                                    ()
+                                    .false.
+                                    .false.
+                                    .false.
+                                    NotMethod
+                                    ()
+                                    []
+                                    ()
                                 ),
                             j:
                                 (Variable
@@ -51,9 +79,37 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
+                                ),
+                            j__dc:
+                                (Variable
+                                    2
+                                    j__dc
+                                    []
+                                    Local
+                                    ()
+                                    ()
+                                    Default
+                                    (Integer 4)
+                                    ()
+                                    Source
+                                    Public
+                                    Required
+                                    .false.
+                                    .false.
+                                    .false.
+                                    ()
+                                    .false.
+                                    .false.
+                                    .false.
+                                    NotMethod
+                                    ()
+                                    []
+                                    ()
                                 ),
                             res:
                                 (Variable
@@ -75,22 +131,24 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     openmp_36
                     []
                     [(DoConcurrentLoop
-                        [((Var 2 i)
+                        [((Var 2 i__dc)
                         (IntegerConstant 1 (Integer 4) Decimal)
                         (IntegerConstant 5 (Integer 4) Decimal)
-                        ())
-                        ((Var 2 j)
+                        (IntegerConstant 1 (Integer 4) Decimal))
+                        ((Var 2 j__dc)
                         (IntegerConstant 1 (Integer 4) Decimal)
                         (IntegerConstant 3 (Integer 4) Decimal)
-                        ())]
+                        (IntegerConstant 1 (Integer 4) Decimal))]
                         []
                         []
                         []
@@ -100,9 +158,9 @@
                                 (Var 2 res)
                                 Add
                                 (IntegerBinOp
-                                    (Var 2 i)
+                                    (Var 2 i__dc)
                                     Mul
-                                    (Var 2 j)
+                                    (Var 2 j__dc)
                                     (Integer 4)
                                     ()
                                 )
@@ -112,6 +170,8 @@
                             ()
                             .false.
                             .false.
+                            .false.
+                            .false.
                         )]
                     )
                     (Print
@@ -119,6 +179,8 @@
                             ()
                             [(Var 2 res)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )

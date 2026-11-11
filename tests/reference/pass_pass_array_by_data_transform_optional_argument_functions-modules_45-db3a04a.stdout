@@ -29,9 +29,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             file_scope_flag:
                                 (ExternalSymbol
@@ -83,9 +85,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             os_valid:
                                 (Variable
@@ -107,9 +111,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             profile_config_t:
                                 (ExternalSymbol
@@ -143,9 +149,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             profiles:
                                 (Variable
@@ -213,9 +221,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             profindex:
                                 (Variable
@@ -237,9 +247,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     modules_45
@@ -349,9 +361,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             __libasr_created_dummy_variable_1:
                                                 (Variable
@@ -373,9 +387,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             __libasr_created_dummy_variable_2:
                                                 (Variable
@@ -397,9 +413,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             __libasr_created_dummy_variable_3:
                                                 (Variable
@@ -421,9 +439,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             __libasr_created_dummy_variable_4:
                                                 (Variable
@@ -456,9 +476,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             __libasr_created_variable_:
                                                 (Variable
@@ -480,9 +502,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             __libasr_created_variable_pointer_:
                                                 (Variable
@@ -506,9 +530,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             __libasr_created_variable_pointer_1:
                                                 (Variable
@@ -532,9 +558,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             __libasr_created_variable_pointer_2:
                                                 (Variable
@@ -558,9 +586,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             __libasr_created_variable_pointer_3:
                                                 (Variable
@@ -584,9 +614,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             __libasr_created_variable_pointer_4:
                                                 (Variable
@@ -617,13 +649,15 @@
                                                     Required
                                                     .false.
                                                     .false.
-                                                    .false.
+                                                    .true.
                                                     ()
+                                                    .false.
                                                     .false.
                                                     .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             c_flags:
                                                 (Variable
@@ -647,9 +681,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             compiler_name:
                                                 (Variable
@@ -673,9 +709,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             cxx_flags:
                                                 (Variable
@@ -699,9 +737,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             err_message:
                                                 (Variable
@@ -725,9 +765,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             file_flags:
                                                 (Variable
@@ -751,9 +793,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             file_name:
                                                 (Variable
@@ -777,9 +821,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             file_scope_flags:
                                                 (Variable
@@ -814,9 +860,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             flags:
                                                 (Variable
@@ -840,9 +888,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             ifile:
                                                 (Variable
@@ -864,9 +914,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             ikey:
                                                 (Variable
@@ -888,9 +940,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             is_valid:
                                                 (Variable
@@ -912,9 +966,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             key_name:
                                                 (Variable
@@ -938,9 +994,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             link_time_flags:
                                                 (Variable
@@ -964,9 +1022,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             os_type:
                                                 (Variable
@@ -988,9 +1048,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             os_valid:
                                                 (Variable
@@ -1012,9 +1074,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             profile_name:
                                                 (Variable
@@ -1038,9 +1102,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             profiles:
                                                 (Variable
@@ -1108,9 +1174,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             profindex:
                                                 (Variable
@@ -1132,9 +1200,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             stat:
                                                 (Variable
@@ -1156,9 +1226,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     get_flags
@@ -1251,10 +1323,12 @@
                                         [(Associate
                                             (Var 6 __libasr_created_variable_pointer_)
                                             (Var 6 flags)
+                                            NoPointerBounds
                                         )]
                                         [(Associate
                                             (Var 6 __libasr_created_variable_pointer_)
                                             (Var 6 __libasr_created_dummy_variable_)
+                                            NoPointerBounds
                                         )]
                                     )
                                     (If
@@ -1269,10 +1343,12 @@
                                         [(Associate
                                             (Var 6 __libasr_created_variable_pointer_1)
                                             (Var 6 c_flags)
+                                            NoPointerBounds
                                         )]
                                         [(Associate
                                             (Var 6 __libasr_created_variable_pointer_1)
                                             (Var 6 __libasr_created_dummy_variable_1)
+                                            NoPointerBounds
                                         )]
                                     )
                                     (If
@@ -1287,10 +1363,12 @@
                                         [(Associate
                                             (Var 6 __libasr_created_variable_pointer_2)
                                             (Var 6 cxx_flags)
+                                            NoPointerBounds
                                         )]
                                         [(Associate
                                             (Var 6 __libasr_created_variable_pointer_2)
                                             (Var 6 __libasr_created_dummy_variable_2)
+                                            NoPointerBounds
                                         )]
                                     )
                                     (If
@@ -1305,10 +1383,12 @@
                                         [(Associate
                                             (Var 6 __libasr_created_variable_pointer_3)
                                             (Var 6 link_time_flags)
+                                            NoPointerBounds
                                         )]
                                         [(Associate
                                             (Var 6 __libasr_created_variable_pointer_3)
                                             (Var 6 __libasr_created_dummy_variable_3)
+                                            NoPointerBounds
                                         )]
                                     )
                                     (If
@@ -1323,10 +1403,12 @@
                                         [(Associate
                                             (Var 6 __libasr_created_variable_pointer_4)
                                             (Var 6 file_scope_flags)
+                                            NoPointerBounds
                                         )]
                                         [(Associate
                                             (Var 6 __libasr_created_variable_pointer_4)
                                             (Var 6 __libasr_created_dummy_variable_4)
+                                            NoPointerBounds
                                         )]
                                     )
                                     (Assignment
@@ -1376,6 +1458,7 @@
                                             )
                                             ColMajor
                                             ()
+                                            .false.
                                         )
                                         (FunctionCall
                                             2 new_profile
@@ -1518,6 +1601,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )
                                     (Assignment
                                         (Var 6 profindex)
@@ -1529,6 +1614,8 @@
                                             ()
                                         )
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )]
@@ -1563,9 +1650,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             __libasr_is_present_cxx_flags:
                                                 (Variable
@@ -1587,9 +1676,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             __libasr_is_present_file_scope_flags:
                                                 (Variable
@@ -1611,9 +1702,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             __libasr_is_present_flags:
                                                 (Variable
@@ -1635,9 +1728,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             __libasr_is_present_is_built_in:
                                                 (Variable
@@ -1659,9 +1754,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             __libasr_is_present_link_time_flags:
                                                 (Variable
@@ -1683,9 +1780,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             c_flags:
                                                 (Variable
@@ -1707,9 +1806,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             compiler:
                                                 (Variable
@@ -1731,9 +1832,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             cxx_flags:
                                                 (Variable
@@ -1755,9 +1858,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             file_scope_flags:
                                                 (Variable
@@ -1790,9 +1895,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             flags:
                                                 (Variable
@@ -1814,9 +1921,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             is_built_in:
                                                 (Variable
@@ -1838,9 +1947,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             link_time_flags:
                                                 (Variable
@@ -1862,9 +1973,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             os_type:
                                                 (Variable
@@ -1886,9 +1999,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             profile:
                                                 (Variable
@@ -1948,9 +2063,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             profile_name:
                                                 (Variable
@@ -1972,9 +2089,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     new_profile
@@ -2106,9 +2225,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             compiler:
                                                 (Variable
@@ -2132,9 +2253,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             cxx_flags:
                                                 (Variable
@@ -2158,9 +2281,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             file_scope_flags:
                                                 (Variable
@@ -2195,9 +2320,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             flags:
                                                 (Variable
@@ -2221,9 +2348,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             is_built_in:
                                                 (Variable
@@ -2245,9 +2374,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             link_time_flags:
                                                 (Variable
@@ -2271,9 +2402,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             os_type:
                                                 (Variable
@@ -2295,9 +2428,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             profile_name:
                                                 (Variable
@@ -2321,9 +2456,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     profile_config_t
@@ -2391,6 +2528,7 @@
                     modules_45_fpm_manifest_profile
                     ()
                     [modules_45_fpm_manifest_profile]
+                    .false.
                     .false.
                     .false.
                     .false.

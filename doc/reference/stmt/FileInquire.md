@@ -15,5 +15,6 @@ _No documentation yet._
 ## Verify
 
 <!-- BEGIN AUTO: verify -->
-None.
+* FileInquire size must be a scalar integer(8)
+* FileInquire pos must be a scalar integer(8)
 <!-- END AUTO: verify -->

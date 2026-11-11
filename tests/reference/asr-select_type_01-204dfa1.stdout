@@ -52,9 +52,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     base
@@ -112,9 +114,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             bptr:
                                 (Variable
@@ -143,9 +147,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             child:
                                 (Struct
@@ -172,9 +178,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     child
@@ -222,9 +230,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             perform_select_type:
                                 (Function
@@ -258,9 +268,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             ~select_type_block_:
                                                 (Block
@@ -306,6 +318,8 @@
                                                                 ()
                                                             )]
                                                             FormatFortran
+                                                            []
+                                                            ()
                                                             (Allocatable
                                                                 (String 1 () DeferredLength DescriptorString)
                                                             )
@@ -418,6 +432,8 @@
                                                                 ()
                                                             )]
                                                             FormatFortran
+                                                            []
+                                                            ()
                                                             (Allocatable
                                                                 (String 1 () DeferredLength DescriptorString)
                                                             )
@@ -560,6 +576,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Print
                         (StringFormat
@@ -571,6 +589,8 @@
                                 ()
                             )]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -593,6 +613,8 @@
                                 ()
                             )]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -602,6 +624,7 @@
                     (Associate
                         (Var 2 bptr)
                         (Var 2 child_target)
+                        NoPointerBounds
                     )
                     (SubroutineCall
                         2 perform_select_type
@@ -613,6 +636,7 @@
                     (Associate
                         (Var 2 bptr)
                         (Var 2 base_target)
+                        NoPointerBounds
                     )
                     (SubroutineCall
                         2 perform_select_type

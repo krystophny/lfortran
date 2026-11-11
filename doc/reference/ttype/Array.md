@@ -19,6 +19,7 @@ _No documentation yet._
 * Assumed-rank arrays must have 0 dimensions
 * Array type cannot have 0 dimensions.
 * Array type cannot be nested.
+* Array with physical type `StringArraySinglePointer` must have a string element type
 * Array of strings' physical type shouldn't be `FixedSizeArray`
 * Array of strings with physical type `StringArraySinglePointer` must have string physical type `CChar`, not `DescriptorString`
 * Array of classes can't be of physical type `FixedSizeArray`

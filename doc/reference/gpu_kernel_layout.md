@@ -11,6 +11,8 @@
 * `packed` of type `bool`
 * `source_argument_count` of type `int`
 * `device_functions` of type `symbol*`
+* `lanes` of type `symbol?`
+* `lanes_max` of type `int`
 <!-- END AUTO: fields -->
 
 ## Documentation

@@ -59,9 +59,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             associate_block:
                                                 (AssociateBlock
@@ -117,9 +119,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     associate_block
@@ -146,8 +150,9 @@
                                                                 )
                                                                 ColMajor
                                                                 ()
+                                                                .false.
                                                             )
-                                                            9 1_build_target_ptr_ptr
+                                                            13 1_build_target_ptr_ptr
                                                             (Pointer
                                                                 (StructType
                                                                     [(Allocatable
@@ -160,11 +165,12 @@
                                                             )
                                                             ()
                                                         )
+                                                        NoPointerBounds
                                                     )
                                                     (Assignment
                                                         (StructInstanceMember
                                                             (Var 13 temp)
-                                                            12 1_string_t_s
+                                                            14 1_string_t_s
                                                             (Allocatable
                                                                 (String 1 () DeferredLength DescriptorString)
                                                             )
@@ -172,13 +178,15 @@
                                                         )
                                                         (StructInstanceMember
                                                             (Var 14 target)
-                                                            12 1_build_target_t_output_dir
+                                                            14 1_build_target_t_output_dir
                                                             (Allocatable
                                                                 (String 1 () DeferredLength DescriptorString)
                                                             )
                                                             ()
                                                         )
                                                         ()
+                                                        .false.
+                                                        .false.
                                                         .false.
                                                         .false.
                                                     )
@@ -206,6 +214,8 @@
                                                             ()
                                                         )
                                                         ()
+                                                        .false.
+                                                        .false.
                                                         .false.
                                                         .false.
                                                     )]
@@ -245,9 +255,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             i:
                                                 (Variable
@@ -269,9 +281,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             j:
                                                 (Variable
@@ -293,9 +307,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             model:
                                                 (Variable
@@ -322,9 +338,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             targets:
                                                 (Variable
@@ -364,9 +382,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             temp:
                                                 (Variable
@@ -395,9 +415,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             verbose:
                                                 (Variable
@@ -419,9 +441,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     build_package_build_target_ptr____0
@@ -497,7 +521,7 @@
                                             (Integer 4)
                                             ()
                                         )
-                                        ())
+                                        (IntegerConstant 1 (Integer 4) Decimal))
                                         [(AssociateBlockCall
                                             13 associate_block
                                         )]
@@ -567,9 +591,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     build_target_ptr
@@ -626,9 +652,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     build_target_t
@@ -693,9 +721,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             settings:
                                                 (Variable
@@ -722,9 +752,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             targets:
                                                 (Variable
@@ -766,9 +798,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     cmd_build
@@ -801,26 +835,24 @@
                                             (Var 10 targets)
                                             DescriptorArray
                                             PointerArray
-                                            (Allocatable
-                                                (Array
-                                                    (StructType
-                                                        [(Pointer
-                                                            (StructType
-                                                                []
-                                                                []
-                                                                .true.
-                                                                .false.
-                                                            )
-                                                        )]
-                                                        []
-                                                        .true.
-                                                        .false.
-                                                    )
-                                                    [(()
-                                                    ())]
-                                                    PointerArray
-                                                    Global
+                                            (Array
+                                                (StructType
+                                                    [(Pointer
+                                                        (StructType
+                                                            []
+                                                            []
+                                                            .true.
+                                                            .false.
+                                                        )
+                                                    )]
+                                                    []
+                                                    .true.
+                                                    .false.
                                                 )
+                                                [(()
+                                                ())]
+                                                PointerArray
+                                                Global
                                             )
                                             ()
                                         ))
@@ -904,9 +936,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     fpm_cmd_settings
@@ -983,9 +1017,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     string_t
@@ -1014,6 +1050,7 @@
                     modules_37_fpm_backend
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.

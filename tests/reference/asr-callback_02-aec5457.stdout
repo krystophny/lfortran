@@ -32,9 +32,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             b:
                                                 (Variable
@@ -56,9 +58,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             f:
                                                 (Function
@@ -85,9 +89,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             x:
                                                                 (Variable
@@ -109,9 +115,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     f
@@ -161,9 +169,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     cb
@@ -218,6 +228,8 @@
                                             ()
                                             [(Var 3 res)]
                                             FormatFortran
+                                            []
+                                            ()
                                             (Allocatable
                                                 (String 1 () DeferredLength DescriptorString)
                                             )
@@ -237,6 +249,8 @@
                                             ()
                                             [(Var 3 res)]
                                             FormatFortran
+                                            []
+                                            ()
                                             (Allocatable
                                                 (String 1 () DeferredLength DescriptorString)
                                             )
@@ -261,12 +275,16 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )
                                     (Print
                                         (StringFormat
                                             ()
                                             [(Var 3 res)]
                                             FormatFortran
+                                            []
+                                            ()
                                             (Allocatable
                                                 (String 1 () DeferredLength DescriptorString)
                                             )
@@ -304,9 +322,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             d:
                                                 (Variable
@@ -328,9 +348,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             f:
                                                 (Function
@@ -357,9 +379,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             x:
                                                                 (Variable
@@ -381,9 +405,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     f
@@ -427,6 +453,8 @@
                                                         ()
                                                         .false.
                                                         .false.
+                                                        .false.
+                                                        .false.
                                                     )]
                                                     ()
                                                     Public
@@ -454,9 +482,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             res:
                                                 (Variable
@@ -478,9 +508,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     foo
@@ -521,6 +553,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )]
                                     (Var 5 foo)
                                     Public
@@ -532,6 +566,7 @@
                     callback_02
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.
@@ -594,9 +629,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     main
@@ -620,6 +657,8 @@
                             ()
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )]

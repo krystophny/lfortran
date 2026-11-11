@@ -27,9 +27,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             i2:
                                 (Variable
@@ -51,9 +53,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             i3:
                                 (Variable
@@ -81,9 +85,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             r1:
                                 (Variable
@@ -111,9 +117,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             r2:
                                 (Variable
@@ -150,9 +158,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             r3:
                                 (Variable
@@ -180,9 +190,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             r4:
                                 (Variable
@@ -219,9 +231,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             x:
                                 (Variable
@@ -243,9 +257,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             y:
                                 (Variable
@@ -267,9 +283,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     constant_kinds
@@ -283,6 +301,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 2 y)
@@ -300,6 +320,8 @@
                             ()
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -312,6 +334,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 2 y)
@@ -331,11 +355,6 @@
                         ()
                         .false.
                         .false.
-                    )
-                    (Assignment
-                        (Var 2 x)
-                        (IntegerConstant 1 (Integer 4) Decimal)
-                        ()
                         .false.
                         .false.
                     )
@@ -343,6 +362,17 @@
                         (Var 2 x)
                         (IntegerConstant 1 (Integer 4) Decimal)
                         ()
+                        .false.
+                        .false.
+                        .false.
+                        .false.
+                    )
+                    (Assignment
+                        (Var 2 x)
+                        (IntegerConstant 1 (Integer 4) Decimal)
+                        ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -356,6 +386,8 @@
                             ()
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )]

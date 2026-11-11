@@ -27,9 +27,11 @@
               nil
               false
               false
+              false
               :NotMethod
               nil
               []
+              nil
             )
             "y" (Variable
               1
@@ -52,9 +54,11 @@
               nil
               false
               false
+              false
               :NotMethod
               nil
               []
+              nil
             )
           }
         )
@@ -82,6 +86,8 @@
               nil
             )
             nil
+            false
+            false
             false
             false
           )

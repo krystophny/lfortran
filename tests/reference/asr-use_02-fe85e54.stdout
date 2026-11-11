@@ -39,9 +39,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     use_02
@@ -50,6 +52,8 @@
                         (Var 9 i)
                         (IntegerConstant 1234567890123456789 (Integer 8) Decimal)
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -88,6 +92,7 @@
                     use_02_module
                     ()
                     [iso_fortran_env]
+                    .false.
                     .false.
                     .false.
                     .false.

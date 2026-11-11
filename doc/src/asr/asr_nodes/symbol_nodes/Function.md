@@ -11,7 +11,7 @@ Function(symbol_table symtab, identifier name,
     ttype function_signature, identifier* dependencies, expr* args,
     stmt* body, expr? return_var, access access, bool deterministic,
     bool side_effect_free, string? module_file, gpu_kernel_layout? gpu,
-    location start_name, location end_name)
+    interface_body? interface_body, location start_name, location end_name)
 ```
 
 ### Arguments
@@ -30,6 +30,7 @@ Function(symbol_table symtab, identifier name,
 | `side_effect_free` | `true` when a call has no effect other than its result. Reserved for the same optimizations. |
 | `module_file` | the module file the procedure was loaded from, when it was; `nil` otherwise. |
 | `gpu` | the finalized GPU kernel layout, or `nil`. Records buffer and scalar bindings, workspace extents and parameters, and the device call graph. |
+| `interface_body` | facts about an interface body (`deftype=Interface`), or `nil`. See [interface_body](../helper_nodes/interface_body.md). |
 | `start_name` | the source span of the name in the `function` or `subroutine` statement. |
 | `end_name` | the source span of the name in the matching `end` statement. |
 
@@ -49,6 +50,18 @@ The dummy arguments appear twice: in `symtab`, which owns the
 [Variable](Variable.md) symbols, and in `args`, which fixes their order. The
 result variable of a function is likewise owned by `symtab`, with
 `intent=ReturnVar`, and referenced by `return_var`.
+
+A nonallocatable, nonpointer character dummy (a scalar, or an explicit-shape
+or assumed-size array) of a procedure without BIND(C) is passed as a pointer
+to its data, with the length of the actual (the element length of an array)
+passed by value in a hidden argument, as gfortran does. The
+`string_length_arguments` pass makes this explicit: it gives each such dummy an
+`integer(8), value, intent(in)` dummy after all the other dummies, in the order
+of the character dummies, makes it the `len` of an assumed-length dummy, and
+appends the lengths of the actuals to every call. Afterwards ASR verification
+requires every such dummy to have its hidden dummy and every call to pass it.
+`ASRUtils::is_string_dummy_with_hidden_length()` says which dummies these are;
+a code generator passes them as their data pointer alone.
 
 `deterministic` and `side_effect_free` are declarations about the procedure,
 not consequences of its body. A frontend that cannot prove them must leave

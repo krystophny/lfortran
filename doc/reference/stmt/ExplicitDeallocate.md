@@ -4,7 +4,7 @@
 
 <!-- BEGIN AUTO: asr -->
 ```
-ExplicitDeallocate(expr* vars)
+ExplicitDeallocate(expr* vars, expr? stat, expr? errmsg)
 ```
 <!-- END AUTO: asr -->
 

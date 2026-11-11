@@ -33,9 +33,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     array_02_transfer
@@ -55,6 +57,8 @@
                             ColMajor
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -86,6 +90,8 @@
                                 ()
                             )]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )

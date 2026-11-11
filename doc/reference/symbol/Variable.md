@@ -4,7 +4,7 @@
 
 <!-- BEGIN AUTO: asr -->
 ```
-Variable(symbol_table parent_symtab, identifier name, identifier* dependencies, intent intent, expr? symbolic_value, expr? value, storage_type storage, ttype type, symbol? type_declaration, abi abi, access access, presence presence, bool value_attr, bool target_attr, bool contiguous_attr, string? bindc_name, bool is_volatile, bool is_protected, pass_attr pass_attr, identifier? self_argument, codimension* codims)
+Variable(symbol_table parent_symtab, identifier name, identifier* dependencies, intent intent, expr? symbolic_value, expr? value, storage_type storage, ttype type, symbol? type_declaration, abi abi, access access, presence presence, bool value_attr, bool target_attr, bool contiguous_attr, string? bindc_name, bool is_volatile, bool is_asynchronous, bool is_protected, pass_attr pass_attr, identifier? self_argument, codimension* codims, symbol? common_block)
 ```
 <!-- END AUTO: asr -->
 
@@ -15,6 +15,8 @@ _No documentation yet._
 ## Verify
 
 <!-- BEGIN AUTO: verify -->
+* result argument must belong to a procedure
+* result argument must be an output dummy of a lowered function
 * `Variable::m_parent_symtab` cannot be `nullptr`
 * Variable '[...]' not found in parent_symtab symbol table
 * Variable's parent symbol table does not point to it

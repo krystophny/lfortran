@@ -4,7 +4,7 @@
 
 <!-- BEGIN AUTO: asr -->
 ```
-ReAlloc(alloc_arg* args)
+ReAlloc(alloc_arg* args, expr shape_differs)
 ```
 <!-- END AUTO: asr -->
 

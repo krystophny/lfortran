@@ -27,9 +27,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             j:
                                 (Variable
@@ -51,9 +53,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             k:
                                 (Variable
@@ -75,9 +79,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     doloop_04
@@ -88,11 +94,15 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 2 k)
                         (IntegerConstant 2 (Integer 4) Decimal)
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -112,6 +122,8 @@
                                 ()
                             )
                             ()
+                            .false.
+                            .false.
                             .false.
                             .false.
                         )]
@@ -136,6 +148,8 @@
                             ()
                             [(Var 2 j)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -148,6 +162,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 2 k)
@@ -157,6 +173,8 @@
                             (IntegerConstant -2 (Integer 4) Decimal)
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -176,6 +194,8 @@
                                 ()
                             )
                             ()
+                            .false.
+                            .false.
                             .false.
                             .false.
                         )]
@@ -200,6 +220,8 @@
                             ()
                             [(Var 2 j)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -212,13 +234,15 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (DoLoop
                         a
                         ((Var 2 i)
                         (IntegerConstant 1 (Integer 4) Decimal)
                         (IntegerConstant 10 (Integer 4) Decimal)
-                        ())
+                        (IntegerConstant 1 (Integer 4) Decimal))
                         [(Assignment
                             (Var 2 j)
                             (IntegerBinOp
@@ -229,6 +253,8 @@
                                 ()
                             )
                             ()
+                            .false.
+                            .false.
                             .false.
                             .false.
                         )
@@ -268,6 +294,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (DoLoop
                         b
@@ -285,6 +313,8 @@
                                 ()
                             )
                             ()
+                            .false.
+                            .false.
                             .false.
                             .false.
                         )
@@ -324,11 +354,15 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 2 i)
                         (IntegerConstant 1 (Integer 4) Decimal)
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -348,6 +382,8 @@
                                 ()
                             )
                             ()
+                            .false.
+                            .false.
                             .false.
                             .false.
                         )
@@ -377,6 +413,8 @@
                             ()
                             .false.
                             .false.
+                            .false.
+                            .false.
                         )]
                         []
                     )
@@ -398,6 +436,8 @@
                         (Var 2 k)
                         (IntegerConstant 2 (Integer 4) Decimal)
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )

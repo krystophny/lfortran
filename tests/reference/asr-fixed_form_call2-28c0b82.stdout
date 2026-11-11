@@ -27,9 +27,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             m:
                                 (Variable
@@ -51,9 +53,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             prinf:
                                 (Function
@@ -66,7 +70,7 @@
                                     (FunctionType
                                         []
                                         ()
-                                        BindC
+                                        Source
                                         ImplicitInterface
                                         ()
                                         .false.
@@ -101,9 +105,9 @@
                                                     ()
                                                     ()
                                                     Default
-                                                    (String 1 (IntegerConstant 6 (Integer 4) Decimal) ExpressionLength DescriptorString)
+                                                    (String 1 () AssumedLength DescriptorString)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -112,9 +116,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             prinf~arg_1:
                                                 (Variable
@@ -127,7 +133,7 @@
                                                     Default
                                                     (Integer 4)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -136,17 +142,19 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     prinf~fpcast
                                     (FunctionType
-                                        [(String 1 (IntegerConstant 6 (Integer 4) Decimal) ExpressionLength DescriptorString)
+                                        [(String 1 () AssumedLength DescriptorString)
                                         (Integer 4)]
                                         ()
-                                        BindC
+                                        Source
                                         Interface
                                         ()
                                         .false.
@@ -179,10 +187,10 @@
                                     Default
                                     (Pointer
                                         (FunctionType
-                                            [(String 1 (IntegerConstant 6 (Integer 4) Decimal) ExpressionLength DescriptorString)
+                                            [(String 1 () AssumedLength DescriptorString)
                                             (Integer 4)]
                                             ()
-                                            BindC
+                                            Source
                                             Interface
                                             ()
                                             .false.
@@ -205,9 +213,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     idd_frm
@@ -234,6 +244,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Associate
                         (Var 2 prinf~fpcast_ptr)
@@ -241,10 +253,10 @@
                             (Var 2 prinf)
                             2 prinf~fpcast
                             (FunctionType
-                                [(String 1 (IntegerConstant 6 (Integer 4) Decimal) ExpressionLength DescriptorString)
+                                [(String 1 () AssumedLength DescriptorString)
                                 (Integer 4)]
                                 ()
-                                BindC
+                                Source
                                 Interface
                                 ()
                                 .false.
@@ -258,6 +270,7 @@
                             )
                             ()
                         )
+                        NoPointerBounds
                     )
                     (SubroutineCall
                         2 prinf~fpcast_ptr
@@ -276,10 +289,10 @@
                             (Var 2 prinf)
                             2 prinf~fpcast
                             (FunctionType
-                                [(String 1 (IntegerConstant 6 (Integer 4) Decimal) ExpressionLength DescriptorString)
+                                [(String 1 () AssumedLength DescriptorString)
                                 (Integer 4)]
                                 ()
-                                BindC
+                                Source
                                 Interface
                                 ()
                                 .false.
@@ -293,6 +306,7 @@
                             )
                             ()
                         )
+                        NoPointerBounds
                     )
                     (SubroutineCall
                         2 prinf~fpcast_ptr
@@ -309,6 +323,8 @@
                         (Var 2 m)
                         (IntegerConstant 1 (Integer 4) Decimal)
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )

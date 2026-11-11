@@ -9,6 +9,8 @@
 * `Save`
 * `Parameter`
 * `Threadprivate`
+* `ResultArgument`
+* `HostAssociated`
 <!-- END AUTO: values -->
 
 ## Documentation

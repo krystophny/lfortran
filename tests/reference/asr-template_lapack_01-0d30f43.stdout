@@ -108,9 +108,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             res:
                                                                 (Variable
@@ -136,9 +138,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     cast
@@ -198,9 +202,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             u:
                                                 (Variable
@@ -226,9 +232,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     cast_r
@@ -267,9 +275,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             res:
                                                                 (Variable
@@ -295,9 +305,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     cast_to_t
@@ -353,7 +365,7 @@
                                                                         (Var 8 lda))
                                                                         (()
                                                                         ())]
-                                                                        DescriptorArray
+                                                                        UnboundedPointerArray
                                                                         Global
                                                                     )
                                                                     ()
@@ -366,9 +378,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             alpha:
                                                                 (Variable
@@ -394,9 +408,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             b:
                                                                 (Variable
@@ -417,7 +433,7 @@
                                                                         (Var 8 ldb))
                                                                         (()
                                                                         ())]
-                                                                        DescriptorArray
+                                                                        UnboundedPointerArray
                                                                         Global
                                                                     )
                                                                     ()
@@ -430,9 +446,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             beta:
                                                                 (Variable
@@ -458,9 +476,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             c:
                                                                 (Variable
@@ -481,7 +501,7 @@
                                                                         (Var 8 ldc))
                                                                         (()
                                                                         ())]
-                                                                        DescriptorArray
+                                                                        UnboundedPointerArray
                                                                         Global
                                                                     )
                                                                     ()
@@ -494,9 +514,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             k:
                                                                 (Variable
@@ -518,9 +540,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             lda:
                                                                 (Variable
@@ -542,9 +566,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             ldb:
                                                                 (Variable
@@ -566,9 +592,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             ldc:
                                                                 (Variable
@@ -590,9 +618,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             m:
                                                                 (Variable
@@ -614,9 +644,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             n:
                                                                 (Variable
@@ -638,9 +670,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             transa:
                                                                 (Variable
@@ -662,9 +696,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             transb:
                                                                 (Variable
@@ -686,9 +722,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     gemm
@@ -717,7 +755,7 @@
                                                             ))
                                                             (()
                                                             ())]
-                                                            DescriptorArray
+                                                            UnboundedPointerArray
                                                             Global
                                                         )
                                                         (Integer 4)
@@ -735,7 +773,7 @@
                                                             ))
                                                             (()
                                                             ())]
-                                                            DescriptorArray
+                                                            UnboundedPointerArray
                                                             Global
                                                         )
                                                         (Integer 4)
@@ -758,7 +796,7 @@
                                                             ))
                                                             (()
                                                             ())]
-                                                            DescriptorArray
+                                                            UnboundedPointerArray
                                                             Global
                                                         )
                                                         (Integer 4)]
@@ -833,9 +871,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             b:
                                                                 (Variable
@@ -869,9 +909,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             c:
                                                                 (Variable
@@ -916,9 +958,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             k:
                                                                 (Variable
@@ -940,9 +984,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             m:
                                                                 (Variable
@@ -964,9 +1010,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             n:
                                                                 (Variable
@@ -988,9 +1036,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     nonsimple_external_matmul
@@ -1103,6 +1153,8 @@
                                                         ()
                                                         .false.
                                                         .false.
+                                                        .false.
+                                                        .false.
                                                     )
                                                     (Assignment
                                                         (Var 10 n)
@@ -1115,6 +1167,8 @@
                                                         ()
                                                         .false.
                                                         .false.
+                                                        .false.
+                                                        .false.
                                                     )
                                                     (Assignment
                                                         (Var 10 k)
@@ -1125,6 +1179,8 @@
                                                             ()
                                                         )
                                                         ()
+                                                        .false.
+                                                        .false.
                                                         .false.
                                                         .false.
                                                     )
@@ -1160,18 +1216,18 @@
                                                         ((ArrayPhysicalCast
                                                             (Var 10 a)
                                                             DescriptorArray
-                                                            DescriptorArray
+                                                            UnboundedPointerArray
                                                             (Array
                                                                 (TypeParameter
                                                                     t
                                                                     NonExtensible
                                                                     .false.
                                                                 )
-                                                                [(()
-                                                                ())
+                                                                [((IntegerConstant 1 (Integer 4) Decimal)
+                                                                (Var 10 m))
                                                                 (()
                                                                 ())]
-                                                                DescriptorArray
+                                                                UnboundedPointerArray
                                                                 Global
                                                             )
                                                             ()
@@ -1180,18 +1236,18 @@
                                                         ((ArrayPhysicalCast
                                                             (Var 10 b)
                                                             DescriptorArray
-                                                            DescriptorArray
+                                                            UnboundedPointerArray
                                                             (Array
                                                                 (TypeParameter
                                                                     t
                                                                     NonExtensible
                                                                     .false.
                                                                 )
-                                                                [(()
-                                                                ())
+                                                                [((IntegerConstant 1 (Integer 4) Decimal)
+                                                                (Var 10 k))
                                                                 (()
                                                                 ())]
-                                                                DescriptorArray
+                                                                UnboundedPointerArray
                                                                 Global
                                                             )
                                                             ()
@@ -1215,7 +1271,7 @@
                                                         ((ArrayPhysicalCast
                                                             (Var 10 c)
                                                             PointerArray
-                                                            DescriptorArray
+                                                            UnboundedPointerArray
                                                             (Array
                                                                 (TypeParameter
                                                                     t
@@ -1223,20 +1279,10 @@
                                                                     .false.
                                                                 )
                                                                 [((IntegerConstant 1 (Integer 4) Decimal)
-                                                                (ArraySize
-                                                                    (Var 10 a)
-                                                                    (IntegerConstant 1 (Integer 4) Decimal)
-                                                                    (Integer 4)
-                                                                    ()
-                                                                ))
-                                                                ((IntegerConstant 1 (Integer 4) Decimal)
-                                                                (ArraySize
-                                                                    (Var 10 b)
-                                                                    (IntegerConstant 2 (Integer 4) Decimal)
-                                                                    (Integer 4)
-                                                                    ()
-                                                                ))]
-                                                                DescriptorArray
+                                                                (Var 10 m))
+                                                                (()
+                                                                ())]
+                                                                UnboundedPointerArray
                                                                 Global
                                                             )
                                                             ()
@@ -1271,9 +1317,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             t:
                                                 (Variable
@@ -1299,9 +1347,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     external_matmul_t
@@ -1349,7 +1399,7 @@
                                                                         (Var 4 lda))
                                                                         (()
                                                                         ())]
-                                                                        DescriptorArray
+                                                                        UnboundedPointerArray
                                                                         Global
                                                                     )
                                                                     ()
@@ -1362,9 +1412,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             alpha:
                                                                 (Variable
@@ -1390,9 +1442,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             b:
                                                                 (Variable
@@ -1413,7 +1467,7 @@
                                                                         (Var 4 ldb))
                                                                         (()
                                                                         ())]
-                                                                        DescriptorArray
+                                                                        UnboundedPointerArray
                                                                         Global
                                                                     )
                                                                     ()
@@ -1426,9 +1480,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             beta:
                                                                 (Variable
@@ -1454,9 +1510,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             c:
                                                                 (Variable
@@ -1477,7 +1535,7 @@
                                                                         (Var 4 ldc))
                                                                         (()
                                                                         ())]
-                                                                        DescriptorArray
+                                                                        UnboundedPointerArray
                                                                         Global
                                                                     )
                                                                     ()
@@ -1490,9 +1548,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             k:
                                                                 (Variable
@@ -1514,9 +1574,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             lda:
                                                                 (Variable
@@ -1538,9 +1600,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             ldb:
                                                                 (Variable
@@ -1562,9 +1626,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             ldc:
                                                                 (Variable
@@ -1586,9 +1652,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             m:
                                                                 (Variable
@@ -1610,9 +1678,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             n:
                                                                 (Variable
@@ -1634,9 +1704,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             transa:
                                                                 (Variable
@@ -1658,9 +1730,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             transb:
                                                                 (Variable
@@ -1682,9 +1756,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     gemm
@@ -1713,7 +1789,7 @@
                                                             ))
                                                             (()
                                                             ())]
-                                                            DescriptorArray
+                                                            UnboundedPointerArray
                                                             Global
                                                         )
                                                         (Integer 4)
@@ -1731,7 +1807,7 @@
                                                             ))
                                                             (()
                                                             ())]
-                                                            DescriptorArray
+                                                            UnboundedPointerArray
                                                             Global
                                                         )
                                                         (Integer 4)
@@ -1754,7 +1830,7 @@
                                                             ))
                                                             (()
                                                             ())]
-                                                            DescriptorArray
+                                                            UnboundedPointerArray
                                                             Global
                                                         )
                                                         (Integer 4)]
@@ -1816,9 +1892,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     gemm_r
@@ -1851,9 +1929,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             b:
                                                 (Variable
@@ -1875,9 +1955,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             dp:
                                                 (Variable
@@ -1908,9 +1990,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     my_cast_to_double
@@ -1941,6 +2025,8 @@
                                             ()
                                         )
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )]
@@ -1975,9 +2061,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             b:
                                                 (Variable
@@ -1999,9 +2087,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     my_cast_to_real
@@ -2026,6 +2116,8 @@
                                         (Var 13 b)
                                         (Var 13 a)
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )]
@@ -2068,9 +2160,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             b:
                                                 (Variable
@@ -2100,9 +2194,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             c:
                                                 (Variable
@@ -2143,9 +2239,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             k:
                                                 (Variable
@@ -2167,9 +2265,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             m:
                                                 (Variable
@@ -2191,9 +2291,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             n:
                                                 (Variable
@@ -2215,9 +2317,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     my_external_matmul
@@ -2310,6 +2414,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )
                                     (Assignment
                                         (Var 15 n)
@@ -2322,6 +2428,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )
                                     (Assignment
                                         (Var 15 k)
@@ -2332,6 +2440,8 @@
                                             ()
                                         )
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )
@@ -2366,8 +2476,8 @@
                                             UnboundedPointerArray
                                             (Array
                                                 (Real 4)
-                                                [(()
-                                                ())
+                                                [((IntegerConstant 1 (Integer 4) Decimal)
+                                                (Var 15 m))
                                                 (()
                                                 ())]
                                                 UnboundedPointerArray
@@ -2382,8 +2492,8 @@
                                             UnboundedPointerArray
                                             (Array
                                                 (Real 4)
-                                                [(()
-                                                ())
+                                                [((IntegerConstant 1 (Integer 4) Decimal)
+                                                (Var 15 k))
                                                 (()
                                                 ())]
                                                 UnboundedPointerArray
@@ -2410,19 +2520,9 @@
                                             (Array
                                                 (Real 4)
                                                 [((IntegerConstant 1 (Integer 4) Decimal)
-                                                (ArraySize
-                                                    (Var 15 a)
-                                                    (IntegerConstant 1 (Integer 4) Decimal)
-                                                    (Integer 4)
-                                                    ()
-                                                ))
-                                                ((IntegerConstant 1 (Integer 4) Decimal)
-                                                (ArraySize
-                                                    (Var 15 b)
-                                                    (IntegerConstant 2 (Integer 4) Decimal)
-                                                    (Integer 4)
-                                                    ()
-                                                ))]
+                                                (Var 15 m))
+                                                (()
+                                                ())]
                                                 UnboundedPointerArray
                                                 Global
                                             )
@@ -2471,9 +2571,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             alpha:
                                                 (Variable
@@ -2495,9 +2597,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             b:
                                                 (Variable
@@ -2527,9 +2631,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             beta:
                                                 (Variable
@@ -2551,9 +2657,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             c:
                                                 (Variable
@@ -2583,9 +2691,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             dp:
                                                 (Variable
@@ -2616,9 +2726,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             k:
                                                 (Variable
@@ -2640,9 +2752,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             lda:
                                                 (Variable
@@ -2664,9 +2778,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             ldb:
                                                 (Variable
@@ -2688,9 +2804,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             ldc:
                                                 (Variable
@@ -2712,9 +2830,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             m:
                                                 (Variable
@@ -2736,9 +2856,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             n:
                                                 (Variable
@@ -2760,9 +2882,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             transa:
                                                 (Variable
@@ -2784,9 +2908,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             transb:
                                                 (Variable
@@ -2808,9 +2934,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     my_gemm_double
@@ -2931,9 +3059,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             alpha:
                                                 (Variable
@@ -2955,9 +3085,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             b:
                                                 (Variable
@@ -2987,9 +3119,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             beta:
                                                 (Variable
@@ -3011,9 +3145,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             c:
                                                 (Variable
@@ -3043,9 +3179,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             k:
                                                 (Variable
@@ -3067,9 +3205,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             lda:
                                                 (Variable
@@ -3091,9 +3231,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             ldb:
                                                 (Variable
@@ -3115,9 +3257,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             ldc:
                                                 (Variable
@@ -3139,9 +3283,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             m:
                                                 (Variable
@@ -3163,9 +3309,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             n:
                                                 (Variable
@@ -3187,9 +3335,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             transa:
                                                 (Variable
@@ -3211,9 +3361,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             transb:
                                                 (Variable
@@ -3235,9 +3387,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     my_gemm_real
@@ -3355,9 +3509,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             res:
                                                                 (Variable
@@ -3383,9 +3539,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     cast_to_t
@@ -3441,7 +3599,7 @@
                                                                         (Var 17 lda))
                                                                         (()
                                                                         ())]
-                                                                        DescriptorArray
+                                                                        UnboundedPointerArray
                                                                         Global
                                                                     )
                                                                     ()
@@ -3454,9 +3612,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             alpha:
                                                                 (Variable
@@ -3482,9 +3642,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             b:
                                                                 (Variable
@@ -3505,7 +3667,7 @@
                                                                         (Var 17 ldb))
                                                                         (()
                                                                         ())]
-                                                                        DescriptorArray
+                                                                        UnboundedPointerArray
                                                                         Global
                                                                     )
                                                                     ()
@@ -3518,9 +3680,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             beta:
                                                                 (Variable
@@ -3546,9 +3710,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             c:
                                                                 (Variable
@@ -3569,7 +3735,7 @@
                                                                         (Var 17 ldc))
                                                                         (()
                                                                         ())]
-                                                                        DescriptorArray
+                                                                        UnboundedPointerArray
                                                                         Global
                                                                     )
                                                                     ()
@@ -3582,9 +3748,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             k:
                                                                 (Variable
@@ -3606,9 +3774,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             lda:
                                                                 (Variable
@@ -3630,9 +3800,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             ldb:
                                                                 (Variable
@@ -3654,9 +3826,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             ldc:
                                                                 (Variable
@@ -3678,9 +3852,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             m:
                                                                 (Variable
@@ -3702,9 +3878,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             n:
                                                                 (Variable
@@ -3726,9 +3904,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             transa:
                                                                 (Variable
@@ -3750,9 +3930,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             transb:
                                                                 (Variable
@@ -3774,9 +3956,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     gemm
@@ -3805,7 +3989,7 @@
                                                             ))
                                                             (()
                                                             ())]
-                                                            DescriptorArray
+                                                            UnboundedPointerArray
                                                             Global
                                                         )
                                                         (Integer 4)
@@ -3823,7 +4007,7 @@
                                                             ))
                                                             (()
                                                             ())]
-                                                            DescriptorArray
+                                                            UnboundedPointerArray
                                                             Global
                                                         )
                                                         (Integer 4)
@@ -3846,7 +4030,7 @@
                                                             ))
                                                             (()
                                                             ())]
-                                                            DescriptorArray
+                                                            UnboundedPointerArray
                                                             Global
                                                         )
                                                         (Integer 4)]
@@ -3904,9 +4088,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             simple_external_matmul:
                                                 (Function
@@ -3945,9 +4131,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             b:
                                                                 (Variable
@@ -3981,9 +4169,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             c:
                                                                 (Variable
@@ -4028,9 +4218,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             k:
                                                                 (Variable
@@ -4052,9 +4244,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             m:
                                                                 (Variable
@@ -4076,9 +4270,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             n:
                                                                 (Variable
@@ -4100,9 +4296,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     simple_external_matmul
@@ -4215,6 +4413,8 @@
                                                         ()
                                                         .false.
                                                         .false.
+                                                        .false.
+                                                        .false.
                                                     )
                                                     (Assignment
                                                         (Var 19 n)
@@ -4227,6 +4427,8 @@
                                                         ()
                                                         .false.
                                                         .false.
+                                                        .false.
+                                                        .false.
                                                     )
                                                     (Assignment
                                                         (Var 19 k)
@@ -4237,6 +4439,8 @@
                                                             ()
                                                         )
                                                         ()
+                                                        .false.
+                                                        .false.
                                                         .false.
                                                         .false.
                                                     )
@@ -4272,18 +4476,18 @@
                                                         ((ArrayPhysicalCast
                                                             (Var 19 a)
                                                             DescriptorArray
-                                                            DescriptorArray
+                                                            UnboundedPointerArray
                                                             (Array
                                                                 (TypeParameter
                                                                     t
                                                                     NonExtensible
                                                                     .false.
                                                                 )
-                                                                [(()
-                                                                ())
+                                                                [((IntegerConstant 1 (Integer 4) Decimal)
+                                                                (Var 19 m))
                                                                 (()
                                                                 ())]
-                                                                DescriptorArray
+                                                                UnboundedPointerArray
                                                                 Global
                                                             )
                                                             ()
@@ -4292,18 +4496,18 @@
                                                         ((ArrayPhysicalCast
                                                             (Var 19 b)
                                                             DescriptorArray
-                                                            DescriptorArray
+                                                            UnboundedPointerArray
                                                             (Array
                                                                 (TypeParameter
                                                                     t
                                                                     NonExtensible
                                                                     .false.
                                                                 )
-                                                                [(()
-                                                                ())
+                                                                [((IntegerConstant 1 (Integer 4) Decimal)
+                                                                (Var 19 k))
                                                                 (()
                                                                 ())]
-                                                                DescriptorArray
+                                                                UnboundedPointerArray
                                                                 Global
                                                             )
                                                             ()
@@ -4327,7 +4531,7 @@
                                                         ((ArrayPhysicalCast
                                                             (Var 19 c)
                                                             PointerArray
-                                                            DescriptorArray
+                                                            UnboundedPointerArray
                                                             (Array
                                                                 (TypeParameter
                                                                     t
@@ -4335,20 +4539,10 @@
                                                                     .false.
                                                                 )
                                                                 [((IntegerConstant 1 (Integer 4) Decimal)
-                                                                (ArraySize
-                                                                    (Var 19 a)
-                                                                    (IntegerConstant 1 (Integer 4) Decimal)
-                                                                    (Integer 4)
-                                                                    ()
-                                                                ))
-                                                                ((IntegerConstant 1 (Integer 4) Decimal)
-                                                                (ArraySize
-                                                                    (Var 19 b)
-                                                                    (IntegerConstant 2 (Integer 4) Decimal)
-                                                                    (Integer 4)
-                                                                    ()
-                                                                ))]
-                                                                DescriptorArray
+                                                                (Var 19 m))
+                                                                (()
+                                                                ())]
+                                                                UnboundedPointerArray
                                                                 Global
                                                             )
                                                             ()
@@ -4387,9 +4581,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     simple_external_matmul
@@ -4446,9 +4642,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             b:
                                                                 (Variable
@@ -4478,9 +4676,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             c:
                                                                 (Variable
@@ -4521,9 +4721,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             k:
                                                                 (Variable
@@ -4545,9 +4747,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             m:
                                                                 (Variable
@@ -4569,9 +4773,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             n:
                                                                 (Variable
@@ -4593,9 +4799,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     __instantiated_simple_external_matmul
@@ -4688,6 +4896,8 @@
                                                         ()
                                                         .false.
                                                         .false.
+                                                        .false.
+                                                        .false.
                                                     )
                                                     (Assignment
                                                         (Var 24 n)
@@ -4700,6 +4910,8 @@
                                                         ()
                                                         .false.
                                                         .false.
+                                                        .false.
+                                                        .false.
                                                     )
                                                     (Assignment
                                                         (Var 24 k)
@@ -4710,6 +4922,8 @@
                                                             ()
                                                         )
                                                         ()
+                                                        .false.
+                                                        .false.
                                                         .false.
                                                         .false.
                                                     )
@@ -4744,8 +4958,8 @@
                                                             UnboundedPointerArray
                                                             (Array
                                                                 (Real 4)
-                                                                [(()
-                                                                ())
+                                                                [((IntegerConstant 1 (Integer 4) Decimal)
+                                                                (Var 24 m))
                                                                 (()
                                                                 ())]
                                                                 UnboundedPointerArray
@@ -4760,8 +4974,8 @@
                                                             UnboundedPointerArray
                                                             (Array
                                                                 (Real 4)
-                                                                [(()
-                                                                ())
+                                                                [((IntegerConstant 1 (Integer 4) Decimal)
+                                                                (Var 24 k))
                                                                 (()
                                                                 ())]
                                                                 UnboundedPointerArray
@@ -4788,19 +5002,9 @@
                                                             (Array
                                                                 (Real 4)
                                                                 [((IntegerConstant 1 (Integer 4) Decimal)
-                                                                (ArraySize
-                                                                    (Var 24 a)
-                                                                    (IntegerConstant 1 (Integer 4) Decimal)
-                                                                    (Integer 4)
-                                                                    ()
-                                                                ))
-                                                                ((IntegerConstant 1 (Integer 4) Decimal)
-                                                                (ArraySize
-                                                                    (Var 24 b)
-                                                                    (IntegerConstant 2 (Integer 4) Decimal)
-                                                                    (Integer 4)
-                                                                    ()
-                                                                ))]
+                                                                (Var 24 m))
+                                                                (()
+                                                                ())]
                                                                 UnboundedPointerArray
                                                                 Global
                                                             )
@@ -4849,9 +5053,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             b:
                                                                 (Variable
@@ -4881,9 +5087,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             c:
                                                                 (Variable
@@ -4924,9 +5132,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             k:
                                                                 (Variable
@@ -4948,9 +5158,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             m:
                                                                 (Variable
@@ -4972,9 +5184,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             n:
                                                                 (Variable
@@ -4996,9 +5210,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     __instantiated_simple_external_matmul1
@@ -5091,6 +5307,8 @@
                                                         ()
                                                         .false.
                                                         .false.
+                                                        .false.
+                                                        .false.
                                                     )
                                                     (Assignment
                                                         (Var 25 n)
@@ -5103,6 +5321,8 @@
                                                         ()
                                                         .false.
                                                         .false.
+                                                        .false.
+                                                        .false.
                                                     )
                                                     (Assignment
                                                         (Var 25 k)
@@ -5113,6 +5333,8 @@
                                                             ()
                                                         )
                                                         ()
+                                                        .false.
+                                                        .false.
                                                         .false.
                                                         .false.
                                                     )
@@ -5147,8 +5369,8 @@
                                                             UnboundedPointerArray
                                                             (Array
                                                                 (Real 8)
-                                                                [(()
-                                                                ())
+                                                                [((IntegerConstant 1 (Integer 4) Decimal)
+                                                                (Var 25 m))
                                                                 (()
                                                                 ())]
                                                                 UnboundedPointerArray
@@ -5163,8 +5385,8 @@
                                                             UnboundedPointerArray
                                                             (Array
                                                                 (Real 8)
-                                                                [(()
-                                                                ())
+                                                                [((IntegerConstant 1 (Integer 4) Decimal)
+                                                                (Var 25 k))
                                                                 (()
                                                                 ())]
                                                                 UnboundedPointerArray
@@ -5191,19 +5413,9 @@
                                                             (Array
                                                                 (Real 8)
                                                                 [((IntegerConstant 1 (Integer 4) Decimal)
-                                                                (ArraySize
-                                                                    (Var 25 a)
-                                                                    (IntegerConstant 1 (Integer 4) Decimal)
-                                                                    (Integer 4)
-                                                                    ()
-                                                                ))
-                                                                ((IntegerConstant 1 (Integer 4) Decimal)
-                                                                (ArraySize
-                                                                    (Var 25 b)
-                                                                    (IntegerConstant 2 (Integer 4) Decimal)
-                                                                    (Integer 4)
-                                                                    ()
-                                                                ))]
+                                                                (Var 25 m))
+                                                                (()
+                                                                ())]
                                                                 UnboundedPointerArray
                                                                 Global
                                                             )
@@ -5247,9 +5459,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             asp:
                                                 (Variable
@@ -5279,9 +5493,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             bdp:
                                                 (Variable
@@ -5311,9 +5527,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             bsp:
                                                 (Variable
@@ -5343,9 +5561,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             cdp:
                                                 (Variable
@@ -5375,9 +5595,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             csp:
                                                 (Variable
@@ -5407,9 +5629,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             dp:
                                                 (Variable
@@ -5440,9 +5664,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             nonsimple_external_matmul_double:
                                                 (Function
@@ -5477,9 +5703,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             b:
                                                                 (Variable
@@ -5509,9 +5737,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             c:
                                                                 (Variable
@@ -5552,9 +5782,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             k:
                                                                 (Variable
@@ -5576,9 +5808,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             m:
                                                                 (Variable
@@ -5600,9 +5834,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             n:
                                                                 (Variable
@@ -5624,9 +5860,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     nonsimple_external_matmul_double
@@ -5719,6 +5957,8 @@
                                                         ()
                                                         .false.
                                                         .false.
+                                                        .false.
+                                                        .false.
                                                     )
                                                     (Assignment
                                                         (Var 22 n)
@@ -5731,6 +5971,8 @@
                                                         ()
                                                         .false.
                                                         .false.
+                                                        .false.
+                                                        .false.
                                                     )
                                                     (Assignment
                                                         (Var 22 k)
@@ -5741,6 +5983,8 @@
                                                             ()
                                                         )
                                                         ()
+                                                        .false.
+                                                        .false.
                                                         .false.
                                                         .false.
                                                     )
@@ -5775,8 +6019,8 @@
                                                             UnboundedPointerArray
                                                             (Array
                                                                 (Real 8)
-                                                                [(()
-                                                                ())
+                                                                [((IntegerConstant 1 (Integer 4) Decimal)
+                                                                (Var 22 m))
                                                                 (()
                                                                 ())]
                                                                 UnboundedPointerArray
@@ -5791,8 +6035,8 @@
                                                             UnboundedPointerArray
                                                             (Array
                                                                 (Real 8)
-                                                                [(()
-                                                                ())
+                                                                [((IntegerConstant 1 (Integer 4) Decimal)
+                                                                (Var 22 k))
                                                                 (()
                                                                 ())]
                                                                 UnboundedPointerArray
@@ -5819,19 +6063,9 @@
                                                             (Array
                                                                 (Real 8)
                                                                 [((IntegerConstant 1 (Integer 4) Decimal)
-                                                                (ArraySize
-                                                                    (Var 22 a)
-                                                                    (IntegerConstant 1 (Integer 4) Decimal)
-                                                                    (Integer 4)
-                                                                    ()
-                                                                ))
-                                                                ((IntegerConstant 1 (Integer 4) Decimal)
-                                                                (ArraySize
-                                                                    (Var 22 b)
-                                                                    (IntegerConstant 2 (Integer 4) Decimal)
-                                                                    (Integer 4)
-                                                                    ()
-                                                                ))]
+                                                                (Var 22 m))
+                                                                (()
+                                                                ())]
                                                                 UnboundedPointerArray
                                                                 Global
                                                             )
@@ -5880,9 +6114,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             b:
                                                                 (Variable
@@ -5912,9 +6148,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             c:
                                                                 (Variable
@@ -5955,9 +6193,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             k:
                                                                 (Variable
@@ -5979,9 +6219,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             m:
                                                                 (Variable
@@ -6003,9 +6245,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             n:
                                                                 (Variable
@@ -6027,9 +6271,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     nonsimple_external_matmul_real
@@ -6122,6 +6368,8 @@
                                                         ()
                                                         .false.
                                                         .false.
+                                                        .false.
+                                                        .false.
                                                     )
                                                     (Assignment
                                                         (Var 21 n)
@@ -6134,6 +6382,8 @@
                                                         ()
                                                         .false.
                                                         .false.
+                                                        .false.
+                                                        .false.
                                                     )
                                                     (Assignment
                                                         (Var 21 k)
@@ -6144,6 +6394,8 @@
                                                             ()
                                                         )
                                                         ()
+                                                        .false.
+                                                        .false.
                                                         .false.
                                                         .false.
                                                     )
@@ -6178,8 +6430,8 @@
                                                             UnboundedPointerArray
                                                             (Array
                                                                 (Real 4)
-                                                                [(()
-                                                                ())
+                                                                [((IntegerConstant 1 (Integer 4) Decimal)
+                                                                (Var 21 m))
                                                                 (()
                                                                 ())]
                                                                 UnboundedPointerArray
@@ -6194,8 +6446,8 @@
                                                             UnboundedPointerArray
                                                             (Array
                                                                 (Real 4)
-                                                                [(()
-                                                                ())
+                                                                [((IntegerConstant 1 (Integer 4) Decimal)
+                                                                (Var 21 k))
                                                                 (()
                                                                 ())]
                                                                 UnboundedPointerArray
@@ -6222,19 +6474,9 @@
                                                             (Array
                                                                 (Real 4)
                                                                 [((IntegerConstant 1 (Integer 4) Decimal)
-                                                                (ArraySize
-                                                                    (Var 21 a)
-                                                                    (IntegerConstant 1 (Integer 4) Decimal)
-                                                                    (Integer 4)
-                                                                    ()
-                                                                ))
-                                                                ((IntegerConstant 1 (Integer 4) Decimal)
-                                                                (ArraySize
-                                                                    (Var 21 b)
-                                                                    (IntegerConstant 2 (Integer 4) Decimal)
-                                                                    (Integer 4)
-                                                                    ()
-                                                                ))]
+                                                                (Var 21 m))
+                                                                (()
+                                                                ())]
                                                                 UnboundedPointerArray
                                                                 Global
                                                             )
@@ -6319,6 +6561,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )
                                     (Assignment
                                         (Var 20 cdp)
@@ -6370,6 +6614,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )]
                                     ()
                                     Public
@@ -6381,6 +6627,7 @@
                     template_lapack_01_m
                     ()
                     [template_lapack_01_m]
+                    .false.
                     .false.
                     .false.
                     .false.

@@ -9,6 +9,9 @@
 * `dims` of type `gpu_workspace_dimension*`
 * `buffer_index` of type `int`
 * `element_size` of type `int`
+* `allocation_if` of type `expr?`
+* `allocation_parameter` of type `symbol?`
+* `allocation_on_true` of type `bool`
 <!-- END AUTO: fields -->
 
 ## Documentation

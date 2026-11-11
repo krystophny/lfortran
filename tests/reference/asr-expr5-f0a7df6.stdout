@@ -27,9 +27,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     expr_05
@@ -50,6 +52,8 @@
                             (IntegerConstant 25 (Integer 4) Decimal)
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )

@@ -3,6 +3,7 @@
 
 #include <complex>
 #include <iostream>
+#include <map>
 #include <memory>
 
 #include <libasr/alloc.h>
@@ -42,6 +43,9 @@ struct LLVMTargetConfig {
     bool emit_cpu_attribute = false;
     bool host_target = false;
     bool fast = false;
+    // `--fast` without `--no-fast-math`: the backend may fuse a multiply and
+    // an add into an FMA, like `-ffp-contract=fast` in clang and flang.
+    bool fast_math = false;
 
     void apply_target_attributes(llvm::Module &module) const;
 };
@@ -108,6 +112,9 @@ public:
     const LLVMTargetConfig &get_target_config() const {
         return target_config;
     }
+    const llvm::TargetMachine &get_target_machine() const {
+        return *TM;
+    }
     static void print_targets();
     static std::string get_default_target_triple();
 
@@ -146,10 +153,9 @@ public:
 private:
     std::unique_ptr<llvm::LLVMContext> context;
     std::string TempDir;
-    // Each executor instance gets a unique ID so that __lfortran_evaluate_N
-    // function names are globally unique across all loaded side modules.
-    // This allows dlsym(RTLD_DEFAULT) to always find the right symbol without
-    // needing to track per-module dlopen handles.
+    // Definitions belong to this executor; imports of them from later modules
+    // use the same names. Runtime imports remain in the process namespace.
+    std::map<std::string, std::string> symbols;
     int m_id;
 };
 

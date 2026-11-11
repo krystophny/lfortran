@@ -57,7 +57,7 @@ LFortran is a modern interactive Fortran compiler based on LLVM.
 - `--show-wat`: Show WAT (WebAssembly Text Format) and exit
 - `--show-julia`: Show Julia translation source for the given file and exit
 - `--show-gpu-kernel-source`: Show the GPU kernel source for the backend selected by `--gpu` and exit
-- `--gpu-allow-cpu-fallback`: Run a parallel loop that uses a construct the selected GPU does not support (`real(8)` on Metal, `real(10)` or `real(16)`, input/output, or `stop` and `error stop` on Metal) on the CPU with a warning, instead of failing compilation. A loop the GPU offloading pipeline cannot lower is still an error
+- `--gpu-allow-cpu-fallback`: Run a parallel loop that uses a construct the selected GPU does not support (`real(8)` on Metal, `real(10)` or `real(16)`, or input/output) on the CPU with a warning, instead of failing compilation. A loop the GPU offloading pipeline cannot lower is still an error
 - `--show-fortran`: Show Fortran translation source for the given file and exit
 - `--show-stacktrace`: Show internal stacktrace on compiler errors
 - `--symtab-only`: Only create symbol tables in ASR (skip executable stmt)
@@ -73,9 +73,9 @@ LFortran is a modern interactive Fortran compiler based on LLVM.
 - `--openmp`: Enable OpenMP
 - `--separate-compilation`: Generate object code into .o files
 - `--rtlib`: Include the full runtime library in the LLVM output
-- `--use-loop-variable-after-loop`: Allow using loop variable after the loop
 - `--fast`: Optimize for best performance on the host CPU (disable strict standard compliance)
-- `--link-with-gcc`: Calls GCC for linking instead of clang
+- `--linker TEXT`: Linker for the LLVM backend. The default on Linux is the built-in LLD. An MLIR build keeps the external driver. `clang` and `gcc` select an external compiler driver
+- `--linker-path TEXT`: Directory of an external linker
 - `--target TEXT`: Generate code for the given target
 - `--march TEXT`: Generate code for the selected instruction-set architecture (`native` for the host)
 - `--mcpu TEXT`: Generate and tune code for the selected CPU (`native` for the host)
@@ -99,9 +99,14 @@ LFortran is a modern interactive Fortran compiler based on LLVM.
 - `--bindc-mangling`: Mangles functions with ABI bind(c)
 - `--apply-fortran-mangling`: Mangle symbols with Fortran supported syntax
 - `--mangle-underscore`: Mangles with underscore
-- `--legacy-array-sections`: Enables passing array items as sections if required
+- `--legacy-array-sections`: Enables passing array items as sections if required, and lets the elements of a dummy array whose last dimension is `1`, as in `a(lda, 1)`, be referenced past that dimension, as for an assumed-size `a(lda, *)`
 - `--ignore-pragma`: Ignores all the pragmas
-- `--stack-arrays`: Allocate memory for arrays on stack
+- `--stack-arrays`: Allocate automatic arrays on the stack, including eligible
+  private numeric function-result temporaries and numeric elementwise-expression
+  temporaries passed to `CALL` statements. Temporary bounds are evaluated at
+  the original statement, and their storage is reclaimed at statement exit.
+  User-declared allocatables and allocatable or pointer function results retain
+  their allocation semantics.
 
 # SUBCOMMANDS
 

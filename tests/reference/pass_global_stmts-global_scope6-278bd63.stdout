@@ -27,9 +27,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     f
@@ -56,6 +58,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 3 f1)
@@ -69,6 +73,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 1 x)
@@ -80,6 +86,8 @@
                             ()
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )]
@@ -109,9 +117,11 @@
                     ()
                     .false.
                     .false.
+                    .false.
                     NotMethod
                     ()
                     []
+                    ()
                 )
         })
     []

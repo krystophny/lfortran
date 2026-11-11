@@ -65,9 +65,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             dot_is_token:
                                                 (Variable
@@ -89,9 +91,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     next_token
@@ -155,9 +159,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             next_token:
                                                 (StructMethodDeclaration
@@ -169,6 +175,7 @@
                                                     Source
                                                     .false.
                                                     .false.
+                                                    Public
                                                 )
                                         })
                                     toml_character_tokenizer
@@ -184,7 +191,7 @@
                                     [conf]
                                     []
                                     Source
-                                    Private
+                                    Public
                                     .false.
                                     .false.
                                     .false.
@@ -192,16 +199,6 @@
                                     ()
                                     4 toml_tokenizer
                                     []
-                                ),
-                            toml_table:
-                                (ExternalSymbol
-                                    4
-                                    toml_table
-                                    8 toml_table
-                                    tomlf_de_tokenizer_25
-                                    []
-                                    toml_table
-                                    Private
                                 ),
                             toml_tokenizer:
                                 (ExternalSymbol
@@ -212,22 +209,13 @@
                                     []
                                     toml_tokenizer
                                     Private
-                                ),
-                            toml_tokenizer_:
-                                (ExternalSymbol
-                                    4
-                                    toml_tokenizer_
-                                    8 toml_tokenizer_
-                                    tomlf_de_tokenizer_25
-                                    []
-                                    toml_tokenizer_
-                                    Private
                                 )
                         })
                     tomlf_de_character
                     ()
                     [tomlf_de_tokenizer_25]
                     .true.
+                    .false.
                     .false.
                     .false.
                     ()
@@ -274,9 +262,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             dot_is_token:
                                                 (Variable
@@ -298,9 +288,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     next_token
@@ -341,6 +333,7 @@
                                     .false.
                                     .false.
                                     ()
+                                    (.true.)
                                 ),
                             parse_select:
                                 (Function
@@ -389,9 +382,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             table:
                                                 (Variable
@@ -420,9 +415,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     parse_select
@@ -473,6 +470,7 @@
                                             ()
                                         )
                                         (Var 13 table)
+                                        NoPointerBounds
                                     )]
                                     ()
                                     Private
@@ -511,9 +509,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     toml_table
@@ -588,9 +588,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             next_token:
                                                 (StructMethodDeclaration
@@ -602,6 +604,7 @@
                                                     Source
                                                     .true.
                                                     .false.
+                                                    Public
                                                 )
                                         })
                                     toml_tokenizer
@@ -622,7 +625,7 @@
                                     [current]
                                     []
                                     Source
-                                    Private
+                                    Public
                                     .false.
                                     .true.
                                     .false.
@@ -663,6 +666,7 @@
                     ()
                     []
                     .true.
+                    .false.
                     .false.
                     .false.
                     ()

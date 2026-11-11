@@ -30,10 +30,12 @@
                     :contiguous_attr false
                     :bindc_name nil
                     :is_volatile false
+                    :is_asynchronous false
                     :is_protected false
                     :pass_attr :NotMethod
                     :self_argument nil
                     :codims []
+                    :common_block nil
                   )
                   "b" (Variable
                     :parent_symtab 2
@@ -55,10 +57,12 @@
                     :contiguous_attr false
                     :bindc_name nil
                     :is_volatile false
+                    :is_asynchronous false
                     :is_protected false
                     :pass_attr :NotMethod
                     :self_argument nil
                     :codims []
+                    :common_block nil
                   )
                   "c" (Variable
                     :parent_symtab 2
@@ -80,10 +84,12 @@
                     :contiguous_attr false
                     :bindc_name nil
                     :is_volatile false
+                    :is_asynchronous false
                     :is_protected false
                     :pass_attr :NotMethod
                     :self_argument nil
                     :codims []
+                    :common_block nil
                   )
                 }
               )
@@ -142,6 +148,8 @@
                   :overloaded nil
                   :realloc_lhs false
                   :move_allocation false
+                  :new_target false
+                  :new_allocation false
                 )
               ]
               :return_var (Var
@@ -160,6 +168,7 @@
         :loaded_from_mod false
         :intrinsic false
         :has_submodules false
+        :host_only_object false
         :global_init nil
       )
       "main" (Program

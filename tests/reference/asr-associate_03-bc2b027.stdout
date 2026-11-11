@@ -27,9 +27,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             p1:
                                 (Variable
@@ -53,9 +55,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             t1:
                                 (Variable
@@ -77,9 +81,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             t2:
                                 (Variable
@@ -101,9 +107,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     associate_03
@@ -114,6 +122,8 @@
                             [(Var 2 t1)
                             (Var 2 t2)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -132,10 +142,12 @@
                         [(Associate
                             (Var 2 p1)
                             (Var 2 t1)
+                            NoPointerBounds
                         )]
                         [(Associate
                             (Var 2 p1)
                             (Var 2 t2)
+                            NoPointerBounds
                         )]
                     )
                     (Print
@@ -143,6 +155,8 @@
                             ()
                             [(Var 2 p1)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -153,6 +167,8 @@
                         (Var 2 i)
                         (Var 2 p1)
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )

@@ -15,5 +15,5 @@ _No documentation yet._
 ## Verify
 
 <!-- BEGIN AUTO: verify -->
-None.
+* `FileWrite::m_overloaded` must be nil for formatted output
 <!-- END AUTO: verify -->

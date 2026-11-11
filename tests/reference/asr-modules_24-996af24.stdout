@@ -42,9 +42,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             tokenizer_ptr:
                                 (Variable
@@ -80,9 +82,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             toml_table:
                                 (ExternalSymbol
@@ -120,6 +124,7 @@
                     [(Associate
                         (Var 7 tokenizer_ptr)
                         (Var 7 tokenizer)
+                        NoPointerBounds
                     )
                     (SubroutineCall
                         7 parse_select
@@ -182,9 +187,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             table:
                                                 (Variable
@@ -213,9 +220,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     parse_select
@@ -266,6 +275,7 @@
                                             ()
                                         )
                                         (Var 6 table)
+                                        NoPointerBounds
                                     )]
                                     ()
                                     Public
@@ -304,9 +314,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     toml_table
@@ -381,9 +393,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     toml_tokenizer
@@ -444,6 +458,7 @@
                     tomlf_de_tokenizer_24
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.

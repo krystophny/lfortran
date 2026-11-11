@@ -29,9 +29,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             p2:
                                 (Variable
@@ -55,9 +57,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             t1:
                                 (Variable
@@ -79,9 +83,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             t2:
                                 (Variable
@@ -103,9 +109,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     nullify_02
@@ -113,6 +121,7 @@
                     [(Associate
                         (Var 2 p1)
                         (Var 2 t1)
+                        NoPointerBounds
                     )
                     (Assignment
                         (Var 2 p1)
@@ -129,10 +138,13 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Associate
                         (Var 2 p2)
                         (Var 2 t2)
+                        NoPointerBounds
                     )
                     (Assignment
                         (Var 2 p2)
@@ -147,6 +159,8 @@
                             ()
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )

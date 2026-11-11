@@ -27,9 +27,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     main
@@ -54,6 +56,8 @@
                             (Var 2 k)
                             (IntegerConstant 15 (Integer 4) Decimal)
                             ()
+                            .false.
+                            .false.
                             .false.
                             .false.
                         )]

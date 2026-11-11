@@ -62,9 +62,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     main
@@ -108,9 +110,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     test_subroutine
@@ -168,9 +172,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             test_subroutine:
                                                 (StructMethodDeclaration
@@ -182,6 +188,7 @@
                                                     Source
                                                     .false.
                                                     .true.
+                                                    Public
                                                 )
                                         })
                                     test_type
@@ -208,6 +215,7 @@
                     test_module
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.

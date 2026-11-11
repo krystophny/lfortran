@@ -19,6 +19,7 @@
                     :Source
                     true
                     false
+                    :Public
                   )
                 }
               )
@@ -70,9 +71,11 @@
                     nil
                     false
                     false
+                    false
                     :NotMethod
                     nil
                     []
+                    nil
                   )
                   "a" (Variable
                     3
@@ -95,9 +98,11 @@
                     nil
                     false
                     false
+                    false
                     :NotMethod
                     nil
                     []
+                    nil
                   )
                 }
               )
@@ -156,6 +161,7 @@
                     :Source
                     false
                     true
+                    :Public
                   )
                 }
               )
@@ -204,9 +210,11 @@
                     nil
                     false
                     false
+                    false
                     :NotMethod
                     nil
                     []
+                    nil
                   )
                 }
               )
@@ -248,6 +256,7 @@
         "m"
         nil
         []
+        false
         false
         false
         false

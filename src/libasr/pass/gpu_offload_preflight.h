@@ -1,14 +1,17 @@
 #ifndef LIBASR_PASS_GPU_OFFLOAD_PREFLIGHT_H
 #define LIBASR_PASS_GPU_OFFLOAD_PREFLIGHT_H
 
+#include <algorithm>
 #include <set>
 #include <string>
 #include <vector>
 
 #include <libasr/asr.h>
+#include <libasr/asr_pass_walk_visitor.h>
 #include <libasr/asr_utils.h>
 #include <libasr/codegen/gpu_utils.h>
 #include <libasr/pass/gpu_decline.h>
+#include <libasr/pass/gpu_offload_collect.h>
 
 namespace LCompilers {
 
@@ -59,6 +62,14 @@ bool match_gpu_struct_array_member_extent(ASR::expr_t *expr,
 // elementwise, so its shape in turn is that of one of its array operands.
 // Follow the chain down to the designator that actually has extents.
 ASR::expr_t* gpu_scope_array_shape_source(const ASR::Variable_t *var,
+        ASR::stmt_t **body, size_t n_body);
+
+// Whether the local array `var` of a BLOCK or ASSOCIATE scope is an
+// allocatable assigned the array a function returns -- an associate name
+// bound to such a call. The routine the function becomes gives its result
+// an explicit shape, and the assignment gives that shape, over the actual
+// arguments, to `var` (gpu_device_allocatable).
+bool gpu_scope_array_function_result(const ASR::Variable_t *var,
         ASR::stmt_t **body, size_t n_body);
 
 // The same question for the whole loop body: the scopes it opens hold the
@@ -152,7 +163,7 @@ public:
             ASR::ttype_t *t =
                 ASRUtils::type_get_past_allocatable_pointer(var->m_type);
             ASR::dimension_t *dims = nullptr;
-            int rank = ASRUtils::extract_dimensions_from_ttype(t, dims);
+            int rank = checked_integer_cast<int>(ASRUtils::extract_dimensions_from_ttype(t, dims));
             if (rank <= 0) continue;
             if (ASRUtils::is_fixed_size_array(dims, rank)) continue;
             if (dims_have_lengths(dims, (size_t)rank)) continue;
@@ -172,6 +183,9 @@ public:
                 // is built, and the workspace pre-flight then decides
                 // whether the host can evaluate it.
                 if (gpu_scope_array_shape_source(var, body, n_body)) {
+                    continue;
+                }
+                if (gpu_scope_array_function_result(var, body, n_body)) {
                     continue;
                 }
             }
@@ -307,31 +321,130 @@ public:
     }
 };
 
-// Every `stop` and `error stop` a body holds, in the order they are found.
-// A device that can trap runs one of these as a halt of the launch, which
-// is less than the statement asks for: a grid returns no status, so the
-// stop code goes nowhere and normal termination cannot be told apart from
-// error termination. Each one is collected so that what the device drops
-// is said where the statement stands, rather than lowered in silence.
-class GpuStopStatementFinder
-        : public ASRUtils::BlockBodyWalkVisitor<GpuStopStatementFinder> {
-public:
-    // How Fortran spells the statement, and where it is.
-    std::vector<std::pair<std::string, Location>> stops;
+// The exits and cycles of the body of an offloaded loop, where a thread
+// runs one iteration of it. A cycle of the offloaded loop -- an unnamed one
+// outside the loops of the body, or a named one whose name no loop of the
+// body has -- ends that iteration, and with it the thread, so when the
+// walker is given an allocator it becomes a return. Every other exit and
+// cycle leaves a loop of the body and is left for the device code
+// generator. The ones that have no lowering yet are reported in `reason`
+// and `loc` instead.
+// Walking the body of a procedure the loop calls finds no cycle of the
+// offloaded loop, only the exits that have no lowering.
+class GpuOffloadedLoopLeaves
+        : public ASR::ASRPassBaseWalkVisitor<GpuOffloadedLoopLeaves> {
+    struct Frame {
+        const char *name;
+        // A do concurrent, whose name ASR does not keep.
+        bool concurrent;
+    };
+    std::vector<Frame> frames;
+    Allocator *al;
+    ASR::stmt_t *replacement = nullptr;
 
-    void visit_stmt(const ASR::stmt_t &s) {
-        switch (s.type) {
-            case ASR::stmtType::Stop:
-                stops.push_back({"stop", s.base.loc});
-                break;
-            case ASR::stmtType::ErrorStop:
-                stops.push_back({"error stop", s.base.loc});
-                break;
-            default:
-                break;
-        }
-        ASR::BaseWalkVisitor<GpuStopStatementFinder>::visit_stmt(s);
+    static bool unnamed(const char *name) {
+        return name == nullptr || name[0] == '\0';
     }
+
+    bool names_a_frame(const char *name) const {
+        for (const Frame &f : frames) {
+            if (!unnamed(f.name) && std::string(f.name) == name) return true;
+        }
+        return false;
+    }
+
+    bool in_concurrent() const {
+        for (const Frame &f : frames) {
+            if (f.concurrent) return true;
+        }
+        return false;
+    }
+
+    void decline(GpuDeclineReason why, const Location &where) {
+        if (reason != GpuDeclineReason::None) return;
+        reason = why;
+        loc = where;
+    }
+
+    template <typename Loop>
+    void loop(const Loop &x, const char *name, bool concurrent) {
+        frames.push_back({name, concurrent});
+        Loop &xx = const_cast<Loop&>(x);
+        transform_stmts(xx.m_body, xx.n_body);
+        frames.pop_back();
+    }
+
+public:
+    GpuDeclineReason reason = GpuDeclineReason::None;
+    Location loc;
+
+    // Without an allocator, the body is only looked at.
+    explicit GpuOffloadedLoopLeaves(Allocator *al_) : al(al_) {}
+
+    void transform_stmts(ASR::stmt_t **&m_body, size_t &n_body) {
+        for (size_t i = 0; i < n_body; i++) {
+            replacement = nullptr;
+            visit_stmt(*m_body[i]);
+            if (replacement != nullptr) m_body[i] = replacement;
+            replacement = nullptr;
+        }
+    }
+
+    void visit_DoLoop(const ASR::DoLoop_t &x) {
+        loop(x, x.m_name, false);
+    }
+
+    void visit_WhileLoop(const ASR::WhileLoop_t &x) {
+        loop(x, x.m_name, false);
+    }
+
+    void visit_DoConcurrentLoop(const ASR::DoConcurrentLoop_t &x) {
+        loop(x, nullptr, true);
+    }
+
+    void visit_BlockCall(const ASR::BlockCall_t &x) {
+        ASR::symbol_t *s = ASRUtils::symbol_get_past_external(x.m_m);
+        if (s == nullptr || !ASR::is_a<ASR::Block_t>(*s)) return;
+        ASR::Block_t *block = ASR::down_cast<ASR::Block_t>(s);
+        transform_stmts(block->m_body, block->n_body);
+    }
+
+    void visit_AssociateBlockCall(const ASR::AssociateBlockCall_t &x) {
+        ASR::symbol_t *s = ASRUtils::symbol_get_past_external(x.m_m);
+        if (s == nullptr || !ASR::is_a<ASR::AssociateBlock_t>(*s)) return;
+        ASR::AssociateBlock_t *block =
+            ASR::down_cast<ASR::AssociateBlock_t>(s);
+        transform_stmts(block->m_body, block->n_body);
+    }
+
+    void visit_Exit(const ASR::Exit_t &x) {
+        // An exit cannot leave a do concurrent, so a name that is not of a
+        // loop of the body is of another construct.
+        if (!unnamed(x.m_stmt_name) && !names_a_frame(x.m_stmt_name)) {
+            decline(GpuDeclineReason::ExitOfConstruct, x.base.base.loc);
+        }
+    }
+
+    void visit_Cycle(const ASR::Cycle_t &x) {
+        if (unnamed(x.m_stmt_name)) {
+            if (!frames.empty()) return;
+        } else {
+            if (names_a_frame(x.m_stmt_name)) return;
+            if (in_concurrent()) {
+                decline(GpuDeclineReason::NamedCycleInNestedConcurrent,
+                    x.base.base.loc);
+                return;
+            }
+        }
+        offloaded_cycles++;
+        if (al != nullptr) {
+            replacement = ASRUtils::STMT(ASR::make_Return_t(*al,
+                x.base.base.loc));
+        }
+    }
+
+    // The cycles of the offloaded loop found, which end the thread.
+    int offloaded_cycles = 0;
 };
 
 // Metal shaders have neither variable-length arrays nor a heap, so a
@@ -360,8 +473,8 @@ private:
     static bool has_runtime_extent(ASR::ttype_t *t) {
         if (!t) return false;
         ASR::dimension_t *dims = nullptr;
-        int rank = ASRUtils::extract_dimensions_from_ttype(
-            ASRUtils::type_get_past_allocatable_pointer(t), dims);
+        int rank = checked_integer_cast<int>(ASRUtils::extract_dimensions_from_ttype(
+            ASRUtils::type_get_past_allocatable_pointer(t), dims));
         return rank > 0 && !ASRUtils::is_fixed_size_array(dims, rank);
     }
 
@@ -501,20 +614,26 @@ inline bool gpu_reduction_op_supported(ASR::reduction_opType op) {
         case ASR::reduction_opType::ReduceIAND:
         case ASR::reduction_opType::ReduceIOR:
         case ASR::reduction_opType::ReduceIEOR:
+        case ASR::reduction_opType::ReduceAND:
+        case ASR::reduction_opType::ReduceOR:
+        case ASR::reduction_opType::ReduceEQV:
+        case ASR::reduction_opType::ReduceNEQV:
             return true;
     }
     return false;
 }
 
 // Whether the identity of `op` can be written down in `type`. The bitwise
-// operators are only defined on integers, and MIN and MAX need the
-// extreme value of the kind they run over.
+// operators are only defined on integers, the logical ones only on
+// logicals, and MIN and MAX need the extreme value of the kind they run
+// over.
 inline bool gpu_reduction_identity_exists(ASR::reduction_opType op,
         ASR::ttype_t *type) {
     ASR::ttype_t *t = ASRUtils::type_get_past_array(
         ASRUtils::type_get_past_allocatable_pointer(type));
     bool is_int = ASR::is_a<ASR::Integer_t>(*t);
     bool is_real = ASR::is_a<ASR::Real_t>(*t);
+    bool is_logical = ASR::is_a<ASR::Logical_t>(*t);
     switch (op) {
         case ASR::reduction_opType::ReduceAdd:
         case ASR::reduction_opType::ReduceSub:
@@ -527,6 +646,11 @@ inline bool gpu_reduction_identity_exists(ASR::reduction_opType op,
         case ASR::reduction_opType::ReduceIOR:
         case ASR::reduction_opType::ReduceIEOR:
             return is_int;
+        case ASR::reduction_opType::ReduceAND:
+        case ASR::reduction_opType::ReduceOR:
+        case ASR::reduction_opType::ReduceEQV:
+        case ASR::reduction_opType::ReduceNEQV:
+            return is_logical;
     }
     return false;
 }
@@ -561,6 +685,55 @@ inline ASR::binopType gpu_reduction_fold_binop(ASR::reduction_opType op) {
     return ASR::binopType::Add;
 }
 
+// The statement that combines the accumulator `other` into `target`, both
+// of the reduction's type: the kernel combines each thread's local
+// accumulator into its slot with it, and the host folds each slot into the
+// variable. MIN and MAX keep whichever of the two they are named for; the
+// logical operators and the others combine the two. Each operator is
+// associative, so the runs the threads accumulated combine in any grouping.
+inline ASR::stmt_t* gpu_reduction_combine(Allocator &al, const Location &loc,
+        ASR::reduction_opType op, ASR::expr_t *target, ASR::expr_t *other,
+        ASR::ttype_t *type) {
+    if (gpu_reduction_folds_by_compare(op)) {
+        Vec<ASR::stmt_t*> keep;
+        keep.reserve(al, 1);
+        keep.push_back(al, ASRUtils::STMT(ASR::make_Assignment_t(al, loc,
+            target, other, nullptr, false, false, false, false)));
+        return ASRUtils::STMT(ASR::make_If_t(al, loc, nullptr,
+            ASRUtils::EXPR(ASRUtils::make_Cmpop_util(al, loc,
+                op == ASR::reduction_opType::ReduceMIN
+                    ? ASR::cmpopType::Lt : ASR::cmpopType::Gt,
+                other, target, ASRUtils::duplicate_type(al, type))),
+            keep.p, keep.n, nullptr, 0));
+    }
+    auto combine_logically = [&](ASR::logicalbinopType lop) {
+        return ASRUtils::EXPR(ASR::make_LogicalBinOp_t(al, loc, target, lop,
+            other, ASRUtils::duplicate_type(al, type), nullptr));
+    };
+    ASR::expr_t *value;
+    switch (op) {
+        case ASR::reduction_opType::ReduceAND:
+            value = combine_logically(ASR::logicalbinopType::And);
+            break;
+        case ASR::reduction_opType::ReduceOR:
+            value = combine_logically(ASR::logicalbinopType::Or);
+            break;
+        case ASR::reduction_opType::ReduceEQV:
+            value = combine_logically(ASR::logicalbinopType::Eqv);
+            break;
+        case ASR::reduction_opType::ReduceNEQV:
+            value = combine_logically(ASR::logicalbinopType::NEqv);
+            break;
+        default:
+            value = ASRUtils::EXPR(ASRUtils::make_Binop_util(al, loc,
+                gpu_reduction_fold_binop(op), target, other,
+                ASRUtils::duplicate_type(al, type)));
+            break;
+    }
+    return ASRUtils::STMT(ASR::make_Assignment_t(al, loc, target, value,
+        nullptr, false, false, false, false));
+}
+
 // The value a thread's accumulator starts from: the one that leaves the
 // result unchanged when folded in, so a thread whose body never reached
 // the accumulator contributes nothing.
@@ -579,6 +752,17 @@ inline ASR::expr_t* gpu_reduction_identity(Allocator &al,
         return ASRUtils::EXPR(ASR::make_RealConstant_t(al, loc, v,
             ASRUtils::duplicate_type(al, t)));
     };
+    auto truth = [&](bool v) {
+        return ASRUtils::EXPR(ASR::make_LogicalConstant_t(al, loc, v,
+            ASRUtils::duplicate_type(al, t)));
+    };
+    // The largest integer of the accumulator's kind; the smallest is one
+    // below its negation.
+    auto int_max = [&]() -> int64_t {
+        LCOMPILERS_ASSERT(kind == 1 || kind == 2 || kind == 4 || kind == 8);
+        return kind == 1 ? INT8_MAX : kind == 2 ? INT16_MAX
+            : kind == 4 ? INT32_MAX : INT64_MAX;
+    };
     switch (op) {
         case ASR::reduction_opType::ReduceAdd:
         case ASR::reduction_opType::ReduceSub:
@@ -596,13 +780,20 @@ inline ASR::expr_t* gpu_reduction_identity(Allocator &al,
                 return fraction(kind == 8 ? 1.7976931348623157e308
                                           : 3.40282347e38);
             }
-            return whole(kind == 8 ? INT64_MAX : INT32_MAX);
+            return whole(int_max());
         case ASR::reduction_opType::ReduceMAX:
             if (is_real) {
                 return fraction(kind == 8 ? -1.7976931348623157e308
                                           : -3.40282347e38);
             }
-            return whole(kind == 8 ? INT64_MIN : INT32_MIN);
+            return whole(-int_max() - 1);
+        case ASR::reduction_opType::ReduceAND:
+        case ASR::reduction_opType::ReduceEQV:
+            // `x .eqv. .true.` is `x`, as `x .and. .true.` is.
+            return truth(true);
+        case ASR::reduction_opType::ReduceOR:
+        case ASR::reduction_opType::ReduceNEQV:
+            return truth(false);
     }
     LCOMPILERS_ASSERT(false);
     return nullptr;
@@ -625,7 +816,63 @@ inline ASR::expr_t* gpu_reduction_slot(Allocator &al, const Location &loc,
     return ASRUtils::EXPR(ASR::make_ArrayItem_t(al, loc,
         ASRUtils::EXPR(ASR::make_Var_t(al, loc, buffer)),
         args.p, args.n, ASRUtils::duplicate_type(al, scalar_type),
-        ASR::arraystorageType::ColMajor, nullptr));
+        ASR::arraystorageType::ColMajor, nullptr, false));
+}
+
+// The number of iterations of the loop index range `start:end`:
+// `end - start + 1`, or zero when the range runs backwards. A launch
+// numbers the iterations of a nest by the product of these, so a range
+// that runs backwards must count as none, not as a negative number of
+// iterations that two such ranges multiply into a positive one.
+inline ASR::expr_t* gpu_loop_extent(Allocator &al, const Location &loc,
+        ASR::expr_t *start, ASR::expr_t *end, ASR::ttype_t *int_type) {
+    int64_t start_value = 0, end_value = 0;
+    if (ASRUtils::extract_value(ASRUtils::expr_value(start), start_value)
+            && ASRUtils::extract_value(ASRUtils::expr_value(end),
+                end_value)) {
+        // An extent that does not fit in integer(8) is left to the run
+        // time, where the launch stops for it first
+        // (gpu_checked_iteration_count).
+        uint64_t span = static_cast<uint64_t>(end_value)
+            - static_cast<uint64_t>(start_value);
+        if (end_value < start_value || span < INT64_MAX) {
+            return ASRUtils::EXPR(ASR::make_IntegerConstant_t(al, loc,
+                end_value < start_value ? 0 : static_cast<int64_t>(span) + 1,
+                int_type, ASR::integerbozType::Decimal));
+        }
+    }
+    ASR::expr_t *extent = ASRUtils::EXPR(ASR::make_IntegerBinOp_t(al, loc,
+        ASRUtils::EXPR(ASR::make_IntegerBinOp_t(al, loc, end,
+            ASR::binopType::Sub, start, int_type, nullptr)),
+        ASR::binopType::Add, ASRUtils::EXPR(ASR::make_IntegerConstant_t(al,
+            loc, 1, int_type, ASR::integerbozType::Decimal)),
+        int_type, nullptr));
+    ASR::expr_t *nonempty = ASRUtils::EXPR(ASR::make_IntegerCompare_t(al,
+        loc, end, ASR::cmpopType::GtE, start,
+        ASRUtils::TYPE(ASR::make_Logical_t(al, loc, 4)), nullptr));
+    return ASRUtils::EXPR(ASR::make_IfExp_t(al, loc, nonempty, extent,
+        ASRUtils::EXPR(ASR::make_IntegerConstant_t(al, loc, 0, int_type,
+            ASR::integerbozType::Decimal)), int_type, nullptr));
+}
+
+// The integer type a kernel numbers the iterations of a nest in, given the
+// type of its widest loop index. Their number is the product of the extents,
+// which can exceed the largest value of the indices' kind even when every
+// index fits in it. A device that runs a launch of more iterations than the
+// chunk limit in chunks (GpuDeviceCapabilities::chunked_launches) numbers
+// the iterations of each chunk from 0, at most the limit, which is at most
+// huge(0), so it numbers them in integer(4); one that runs every iteration
+// in one launch numbers them in integer(8) where it indexes in it. Either
+// way the type is never narrower than the loop indices: an integer(8) index
+// keeps 64-bit index arithmetic. The host counts the iterations in
+// integer(8) whatever the kernel numbers them in.
+inline ASR::ttype_t* gpu_iteration_number_type(Allocator &al,
+        const Location &loc, ASR::ttype_t *loop_int_type,
+        const GpuDeviceCapabilities &caps) {
+    int kind = std::max(ASRUtils::extract_kind_from_ttype_t(loop_int_type),
+        caps.chunked_launches ? 4 : std::min(8, caps.max_index_kind));
+    return kind == ASRUtils::extract_kind_from_ttype_t(loop_int_type)
+        ? loop_int_type : ASRUtils::TYPE(ASR::make_Integer_t(al, loc, kind));
 }
 
 } // namespace LCompilers

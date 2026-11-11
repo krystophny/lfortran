@@ -15,5 +15,8 @@ _No documentation yet._
 ## Verify
 
 <!-- BEGIN AUTO: verify -->
+* OMPOverwrite may only be a clause of a parallel loop assigned to the device
+* the array of an OMPOverwrite clause must be an array variable or a component of one
+* the condition of an OMPOverwrite clause must be a scalar logical
 * a variable named by an OMPRegion clause must be a Var
 <!-- END AUTO: verify -->

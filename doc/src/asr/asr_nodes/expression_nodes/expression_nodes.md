@@ -46,12 +46,17 @@ EnumConstructor
 EnumName
 EnumStaticMember
 EnumValue
+FrameAddress
 FunctionCall
 FunctionParam
 FunctionPointerCast
 GetPointer
+GpuAtomicFetchAdd
 GpuBlockIndex
 GpuBlockSize
+GpuLaneBroadcast
+GpuLaneIndex
+GpuLaneReduce
 GpuThreadIndex
 Iachar
 Ichar

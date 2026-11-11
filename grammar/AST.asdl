@@ -136,6 +136,7 @@ decl_stmt
     | Inquire(int label, expr* args, keyword* kwargs, expr* values, trivia? trivia)
     | Nullify(int label, expr* args, keyword* kwargs, trivia? trivia)
     | Open(int label, expr* args, keyword* kwargs, trivia? trivia)
+    | Pause(int label, expr? code, trivia? trivia)
     | Return(int label, expr? value, trivia? trivia)
     | Pragma(int label, pragma_type type, bool end, string construct_name,
             expr* clauses, trivia? trivia)
@@ -466,7 +467,7 @@ concurrent_locality
     | ConcurrentDefault()
     | ConcurrentReduce(reduce_op op, identifier *vars)
 
-reduce_op = ReduceAdd | ReduceSub | ReduceMul | ReduceMIN | ReduceMAX | ReduceIAND | ReduceIOR | ReduceIEOR
+reduce_op = ReduceAdd | ReduceSub | ReduceMul | ReduceMIN | ReduceMAX | ReduceIAND | ReduceIOR | ReduceIEOR | ReduceAND | ReduceOR | ReduceEQV | ReduceNEQV
 
 data_stmt_set
     = DataStmtSet(expr* object, expr* value)

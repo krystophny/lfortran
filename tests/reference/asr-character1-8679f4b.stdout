@@ -19,7 +19,7 @@
                                     (FunctionType
                                         []
                                         (String 1 () AssumedLength DescriptorString)
-                                        BindC
+                                        Source
                                         ImplicitInterface
                                         ()
                                         .false.
@@ -41,9 +41,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             mess~fpcast:
                                 (Function
@@ -61,7 +63,7 @@
                                                     Default
                                                     (Integer 4)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -70,9 +72,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             mess~result:
                                                 (Variable
@@ -85,7 +89,7 @@
                                                     Default
                                                     (String 1 () AssumedLength DescriptorString)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -94,16 +98,18 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     mess~fpcast
                                     (FunctionType
                                         [(Integer 4)]
                                         (String 1 () AssumedLength DescriptorString)
-                                        BindC
+                                        Source
                                         Interface
                                         ()
                                         .false.
@@ -137,7 +143,7 @@
                                         (FunctionType
                                             [(Integer 4)]
                                             (String 1 () AssumedLength DescriptorString)
-                                            BindC
+                                            Source
                                             Interface
                                             ()
                                             .false.
@@ -160,22 +166,49 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             ~implicit_interface_mess_3:
                                 (Function
                                     (SymbolTable
                                         3
                                         {
-                                            
+                                            ~implicit_interface_mess_3_return_var_name:
+                                                (Variable
+                                                    3
+                                                    ~implicit_interface_mess_3_return_var_name
+                                                    []
+                                                    ReturnVar
+                                                    ()
+                                                    ()
+                                                    Default
+                                                    (String 1 () AssumedLength DescriptorString)
+                                                    ()
+                                                    Source
+                                                    Public
+                                                    Required
+                                                    .false.
+                                                    .false.
+                                                    .false.
+                                                    ()
+                                                    .false.
+                                                    .false.
+                                                    .false.
+                                                    NotMethod
+                                                    ()
+                                                    []
+                                                    ()
+                                                )
                                         })
                                     ~implicit_interface_mess_3
                                     (FunctionType
                                         []
                                         (String 1 () AssumedLength DescriptorString)
-                                        BindC
+                                        Source
                                         ImplicitInterface
                                         ()
                                         .false.
@@ -190,7 +223,7 @@
                                     []
                                     []
                                     []
-                                    ()
+                                    (Var 3 ~implicit_interface_mess_3_return_var_name)
                                     Private
                                     .false.
                                     .false.
@@ -202,7 +235,7 @@
                         [(FunctionType
                             []
                             (String 1 () AssumedLength DescriptorString)
-                            BindC
+                            Source
                             ImplicitInterface
                             ()
                             .false.
@@ -237,7 +270,7 @@
                             (FunctionType
                                 [(Integer 4)]
                                 (String 1 () AssumedLength DescriptorString)
-                                BindC
+                                Source
                                 Interface
                                 ()
                                 .false.
@@ -251,11 +284,12 @@
                             )
                             ()
                         )
+                        NoPointerBounds
                     )
                     (Print
                         (FunctionCall
                             2 mess~fpcast_ptr
-                            ()
+                            2 mess
                             [((IntegerConstant 1 (Integer 4) Decimal))]
                             (String 1 () AssumedLength DescriptorString)
                             ()

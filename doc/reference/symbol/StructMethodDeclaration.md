@@ -4,7 +4,7 @@
 
 <!-- BEGIN AUTO: asr -->
 ```
-StructMethodDeclaration(symbol_table parent_symtab, identifier name, identifier? self_argument, identifier proc_name, symbol proc, abi abi, bool is_deferred, bool is_nopass)
+StructMethodDeclaration(symbol_table parent_symtab, identifier name, identifier? self_argument, identifier proc_name, symbol proc, abi abi, bool is_deferred, bool is_nopass, access access)
 ```
 <!-- END AUTO: asr -->
 

@@ -16,6 +16,7 @@ _No documentation yet._
 
 <!-- BEGIN AUTO: verify -->
 * ArrayPhysicalCast is redundant, the old physical type and new physical type must be different.
+* the rank(0) cast of an assumed-rank array must have DescriptorArray as its new physical type
 * Destination physical type conflicts with the physical type of target
 * Old physical type conflicts with the physical type of argument [...] [...]
 <!-- END AUTO: verify -->

@@ -35,6 +35,19 @@ bool gpu_component_is_decomposed(ASR::symbol_t *component) {
         && ASR::is_a<ASR::Array_t>(*ASRUtils::type_get_past_allocatable(type));
 }
 
+bool gpu_component_is_opaque(ASR::symbol_t *component) {
+    if (!component || !ASR::is_a<ASR::Variable_t>(*component)) return false;
+    ASR::ttype_t *type = ASR::down_cast<ASR::Variable_t>(component)->m_type;
+    return ASRUtils::is_allocatable(type) && !ASRUtils::is_array(type);
+}
+
+size_t gpu_opaque_component_words(ASR::symbol_t *component) {
+    ASR::ttype_t *type = ASRUtils::symbol_type(
+        ASRUtils::symbol_get_past_external(component));
+    return !ASRUtils::is_array(type) && ASRUtils::is_character(*type)
+        ? 2 : 1;
+}
+
 static void collect_decomposed_components(ASR::Struct_t *st,
         std::vector<GpuComponentLayout> &out,
         std::set<ASR::Struct_t*> &seen) {
@@ -54,6 +67,40 @@ std::vector<GpuComponentLayout> gpu_decomposed_components(
     std::set<ASR::Struct_t*> seen;
     collect_decomposed_components(definition, components, seen);
     return components;
+}
+
+static bool hands_over_deferred_length_string(ASR::Struct_t *st,
+        std::set<ASR::Struct_t*> &seen) {
+    if (!st || !seen.insert(st).second) return false;
+    std::vector<ASR::symbol_t*> members;
+    gpu_collect_data_members(st, members);
+    for (ASR::symbol_t *member : members) {
+        if (!member || !ASR::is_a<ASR::Variable_t>(*member)) continue;
+        ASR::Variable_t *variable = ASR::down_cast<ASR::Variable_t>(member);
+        if (gpu_component_is_decomposed(member)
+                && ASRUtils::is_deferredLength_string(variable->m_type)) {
+            return true;
+        }
+        // The layout keeps the bytes of an opaque component and of a
+        // pointer one without following them.
+        if (gpu_component_is_opaque(member)
+                || ASRUtils::is_pointer(variable->m_type)) {
+            continue;
+        }
+        if (ASR::is_a<ASR::StructType_t>(
+                    *ASRUtils::extract_type(variable->m_type))
+                && hands_over_deferred_length_string(
+                    gpu_struct_definition(variable->m_type_declaration),
+                    seen)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool gpu_struct_hands_over_deferred_length_string(ASR::Struct_t *definition) {
+    std::set<ASR::Struct_t*> seen;
+    return hands_over_deferred_length_string(definition, seen);
 }
 
 std::vector<GpuComponentLayout> gpu_component_layouts(

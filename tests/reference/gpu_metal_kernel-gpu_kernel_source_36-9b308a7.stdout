@@ -1,0 +1,25 @@
+#include <metal_stdlib>
+using namespace metal;
+
+struct __ScalarArgs___lfortran_gpu_kernel_0_20gpu_kernel_source_36 {
+    int n_gpu;
+    int __loop_end_0_gpu;
+};
+
+kernel void __lfortran_gpu_kernel_0_20gpu_kernel_source_36(
+    device float* x_gpu [[buffer(0)]],
+    device float* y_gpu [[buffer(1)]],
+    constant __ScalarArgs___lfortran_gpu_kernel_0_20gpu_kernel_source_36& __scalar_args [[buffer(2)]],
+    uint __thread_id [[thread_position_in_grid]])
+{
+    int __loop_end_0_gpu = __scalar_args.__loop_end_0_gpu;
+    int __flat_idx_gpu;
+    int i__dc4_gpu;
+    if ((((0 * 0) + __thread_id) >= (((__loop_end_0_gpu >= 1)) ? (((__loop_end_0_gpu - 1) + 1)) : (0)))) {
+        return;
+    }
+    __flat_idx_gpu = ((0 * 0) + __thread_id);
+    i__dc4_gpu = (__flat_idx_gpu + 1);
+    y_gpu[((int)(i__dc4_gpu) - (1))] = (((float)2) * x_gpu[((int)(i__dc4_gpu) - (1))]);
+}
+

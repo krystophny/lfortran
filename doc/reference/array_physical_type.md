@@ -10,8 +10,6 @@
 * `UnboundedPointerArray`
 * `FixedSizeArray`
 * `StringArraySinglePointer`
-* `NumPyArray`
-* `ISODescriptorArray`
 * `SIMDArray`
 * `AssumedRankArray`
 <!-- END AUTO: values -->

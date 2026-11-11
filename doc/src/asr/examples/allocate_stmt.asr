@@ -38,10 +38,12 @@
               :contiguous_attr false
               :bindc_name nil
               :is_volatile false
+              :is_asynchronous false
               :is_protected false
               :pass_attr :NotMethod
               :self_argument nil
               :codims []
+              :common_block nil
             )
             "p" (Variable
               :parent_symtab 1
@@ -65,10 +67,12 @@
               :contiguous_attr false
               :bindc_name nil
               :is_volatile false
+              :is_asynchronous false
               :is_protected false
               :pass_attr :NotMethod
               :self_argument nil
               :codims []
+              :common_block nil
             )
             "stat" (Variable
               :parent_symtab 1
@@ -90,10 +94,12 @@
               :contiguous_attr false
               :bindc_name nil
               :is_volatile false
+              :is_asynchronous false
               :is_protected false
               :pass_attr :NotMethod
               :self_argument nil
               :codims []
+              :common_block nil
             )
           }
         )
@@ -166,6 +172,36 @@
                 :type nil
               )
             ]
+            :shape_differs (IntegerCompare
+              :left (ArraySize
+                :v (Var
+                  :v (SymbolRef 1 "a")
+                )
+                :dim (IntegerConstant
+                  :n 1
+                  :type (Integer
+                    :kind 4
+                  )
+                  :intboz_type :Decimal
+                )
+                :type (Integer
+                  :kind 4
+                )
+                :value nil
+              )
+              :op :NotEq
+              :right (IntegerConstant
+                :n 20
+                :type (Integer
+                  :kind 4
+                )
+                :intboz_type :Decimal
+              )
+              :type (Logical
+                :kind 4
+              )
+              :value nil
+            )
           )
           (ExplicitDeallocate
             :vars [
@@ -173,6 +209,10 @@
                 :v (SymbolRef 1 "a")
               )
             ]
+            :stat (Var
+              :v (SymbolRef 1 "stat")
+            )
+            :errmsg nil
           )
           (Nullify
             :vars [

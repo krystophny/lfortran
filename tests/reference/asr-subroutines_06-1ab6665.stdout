@@ -17,6 +17,16 @@
                                     assign_large
                                     Public
                                 ),
+                            assign_large@~assign:
+                                (ExternalSymbol
+                                    7
+                                    assign_large@~assign
+                                    2 assign_large
+                                    subroutines_06_bitset
+                                    []
+                                    assign_large
+                                    Private
+                                ),
                             assign_logint8_large:
                                 (ExternalSymbol
                                     7
@@ -27,14 +37,21 @@
                                     assign_logint8_large
                                     Public
                                 ),
-                            error_handler:
+                            assign_logint8_large@~assign:
                                 (ExternalSymbol
                                     7
-                                    error_handler
-                                    2 error_handler
+                                    assign_logint8_large@~assign
+                                    2 assign_logint8_large
                                     subroutines_06_bitset
                                     []
+                                    assign_logint8_large
+                                    Private
+                                ),
+                            error_handler:
+                                (GenericProcedure
+                                    7
                                     error_handler
+                                    [7 error_handler~genericprocedure@error_handler]
                                     Public
                                 ),
                             error_handler~genericprocedure:
@@ -47,14 +64,22 @@
                                     error_handler~genericprocedure
                                     Public
                                 ),
-                            ~assign:
+                            error_handler~genericprocedure@error_handler:
                                 (ExternalSymbol
                                     7
-                                    ~assign
-                                    2 ~assign
+                                    error_handler~genericprocedure@error_handler
+                                    2 error_handler~genericprocedure
                                     subroutines_06_bitset
                                     []
+                                    error_handler~genericprocedure
+                                    Private
+                                ),
+                            ~assign:
+                                (CustomOperator
+                                    7
                                     ~assign
+                                    [7 assign_large@~assign
+                                    7 assign_logint8_large@~assign]
                                     Public
                                 )
                         })
@@ -93,9 +118,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             set2:
                                                 (Variable
@@ -117,9 +144,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     assign_large
@@ -180,9 +209,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             self:
                                                 (Variable
@@ -204,9 +235,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     assign_logint8_large
@@ -274,9 +307,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             message:
                                                 (Variable
@@ -298,9 +333,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             module:
                                                 (Variable
@@ -322,9 +359,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             procedure:
                                                 (Variable
@@ -346,9 +385,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             status:
                                                 (Variable
@@ -370,9 +411,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     error_handler~genericprocedure
@@ -407,6 +450,8 @@
                                             [(Var 6 error)
                                             (Var 6 status)]
                                             FormatFortran
+                                            []
+                                            ()
                                             (Allocatable
                                                 (String 1 () DeferredLength DescriptorString)
                                             )
@@ -434,6 +479,7 @@
                     .false.
                     .false.
                     .true.
+                    .false.
                     ()
                 )
         })

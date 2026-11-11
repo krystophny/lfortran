@@ -18,7 +18,7 @@
                                     (FunctionType
                                         []
                                         ()
-                                        BindC
+                                        Source
                                         ImplicitInterface
                                         ()
                                         .false.
@@ -55,7 +55,7 @@
                                                     Default
                                                     (Real 8)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -64,9 +64,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             alnorm~arg_1:
                                                 (Variable
@@ -79,7 +81,7 @@
                                                     Default
                                                     (Logical 4)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -88,9 +90,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             alnorm~result:
                                                 (Variable
@@ -103,7 +107,7 @@
                                                     Default
                                                     (Real 4)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -112,9 +116,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     alnorm~fpcast
@@ -122,7 +128,7 @@
                                         [(Real 8)
                                         (Logical 4)]
                                         (Real 4)
-                                        BindC
+                                        Source
                                         Interface
                                         ()
                                         .false.
@@ -158,7 +164,7 @@
                                             [(Real 8)
                                             (Logical 4)]
                                             (Real 4)
-                                            BindC
+                                            Source
                                             Interface
                                             ()
                                             .false.
@@ -181,9 +187,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             b:
                                 (Variable
@@ -205,9 +213,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             dgetrf:
                                 (Function
@@ -220,7 +230,7 @@
                                     (FunctionType
                                         []
                                         ()
-                                        BindC
+                                        Source
                                         ImplicitInterface
                                         ()
                                         .false.
@@ -257,7 +267,7 @@
                                                     Default
                                                     (Real 8)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -266,9 +276,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             dgetrf~arg_1:
                                                 (Variable
@@ -281,7 +293,7 @@
                                                     Default
                                                     (Real 8)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -290,9 +302,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             dgetrf~arg_2:
                                                 (Variable
@@ -305,7 +319,7 @@
                                                     Default
                                                     (Real 8)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -314,9 +328,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     dgetrf~fpcast
@@ -325,7 +341,7 @@
                                         (Real 8)
                                         (Real 8)]
                                         ()
-                                        BindC
+                                        Source
                                         Interface
                                         ()
                                         .false.
@@ -363,7 +379,7 @@
                                             (Real 8)
                                             (Real 8)]
                                             ()
-                                            BindC
+                                            Source
                                             Interface
                                             ()
                                             .false.
@@ -386,9 +402,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             one:
                                 (Variable
@@ -404,7 +422,7 @@
                                         1.000000
                                         (Real 8)
                                     )
-                                    Default
+                                    Save
                                     (Real 8)
                                     ()
                                     Source
@@ -416,9 +434,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             prho:
                                 (Variable
@@ -440,9 +460,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             six:
                                 (Variable
@@ -458,7 +480,7 @@
                                         6.000000
                                         (Real 8)
                                     )
-                                    Default
+                                    Save
                                     (Real 8)
                                     ()
                                     Source
@@ -470,9 +492,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             two:
                                 (Variable
@@ -488,7 +512,7 @@
                                         2.000000
                                         (Real 8)
                                     )
-                                    Default
+                                    Save
                                     (Real 8)
                                     ()
                                     Source
@@ -500,9 +524,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             u:
                                 (Variable
@@ -524,9 +550,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             x:
                                 (Variable
@@ -548,9 +576,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             y:
                                 (Variable
@@ -572,9 +602,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             zero:
                                 (Variable
@@ -590,7 +622,7 @@
                                         0.000000
                                         (Real 8)
                                     )
-                                    Default
+                                    Save
                                     (Real 8)
                                     ()
                                     Source
@@ -602,9 +634,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     prho
@@ -625,47 +659,7 @@
                     )
                     []
                     []
-                    [(Assignment
-                        (Var 2 zero)
-                        (RealConstant
-                            0.000000
-                            (Real 8)
-                        )
-                        ()
-                        .false.
-                        .false.
-                    )
-                    (Assignment
-                        (Var 2 one)
-                        (RealConstant
-                            1.000000
-                            (Real 8)
-                        )
-                        ()
-                        .false.
-                        .false.
-                    )
-                    (Assignment
-                        (Var 2 two)
-                        (RealConstant
-                            2.000000
-                            (Real 8)
-                        )
-                        ()
-                        .false.
-                        .false.
-                    )
-                    (Assignment
-                        (Var 2 six)
-                        (RealConstant
-                            6.000000
-                            (Real 8)
-                        )
-                        ()
-                        .false.
-                        .false.
-                    )
-                    (Associate
+                    [(Associate
                         (Var 2 alnorm~fpcast_ptr)
                         (FunctionPointerCast
                             (Var 2 alnorm)
@@ -674,7 +668,7 @@
                                 [(Real 8)
                                 (Logical 4)]
                                 (Real 4)
-                                BindC
+                                Source
                                 Interface
                                 ()
                                 .false.
@@ -688,6 +682,7 @@
                             )
                             ()
                         )
+                        NoPointerBounds
                     )
                     (Assignment
                         (Var 2 prho)
@@ -715,7 +710,7 @@
                             (Cast
                                 (FunctionCall
                                     2 alnorm~fpcast_ptr
-                                    ()
+                                    2 alnorm
                                     [((Var 2 x))
                                     ((LogicalConstant
                                         .true.
@@ -736,6 +731,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Associate
                         (Var 2 dgetrf~fpcast_ptr)
@@ -747,7 +744,7 @@
                                 (Real 8)
                                 (Real 8)]
                                 ()
-                                BindC
+                                Source
                                 Interface
                                 ()
                                 .false.
@@ -761,6 +758,7 @@
                             )
                             ()
                         )
+                        NoPointerBounds
                     )
                     (SubroutineCall
                         2 dgetrf~fpcast_ptr
@@ -786,6 +784,8 @@
                             ()
                             .false.
                             .false.
+                            .false.
+                            .false.
                         )]
                         []
                     )
@@ -802,6 +802,8 @@
                             (Var 2 prho)
                             (Var 2 one)
                             ()
+                            .false.
+                            .false.
                             .false.
                             .false.
                         )]

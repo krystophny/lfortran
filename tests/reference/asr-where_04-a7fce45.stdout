@@ -32,9 +32,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             reldiff:
                                                 (Variable
@@ -62,9 +64,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     compare_solutions
@@ -102,6 +106,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )
                                     (Assignment
                                         (Var 3 absdiff)
@@ -110,6 +116,8 @@
                                             (Real 4)
                                         )
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )
@@ -240,6 +248,8 @@
                                             ()
                                             .false.
                                             .false.
+                                            .false.
+                                            .false.
                                         )]
                                         []
                                     )
@@ -257,6 +267,7 @@
                                                         (Real 4)
                                                         ColMajor
                                                         ()
+                                                        .true.
                                                     )
                                                     Sub
                                                     (RealConstant
@@ -297,6 +308,7 @@
                                                         (Real 4)
                                                         ColMajor
                                                         ()
+                                                        .true.
                                                     )
                                                     Sub
                                                     (RealConstant
@@ -328,6 +340,8 @@
                                             ()
                                             [(Var 3 reldiff)]
                                             FormatFortran
+                                            []
+                                            ()
                                             (Allocatable
                                                 (String 1 () DeferredLength DescriptorString)
                                             )
@@ -373,9 +387,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     solution
@@ -419,6 +435,8 @@
                                             ColMajor
                                         )
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )]

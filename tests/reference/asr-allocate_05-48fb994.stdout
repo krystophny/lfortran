@@ -27,9 +27,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             string:
                                 (Variable
@@ -53,9 +55,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     allocate_05
@@ -80,11 +84,15 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 2 string)
                         (Var 2 num)
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -136,6 +144,8 @@
                         )
                         (Var 2 num)
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )

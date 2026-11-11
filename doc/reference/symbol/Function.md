@@ -4,7 +4,7 @@
 
 <!-- BEGIN AUTO: asr -->
 ```
-Function(symbol_table symtab, identifier name, ttype function_signature, identifier* dependencies, expr* args, stmt* body, expr? return_var, access access, bool deterministic, bool side_effect_free, string? module_file, gpu_kernel_layout? gpu, location start_name, location end_name)
+Function(symbol_table symtab, identifier name, ttype function_signature, identifier* dependencies, expr* args, stmt* body, expr? return_var, access access, bool deterministic, bool side_effect_free, string? module_file, gpu_kernel_layout? gpu, interface_body? interface_body, location start_name, location end_name)
 ```
 <!-- END AUTO: asr -->
 
@@ -22,6 +22,7 @@ _No documentation yet._
 * The asr_owner invariant failed
 * Function name is required
 * Type signature is required for `[...]`
+* The function '[...]' must have a result variable exactly when its type has a result type
 * Dependency [...] is inside symbol table [...]
 * Function [...] doesn't depend on [...] but is found in its dependency list.
 * Function [...] depends on [...] but isn't found in its dependency list.

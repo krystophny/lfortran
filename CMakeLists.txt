@@ -6,8 +6,20 @@ set(CMAKE_USER_MAKE_RULES_OVERRIDE ${CMAKE_SOURCE_DIR}/cmake/UserOverride.cmake)
 if (LFORTRAN_BUILD_ALL)
     find_program(RE2C re2c REQUIRED)
     find_program(BISON bison REQUIRED)
-    find_program(BASH_BIN bash REQUIRED)
-    execute_process(COMMAND "env" "RE2C=${RE2C}" "BISON=${BISON}" "${BASH_BIN}" "-e" "build0.sh" WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} RESULT_VARIABLE _BUILD0_EXIT)
+    # NAMES_PER_DIR: the first PATH entry with either name wins, so an active
+    # environment's `python` is preferred over a system `python3`.
+    find_program(LFORTRAN_PYTHON NAMES python3 python NAMES_PER_DIR REQUIRED
+        DOC "Python 3 interpreter that runs the code generators in build0.sh")
+    message(STATUS "Running build0.sh generators with ${LFORTRAN_PYTHON}")
+    # build0.sh runs with the cross-platform Prefix `shell`
+    # (https://github.com/prefix-dev/shell), which Pixi and CI install on
+    # every platform, or with Bash when `shell` is not installed, so builds
+    # without Pixi need only Bash. Override with -DLFORTRAN_SHELL=/path/to/bash.
+    find_program(LFORTRAN_SHELL NAMES shell bash REQUIRED
+        DOC "Bash-compatible shell (Prefix shell or bash) that runs build0.sh")
+    message(STATUS "Running build0.sh with ${LFORTRAN_SHELL}")
+    # Both shells accept --norc; Bash only reads rc files interactively anyway.
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E env "RE2C=${RE2C}" "BISON=${BISON}" "PYTHON=${LFORTRAN_PYTHON}" "${LFORTRAN_SHELL}" "--norc" "build0.sh" WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} RESULT_VARIABLE _BUILD0_EXIT)
     if (NOT _BUILD0_EXIT EQUAL 0)
         message(FATAL_ERROR "Running build0.sh failed (see error above)")
     endif ()
@@ -37,12 +49,25 @@ if (NOT WITH_XEUS AND NOT XEUS_LFORTRAN_WASM_BUILD)
         set(LFORTRAN_CXX_NO_RTTI_FLAG "-fno-rtti")
     elseif (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
         set(LFORTRAN_CXX_NO_RTTI_FLAG "/GR-")
+        # CMake's MSVC default flags contain /GR, which /GR- would override
+        # with warning D9025. RTTI is the MSVC default anyway, so dropping /GR
+        # keeps it enabled for targets that do not use the no-RTTI flag.
+        string(REGEX REPLACE "(^| )[/-]GR( |$)" " " CMAKE_CXX_FLAGS
+            "${CMAKE_CXX_FLAGS}")
     endif ()
 endif()
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
     set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /bigobj")
     set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /bigobj")
+endif ()
+
+if (MSVC)
+    # The MSVC CRT deprecates portable standard C functions such as getenv
+    # and strcpy (C4996) in favor of non-portable *_s variants. Keep using the
+    # standard functions, as LLVM does. POSIX-name deprecations
+    # (_CRT_NONSTDC_NO_WARNINGS) remain enabled.
+    add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 endif ()
 
 # For CMAKE_INSTALL_BINDIR:
@@ -320,6 +345,13 @@ if (WITH_LLVM)
     set_property(TARGET p::llvm PROPERTY INTERFACE_LINK_LIBRARIES
         ${llvm_libs})
     if (MSVC)
+        # LLVM 11 headers derive iterators from std::iterator, which the MSVC
+        # STL deprecates in C++17 (STL4015). The warning is reported inside the
+        # STL headers, so marking LLVM's include directory as external does
+        # not suppress it.
+        set_property(TARGET p::llvm PROPERTY INTERFACE_COMPILE_DEFINITIONS
+            _SILENCE_CXX17_ITERATOR_BASE_CLASS_DEPRECATION_WARNING)
+
         # LLVM on Windows appends zlib shared library and we must provide
         # a path to find it:
         get_filename_component(mypath ${ZLIB_LIBRARY} DIRECTORY)
@@ -329,6 +361,51 @@ if (WITH_LLVM)
     set(HAVE_LFORTRAN_LLVM yes)
     if(CMAKE_SYSTEM_NAME MATCHES "Linux" AND LLVM_VERSION_MAJOR GREATER_EQUAL 12)
         set(WITH_LIBUNWIND_FORCE yes)
+    endif()
+
+    # The driver links ELF executables itself with LLD. macOS and Windows keep
+    # their platform linkers: LLD's Mach-O and COFF drivers still need the
+    # platform SDK, which the system linker already knows.
+    # LLD 7–9 cannot read the SHT_GROUP sections in the current C runtime,
+    # so those builds keep the external compiler driver.
+    # MLIR's imported targets link the shared libLLVM.so. Statically linking
+    # LLD pulls a second copy of LLVM into the same process and corrupts the
+    # heap, so an MLIR build keeps the external compiler driver.
+    if (NOT EMSCRIPTEN AND CMAKE_SYSTEM_NAME STREQUAL "Linux"
+            AND LLVM_VERSION_MAJOR GREATER_EQUAL 10
+            AND NOT WITH_MLIR)
+        # LLVM 10 and newer export an LLD CMake package. An older package
+        # layout ships the same static libraries and headers without it.
+        find_package(LLD CONFIG
+            HINTS
+                "$ENV{CONDA_PREFIX}/lib/cmake/lld"
+                "${CMAKE_PREFIX_PATH}/lib/cmake/lld"
+        )
+        if (TARGET lldELF)
+            set(HAVE_LFORTRAN_LLD yes)
+            message(STATUS "Linking the LFortran driver with LLD ${LLVM_PACKAGE_VERSION}")
+        else()
+            find_library(LFORTRAN_LLD_ELF NAMES liblldELF.a
+                HINTS "${LLVM_LIBRARY_DIR}" "$ENV{CONDA_PREFIX}/lib"
+                NO_DEFAULT_PATH)
+            find_path(LFORTRAN_LLD_INCLUDE_DIR lld/Common/Driver.h
+                HINTS ${LLVM_INCLUDE_DIRS} "$ENV{CONDA_PREFIX}/include"
+                NO_DEFAULT_PATH)
+            if (LFORTRAN_LLD_ELF AND LFORTRAN_LLD_INCLUDE_DIR)
+                set(HAVE_LFORTRAN_LLD yes)
+                set(LLD_INCLUDE_DIRS "${LFORTRAN_LLD_INCLUDE_DIR}")
+                message(STATUS
+                    "Linking the LFortran driver with LLD ${LLVM_PACKAGE_VERSION} from ${LFORTRAN_LLD_ELF}")
+            else()
+                message(FATAL_ERROR
+                    "LLD ${LLVM_PACKAGE_VERSION} was not found. Install the "
+                    "lld package that matches this LLVM.")
+            endif()
+        endif()
+        # Keep LLVM static. The imported lldELF target also names the shared
+        # libLLVM, and the two copies register the same cl::opt options.
+        # src/bin links the static LLD archives against the component archives
+        # instead of that interface.
     endif()
 endif()
 
@@ -355,7 +432,9 @@ if (WITH_XEUS)
     find_package(xeus 5.0.0 REQUIRED)
     find_package(xeus-zmq 3.0.0 REQUIRED)
     set(HAVE_LFORTRAN_XEUS yes)
-
+endif()
+# The Xeus kernel, or else the built-in one, which needs only LLVM
+if (WITH_XEUS OR (WITH_LLVM AND NOT EMSCRIPTEN))
     configure_lfortran_kernel()
 
     # Configuration and data directories for Jupyter and LFortran
@@ -561,11 +640,12 @@ if (WITH_RUNTIME_LIBRARY)
     "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
     "-DCMAKE_PREFIX_PATH=\"${CMAKE_PREFIX_PATH}\""
     "-DCMAKE_INSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}"
-    "-DWITH_XEUS=${WITH_XEUS}"
 #    "-DCMAKE_VERBOSE_MAKEFILE:BOOL=${CMAKE_VERBOSE_MAKEFILE}"
     "-DCMAKE_Fortran_COMPILER=${LFORTRAN_PATH}"
     "-DLFORTRAN_NESTED_BUILD=yes"
-    "${CMAKE_SOURCE_DIR}/src/runtime/"
+    # Do not reuse a runtime cache from an existing in-source build.
+    "-S" "${CMAKE_SOURCE_DIR}/src/runtime"
+    "-B" "${CMAKE_BINARY_DIR}/src/runtime"
     WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/src/runtime")
 
   add_dependencies(configure_runtime lfortran)

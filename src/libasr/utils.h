@@ -20,6 +20,14 @@ enum Platform {
 
 std::string pf2s(Platform);
 Platform get_platform();
+// The kind of the real type that is C `long double` on the target given by
+// its triple, or on the host when the triple is empty or not recognized
+int get_c_long_double_kind(const std::string &target_triple);
+int get_c_pointer_kind(const std::string &target_triple);
+// The C long double kind of the compilation in progress. Kind 10 is a
+// distinct real kind only when this is 10 (x87 extended precision).
+void set_active_c_long_double_kind(int kind);
+int get_active_c_long_double_kind();
 
 std::string get_unique_ID();
 int visualize_json(std::string &astr_data_json, LCompilers::Platform os);
@@ -34,13 +42,19 @@ struct PassOptions {
     std::vector<std::filesystem::path> include_dirs;
 
     int default_integer_kind = 4;
+    // The kind of C `long double` on the target, which the intrinsic
+    // iso_c_binding module gives as `c_long_double`
+    int c_long_double_kind = get_c_long_double_kind("");
+    // The size of a pointer on the target, which the intrinsic iso_c_binding
+    // module gives as `c_size_t`, `c_intptr_t` and `c_ptrdiff_t`, and as
+    // `c_long` where `long` has that size too (ILP32)
+    int c_pointer_kind = get_c_pointer_kind("");
 
     std::string run_fun; // for global_stmts pass
     // TODO: Convert to std::filesystem::path (also change find_and_load_module())
     std::string runtime_library_dir;
     bool always_run = false; // for unused_functions pass
     bool inline_external_symbol_calls = true; // for inline_function_calls pass
-    int64_t unroll_factor = 32; // for loop_unroll pass
     bool fast = false; // is fast flag enabled.
     bool no_fast_math = false; // disable fast-math optimizations (NaN, Inf, etc.)
     bool verbose = false; // For developer debugging
@@ -49,8 +63,8 @@ struct PassOptions {
     bool pass_cumulative = false; // Apply passes cumulatively
     bool verify_all_passes = false; // Verify ASR after every pass
     bool disable_main = false;
-    bool use_loop_variable_after_loop = false;
     bool realloc_lhs_arrays = false;
+    bool stack_arrays = false;
     // Each module is compiled into an object file of its own, so a module
     // read back from a `.mod` file is defined elsewhere and this translation
     // unit only refers to it.
@@ -78,6 +92,13 @@ struct PassOptions {
     bool openmp = false;
     bool gpu_offload_metal = false;
     bool gpu_offload_cuda = false;
+    // The CUDA offload is compiled for an AMD GPU with HIP (`--gpu=hip`).
+    bool gpu_offload_hip = false;
+    // The CUDA device code runs on an NVIDIA GPU (--gpu=cuda), rather than
+    // in the CPU emulation or on an AMD GPU through HIP: its threads run
+    // together in warps, which the lanes of an iteration need
+    // (gpu_vector_lanes.cpp).
+    bool gpu_cuda_warps = false;
     // `!$omp parallel do` asks for host threads. Offloading one onto a device
     // is a choice the user has to make, so it is off unless asked for.
     bool gpu_offload_omp_loops = false;
@@ -90,8 +111,25 @@ struct PassOptions {
     // construct on the unsupported list then runs on the CPU with a warning,
     // so that the kernels of the other loops are still produced.
     bool gpu_kernel_source_only = false;
+    // The loop transformations applied to parallel loops assigned to the
+    // device before they are offloaded (gpu_loop_fusion.cpp and the passes
+    // after it): "all", "none", or a comma separated list of `fuse`, `swap`,
+    // `split`, `jam` and `skew`.
+    std::string gpu_loop_transforms = "all";
+    // The size in bytes of the device's last-level cache that the loop
+    // transformations assume, or -1 to ask the device at run time.
+    int64_t gpu_cache_bytes = -1;
+    // The fewest iterations of a device loop that index-set splitting
+    // splits at run time; 0 splits every one that has an interior.
+    int64_t gpu_split_min_iterations = 131072;
+    // The most iterations one launch of a kernel runs. A launch of more runs
+    // its kernel once per chunk of at most this many (device_launch_expand).
+    // Lowered only by tests, to run many chunks over small loops.
+    int64_t gpu_chunk_limit = 2147483647;
     bool time_report = false;
     bool skip_removal_of_unused_procedures_in_pass_array_by_data = false;
+    // Whether the target can lower descriptor-to-data views in retained entries.
+    bool supports_descriptor_entry_wrappers = true;
     bool bounds_checking = true;
     bool strict_bounds_checking = false;
     // Short-circuit evaluation of logical .and./.or. (the standard permits
@@ -103,6 +141,9 @@ struct PassOptions {
     // Set by the pass manager so that a pass can report a diagnostic. It is
     // null when the passes are run outside the pass manager.
     diag::Diagnostics *diagnostics = nullptr;
+    // The number of activations of a host that can hold a procedure value of
+    // one of its internal procedures at the same time (nested_vars)
+    int64_t internal_procedure_thunks = 8;
 };
 
 struct CompilerOptions {
@@ -133,8 +174,16 @@ struct CompilerOptions {
     // Compile the generated device code as ordinary host code and run the
     // kernels on the CPU, so the GPU path is testable without a GPU.
     bool gpu_cpu_emulation = false;
+    // Compile the generated device code as HIP and run it on an AMD GPU
+    // through ROCm (`--gpu=hip`), with the CUDA runtime API of the GPU
+    // runtime implemented with HIP.
+    bool gpu_hip = false;
     // Toolchain driver used to compile and link GPU device code.
     std::string device_compiler = "nvcc";
+    // GPU architecture the device code is compiled for, such as sm_120 or,
+    // with --gpu=hip, gfx942. Empty means the GPUs of the machine that
+    // compiles.
+    std::string gpu_arch = "";
     std::string openmp_lib_dir = "";
     bool lookup_name = false;
     bool rename_symbol = false;
@@ -170,7 +219,6 @@ struct CompilerOptions {
     bool infer_mode = false;
     bool print_leading_space = false;
     bool rtlib = false;
-    bool use_loop_variable_after_loop = false;
     std::string target = "";
     std::string march = "";
     std::string mcpu = "";
@@ -182,8 +230,9 @@ struct CompilerOptions {
     bool link_numpy = false;
     bool run = false;
     bool legacy_array_sections = false;
+    // Diagnose requirements of Fortran 2023 that earlier standards relax
+    bool std_f23_conformance = false;
     bool ignore_pragma = false;
-    bool stack_arrays = false;
     bool internal_alloc_check = false;
     bool descriptor_index_64 = false; // Use 64-bit indices in array descriptors (implied by -fdefault-integer-8)
     bool wasm_html = false;

@@ -27,9 +27,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             i:
                                 (Variable
@@ -51,9 +53,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             j:
                                 (Variable
@@ -75,9 +79,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             kp:
                                 (Variable
@@ -99,9 +105,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     main
@@ -112,13 +120,15 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (DoLoop
                         ()
                         ((Var 2 i)
                         (IntegerConstant 1 (Integer 4) Decimal)
                         (Var 2 kp)
-                        ())
+                        (IntegerConstant 1 (Integer 4) Decimal))
                         [(DoLoop
                             ()
                             ((Var 2 j)
@@ -130,7 +140,7 @@
                                 ()
                             )
                             (Var 2 kp)
-                            ())
+                            (IntegerConstant 1 (Integer 4) Decimal))
                             [(If
                                 ()
                                 (IntegerCompare
@@ -149,6 +159,8 @@
                                         [(Var 2 i)
                                         (Var 2 j)]
                                         FormatFortran
+                                        []
+                                        ()
                                         (Allocatable
                                             (String 1 () DeferredLength DescriptorString)
                                         )
@@ -161,6 +173,8 @@
                                         [(Var 2 j)
                                         (Var 2 i)]
                                         FormatFortran
+                                        []
+                                        ()
                                         (Allocatable
                                             (String 1 () DeferredLength DescriptorString)
                                         )
@@ -184,6 +198,8 @@
                         (Var 2 do330i)
                         (IntegerConstant 15 (Integer 4) Decimal)
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )]

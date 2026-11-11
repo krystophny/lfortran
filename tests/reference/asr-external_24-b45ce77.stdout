@@ -23,7 +23,7 @@
                                                     Default
                                                     (Integer 4)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -32,16 +32,18 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     h
                                     (FunctionType
                                         []
                                         (Integer 4)
-                                        BindC
+                                        Source
                                         ImplicitInterface
                                         ()
                                         .false.
@@ -78,7 +80,7 @@
                                                     Default
                                                     (Integer 4)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -87,9 +89,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             h~result:
                                                 (Variable
@@ -102,7 +106,7 @@
                                                     Default
                                                     (Integer 4)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -111,16 +115,18 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     h~fpcast
                                     (FunctionType
                                         [(Integer 4)]
                                         (Integer 4)
-                                        BindC
+                                        Source
                                         Interface
                                         ()
                                         .false.
@@ -154,7 +160,7 @@
                                         (FunctionType
                                             [(Integer 4)]
                                             (Integer 4)
-                                            BindC
+                                            Source
                                             Interface
                                             ()
                                             .false.
@@ -177,9 +183,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             i:
                                 (Variable
@@ -201,9 +209,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     apply_fun
@@ -211,7 +221,7 @@
                         [(FunctionType
                             []
                             (Integer 4)
-                            BindC
+                            Source
                             ImplicitInterface
                             ()
                             .false.
@@ -248,7 +258,7 @@
                             (FunctionType
                                 [(Integer 4)]
                                 (Integer 4)
-                                BindC
+                                Source
                                 Interface
                                 ()
                                 .false.
@@ -262,18 +272,21 @@
                             )
                             ()
                         )
+                        NoPointerBounds
                     )
                     (Assignment
                         (Var 10 i)
                         (FunctionCall
                             10 h~fpcast_ptr
-                            ()
+                            10 h
                             [((Var 10 i))]
                             (Integer 4)
                             ()
                             ()
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )]
@@ -299,7 +312,7 @@
                                     (FunctionType
                                         []
                                         ()
-                                        BindC
+                                        Source
                                         ImplicitInterface
                                         ()
                                         .false.
@@ -336,7 +349,7 @@
                                                     Default
                                                     (Integer 4)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -345,16 +358,18 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     g~fpcast
                                     (FunctionType
                                         [(Integer 4)]
                                         ()
-                                        BindC
+                                        Source
                                         Interface
                                         ()
                                         .false.
@@ -388,7 +403,7 @@
                                         (FunctionType
                                             [(Integer 4)]
                                             ()
-                                            BindC
+                                            Source
                                             Interface
                                             ()
                                             .false.
@@ -411,9 +426,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             i:
                                 (Variable
@@ -435,9 +452,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     apply_sub
@@ -445,7 +464,7 @@
                         [(FunctionType
                             []
                             ()
-                            BindC
+                            Source
                             ImplicitInterface
                             ()
                             .false.
@@ -482,7 +501,7 @@
                             (FunctionType
                                 [(Integer 4)]
                                 ()
-                                BindC
+                                Source
                                 Interface
                                 ()
                                 .false.
@@ -496,6 +515,7 @@
                             )
                             ()
                         )
+                        NoPointerBounds
                     )
                     (SubroutineCall
                         8 g~fpcast_ptr
@@ -526,7 +546,7 @@
                                     (FunctionType
                                         []
                                         ()
-                                        BindC
+                                        Source
                                         ImplicitInterface
                                         ()
                                         .false.
@@ -563,7 +583,7 @@
                                                     Default
                                                     (Integer 4)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -572,9 +592,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     apply_fun~fpcast
@@ -596,7 +618,7 @@
                                         )
                                         (Integer 4)]
                                         ()
-                                        BindC
+                                        Source
                                         Interface
                                         ()
                                         .false.
@@ -646,7 +668,7 @@
                                             )
                                             (Integer 4)]
                                             ()
-                                            BindC
+                                            Source
                                             Interface
                                             ()
                                             .false.
@@ -669,9 +691,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             apply_sub:
                                 (Function
@@ -684,7 +708,7 @@
                                     (FunctionType
                                         []
                                         ()
-                                        BindC
+                                        Source
                                         ImplicitInterface
                                         ()
                                         .false.
@@ -721,7 +745,7 @@
                                                     Default
                                                     (Integer 4)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -730,9 +754,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     apply_sub~fpcast
@@ -754,7 +780,7 @@
                                         )
                                         (Integer 4)]
                                         ()
-                                        BindC
+                                        Source
                                         Interface
                                         ()
                                         .false.
@@ -804,7 +830,7 @@
                                             )
                                             (Integer 4)]
                                             ()
-                                            BindC
+                                            Source
                                             Interface
                                             ()
                                             .false.
@@ -827,9 +853,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             i:
                                 (Variable
@@ -851,9 +879,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             incr:
                                 (ExternalSymbol
@@ -884,6 +914,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Associate
                         (Var 5 apply_sub~fpcast_ptr)
@@ -908,7 +940,7 @@
                                 )
                                 (Integer 4)]
                                 ()
-                                BindC
+                                Source
                                 Interface
                                 ()
                                 .false.
@@ -922,6 +954,7 @@
                             )
                             ()
                         )
+                        NoPointerBounds
                     )
                     (SubroutineCall
                         5 apply_sub~fpcast_ptr
@@ -968,7 +1001,7 @@
                                 )
                                 (Integer 4)]
                                 ()
-                                BindC
+                                Source
                                 Interface
                                 ()
                                 .false.
@@ -982,6 +1015,7 @@
                             )
                             ()
                         )
+                        NoPointerBounds
                     )
                     (SubroutineCall
                         5 apply_sub~fpcast_ptr
@@ -1028,7 +1062,7 @@
                                 )
                                 (Integer 4)]
                                 ()
-                                BindC
+                                Source
                                 Interface
                                 ()
                                 .false.
@@ -1042,6 +1076,7 @@
                             )
                             ()
                         )
+                        NoPointerBounds
                     )
                     (SubroutineCall
                         5 apply_fun~fpcast_ptr
@@ -1070,6 +1105,8 @@
                             ()
                             [(Var 5 i)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -1108,9 +1145,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     incr
@@ -1141,6 +1180,8 @@
                                             ()
                                         )
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )]
@@ -1175,9 +1216,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             x:
                                                 (Variable
@@ -1199,9 +1242,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     twice
@@ -1234,6 +1279,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )]
                                     (Var 4 twice)
                                     Public
@@ -1245,6 +1292,7 @@
                     external_24_mod
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.

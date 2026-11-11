@@ -47,6 +47,22 @@ struct GpuComponentLayout {
 // inline in the element. See `gpu_decomposed_components`.
 bool gpu_component_is_decomposed(ASR::symbol_t *component);
 
+// Whether the device layout of a derived-type kernel argument carries this
+// component as the host's bytes without giving them a meaning: an
+// allocatable scalar component, whose host representation is a pointer to
+// the value (and its length, for a character). The device copy of the
+// variable keeps these bytes so that the components after it sit where the
+// host put them, and copies them back unchanged; the kernel must not read
+// or write the component itself. See `gpu_opaque_component_words`.
+bool gpu_component_is_opaque(ASR::symbol_t *component);
+
+// The number of 64-bit words the host representation of a component takes:
+// a character is a pointer and a length, any other allocatable component
+// is a pointer. This is what the device declares in place of a
+// component it does not interpret -- an opaque component or a decomposed
+// one, whose data is handed over in buffers of its own.
+size_t gpu_opaque_component_words(ASR::symbol_t *component);
+
 // What `gpu_decomposed_components` records about one component, for a
 // caller holding the component and not the type it belongs to.
 GpuComponentLayout gpu_component_layout(ASR::symbol_t *component);
@@ -62,6 +78,20 @@ GpuComponentLayout gpu_component_layout(ASR::symbol_t *component);
 // rather than in each place that walks a derived type of its own accord.
 std::vector<GpuComponentLayout> gpu_decomposed_components(
     ASR::Struct_t *definition);
+
+// Whether a derived-type kernel argument of type `definition` may hold a
+// deferred-length character component that the device layout would hand
+// over as a device buffer of its own: one of `definition`'s decomposed
+// components, or one of a derived-type component that is neither opaque
+// nor a pointer, stored inline or decomposed, followed recursively. This
+// follows every derived-type component the layout may walk, and also the
+// components of a decomposed one, which the layout does not hand over (a
+// type like that is not offloaded with a constant-length string in their
+// place either). Each such buffer becomes a kernel parameter of the
+// component's type without its Allocatable wrapper, which a
+// deferred-length string cannot be declared with, so the GPU path declines
+// the argument instead (gpu_offload.cpp, gpu_kernel_parameter_decline).
+bool gpu_struct_hands_over_deferred_length_string(ASR::Struct_t *definition);
 
 // The components of `variable`'s derived type that `layout` hands over as
 // device buffers of their own, in the order the layout lists them.

@@ -13,6 +13,10 @@
 * `ReduceIAND`
 * `ReduceIOR`
 * `ReduceIEOR`
+* `ReduceAND`
+* `ReduceOR`
+* `ReduceEQV`
+* `ReduceNEQV`
 <!-- END AUTO: values -->
 
 ## Documentation

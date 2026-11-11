@@ -26,10 +26,12 @@
               :contiguous_attr false
               :bindc_name nil
               :is_volatile false
+              :is_asynchronous false
               :is_protected false
               :pass_attr :NotMethod
               :self_argument nil
               :codims []
+              :common_block nil
             )
             "iostat" (Variable
               :parent_symtab 1
@@ -51,10 +53,12 @@
               :contiguous_attr false
               :bindc_name nil
               :is_volatile false
+              :is_asynchronous false
               :is_protected false
               :pass_attr :NotMethod
               :self_argument nil
               :codims []
+              :common_block nil
             )
             "n" (Variable
               :parent_symtab 1
@@ -76,10 +80,12 @@
               :contiguous_attr false
               :bindc_name nil
               :is_volatile false
+              :is_asynchronous false
               :is_protected false
               :pass_attr :NotMethod
               :self_argument nil
               :codims []
+              :common_block nil
             )
             "unit" (Variable
               :parent_symtab 1
@@ -101,10 +107,12 @@
               :contiguous_attr false
               :bindc_name nil
               :is_volatile false
+              :is_asynchronous false
               :is_protected false
               :pass_attr :NotMethod
               :self_argument nil
               :codims []
+              :common_block nil
             )
           }
         )
@@ -163,6 +171,7 @@
             :round nil
             :pad nil
             :asynchronous nil
+            :convert nil
           )
           (FileRead
             :label -1

@@ -14,7 +14,7 @@
                                     []
                                     Local
                                     (ArrayConstant
-                                        12
+                                        3
                                         [.true., .true., .true.]
                                         (Array
                                             (Logical 4)
@@ -26,7 +26,7 @@
                                         ColMajor
                                     )
                                     (ArrayConstant
-                                        12
+                                        3
                                         [.true., .true., .true.]
                                         (Array
                                             (Logical 4)
@@ -55,9 +55,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             l:
                                 (Variable
@@ -79,9 +81,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     intrinsics_47
@@ -92,7 +96,7 @@
                             All
                             [(ArrayPhysicalCast
                                 (ArrayConstant
-                                    8
+                                    2
                                     [.true., .true.]
                                     (Array
                                         (Logical 4)
@@ -124,6 +128,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 2 l)
@@ -131,7 +137,7 @@
                             All
                             [(ArrayPhysicalCast
                                 (ArrayConstant
-                                    8
+                                    2
                                     [.true., .false.]
                                     (Array
                                         (Logical 4)
@@ -163,6 +169,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 2 l)
@@ -170,7 +178,7 @@
                             All
                             [(ArrayPhysicalCast
                                 (ArrayConstant
-                                    4
+                                    1
                                     [.false.]
                                     (Array
                                         (Logical 4)
@@ -202,6 +210,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 2 l)
@@ -209,7 +219,7 @@
                             All
                             [(ArrayPhysicalCast
                                 (ArrayConstant
-                                    4
+                                    1
                                     [.true.]
                                     (Array
                                         (Logical 4)
@@ -241,6 +251,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 2 l)
@@ -264,6 +276,8 @@
                             ()
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -301,7 +315,7 @@
                                         Global
                                     )
                                     (ArrayConstant
-                                        8
+                                        2
                                         [.false., .true.]
                                         (Array
                                             (Logical 4)
@@ -334,6 +348,8 @@
                             )
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -371,6 +387,8 @@
                             ()
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -416,6 +434,8 @@
                             ()
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )

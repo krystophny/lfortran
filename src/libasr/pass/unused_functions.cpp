@@ -183,6 +183,23 @@ public:
         }
     }
 
+    // An array constant of derived type holds its elements as expressions,
+    // which can name procedures: a structure constant gives a procedure
+    // pointer component its target, as in `[t(f), t(g)]`.
+    void visit_ArrayConstant(const ASR::ArrayConstant_t &x) {
+        ASR::BaseWalkVisitor<CollectUnusedFunctionsVisitor>::visit_ArrayConstant(x);
+        ASR::ttype_t* element_type = ASRUtils::type_get_past_array(
+            ASRUtils::type_get_past_allocatable(x.m_type));
+        if (!ASR::is_a<ASR::StructType_t>(*element_type)) {
+            return;
+        }
+        ASR::expr_t** elements = static_cast<ASR::expr_t**>(x.m_data);
+        size_t n = (size_t) ASRUtils::get_fixed_size_of_array(x.m_type);
+        for (size_t i = 0; i < n; i++) {
+            visit_expr(*elements[i]);
+        }
+    }
+
     // A cast of a procedure to another interface names that interface, and
     // nothing calls it.
     void visit_FunctionPointerCast(const ASR::FunctionPointerCast_t &x) {
@@ -219,6 +236,27 @@ public:
             fn_used[get_hash((ASR::asr_t*)decl)] =
                 ASR::down_cast<ASR::Function_t>(decl)->m_name;
         }
+    }
+
+    // Marks a procedure and the external symbol naming it as used.
+    void mark_procedure_used(ASR::symbol_t *sym) {
+        if (sym == nullptr) return;
+        if (ASR::is_a<ASR::ExternalSymbol_t>(*sym)) {
+            fn_used[get_hash((ASR::asr_t*)sym)] =
+                ASR::down_cast<ASR::ExternalSymbol_t>(sym)->m_name;
+            sym = ASR::down_cast<ASR::ExternalSymbol_t>(sym)->m_external;
+        }
+        if (sym != nullptr && ASR::is_a<ASR::Function_t>(*sym)) {
+            fn_used[get_hash((ASR::asr_t*)sym)] =
+                ASR::down_cast<ASR::Function_t>(sym)->m_name;
+        }
+    }
+
+    // Formatted output that dispatches to a defined output procedure uses
+    // that procedure and its callback, although nothing calls them there.
+    void visit_dtio_binding(const ASR::dtio_binding_t &x) {
+        mark_procedure_used(x.m_procedure);
+        mark_procedure_used(x.m_callback);
     }
 
     void visit_Struct(const ASR::Struct_t &x) {

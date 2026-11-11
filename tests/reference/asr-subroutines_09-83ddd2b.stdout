@@ -27,9 +27,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             f:
                                 (Variable
@@ -57,9 +59,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             get_elem_table@get_value:
                                 (ExternalSymbol
@@ -69,7 +73,7 @@
                                     subroutines_09_tomlf_build_array
                                     []
                                     get_elem_table
-                                    Public
+                                    Private
                                 ),
                             get_elem_value_string@get_value:
                                 (ExternalSymbol
@@ -79,37 +83,15 @@
                                     subroutines_09_tomlf_build_array
                                     []
                                     get_elem_value_string
-                                    Public
+                                    Private
                                 ),
                             get_value:
-                                (ExternalSymbol
+                                (GenericProcedure
                                     5
                                     get_value
-                                    2 get_value
-                                    subroutines_09_tomlf_build_array
-                                    []
-                                    get_value
+                                    [5 get_elem_table@get_value
+                                    5 get_elem_value_string@get_value]
                                     Public
-                                ),
-                            get_value@get_elem_table:
-                                (ExternalSymbol
-                                    5
-                                    get_value@get_elem_table
-                                    2 get_elem_table
-                                    subroutines_09_tomlf_build_array
-                                    []
-                                    get_elem_table
-                                    Private
-                                ),
-                            get_value@get_elem_value_string:
-                                (ExternalSymbol
-                                    5
-                                    get_value@get_elem_value_string
-                                    2 get_elem_value_string
-                                    subroutines_09_tomlf_build_array
-                                    []
-                                    get_elem_value_string
-                                    Private
                                 ),
                             pos:
                                 (Variable
@@ -131,9 +113,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             ptr:
                                 (Variable
@@ -157,15 +141,17 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     main
                     [subroutines_09_tomlf_build_array]
                     [(SubroutineCall
-                        5 get_value@get_elem_table
+                        5 get_elem_table@get_value
                         5 get_value
                         [((Var 5 a))
                         ((Var 5 pos))
@@ -175,7 +161,7 @@
                         .false.
                     )
                     (SubroutineCall
-                        5 get_value@get_elem_value_string
+                        5 get_elem_value_string@get_value
                         5 get_value
                         [((Var 5 f))
                         ((Var 5 pos))
@@ -217,9 +203,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             pos:
                                                 (Variable
@@ -241,9 +229,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             ptr:
                                                 (Variable
@@ -267,9 +257,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             stat:
                                                 (Variable
@@ -291,9 +283,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     get_elem_table
@@ -334,6 +328,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )]
                                     ()
                                     Private
@@ -366,9 +362,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             def:
                                                 (Variable
@@ -390,9 +388,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             pos:
                                                 (Variable
@@ -414,9 +414,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             ptr:
                                                 (Variable
@@ -440,9 +442,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             stat:
                                                 (Variable
@@ -464,9 +468,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     get_elem_value_string
@@ -509,6 +515,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )]
                                     ()
                                     Private
@@ -528,6 +536,7 @@
                     subroutines_09_tomlf_build_array
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.

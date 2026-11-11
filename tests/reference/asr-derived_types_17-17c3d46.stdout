@@ -74,9 +74,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     add
@@ -129,6 +131,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )]
                                     (Var 4 self)
                                     Public
@@ -176,9 +180,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     subtract
@@ -231,6 +237,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )]
                                     (Var 5 self)
                                     Public
@@ -263,9 +271,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     t_1
@@ -292,6 +302,7 @@
                     derived_types_17_module_1
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.
@@ -354,6 +365,8 @@
                                                 ()
                                             )]
                                             FormatFortran
+                                            []
+                                            ()
                                             (Allocatable
                                                 (String 1 () DeferredLength DescriptorString)
                                             )
@@ -377,6 +390,8 @@
                                                 ()
                                             )]
                                             FormatFortran
+                                            []
+                                            ()
                                             (Allocatable
                                                 (String 1 () DeferredLength DescriptorString)
                                             )
@@ -403,6 +418,7 @@
                     derived_types_17_module_2
                     ()
                     [derived_types_17_module_1]
+                    .false.
                     .false.
                     .false.
                     .false.

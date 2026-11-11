@@ -33,9 +33,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             b:
                                 (Variable
@@ -63,9 +65,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             c:
                                 (Variable
@@ -93,9 +97,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             i:
                                 (Variable
@@ -117,9 +123,37 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
+                                ),
+                            i__dc:
+                                (Variable
+                                    2
+                                    i__dc
+                                    []
+                                    Local
+                                    ()
+                                    ()
+                                    Default
+                                    (Integer 4)
+                                    ()
+                                    Source
+                                    Public
+                                    Required
+                                    .false.
+                                    .false.
+                                    .false.
+                                    ()
+                                    .false.
+                                    .false.
+                                    .false.
+                                    NotMethod
+                                    ()
+                                    []
+                                    ()
                                 ),
                             n:
                                 (Variable
@@ -141,9 +175,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             scalar:
                                 (Variable
@@ -165,9 +201,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     triad
@@ -223,12 +261,14 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (DoConcurrentLoop
-                        [((Var 2 i)
+                        [((Var 2 i__dc)
                         (IntegerConstant 1 (Integer 4) Decimal)
                         (Var 2 n)
-                        ())]
+                        (IntegerConstant 1 (Integer 4) Decimal))]
                         []
                         []
                         []
@@ -236,21 +276,23 @@
                             (ArrayItem
                                 (Var 2 c)
                                 [(()
-                                (Var 2 i)
+                                (Var 2 i__dc)
                                 ())]
                                 (Real 4)
                                 ColMajor
                                 ()
+                                .false.
                             )
                             (RealBinOp
                                 (ArrayItem
                                     (Var 2 a)
                                     [(()
-                                    (Var 2 i)
+                                    (Var 2 i__dc)
                                     ())]
                                     (Real 4)
                                     ColMajor
                                     ()
+                                    .false.
                                 )
                                 Add
                                 (RealBinOp
@@ -259,11 +301,12 @@
                                     (ArrayItem
                                         (Var 2 b)
                                         [(()
-                                        (Var 2 i)
+                                        (Var 2 i__dc)
                                         ())]
                                         (Real 4)
                                         ColMajor
                                         ()
+                                        .false.
                                     )
                                     (Real 4)
                                     ()
@@ -272,6 +315,8 @@
                                 ()
                             )
                             ()
+                            .false.
+                            .false.
                             .false.
                             .false.
                         )]

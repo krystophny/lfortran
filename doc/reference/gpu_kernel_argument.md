@@ -11,6 +11,8 @@
 * `kind` of type `gpu_argument_kind`
 * `argument_index` of type `int`
 * `dimension` of type `int`
+* `written` of type `bool`
+* `noalias` of type `bool`
 <!-- END AUTO: fields -->
 
 ## Documentation

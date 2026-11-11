@@ -39,9 +39,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             p2:
                                 (Variable
@@ -99,9 +101,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             p3:
                                 (Variable
@@ -159,9 +163,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             t1:
                                 (Variable
@@ -183,9 +189,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             t2:
                                 (Variable
@@ -215,9 +223,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             t3:
                                 (Variable
@@ -247,9 +257,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     associate_07
@@ -257,6 +269,7 @@
                     [(Associate
                         (Var 2 p1)
                         (Var 2 t1)
+                        NoPointerBounds
                     )
                     (Associate
                         (Var 2 p2)
@@ -275,6 +288,7 @@
                             )
                             ()
                         )
+                        NoPointerBounds
                     )
                     (If
                         ()

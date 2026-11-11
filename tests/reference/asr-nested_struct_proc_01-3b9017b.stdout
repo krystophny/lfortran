@@ -127,9 +127,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             initial_team:
                                 (ExternalSymbol
@@ -213,6 +215,7 @@
                                                     Source
                                                     .false.
                                                     .false.
+                                                    Public
                                                 ),
                                             map:
                                                 (Variable
@@ -245,9 +248,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     integer32complex32orderedmap
@@ -272,7 +277,7 @@
                                     [map]
                                     []
                                     Source
-                                    Private
+                                    Public
                                     .false.
                                     .false.
                                     .false.
@@ -416,9 +421,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             rc:
                                                 (Variable
@@ -440,9 +447,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             res:
                                                 (Variable
@@ -466,9 +475,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             this:
                                                 (Variable
@@ -501,9 +512,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     omap_i_at_rc
@@ -549,11 +562,14 @@
                                             (Complex 4)
                                             ()
                                         )
+                                        NoPointerBounds
                                     )
                                     (Assignment
                                         (Var 12 rc)
                                         (IntegerConstant 0 (Integer 4) Decimal)
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )]
@@ -645,9 +661,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             status:
                                                 (Variable
@@ -669,9 +687,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             this:
                                                 (Variable
@@ -709,9 +729,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             tmp:
                                                 (Variable
@@ -735,9 +757,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             tol:
                                                 (Variable
@@ -765,9 +789,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             value:
                                                 (Variable
@@ -789,9 +815,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     omap_insert_key_value
@@ -859,6 +887,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )
                                     (Associate
                                         (Var 13 tmp)
@@ -906,6 +936,7 @@
                                                 ()
                                             )
                                         )
+                                        NoPointerBounds
                                     )
                                     (If
                                         ()
@@ -1015,6 +1046,7 @@
                                                     Source
                                                     .false.
                                                     .false.
+                                                    Public
                                                 ),
                                             stored_value:
                                                 (Variable
@@ -1036,9 +1068,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             tree:
                                                 (Variable
@@ -1065,9 +1099,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     omap_map
@@ -1088,7 +1124,7 @@
                                     stored_value]
                                     []
                                     Source
-                                    Private
+                                    Public
                                     .false.
                                     .false.
                                     .false.
@@ -1137,9 +1173,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             real128:
                                 (ExternalSymbol
@@ -1266,6 +1304,7 @@
                     ()
                     [iso_fortran_env
                     gftl2_integer32complex32orderedmap]
+                    .false.
                     .false.
                     .false.
                     .false.
@@ -1538,9 +1577,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             logical16:
                                 (ExternalSymbol
@@ -1628,9 +1669,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             numeric_storage_size:
                                 (ExternalSymbol
@@ -1852,9 +1895,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     nested_struct_proc_01
@@ -1863,6 +1908,8 @@
                         (Var 14 key)
                         (IntegerConstant 10 (Integer 4) Decimal)
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -1885,6 +1932,8 @@
                             )
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )

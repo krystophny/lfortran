@@ -22,7 +22,7 @@
                                     interface_04_mod1
                                     []
                                     a1
-                                    Public
+                                    Private
                                 ),
                             i:
                                 (Variable
@@ -44,9 +44,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     interface_04
@@ -56,6 +58,8 @@
                         (Var 5 i)
                         (IntegerConstant 5 (Integer 4) Decimal)
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -119,9 +123,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     a1
@@ -154,6 +160,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )]
                                     ()
                                     Public
@@ -168,6 +176,7 @@
                     .false.
                     .false.
                     .false.
+                    .false.
                     ()
                 ),
             interface_04_mod2:
@@ -176,13 +185,10 @@
                         4
                         {
                             a:
-                                (ExternalSymbol
+                                (GenericProcedure
                                     4
                                     a
-                                    2 a
-                                    interface_04_mod1
-                                    []
-                                    a
+                                    [4 a1@a]
                                     Public
                                 ),
                             a1:
@@ -194,11 +200,22 @@
                                     []
                                     a1
                                     Public
+                                ),
+                            a1@a:
+                                (ExternalSymbol
+                                    4
+                                    a1@a
+                                    2 a1
+                                    interface_04_mod1
+                                    []
+                                    a1
+                                    Private
                                 )
                         })
                     interface_04_mod2
                     ()
                     [interface_04_mod1]
+                    .false.
                     .false.
                     .false.
                     .false.

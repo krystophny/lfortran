@@ -4,7 +4,7 @@
 
 <!-- BEGIN AUTO: asr -->
 ```
-ArrayItem(expr v, array_index* args, ttype type, arraystorage storage_format, expr? value)
+ArrayItem(expr v, array_index* args, ttype type, arraystorage storage_format, expr? value, bool in_bounds)
 ```
 <!-- END AUTO: asr -->
 

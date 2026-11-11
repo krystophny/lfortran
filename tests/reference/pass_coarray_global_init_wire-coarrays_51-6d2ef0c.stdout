@@ -24,9 +24,11 @@
                     ()
                     .false.
                     .false.
+                    .false.
                     NotMethod
                     ()
                     []
+                    ()
                 ),
             __module_coarrays_51_a_ca__coarray_handle:
                 (Variable
@@ -55,9 +57,11 @@
                     ()
                     .false.
                     .false.
+                    .false.
                     NotMethod
                     ()
                     []
+                    ()
                 ),
             __module_coarrays_51_b_cb__coarray_data:
                 (Variable
@@ -81,9 +85,11 @@
                     ()
                     .false.
                     .false.
+                    .false.
                     NotMethod
                     ()
                     []
+                    ()
                 ),
             __module_coarrays_51_b_cb__coarray_handle:
                 (Variable
@@ -112,9 +118,11 @@
                     ()
                     .false.
                     .false.
+                    .false.
                     NotMethod
                     ()
                     []
+                    ()
                 ),
             __module_prif_prif_dummy_team_descriptor:
                 (Struct
@@ -175,9 +183,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             current_image_buffer:
                                 (Variable
@@ -201,9 +211,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             errmsg:
                                 (Variable
@@ -225,9 +237,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             errmsg_alloc:
                                 (Variable
@@ -251,9 +265,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             image_num:
                                 (Variable
@@ -275,9 +291,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             offset:
                                 (Variable
@@ -299,9 +317,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             size_in_bytes:
                                 (Variable
@@ -323,9 +343,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             stat:
                                 (Variable
@@ -347,9 +369,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     __module_prif_prif_get
@@ -397,7 +421,7 @@
                     (Var 19 errmsg_alloc)]
                     []
                     ()
-                    Public
+                    Private
                     .false.
                     .false.
                     ()
@@ -427,9 +451,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     __module_prif_prif_init
@@ -452,7 +478,7 @@
                     [(Var 9 stat)]
                     []
                     ()
-                    Public
+                    Private
                     .false.
                     .false.
                     ()
@@ -489,9 +515,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             initial_team_index:
                                 (Variable
@@ -513,9 +541,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             stat:
                                 (Variable
@@ -537,9 +567,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             sub:
                                 (Variable
@@ -567,9 +599,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     __module_prif_prif_initial_team_index
@@ -611,7 +645,7 @@
                     (Var 20 stat)]
                     []
                     ()
-                    Public
+                    Private
                     .false.
                     .false.
                     ()
@@ -641,9 +675,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             stop_code_char:
                                 (Variable
@@ -665,9 +701,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             stop_code_int:
                                 (Variable
@@ -689,9 +727,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     __module_prif_prif_stop
@@ -718,7 +758,7 @@
                     (Var 11 stop_code_char)]
                     []
                     ()
-                    Public
+                    Private
                     .false.
                     .false.
                     ()
@@ -748,9 +788,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             errmsg_alloc:
                                 (Variable
@@ -774,9 +816,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             stat:
                                 (Variable
@@ -798,9 +842,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     __module_prif_prif_sync_all
@@ -829,7 +875,7 @@
                     (Var 10 errmsg_alloc)]
                     []
                     ()
-                    Public
+                    Private
                     .false.
                     .false.
                     ()
@@ -866,9 +912,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     __module_prif_prif_team_type
@@ -935,9 +983,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             this_image:
                                 (Variable
@@ -959,9 +1009,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     __module_prif_prif_this_image_no_coarray
@@ -998,7 +1050,7 @@
                     (Var 15 this_image)]
                     []
                     ()
-                    Public
+                    Private
                     .false.
                     .false.
                     ()
@@ -1069,9 +1121,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     __lfortran_global_init_coarrays_51
@@ -1106,6 +1160,8 @@
                                                 (Logical 4)
                                             )
                                             ()
+                                            .false.
+                                            .false.
                                             .false.
                                             .false.
                                         )
@@ -1171,9 +1227,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             p:
                                 (ExternalSymbol
@@ -1225,9 +1283,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     coarrays_51
@@ -1267,6 +1327,8 @@
                             ()
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -1315,6 +1377,7 @@
                                     )
                                     ColMajor
                                     ()
+                                    .true.
                                 )
                                 2 1_point_x
                                 (Integer 4)
@@ -1347,6 +1410,7 @@
                                     )
                                     ColMajor
                                     ()
+                                    .true.
                                 )
                                 2 1_point_x
                                 (Integer 4)
@@ -1387,6 +1451,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 2 cb)
@@ -1398,6 +1464,8 @@
                             ()
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -1576,9 +1644,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     __lfortran_global_init_coarrays_51_a
@@ -1628,17 +1698,20 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     [(()
                                     ()
                                     CodimensionStar)]
+                                    ()
                                 )
                         })
                     coarrays_51_a
                     ()
                     []
                     .true.
+                    .false.
                     .false.
                     .false.
                     __lfortran_global_init_coarrays_51_a
@@ -1679,9 +1752,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     __lfortran_global_init_coarrays_51_b
@@ -1731,11 +1806,13 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     [(()
                                     ()
                                     CodimensionStar)]
+                                    ()
                                 ),
                             p:
                                 (Variable
@@ -1769,9 +1846,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             point:
                                 (Struct
@@ -1798,9 +1877,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     point
@@ -1890,15 +1971,18 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     coarrays_51_b
                     ()
                     []
                     .true.
+                    .false.
                     .false.
                     .false.
                     __lfortran_global_init_coarrays_51_b
@@ -1935,9 +2019,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             image_num:
                                 (Variable
@@ -1959,9 +2045,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             offset:
                                 (Variable
@@ -1983,9 +2071,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             result:
                                 (Variable
@@ -2007,9 +2097,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             sub:
                                 (Variable
@@ -2037,9 +2129,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     lcompilers_prif_get_integer(4)
@@ -2112,7 +2206,7 @@
                         .false.
                     )]
                     (Var 18 result)
-                    Public
+                    Private
                     .false.
                     .false.
                     ()
@@ -2142,9 +2236,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     lcompilers_prif_this_image
@@ -2174,7 +2270,7 @@
                         .false.
                     )]
                     (Var 14 lcompilers_prif_this_image)
-                    Public
+                    Private
                     .false.
                     .false.
                     ()
@@ -2206,9 +2302,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     prif_coarray_handle

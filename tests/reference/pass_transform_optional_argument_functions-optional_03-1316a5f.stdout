@@ -27,9 +27,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             __libasr_created_dummy_variable_1:
                                 (Variable
@@ -51,9 +53,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             __libasr_created_dummy_variable_2:
                                 (Variable
@@ -75,9 +79,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             __libasr_created_variable_pointer_:
                                 (Variable
@@ -101,9 +107,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             __libasr_created_variable_pointer_1:
                                 (Variable
@@ -127,9 +135,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             __libasr_created_variable_pointer_2:
                                 (Variable
@@ -153,9 +163,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             f1:
                                 (ExternalSymbol
@@ -189,9 +201,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             lfortran_tmp:
                                 (Variable
@@ -215,9 +229,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             lfortran_tmp1:
                                 (Variable
@@ -241,9 +257,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             my_sub:
                                 (ExternalSymbol
@@ -264,6 +282,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (If
                         ()
@@ -277,10 +297,12 @@
                         [(Associate
                             (Var 5 __libasr_created_variable_pointer_)
                             (Var 5 i)
+                            NoPointerBounds
                         )]
                         [(Associate
                             (Var 5 __libasr_created_variable_pointer_)
                             (Var 5 __libasr_created_dummy_variable_)
+                            NoPointerBounds
                         )]
                     )
                     (Assignment
@@ -314,6 +336,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (If
                         ()
@@ -327,10 +351,12 @@
                         [(Associate
                             (Var 5 __libasr_created_variable_pointer_1)
                             (Var 5 lfortran_tmp)
+                            NoPointerBounds
                         )]
                         [(Associate
                             (Var 5 __libasr_created_variable_pointer_1)
                             (Var 5 __libasr_created_dummy_variable_1)
+                            NoPointerBounds
                         )]
                     )
                     (Assignment
@@ -364,6 +390,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (If
                         ()
@@ -377,10 +405,12 @@
                         [(Associate
                             (Var 5 __libasr_created_variable_pointer_2)
                             (Var 5 lfortran_tmp1)
+                            NoPointerBounds
                         )]
                         [(Associate
                             (Var 5 __libasr_created_variable_pointer_2)
                             (Var 5 __libasr_created_dummy_variable_2)
+                            NoPointerBounds
                         )]
                     )
                     (SubroutineCall
@@ -447,9 +477,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             r:
                                                 (Variable
@@ -473,9 +505,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             x:
                                                 (Variable
@@ -497,9 +531,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     f1
@@ -528,6 +564,8 @@
                                         (Var 4 r)
                                         (IntegerConstant 0 (Integer 4) Decimal)
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )]
@@ -562,9 +600,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     my_sub
@@ -594,6 +634,8 @@
                                             )
                                             (Var 3 a)]
                                             FormatFortran
+                                            []
+                                            ()
                                             (Allocatable
                                                 (String 1 () DeferredLength DescriptorString)
                                             )
@@ -610,6 +652,7 @@
                     optional_03_m
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.

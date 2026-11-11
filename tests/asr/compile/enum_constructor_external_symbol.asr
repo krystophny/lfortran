@@ -43,9 +43,11 @@
                     nil
                     false
                     false
+                    false
                     :NotMethod
                     nil
                     []
+                    nil
                   )
                   "red" (Variable
                     2
@@ -80,9 +82,11 @@
                     nil
                     false
                     false
+                    false
                     :NotMethod
                     nil
                     []
+                    nil
                   )
                 }
               )
@@ -105,6 +109,7 @@
         "m"
         nil
         []
+        false
         false
         false
         false
@@ -135,9 +140,11 @@
               nil
               false
               false
+              false
               :NotMethod
               nil
               []
+              nil
             )
             "color" (ExternalSymbol
               3
@@ -169,9 +176,11 @@
               nil
               false
               false
+              false
               :NotMethod
               nil
               []
+              nil
             )
           }
         )
@@ -203,6 +212,8 @@
             nil
             false
             false
+            false
+            false
           )
           (Assignment
             (Var
@@ -221,6 +232,8 @@
               nil
             )
             nil
+            false
+            false
             false
             false
           )

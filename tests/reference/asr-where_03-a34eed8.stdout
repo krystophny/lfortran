@@ -51,9 +51,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             b:
                                 (Variable
@@ -81,9 +83,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     where_03
@@ -121,6 +125,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 2 b)
@@ -137,6 +143,8 @@
                             ColMajor
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -194,6 +202,8 @@
                                 )
                             )
                             ()
+                            .false.
+                            .false.
                             .false.
                             .false.
                         )]
@@ -258,6 +268,8 @@
                             ()
                             .false.
                             .false.
+                            .false.
+                            .false.
                         )]
                         [(Where
                             (RealCompare
@@ -316,6 +328,8 @@
                                     )
                                 )
                                 ()
+                                .false.
+                                .false.
                                 .false.
                                 .false.
                             )]
@@ -433,6 +447,8 @@
                                 ()
                                 .false.
                                 .false.
+                                .false.
+                                .false.
                             )]
                         )]
                     )
@@ -450,6 +466,7 @@
                                         (Real 4)
                                         ColMajor
                                         ()
+                                        .true.
                                     )
                                     Sub
                                     (RealConstant
@@ -490,6 +507,7 @@
                                         (Real 4)
                                         ColMajor
                                         ()
+                                        .true.
                                     )
                                     Sub
                                     (RealConstant
@@ -530,6 +548,7 @@
                                         (Real 4)
                                         ColMajor
                                         ()
+                                        .true.
                                     )
                                     Sub
                                     (RealConstant
@@ -570,6 +589,7 @@
                                         (Real 4)
                                         ColMajor
                                         ()
+                                        .true.
                                     )
                                     Sub
                                     (RealConstant
@@ -610,6 +630,7 @@
                                         (Real 4)
                                         ColMajor
                                         ()
+                                        .true.
                                     )
                                     Sub
                                     (RealUnaryMinus
@@ -657,6 +678,7 @@
                                         (Real 4)
                                         ColMajor
                                         ()
+                                        .true.
                                     )
                                     Sub
                                     (RealUnaryMinus
@@ -704,6 +726,7 @@
                                         (Real 4)
                                         ColMajor
                                         ()
+                                        .true.
                                     )
                                     Sub
                                     (RealConstant
@@ -744,6 +767,7 @@
                                         (Real 4)
                                         ColMajor
                                         ()
+                                        .true.
                                     )
                                     Sub
                                     (RealConstant
@@ -775,6 +799,8 @@
                             ()
                             [(Var 2 a)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -786,6 +812,8 @@
                             ()
                             [(Var 2 b)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
