@@ -33,6 +33,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )]
                     ()
                     Public
@@ -60,9 +62,11 @@
                     ()
                     .false.
                     .false.
+                    .false.
                     NotMethod
                     ()
                     []
+                    ()
                 )
         })
     []

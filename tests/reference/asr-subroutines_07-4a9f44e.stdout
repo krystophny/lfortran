@@ -17,25 +17,22 @@
                                     f
                                     Public
                                 ),
-                            f_int:
+                            f@f_int:
                                 (ExternalSymbol
                                     4
-                                    f_int
-                                    2 f_int
-                                    subroutines_07_mod
-                                    []
-                                    f_int
-                                    Public
-                                ),
-                            f_int@f:
-                                (ExternalSymbol
-                                    4
-                                    f_int@f
+                                    f@f_int
                                     2 f
                                     subroutines_07_mod
                                     []
                                     f
                                     Private
+                                ),
+                            f_int:
+                                (GenericProcedure
+                                    4
+                                    f_int
+                                    [4 f@f_int]
+                                    Public
                                 ),
                             i:
                                 (Variable
@@ -57,9 +54,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             j:
                                 (Variable
@@ -81,9 +80,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             k:
                                 (Variable
@@ -105,9 +106,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             l:
                                 (Variable
@@ -129,9 +132,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     subroutines_07
@@ -142,11 +147,15 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 4 j)
                         (IntegerConstant 1 (Integer 4) Decimal)
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -156,6 +165,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 4 l)
@@ -163,9 +174,11 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (SubroutineCall
-                        4 f_int@f
+                        4 f@f_int
                         4 f_int
                         [((Var 4 i))
                         ((Var 4 j))
@@ -221,9 +234,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             b:
                                                 (Variable
@@ -245,9 +260,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             c:
                                                 (Variable
@@ -269,9 +286,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             d:
                                                 (Variable
@@ -293,9 +312,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             kind:
                                                 (Variable
@@ -317,9 +338,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     f
@@ -372,6 +395,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )]
                                     ()
                                     Public
@@ -390,6 +415,7 @@
                     subroutines_07_mod
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.

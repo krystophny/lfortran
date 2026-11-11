@@ -20,10 +20,10 @@ target datalayout = "..."
 @10 = private unnamed_addr constant [2 x i8] c"\0A\00", align 1
 @11 = private unnamed_addr constant [5 x i8] c"%s%s\00", align 1
 
-define float @_lcompilers_sin_f32(float* %x) {
+define internal float @_lcompilers_sin_f32(float* %x) {
 .entry:
   %_lcompilers_sin_f32 = alloca float, align 4
-  %0 = load float, float* %x, align 4
+  %0 = load float, float* %x, align 1
   %1 = call float @_lfortran_ssin(float %0)
   store float %1, float* %_lcompilers_sin_f32, align 4
   br label %return
@@ -38,10 +38,10 @@ FINALIZE_SYMTABLE__lcompilers_sin_f32:            ; preds = %return
 
 declare float @_lfortran_ssin(float)
 
-define double @_lcompilers_sin_f64(double* %x) {
+define internal double @_lcompilers_sin_f64(double* %x) {
 .entry:
   %_lcompilers_sin_f64 = alloca double, align 8
-  %0 = load double, double* %x, align 8
+  %0 = load double, double* %x, align 1
   %1 = call double @_lfortran_dsin(double %0)
   store double %1, double* %_lcompilers_sin_f64, align 8
   br label %return
@@ -62,11 +62,11 @@ define i32 @main(i32 %0, i8** %1) {
   %call_arg_value = alloca float, align 4
   %stringFormat_desc = alloca %string_descriptor, align 8
   %2 = call i8* @_lfortran_get_default_allocator()
+  %3 = alloca i64, align 8
   call void @_lpython_call_initial_functions(i32 %0, i8** %1)
   %y = alloca double, align 8
   store double 0x3FEFEB7A9B2C6D8B, double* %y, align 8
-  %3 = alloca i64, align 8
-  %4 = call i8* (i8*, i8*, i64, i8*, i64*, i32, i32, i32, i32, i32, i32, ...) @_lcompilers_string_format_fortran(i8* %2, i8* null, i64 0, i8* getelementptr inbounds ([6 x i8], [6 x i8]* @serialization_info, i32 0, i32 0), i64* %3, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, float* @intrinsics_02.x, double* %y)
+  %4 = call i8* (i8*, i8*, i64, i8*, i64*, i32, i32, i32, i32, i32, i32, i32, i32, i8**, ...) @_lcompilers_string_format_fortran(i8* %2, i8* null, i64 0, i8* getelementptr inbounds ([6 x i8], [6 x i8]* @serialization_info, i32 0, i32 0), i64* %3, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i32 0, i8** null, float* @intrinsics_02.x, double* %y)
   %5 = load i64, i64* %3, align 8
   %6 = getelementptr %string_descriptor, %string_descriptor* %stringFormat_desc, i32 0, i32 0
   store i8* %4, i8** %6, align 8
@@ -183,7 +183,7 @@ FINALIZE_SYMTABLE_intrinsics_02:                  ; preds = %return
 
 declare void @_lpython_call_initial_functions(i32, i8**)
 
-declare i8* @_lcompilers_string_format_fortran(i8*, i8*, i64, i8*, i64*, i32, i32, i32, i32, i32, i32, ...)
+declare i8* @_lcompilers_string_format_fortran(i8*, i8*, i64, i8*, i64*, i32, i32, i32, i32, i32, i32, i32, i32, i8**, ...)
 
 declare i8* @_lfortran_get_default_allocator()
 

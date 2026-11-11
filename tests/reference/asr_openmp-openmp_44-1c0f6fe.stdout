@@ -13,7 +13,7 @@
                                 (ExternalSymbol
                                     8
                                     c_bool
-                                    43 c_bool
+                                    45 c_bool
                                     lfortran_intrinsic_iso_c_binding
                                     []
                                     c_bool
@@ -23,7 +23,7 @@
                                 (ExternalSymbol
                                     8
                                     c_funptr
-                                    43 c_funptr
+                                    45 c_funptr
                                     lfortran_intrinsic_iso_c_binding
                                     []
                                     c_funptr
@@ -33,7 +33,7 @@
                                 (ExternalSymbol
                                     8
                                     c_int
-                                    43 c_int
+                                    45 c_int
                                     lfortran_intrinsic_iso_c_binding
                                     []
                                     c_int
@@ -43,7 +43,7 @@
                                 (ExternalSymbol
                                     8
                                     c_long
-                                    43 c_long
+                                    45 c_long
                                     lfortran_intrinsic_iso_c_binding
                                     []
                                     c_long
@@ -53,7 +53,7 @@
                                 (ExternalSymbol
                                     8
                                     c_ptr
-                                    43 c_ptr
+                                    45 c_ptr
                                     lfortran_intrinsic_iso_c_binding
                                     []
                                     c_ptr
@@ -187,10 +187,132 @@
                                     .false.
                                     ()
                                 ),
-                            gomp_critical_start:
+                            gomp_critical_name_end:
                                 (Function
                                     (SymbolTable
                                         13
+                                        {
+                                            pptr:
+                                                (Variable
+                                                    13
+                                                    pptr
+                                                    []
+                                                    InOut
+                                                    ()
+                                                    ()
+                                                    Default
+                                                    (CPtr
+                                                        CPointer
+                                                    )
+                                                    8 c_ptr
+                                                    BindC
+                                                    Public
+                                                    Required
+                                                    .false.
+                                                    .false.
+                                                    .false.
+                                                    ()
+                                                    .false.
+                                                    .false.
+                                                    .false.
+                                                    NotMethod
+                                                    ()
+                                                    []
+                                                    ()
+                                                )
+                                        })
+                                    gomp_critical_name_end
+                                    (FunctionType
+                                        [(CPtr
+                                            CPointer
+                                        )]
+                                        ()
+                                        BindC
+                                        Interface
+                                        "GOMP_critical_name_end"
+                                        .false.
+                                        .false.
+                                        .false.
+                                        .false.
+                                        .false.
+                                        []
+                                        .false.
+                                        Host
+                                    )
+                                    []
+                                    [(Var 13 pptr)]
+                                    []
+                                    ()
+                                    Public
+                                    .false.
+                                    .false.
+                                    ()
+                                ),
+                            gomp_critical_name_start:
+                                (Function
+                                    (SymbolTable
+                                        14
+                                        {
+                                            pptr:
+                                                (Variable
+                                                    14
+                                                    pptr
+                                                    []
+                                                    InOut
+                                                    ()
+                                                    ()
+                                                    Default
+                                                    (CPtr
+                                                        CPointer
+                                                    )
+                                                    8 c_ptr
+                                                    BindC
+                                                    Public
+                                                    Required
+                                                    .false.
+                                                    .false.
+                                                    .false.
+                                                    ()
+                                                    .false.
+                                                    .false.
+                                                    .false.
+                                                    NotMethod
+                                                    ()
+                                                    []
+                                                    ()
+                                                )
+                                        })
+                                    gomp_critical_name_start
+                                    (FunctionType
+                                        [(CPtr
+                                            CPointer
+                                        )]
+                                        ()
+                                        BindC
+                                        Interface
+                                        "GOMP_critical_name_start"
+                                        .false.
+                                        .false.
+                                        .false.
+                                        .false.
+                                        .false.
+                                        []
+                                        .false.
+                                        Host
+                                    )
+                                    []
+                                    [(Var 14 pptr)]
+                                    []
+                                    ()
+                                    Public
+                                    .false.
+                                    .false.
+                                    ()
+                                ),
+                            gomp_critical_start:
+                                (Function
+                                    (SymbolTable
+                                        15
                                         {
                                             
                                         })
@@ -222,11 +344,11 @@
                             gomp_loop_auto_next:
                                 (Function
                                     (SymbolTable
-                                        14
+                                        16
                                         {
                                             gomp_loop_auto_next:
                                                 (Variable
-                                                    14
+                                                    16
                                                     gomp_loop_auto_next
                                                     []
                                                     ReturnVar
@@ -235,7 +357,7 @@
                                                     Default
                                                     (Logical 1)
                                                     ()
-                                                    Source
+                                                    BindC
                                                     Public
                                                     Required
                                                     .false.
@@ -244,13 +366,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             iend:
                                                 (Variable
-                                                    14
+                                                    16
                                                     iend
                                                     []
                                                     Unspecified
@@ -268,13 +392,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             istart:
                                                 (Variable
-                                                    14
+                                                    16
                                                     istart
                                                     []
                                                     Unspecified
@@ -292,9 +418,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     gomp_loop_auto_next
@@ -315,10 +443,10 @@
                                         Host
                                     )
                                     []
-                                    [(Var 14 istart)
-                                    (Var 14 iend)]
+                                    [(Var 16 istart)
+                                    (Var 16 iend)]
                                     []
-                                    (Var 14 gomp_loop_auto_next)
+                                    (Var 16 gomp_loop_auto_next)
                                     Public
                                     .false.
                                     .false.
@@ -327,11 +455,11 @@
                             gomp_loop_auto_start:
                                 (Function
                                     (SymbolTable
-                                        15
+                                        17
                                         {
                                             end:
                                                 (Variable
-                                                    15
+                                                    17
                                                     end
                                                     []
                                                     Unspecified
@@ -349,13 +477,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             gomp_loop_auto_start:
                                                 (Variable
-                                                    15
+                                                    17
                                                     gomp_loop_auto_start
                                                     []
                                                     ReturnVar
@@ -364,7 +494,7 @@
                                                     Default
                                                     (Logical 1)
                                                     ()
-                                                    Source
+                                                    BindC
                                                     Public
                                                     Required
                                                     .false.
@@ -373,13 +503,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             iend:
                                                 (Variable
-                                                    15
+                                                    17
                                                     iend
                                                     []
                                                     Unspecified
@@ -397,13 +529,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             incr:
                                                 (Variable
-                                                    15
+                                                    17
                                                     incr
                                                     []
                                                     Unspecified
@@ -421,13 +555,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             istart:
                                                 (Variable
-                                                    15
+                                                    17
                                                     istart
                                                     []
                                                     Unspecified
@@ -445,13 +581,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             start:
                                                 (Variable
-                                                    15
+                                                    17
                                                     start
                                                     []
                                                     Unspecified
@@ -469,9 +607,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     gomp_loop_auto_start
@@ -495,13 +635,13 @@
                                         Host
                                     )
                                     []
-                                    [(Var 15 start)
-                                    (Var 15 end)
-                                    (Var 15 incr)
-                                    (Var 15 istart)
-                                    (Var 15 iend)]
+                                    [(Var 17 start)
+                                    (Var 17 end)
+                                    (Var 17 incr)
+                                    (Var 17 istart)
+                                    (Var 17 iend)]
                                     []
-                                    (Var 15 gomp_loop_auto_start)
+                                    (Var 17 gomp_loop_auto_start)
                                     Public
                                     .false.
                                     .false.
@@ -510,11 +650,11 @@
                             gomp_loop_dynamic_next:
                                 (Function
                                     (SymbolTable
-                                        16
+                                        18
                                         {
                                             gomp_loop_dynamic_next:
                                                 (Variable
-                                                    16
+                                                    18
                                                     gomp_loop_dynamic_next
                                                     []
                                                     ReturnVar
@@ -523,7 +663,7 @@
                                                     Default
                                                     (Logical 1)
                                                     ()
-                                                    Source
+                                                    BindC
                                                     Public
                                                     Required
                                                     .false.
@@ -532,13 +672,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             iend:
                                                 (Variable
-                                                    16
+                                                    18
                                                     iend
                                                     []
                                                     Unspecified
@@ -556,13 +698,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             istart:
                                                 (Variable
-                                                    16
+                                                    18
                                                     istart
                                                     []
                                                     Unspecified
@@ -580,9 +724,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     gomp_loop_dynamic_next
@@ -603,10 +749,10 @@
                                         Host
                                     )
                                     []
-                                    [(Var 16 istart)
-                                    (Var 16 iend)]
+                                    [(Var 18 istart)
+                                    (Var 18 iend)]
                                     []
-                                    (Var 16 gomp_loop_dynamic_next)
+                                    (Var 18 gomp_loop_dynamic_next)
                                     Public
                                     .false.
                                     .false.
@@ -615,11 +761,11 @@
                             gomp_loop_dynamic_start:
                                 (Function
                                     (SymbolTable
-                                        17
+                                        19
                                         {
                                             chunk:
                                                 (Variable
-                                                    17
+                                                    19
                                                     chunk
                                                     []
                                                     Unspecified
@@ -637,13 +783,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             end:
                                                 (Variable
-                                                    17
+                                                    19
                                                     end
                                                     []
                                                     Unspecified
@@ -661,13 +809,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             gomp_loop_dynamic_start:
                                                 (Variable
-                                                    17
+                                                    19
                                                     gomp_loop_dynamic_start
                                                     []
                                                     ReturnVar
@@ -676,7 +826,7 @@
                                                     Default
                                                     (Logical 1)
                                                     ()
-                                                    Source
+                                                    BindC
                                                     Public
                                                     Required
                                                     .false.
@@ -685,13 +835,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             iend:
                                                 (Variable
-                                                    17
+                                                    19
                                                     iend
                                                     []
                                                     Unspecified
@@ -709,13 +861,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             incr:
                                                 (Variable
-                                                    17
+                                                    19
                                                     incr
                                                     []
                                                     Unspecified
@@ -733,13 +887,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             istart:
                                                 (Variable
-                                                    17
+                                                    19
                                                     istart
                                                     []
                                                     Unspecified
@@ -757,13 +913,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             start:
                                                 (Variable
-                                                    17
+                                                    19
                                                     start
                                                     []
                                                     Unspecified
@@ -781,9 +939,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     gomp_loop_dynamic_start
@@ -808,14 +968,14 @@
                                         Host
                                     )
                                     []
-                                    [(Var 17 start)
-                                    (Var 17 end)
-                                    (Var 17 incr)
-                                    (Var 17 chunk)
-                                    (Var 17 istart)
-                                    (Var 17 iend)]
+                                    [(Var 19 start)
+                                    (Var 19 end)
+                                    (Var 19 incr)
+                                    (Var 19 chunk)
+                                    (Var 19 istart)
+                                    (Var 19 iend)]
                                     []
-                                    (Var 17 gomp_loop_dynamic_start)
+                                    (Var 19 gomp_loop_dynamic_start)
                                     Public
                                     .false.
                                     .false.
@@ -824,7 +984,7 @@
                             gomp_loop_end:
                                 (Function
                                     (SymbolTable
-                                        18
+                                        20
                                         {
                                             
                                         })
@@ -856,7 +1016,7 @@
                             gomp_loop_end_nowait:
                                 (Function
                                     (SymbolTable
-                                        19
+                                        21
                                         {
                                             
                                         })
@@ -888,11 +1048,11 @@
                             gomp_loop_guided_next:
                                 (Function
                                     (SymbolTable
-                                        20
+                                        22
                                         {
                                             gomp_loop_guided_next:
                                                 (Variable
-                                                    20
+                                                    22
                                                     gomp_loop_guided_next
                                                     []
                                                     ReturnVar
@@ -901,7 +1061,7 @@
                                                     Default
                                                     (Logical 1)
                                                     ()
-                                                    Source
+                                                    BindC
                                                     Public
                                                     Required
                                                     .false.
@@ -910,13 +1070,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             iend:
                                                 (Variable
-                                                    20
+                                                    22
                                                     iend
                                                     []
                                                     Unspecified
@@ -934,13 +1096,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             istart:
                                                 (Variable
-                                                    20
+                                                    22
                                                     istart
                                                     []
                                                     Unspecified
@@ -958,9 +1122,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     gomp_loop_guided_next
@@ -981,10 +1147,10 @@
                                         Host
                                     )
                                     []
-                                    [(Var 20 istart)
-                                    (Var 20 iend)]
+                                    [(Var 22 istart)
+                                    (Var 22 iend)]
                                     []
-                                    (Var 20 gomp_loop_guided_next)
+                                    (Var 22 gomp_loop_guided_next)
                                     Public
                                     .false.
                                     .false.
@@ -993,11 +1159,11 @@
                             gomp_loop_guided_start:
                                 (Function
                                     (SymbolTable
-                                        21
+                                        23
                                         {
                                             chunk:
                                                 (Variable
-                                                    21
+                                                    23
                                                     chunk
                                                     []
                                                     Unspecified
@@ -1015,13 +1181,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             end:
                                                 (Variable
-                                                    21
+                                                    23
                                                     end
                                                     []
                                                     Unspecified
@@ -1039,13 +1207,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             gomp_loop_guided_start:
                                                 (Variable
-                                                    21
+                                                    23
                                                     gomp_loop_guided_start
                                                     []
                                                     ReturnVar
@@ -1054,7 +1224,7 @@
                                                     Default
                                                     (Logical 1)
                                                     ()
-                                                    Source
+                                                    BindC
                                                     Public
                                                     Required
                                                     .false.
@@ -1063,13 +1233,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             iend:
                                                 (Variable
-                                                    21
+                                                    23
                                                     iend
                                                     []
                                                     Unspecified
@@ -1087,13 +1259,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             incr:
                                                 (Variable
-                                                    21
+                                                    23
                                                     incr
                                                     []
                                                     Unspecified
@@ -1111,13 +1285,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             istart:
                                                 (Variable
-                                                    21
+                                                    23
                                                     istart
                                                     []
                                                     Unspecified
@@ -1135,13 +1311,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             start:
                                                 (Variable
-                                                    21
+                                                    23
                                                     start
                                                     []
                                                     Unspecified
@@ -1159,9 +1337,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     gomp_loop_guided_start
@@ -1186,14 +1366,14 @@
                                         Host
                                     )
                                     []
-                                    [(Var 21 start)
-                                    (Var 21 end)
-                                    (Var 21 incr)
-                                    (Var 21 chunk)
-                                    (Var 21 istart)
-                                    (Var 21 iend)]
+                                    [(Var 23 start)
+                                    (Var 23 end)
+                                    (Var 23 incr)
+                                    (Var 23 chunk)
+                                    (Var 23 istart)
+                                    (Var 23 iend)]
                                     []
-                                    (Var 21 gomp_loop_guided_start)
+                                    (Var 23 gomp_loop_guided_start)
                                     Public
                                     .false.
                                     .false.
@@ -1202,11 +1382,11 @@
                             gomp_loop_runtime_next:
                                 (Function
                                     (SymbolTable
-                                        22
+                                        24
                                         {
                                             gomp_loop_runtime_next:
                                                 (Variable
-                                                    22
+                                                    24
                                                     gomp_loop_runtime_next
                                                     []
                                                     ReturnVar
@@ -1215,7 +1395,7 @@
                                                     Default
                                                     (Logical 1)
                                                     ()
-                                                    Source
+                                                    BindC
                                                     Public
                                                     Required
                                                     .false.
@@ -1224,13 +1404,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             iend:
                                                 (Variable
-                                                    22
+                                                    24
                                                     iend
                                                     []
                                                     Unspecified
@@ -1248,13 +1430,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             istart:
                                                 (Variable
-                                                    22
+                                                    24
                                                     istart
                                                     []
                                                     Unspecified
@@ -1272,9 +1456,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     gomp_loop_runtime_next
@@ -1295,10 +1481,10 @@
                                         Host
                                     )
                                     []
-                                    [(Var 22 istart)
-                                    (Var 22 iend)]
+                                    [(Var 24 istart)
+                                    (Var 24 iend)]
                                     []
-                                    (Var 22 gomp_loop_runtime_next)
+                                    (Var 24 gomp_loop_runtime_next)
                                     Public
                                     .false.
                                     .false.
@@ -1307,11 +1493,11 @@
                             gomp_loop_runtime_start:
                                 (Function
                                     (SymbolTable
-                                        23
+                                        25
                                         {
                                             end:
                                                 (Variable
-                                                    23
+                                                    25
                                                     end
                                                     []
                                                     Unspecified
@@ -1329,13 +1515,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             gomp_loop_runtime_start:
                                                 (Variable
-                                                    23
+                                                    25
                                                     gomp_loop_runtime_start
                                                     []
                                                     ReturnVar
@@ -1344,7 +1532,7 @@
                                                     Default
                                                     (Logical 1)
                                                     ()
-                                                    Source
+                                                    BindC
                                                     Public
                                                     Required
                                                     .false.
@@ -1353,13 +1541,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             iend:
                                                 (Variable
-                                                    23
+                                                    25
                                                     iend
                                                     []
                                                     Unspecified
@@ -1377,13 +1567,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             incr:
                                                 (Variable
-                                                    23
+                                                    25
                                                     incr
                                                     []
                                                     Unspecified
@@ -1401,13 +1593,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             istart:
                                                 (Variable
-                                                    23
+                                                    25
                                                     istart
                                                     []
                                                     Unspecified
@@ -1425,13 +1619,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             start:
                                                 (Variable
-                                                    23
+                                                    25
                                                     start
                                                     []
                                                     Unspecified
@@ -1449,9 +1645,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     gomp_loop_runtime_start
@@ -1475,13 +1673,13 @@
                                         Host
                                     )
                                     []
-                                    [(Var 23 start)
-                                    (Var 23 end)
-                                    (Var 23 incr)
-                                    (Var 23 istart)
-                                    (Var 23 iend)]
+                                    [(Var 25 start)
+                                    (Var 25 end)
+                                    (Var 25 incr)
+                                    (Var 25 istart)
+                                    (Var 25 iend)]
                                     []
-                                    (Var 23 gomp_loop_runtime_start)
+                                    (Var 25 gomp_loop_runtime_start)
                                     Public
                                     .false.
                                     .false.
@@ -1490,11 +1688,11 @@
                             gomp_loop_static_next:
                                 (Function
                                     (SymbolTable
-                                        24
+                                        26
                                         {
                                             gomp_loop_static_next:
                                                 (Variable
-                                                    24
+                                                    26
                                                     gomp_loop_static_next
                                                     []
                                                     ReturnVar
@@ -1503,7 +1701,7 @@
                                                     Default
                                                     (Logical 1)
                                                     ()
-                                                    Source
+                                                    BindC
                                                     Public
                                                     Required
                                                     .false.
@@ -1512,13 +1710,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             iend:
                                                 (Variable
-                                                    24
+                                                    26
                                                     iend
                                                     []
                                                     Unspecified
@@ -1536,13 +1736,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             istart:
                                                 (Variable
-                                                    24
+                                                    26
                                                     istart
                                                     []
                                                     Unspecified
@@ -1560,9 +1762,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     gomp_loop_static_next
@@ -1583,10 +1787,10 @@
                                         Host
                                     )
                                     []
-                                    [(Var 24 istart)
-                                    (Var 24 iend)]
+                                    [(Var 26 istart)
+                                    (Var 26 iend)]
                                     []
-                                    (Var 24 gomp_loop_static_next)
+                                    (Var 26 gomp_loop_static_next)
                                     Public
                                     .false.
                                     .false.
@@ -1595,11 +1799,11 @@
                             gomp_loop_static_start:
                                 (Function
                                     (SymbolTable
-                                        25
+                                        27
                                         {
                                             chunk:
                                                 (Variable
-                                                    25
+                                                    27
                                                     chunk
                                                     []
                                                     Unspecified
@@ -1617,13 +1821,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             end:
                                                 (Variable
-                                                    25
+                                                    27
                                                     end
                                                     []
                                                     Unspecified
@@ -1641,13 +1847,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             gomp_loop_static_start:
                                                 (Variable
-                                                    25
+                                                    27
                                                     gomp_loop_static_start
                                                     []
                                                     ReturnVar
@@ -1656,7 +1864,7 @@
                                                     Default
                                                     (Logical 1)
                                                     ()
-                                                    Source
+                                                    BindC
                                                     Public
                                                     Required
                                                     .false.
@@ -1665,13 +1873,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             iend:
                                                 (Variable
-                                                    25
+                                                    27
                                                     iend
                                                     []
                                                     Unspecified
@@ -1689,13 +1899,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             incr:
                                                 (Variable
-                                                    25
+                                                    27
                                                     incr
                                                     []
                                                     Unspecified
@@ -1713,13 +1925,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             istart:
                                                 (Variable
-                                                    25
+                                                    27
                                                     istart
                                                     []
                                                     Unspecified
@@ -1737,13 +1951,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             start:
                                                 (Variable
-                                                    25
+                                                    27
                                                     start
                                                     []
                                                     Unspecified
@@ -1761,9 +1977,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     gomp_loop_static_start
@@ -1788,14 +2006,14 @@
                                         Host
                                     )
                                     []
-                                    [(Var 25 start)
-                                    (Var 25 end)
-                                    (Var 25 incr)
-                                    (Var 25 chunk)
-                                    (Var 25 istart)
-                                    (Var 25 iend)]
+                                    [(Var 27 start)
+                                    (Var 27 end)
+                                    (Var 27 incr)
+                                    (Var 27 chunk)
+                                    (Var 27 istart)
+                                    (Var 27 iend)]
                                     []
-                                    (Var 25 gomp_loop_static_start)
+                                    (Var 27 gomp_loop_static_start)
                                     Public
                                     .false.
                                     .false.
@@ -1804,11 +2022,11 @@
                             gomp_parallel:
                                 (Function
                                     (SymbolTable
-                                        26
+                                        28
                                         {
                                             data:
                                                 (Variable
-                                                    26
+                                                    28
                                                     data
                                                     []
                                                     Unspecified
@@ -1828,13 +2046,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             flags:
                                                 (Variable
-                                                    26
+                                                    28
                                                     flags
                                                     []
                                                     Unspecified
@@ -1852,13 +2072,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             fn:
                                                 (Variable
-                                                    26
+                                                    28
                                                     fn
                                                     []
                                                     Unspecified
@@ -1878,13 +2100,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             num_threads:
                                                 (Variable
-                                                    26
+                                                    28
                                                     num_threads
                                                     []
                                                     Unspecified
@@ -1902,9 +2126,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     gomp_parallel
@@ -1931,10 +2157,10 @@
                                         Host
                                     )
                                     []
-                                    [(Var 26 fn)
-                                    (Var 26 data)
-                                    (Var 26 num_threads)
-                                    (Var 26 flags)]
+                                    [(Var 28 fn)
+                                    (Var 28 data)
+                                    (Var 28 num_threads)
+                                    (Var 28 flags)]
                                     []
                                     ()
                                     Public
@@ -1945,7 +2171,7 @@
                             gomp_sections_end:
                                 (Function
                                     (SymbolTable
-                                        27
+                                        29
                                         {
                                             
                                         })
@@ -1977,11 +2203,11 @@
                             gomp_sections_next:
                                 (Function
                                     (SymbolTable
-                                        28
+                                        30
                                         {
                                             gomp_sections_next:
                                                 (Variable
-                                                    28
+                                                    30
                                                     gomp_sections_next
                                                     []
                                                     ReturnVar
@@ -1999,9 +2225,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     gomp_sections_next
@@ -2023,7 +2251,7 @@
                                     []
                                     []
                                     []
-                                    (Var 28 gomp_sections_next)
+                                    (Var 30 gomp_sections_next)
                                     Public
                                     .false.
                                     .false.
@@ -2032,11 +2260,11 @@
                             gomp_sections_start:
                                 (Function
                                     (SymbolTable
-                                        29
+                                        31
                                         {
                                             count:
                                                 (Variable
-                                                    29
+                                                    31
                                                     count
                                                     []
                                                     Unspecified
@@ -2054,13 +2282,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             gomp_sections_start:
                                                 (Variable
-                                                    29
+                                                    31
                                                     gomp_sections_start
                                                     []
                                                     ReturnVar
@@ -2078,9 +2308,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     gomp_sections_start
@@ -2100,9 +2332,9 @@
                                         Host
                                     )
                                     []
-                                    [(Var 29 count)]
+                                    [(Var 31 count)]
                                     []
-                                    (Var 29 gomp_sections_start)
+                                    (Var 31 gomp_sections_start)
                                     Public
                                     .false.
                                     .false.
@@ -2111,11 +2343,11 @@
                             gomp_task:
                                 (Function
                                     (SymbolTable
-                                        30
+                                        32
                                         {
                                             arg_align:
                                                 (Variable
-                                                    30
+                                                    32
                                                     arg_align
                                                     []
                                                     Unspecified
@@ -2133,13 +2365,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             arg_size:
                                                 (Variable
-                                                    30
+                                                    32
                                                     arg_size
                                                     []
                                                     Unspecified
@@ -2157,13 +2391,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             cpyfn:
                                                 (Variable
-                                                    30
+                                                    32
                                                     cpyfn
                                                     []
                                                     Unspecified
@@ -2183,13 +2419,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             data:
                                                 (Variable
-                                                    30
+                                                    32
                                                     data
                                                     []
                                                     Unspecified
@@ -2209,13 +2447,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             depend:
                                                 (Variable
-                                                    30
+                                                    32
                                                     depend
                                                     []
                                                     Unspecified
@@ -2235,13 +2475,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             flags:
                                                 (Variable
-                                                    30
+                                                    32
                                                     flags
                                                     []
                                                     Unspecified
@@ -2259,13 +2501,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             fn:
                                                 (Variable
-                                                    30
+                                                    32
                                                     fn
                                                     []
                                                     Unspecified
@@ -2285,13 +2529,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             if_clause:
                                                 (Variable
-                                                    30
+                                                    32
                                                     if_clause
                                                     []
                                                     Unspecified
@@ -2309,9 +2555,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     gomp_task
@@ -2346,14 +2594,14 @@
                                         Host
                                     )
                                     []
-                                    [(Var 30 fn)
-                                    (Var 30 data)
-                                    (Var 30 cpyfn)
-                                    (Var 30 arg_size)
-                                    (Var 30 arg_align)
-                                    (Var 30 if_clause)
-                                    (Var 30 flags)
-                                    (Var 30 depend)]
+                                    [(Var 32 fn)
+                                    (Var 32 data)
+                                    (Var 32 cpyfn)
+                                    (Var 32 arg_size)
+                                    (Var 32 arg_align)
+                                    (Var 32 if_clause)
+                                    (Var 32 flags)
+                                    (Var 32 depend)]
                                     []
                                     ()
                                     Public
@@ -2364,7 +2612,7 @@
                             gomp_taskwait:
                                 (Function
                                     (SymbolTable
-                                        31
+                                        33
                                         {
                                             
                                         })
@@ -2396,11 +2644,11 @@
                             gomp_teams:
                                 (Function
                                     (SymbolTable
-                                        32
+                                        34
                                         {
                                             data:
                                                 (Variable
-                                                    32
+                                                    34
                                                     data
                                                     []
                                                     Unspecified
@@ -2420,13 +2668,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             fn:
                                                 (Variable
-                                                    32
+                                                    34
                                                     fn
                                                     []
                                                     Unspecified
@@ -2446,13 +2696,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             num_teams:
                                                 (Variable
-                                                    32
+                                                    34
                                                     num_teams
                                                     []
                                                     Unspecified
@@ -2470,13 +2722,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             thread_limit:
                                                 (Variable
-                                                    32
+                                                    34
                                                     thread_limit
                                                     []
                                                     Unspecified
@@ -2494,9 +2748,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     gomp_teams
@@ -2523,10 +2779,10 @@
                                         Host
                                     )
                                     []
-                                    [(Var 32 fn)
-                                    (Var 32 data)
-                                    (Var 32 num_teams)
-                                    (Var 32 thread_limit)]
+                                    [(Var 34 fn)
+                                    (Var 34 data)
+                                    (Var 34 num_teams)
+                                    (Var 34 thread_limit)]
                                     []
                                     ()
                                     Public
@@ -2537,11 +2793,11 @@
                             omp_get_max_threads:
                                 (Function
                                     (SymbolTable
-                                        33
+                                        35
                                         {
                                             omp_get_max_threads:
                                                 (Variable
-                                                    33
+                                                    35
                                                     omp_get_max_threads
                                                     []
                                                     ReturnVar
@@ -2550,7 +2806,7 @@
                                                     Default
                                                     (Integer 4)
                                                     ()
-                                                    Source
+                                                    BindC
                                                     Public
                                                     Required
                                                     .false.
@@ -2559,9 +2815,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     omp_get_max_threads
@@ -2583,7 +2841,7 @@
                                     []
                                     []
                                     []
-                                    (Var 33 omp_get_max_threads)
+                                    (Var 35 omp_get_max_threads)
                                     Public
                                     .false.
                                     .false.
@@ -2592,11 +2850,11 @@
                             omp_get_num_procs:
                                 (Function
                                     (SymbolTable
-                                        34
+                                        36
                                         {
                                             omp_get_num_procs:
                                                 (Variable
-                                                    34
+                                                    36
                                                     omp_get_num_procs
                                                     []
                                                     ReturnVar
@@ -2614,9 +2872,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     omp_get_num_procs
@@ -2638,7 +2898,7 @@
                                     []
                                     []
                                     []
-                                    (Var 34 omp_get_num_procs)
+                                    (Var 36 omp_get_num_procs)
                                     Public
                                     .false.
                                     .false.
@@ -2647,11 +2907,11 @@
                             omp_get_num_teams:
                                 (Function
                                     (SymbolTable
-                                        35
+                                        37
                                         {
                                             omp_get_num_teams:
                                                 (Variable
-                                                    35
+                                                    37
                                                     omp_get_num_teams
                                                     []
                                                     ReturnVar
@@ -2660,7 +2920,7 @@
                                                     Default
                                                     (Integer 4)
                                                     ()
-                                                    Source
+                                                    BindC
                                                     Public
                                                     Required
                                                     .false.
@@ -2669,9 +2929,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     omp_get_num_teams
@@ -2693,7 +2955,7 @@
                                     []
                                     []
                                     []
-                                    (Var 35 omp_get_num_teams)
+                                    (Var 37 omp_get_num_teams)
                                     Public
                                     .false.
                                     .false.
@@ -2702,11 +2964,11 @@
                             omp_get_num_threads:
                                 (Function
                                     (SymbolTable
-                                        36
+                                        38
                                         {
                                             omp_get_num_threads:
                                                 (Variable
-                                                    36
+                                                    38
                                                     omp_get_num_threads
                                                     []
                                                     ReturnVar
@@ -2715,7 +2977,7 @@
                                                     Default
                                                     (Integer 4)
                                                     ()
-                                                    Source
+                                                    BindC
                                                     Public
                                                     Required
                                                     .false.
@@ -2724,9 +2986,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     omp_get_num_threads
@@ -2748,7 +3012,7 @@
                                     []
                                     []
                                     []
-                                    (Var 36 omp_get_num_threads)
+                                    (Var 38 omp_get_num_threads)
                                     Public
                                     .false.
                                     .false.
@@ -2757,11 +3021,11 @@
                             omp_get_team_num:
                                 (Function
                                     (SymbolTable
-                                        37
+                                        39
                                         {
                                             omp_get_team_num:
                                                 (Variable
-                                                    37
+                                                    39
                                                     omp_get_team_num
                                                     []
                                                     ReturnVar
@@ -2770,7 +3034,7 @@
                                                     Default
                                                     (Integer 4)
                                                     ()
-                                                    Source
+                                                    BindC
                                                     Public
                                                     Required
                                                     .false.
@@ -2779,9 +3043,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     omp_get_team_num
@@ -2803,7 +3069,7 @@
                                     []
                                     []
                                     []
-                                    (Var 37 omp_get_team_num)
+                                    (Var 39 omp_get_team_num)
                                     Public
                                     .false.
                                     .false.
@@ -2812,11 +3078,11 @@
                             omp_get_team_size:
                                 (Function
                                     (SymbolTable
-                                        38
+                                        40
                                         {
                                             level:
                                                 (Variable
-                                                    38
+                                                    40
                                                     level
                                                     []
                                                     Unspecified
@@ -2834,13 +3100,15 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             omp_get_team_size:
                                                 (Variable
-                                                    38
+                                                    40
                                                     omp_get_team_size
                                                     []
                                                     ReturnVar
@@ -2849,7 +3117,7 @@
                                                     Default
                                                     (Integer 4)
                                                     ()
-                                                    Source
+                                                    BindC
                                                     Public
                                                     Required
                                                     .false.
@@ -2858,9 +3126,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     omp_get_team_size
@@ -2880,9 +3150,9 @@
                                         Host
                                     )
                                     []
-                                    [(Var 38 level)]
+                                    [(Var 40 level)]
                                     []
-                                    (Var 38 omp_get_team_size)
+                                    (Var 40 omp_get_team_size)
                                     Public
                                     .false.
                                     .false.
@@ -2891,11 +3161,11 @@
                             omp_get_thread_num:
                                 (Function
                                     (SymbolTable
-                                        39
+                                        41
                                         {
                                             omp_get_thread_num:
                                                 (Variable
-                                                    39
+                                                    41
                                                     omp_get_thread_num
                                                     []
                                                     ReturnVar
@@ -2904,7 +3174,7 @@
                                                     Default
                                                     (Integer 4)
                                                     ()
-                                                    Source
+                                                    BindC
                                                     Public
                                                     Required
                                                     .false.
@@ -2913,9 +3183,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     omp_get_thread_num
@@ -2937,7 +3209,7 @@
                                     []
                                     []
                                     []
-                                    (Var 39 omp_get_thread_num)
+                                    (Var 41 omp_get_thread_num)
                                     Public
                                     .false.
                                     .false.
@@ -2946,11 +3218,11 @@
                             omp_get_wtime:
                                 (Function
                                     (SymbolTable
-                                        40
+                                        42
                                         {
                                             omp_get_wtime:
                                                 (Variable
-                                                    40
+                                                    42
                                                     omp_get_wtime
                                                     []
                                                     ReturnVar
@@ -2968,9 +3240,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     omp_get_wtime
@@ -2992,7 +3266,7 @@
                                     []
                                     []
                                     []
-                                    (Var 40 omp_get_wtime)
+                                    (Var 42 omp_get_wtime)
                                     Public
                                     .false.
                                     .false.
@@ -3001,11 +3275,11 @@
                             omp_set_num_threads:
                                 (Function
                                     (SymbolTable
-                                        41
+                                        43
                                         {
                                             n:
                                                 (Variable
-                                                    41
+                                                    43
                                                     n
                                                     []
                                                     Unspecified
@@ -3023,9 +3297,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     omp_set_num_threads
@@ -3045,7 +3321,7 @@
                                         Host
                                     )
                                     []
-                                    [(Var 41 n)]
+                                    [(Var 43 n)]
                                     []
                                     ()
                                     Public
@@ -3060,6 +3336,7 @@
                     .true.
                     .false.
                     .false.
+                    .false.
                     ()
                 ),
             openmp_44:
@@ -3071,7 +3348,7 @@
                                 (ExternalSymbol
                                     6
                                     c_bool
-                                    43 c_bool
+                                    45 c_bool
                                     lfortran_intrinsic_iso_c_binding
                                     []
                                     c_bool
@@ -3081,7 +3358,7 @@
                                 (ExternalSymbol
                                     6
                                     c_funptr
-                                    43 c_funptr
+                                    45 c_funptr
                                     lfortran_intrinsic_iso_c_binding
                                     []
                                     c_funptr
@@ -3091,7 +3368,7 @@
                                 (ExternalSymbol
                                     6
                                     c_int
-                                    43 c_int
+                                    45 c_int
                                     lfortran_intrinsic_iso_c_binding
                                     []
                                     c_int
@@ -3101,7 +3378,7 @@
                                 (ExternalSymbol
                                     6
                                     c_long
-                                    43 c_long
+                                    45 c_long
                                     lfortran_intrinsic_iso_c_binding
                                     []
                                     c_long
@@ -3111,7 +3388,7 @@
                                 (ExternalSymbol
                                     6
                                     c_ptr
-                                    43 c_ptr
+                                    45 c_ptr
                                     lfortran_intrinsic_iso_c_binding
                                     []
                                     c_ptr
@@ -3185,6 +3462,26 @@
                                     omp_lib
                                     []
                                     gomp_critical_end
+                                    Public
+                                ),
+                            gomp_critical_name_end:
+                                (ExternalSymbol
+                                    6
+                                    gomp_critical_name_end
+                                    8 gomp_critical_name_end
+                                    omp_lib
+                                    []
+                                    gomp_critical_name_end
+                                    Public
+                                ),
+                            gomp_critical_name_start:
+                                (ExternalSymbol
+                                    6
+                                    gomp_critical_name_start
+                                    8 gomp_critical_name_start
+                                    omp_lib
+                                    []
+                                    gomp_critical_name_start
                                     Public
                                 ),
                             gomp_critical_start:
@@ -3497,9 +3794,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     openmp_44
@@ -3540,6 +3839,8 @@
                                 ()
                                 .false.
                                 .false.
+                                .false.
+                                .false.
                             )
                             (Print
                                 (StringFormat
@@ -3550,6 +3851,8 @@
                                     )
                                     (Var 6 tid)]
                                     FormatFortran
+                                    []
+                                    ()
                                     (Allocatable
                                         (String 1 () DeferredLength DescriptorString)
                                     )
@@ -3587,6 +3890,8 @@
                                 ()
                                 .false.
                                 .false.
+                                .false.
+                                .false.
                             )
                             (Print
                                 (StringFormat
@@ -3597,6 +3902,8 @@
                                     )
                                     (Var 6 tid)]
                                     FormatFortran
+                                    []
+                                    ()
                                     (Allocatable
                                         (String 1 () DeferredLength DescriptorString)
                                     )
@@ -3634,6 +3941,8 @@
                                 ()
                                 .false.
                                 .false.
+                                .false.
+                                .false.
                             )
                             (Print
                                 (StringFormat
@@ -3644,6 +3953,8 @@
                                     )
                                     (Var 6 tid)]
                                     FormatFortran
+                                    []
+                                    ()
                                     (Allocatable
                                         (String 1 () DeferredLength DescriptorString)
                                     )
@@ -3663,6 +3974,8 @@
                             )
                             (Var 6 tid)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -3791,6 +4104,7 @@
                     openmp_44_parallel_sections
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.

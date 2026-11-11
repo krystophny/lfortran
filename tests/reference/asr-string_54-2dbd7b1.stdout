@@ -27,18 +27,17 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             double:
-                                (ExternalSymbol
+                                (GenericProcedure
                                     5
                                     double
-                                    2 double
-                                    string_54_mod
-                                    []
-                                    double
+                                    [5 double_@double]
                                     Public
                                 ),
                             double_:
@@ -50,6 +49,16 @@
                                     []
                                     double_
                                     Public
+                                ),
+                            double_@double:
+                                (ExternalSymbol
+                                    5
+                                    double_@double
+                                    2 double_
+                                    string_54_mod
+                                    []
+                                    double_
+                                    Private
                                 ),
                             foo_sub:
                                 (ExternalSymbol
@@ -81,9 +90,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     string_54
@@ -92,6 +103,8 @@
                         (Var 5 x)
                         (IntegerConstant 10 (Integer 4) Decimal)
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -163,9 +176,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             x:
                                                 (Variable
@@ -187,9 +202,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     double_
@@ -220,6 +237,8 @@
                                             ()
                                         )
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )]
@@ -262,9 +281,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             x:
                                                 (Variable
@@ -286,9 +307,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     foo_sub
@@ -350,6 +373,7 @@
                     string_54_mod
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.

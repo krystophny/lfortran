@@ -99,9 +99,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     bindc_06
@@ -116,6 +118,8 @@
                             )
                             (Var 13 f_int4)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -145,6 +149,8 @@
                             )
                             (Var 13 f_int8)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -180,6 +186,8 @@
                             )
                             (Var 13 f_logical)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -218,6 +226,8 @@
                             )
                             (Var 13 ptr_f_type_c_ptr)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -275,9 +285,11 @@
                                     "c_int4"
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             f_int8:
                                 (Variable
@@ -299,9 +311,11 @@
                                     "c_int8"
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             f_logical:
                                 (Variable
@@ -323,9 +337,11 @@
                                     "c_logical"
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             f_type_c_ptr:
                                 (Variable
@@ -349,14 +365,17 @@
                                     "c_type_c_ptr"
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     bindc_06_mod
                     ()
                     [iso_c_binding]
+                    .false.
                     .false.
                     .false.
                     .false.

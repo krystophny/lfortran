@@ -69,6 +69,8 @@
                                                             ()
                                                             [(Var 3 x)]
                                                             FormatFortran
+                                                            []
+                                                            ()
                                                             (Allocatable
                                                                 (String 1 () DeferredLength DescriptorString)
                                                             )
@@ -80,6 +82,8 @@
                                                             ()
                                                             [(Var 3 y)]
                                                             FormatFortran
+                                                            []
+                                                            ()
                                                             (Allocatable
                                                                 (String 1 () DeferredLength DescriptorString)
                                                             )
@@ -92,6 +96,8 @@
                                                         ()
                                                         .false.
                                                         .false.
+                                                        .false.
+                                                        .false.
                                                     )
                                                     (Assignment
                                                         (Var 3 y)
@@ -100,6 +106,8 @@
                                                             (Real 4)
                                                         )
                                                         ()
+                                                        .false.
+                                                        .false.
                                                         .false.
                                                         .false.
                                                     )]
@@ -129,9 +137,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             y:
                                                 (Variable
@@ -153,9 +163,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     b
@@ -182,6 +194,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )
                                     (Assignment
                                         (Var 3 y)
@@ -192,12 +206,16 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )
                                     (Print
                                         (StringFormat
                                             ()
                                             [(Var 3 x)]
                                             FormatFortran
+                                            []
+                                            ()
                                             (Allocatable
                                                 (String 1 () DeferredLength DescriptorString)
                                             )
@@ -209,6 +227,8 @@
                                             ()
                                             [(Var 3 y)]
                                             FormatFortran
+                                            []
+                                            ()
                                             (Allocatable
                                                 (String 1 () DeferredLength DescriptorString)
                                             )
@@ -227,6 +247,8 @@
                                             ()
                                             [(Var 3 x)]
                                             FormatFortran
+                                            []
+                                            ()
                                             (Allocatable
                                                 (String 1 () DeferredLength DescriptorString)
                                             )
@@ -238,6 +260,8 @@
                                             ()
                                             [(Var 3 y)]
                                             FormatFortran
+                                            []
+                                            ()
                                             (Allocatable
                                                 (String 1 () DeferredLength DescriptorString)
                                             )
@@ -254,6 +278,7 @@
                     nested_05_a
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.

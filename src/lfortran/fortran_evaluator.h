@@ -1,6 +1,8 @@
 #ifndef LFORTRAN_FORTRAN_EVALUATOR_H
 #define LFORTRAN_FORTRAN_EVALUATOR_H
 
+#include <functional>
+#include <map>
 #include <memory>
 #include <set>
 
@@ -47,7 +49,7 @@ public:
         enum {
             integer4, integer8, real4, real8, complex4, complex8, boolean,
             character, statement, none
-        } type;
+        } type = none;
         union {
             bool b;
             int32_t i32;
@@ -61,7 +63,63 @@ public:
         std::string ast;
         std::string asr;
         std::string llvm_ir;
+
+        // False for statements and empty cells, which have no value.
+        bool has_value() const { return type != statement && type != none; }
+        // The Fortran type and the text the prompt and kernels show.
+        std::string type_name() const;
+        std::string text() const;
     };
+
+    // Where an executed cell's display data and clear_output() calls go
+    // (the lfortran_display module). Unset hooks ignore them.
+    struct CellIO {
+        std::function<void(const std::string &mime, const std::string &data)> display;
+        std::function<void()> clear_output;
+        // Supplies the records a READ from stdin consumes: returns 0 with
+        // `record` set (without a newline), -1 at end of file, or > 0 if no
+        // input is available. Unset, the cell reads the process's stdin.
+        std::function<int(std::string &record)> input;
+        // Receives what the cell writes to stdout (stream 1) and stderr
+        // (stream 2). Set, both are captured while the cell runs and passed
+        // here incrementally on native builds, before each display,
+        // clear_output and input, and when the cell ends. All callbacks run
+        // on the execute() caller. WASM currently drains only at these
+        // barriers. Unset, the cell writes to the process's stdout and stderr.
+        std::function<void(int stream, const std::string &text)> output;
+        // Make bounded, nonblocking transport progress on the caller after
+        // each capture pump, even when no new output was captured.
+        std::function<void()> progress_output;
+        // Flush the frontend's transport before STOP terminates the process.
+        // Called on the execute() caller, after the last output.
+        std::function<void()> flush_on_exit;
+    };
+
+    struct CellResult {
+        bool ok = false;
+        bool inspection = false; // a %%show* cell
+        EvalResult value{};      // `none` for a %%show* cell
+        std::string output;      // the text a %%show* cell shows
+        std::string diagnostics; // rendered warnings and errors
+        // If !ok: the error's name and message (the rendered diagnostics of
+        // a CompilerError) and, for an internal compiler error, the stack
+        // trace (empty without stacktrace support).
+        std::string error_name, error_value;
+        bool internal_error = false;
+        std::string error_traceback;
+
+        // The text a frontend shows for a failed cell.
+        std::string error_text() const;
+    };
+
+    // Runs one interactive cell: evaluate() with fresh diagnostics and
+    // passes, or a %%showast/asr/llvm/asm/cpp/fmt cell, which does not add
+    // its declarations to the session. Never throws a compiler exception; it
+    // becomes the error. `compiler_options.interactive` must be set. Only one
+    // cell may run at a time in a process, as the display hooks are
+    // process-wide.
+    CellResult execute(const std::string &code, bool verbose = false,
+        const CellIO &io = {});
 
     // Evaluates `code`.
     // If `verbose=true`, it saves ast, asr and llvm_ir in Result.
@@ -77,7 +135,7 @@ public:
         diag::Diagnostics &diagnostics);
     Result<std::string> get_asr(const std::string &code,
         LocationManager &lm, diag::Diagnostics &diagnostics);
-    ASR::asr_t* handle_lookup_name(LCompilers::ASR::TranslationUnit_t* tu, uint64_t pos);
+    ASR::asr_t* handle_lookup_name(LCompilers::ASR::TranslationUnit_t* tu, uint32_t pos);
     Result<ASR::TranslationUnit_t*> get_asr2(const std::string &code,
         LocationManager &lm, diag::Diagnostics &diagnostics);
     Result<ASR::TranslationUnit_t*> get_asr3(
@@ -102,7 +160,7 @@ public:
     Result<std::unique_ptr<LLVMModule>> get_llvm3(ASR::TranslationUnit_t &asr,
         LCompilers::PassManager& pass_manager,
         diag::Diagnostics &diagnostics, LocationManager &lm, const std::string &infile,
-        int* time_opt);
+        int64_t* time_opt);
     Result<std::string> get_asm(const std::string &code,
         LocationManager &lm,
         LCompilers::PassManager& pass_manager,
@@ -158,6 +216,9 @@ private:
     std::unique_ptr<WasmLFortranExecutor> wasm_exec;
 #endif
     SymbolTable *symbol_table;
+    // Keyed by the committed cell scope so inspection's scope restoration
+    // also restores the implicit typing policy.
+    std::map<SymbolTable*, std::map<std::string, ASR::ttype_t*>> cell_implicit_types;
     std::string run_fn;
     // One entry per cell evaluated so far, each covering a range of its own,
     // so that a location taken from an earlier cell still points at that

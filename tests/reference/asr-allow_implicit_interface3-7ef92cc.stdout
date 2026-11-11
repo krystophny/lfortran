@@ -27,9 +27,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             lsame:
                                 (Function
@@ -47,7 +49,7 @@
                                                     Default
                                                     (Logical 4)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -56,16 +58,18 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     lsame
                                     (FunctionType
                                         []
                                         (Logical 4)
-                                        BindC
+                                        Source
                                         ImplicitInterface
                                         ()
                                         .false.
@@ -100,9 +104,9 @@
                                                     ()
                                                     ()
                                                     Default
-                                                    (String 1 (IntegerConstant 1 (Integer 4) Decimal) ExpressionLength DescriptorString)
+                                                    (String 1 () AssumedLength DescriptorString)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -111,9 +115,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             lsame~arg_1:
                                                 (Variable
@@ -124,9 +130,9 @@
                                                     ()
                                                     ()
                                                     Default
-                                                    (String 1 (IntegerConstant 1 (Integer 4) Decimal) ExpressionLength DescriptorString)
+                                                    (String 1 () AssumedLength DescriptorString)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -135,9 +141,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             lsame~result:
                                                 (Variable
@@ -150,7 +158,7 @@
                                                     Default
                                                     (Logical 4)
                                                     ()
-                                                    BindC
+                                                    Source
                                                     Public
                                                     Required
                                                     .false.
@@ -159,17 +167,19 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     lsame~fpcast
                                     (FunctionType
-                                        [(String 1 (IntegerConstant 1 (Integer 4) Decimal) ExpressionLength DescriptorString)
-                                        (String 1 (IntegerConstant 1 (Integer 4) Decimal) ExpressionLength DescriptorString)]
+                                        [(String 1 () AssumedLength DescriptorString)
+                                        (String 1 () AssumedLength DescriptorString)]
                                         (Logical 4)
-                                        BindC
+                                        Source
                                         Interface
                                         ()
                                         .false.
@@ -202,10 +212,10 @@
                                     Default
                                     (Pointer
                                         (FunctionType
-                                            [(String 1 (IntegerConstant 1 (Integer 4) Decimal) ExpressionLength DescriptorString)
-                                            (String 1 (IntegerConstant 1 (Integer 4) Decimal) ExpressionLength DescriptorString)]
+                                            [(String 1 () AssumedLength DescriptorString)
+                                            (String 1 () AssumedLength DescriptorString)]
                                             (Logical 4)
-                                            BindC
+                                            Source
                                             Interface
                                             ()
                                             .false.
@@ -228,9 +238,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             uplo:
                                 (Variable
@@ -252,9 +264,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     ssyr2
@@ -281,6 +295,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Associate
                         (Var 2 lsame~fpcast_ptr)
@@ -288,10 +304,10 @@
                             (Var 2 lsame)
                             2 lsame~fpcast
                             (FunctionType
-                                [(String 1 (IntegerConstant 1 (Integer 4) Decimal) ExpressionLength DescriptorString)
-                                (String 1 (IntegerConstant 1 (Integer 4) Decimal) ExpressionLength DescriptorString)]
+                                [(String 1 () AssumedLength DescriptorString)
+                                (String 1 () AssumedLength DescriptorString)]
                                 (Logical 4)
-                                BindC
+                                Source
                                 Interface
                                 ()
                                 .false.
@@ -305,6 +321,7 @@
                             )
                             ()
                         )
+                        NoPointerBounds
                     )
                     (Associate
                         (Var 2 lsame~fpcast_ptr)
@@ -312,10 +329,10 @@
                             (Var 2 lsame)
                             2 lsame~fpcast
                             (FunctionType
-                                [(String 1 (IntegerConstant 1 (Integer 4) Decimal) ExpressionLength DescriptorString)
-                                (String 1 (IntegerConstant 1 (Integer 4) Decimal) ExpressionLength DescriptorString)]
+                                [(String 1 () AssumedLength DescriptorString)
+                                (String 1 () AssumedLength DescriptorString)]
                                 (Logical 4)
-                                BindC
+                                Source
                                 Interface
                                 ()
                                 .false.
@@ -329,6 +346,7 @@
                             )
                             ()
                         )
+                        NoPointerBounds
                     )
                     (If
                         ()
@@ -336,7 +354,7 @@
                             (LogicalNot
                                 (FunctionCall
                                     2 lsame~fpcast_ptr
-                                    ()
+                                    2 lsame
                                     [((Var 2 uplo))
                                     ((StringConstant
                                         "U"
@@ -353,7 +371,7 @@
                             (LogicalNot
                                 (FunctionCall
                                     2 lsame~fpcast_ptr
-                                    ()
+                                    2 lsame
                                     [((Var 2 uplo))
                                     ((StringConstant
                                         "L"
@@ -375,11 +393,15 @@
                             ()
                             .false.
                             .false.
+                            .false.
+                            .false.
                         )]
                         [(Assignment
                             (Var 2 info)
                             (IntegerConstant 2 (Integer 4) Decimal)
                             ()
+                            .false.
+                            .false.
                             .false.
                             .false.
                         )]

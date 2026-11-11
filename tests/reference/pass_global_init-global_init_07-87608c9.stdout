@@ -99,6 +99,7 @@
                                                                 )
                                                                 ColMajor
                                                                 ()
+                                                                .true.
                                                             )
                                                             9 1_extent_n
                                                             (Integer 4)
@@ -117,9 +118,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             c:
                                                 (Variable
@@ -148,6 +151,7 @@
                                                                 )
                                                                 ColMajor
                                                                 ()
+                                                                .true.
                                                             )
                                                             9 1_extent_step
                                                             (Integer 4)
@@ -166,9 +170,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     host_bound
@@ -262,6 +268,7 @@
                                                         )
                                                         ColMajor
                                                         ()
+                                                        .true.
                                                     )
                                                     9 1_extent_n
                                                     (Integer 4)
@@ -273,6 +280,8 @@
                                             ()
                                         )
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )
@@ -311,6 +320,7 @@
                                                         )
                                                         ColMajor
                                                         ()
+                                                        .true.
                                                     )
                                                     9 1_extent_step
                                                     (Integer 4)
@@ -322,6 +332,8 @@
                                             ()
                                         )
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )
@@ -352,6 +364,7 @@
                                                                 )
                                                                 ColMajor
                                                                 ()
+                                                                .true.
                                                             )
                                                             9 1_extent_n
                                                             (Integer 4)
@@ -403,6 +416,7 @@
                                                                 )
                                                                 ColMajor
                                                                 ()
+                                                                .true.
                                                             )
                                                             9 1_extent_step
                                                             (Integer 4)
@@ -514,9 +528,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             shared:
                                 (ExternalSymbol
@@ -623,6 +639,7 @@
                                     )
                                     ColMajor
                                     ()
+                                    .true.
                                 )
                                 7 1_extent_n
                                 (Integer 4)
@@ -656,6 +673,7 @@
                                     )
                                     ColMajor
                                     ()
+                                    .true.
                                 )
                                 7 1_extent_n
                                 (Integer 4)
@@ -689,6 +707,7 @@
                                     )
                                     ColMajor
                                     ()
+                                    .true.
                                 )
                                 7 1_extent_step
                                 (Integer 4)
@@ -720,6 +739,7 @@
                                 )
                                 ColMajor
                                 ()
+                                .true.
                             )
                             7 1_extent_n
                             (Integer 4)
@@ -727,6 +747,8 @@
                         )
                         (IntegerConstant 99 (Integer 4) Decimal)
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -748,6 +770,7 @@
                                     )
                                     ColMajor
                                     ()
+                                    .true.
                                 )
                                 7 1_extent_n
                                 (Integer 4)
@@ -856,9 +879,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             expected:
                                                 (Variable
@@ -880,9 +905,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     counts
@@ -921,6 +948,7 @@
                                                     )
                                                     ColMajor
                                                     ()
+                                                    .true.
                                                 )
                                                 5 1_extent_n
                                                 (Integer 4)
@@ -952,6 +980,7 @@
                                                 )
                                                 ColMajor
                                                 ()
+                                                .true.
                                             )
                                             5 1_extent_n
                                             (Integer 4)
@@ -973,6 +1002,7 @@
                                                     )
                                                     ColMajor
                                                     ()
+                                                    .true.
                                                 )
                                                 5 1_extent_n
                                                 (Integer 4)
@@ -984,6 +1014,8 @@
                                             ()
                                         )
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )]
@@ -1018,9 +1050,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             step:
                                                 (Variable
@@ -1042,9 +1076,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     extent
@@ -1111,6 +1147,7 @@
                                                                 )
                                                                 ColMajor
                                                                 ()
+                                                                .true.
                                                             )
                                                             4 1_extent_n
                                                             (Integer 4)
@@ -1129,9 +1166,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     module_bound
@@ -1206,6 +1245,7 @@
                                                         )
                                                         ColMajor
                                                         ()
+                                                        .true.
                                                     )
                                                     4 1_extent_n
                                                     (Integer 4)
@@ -1217,6 +1257,8 @@
                                             ()
                                         )
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )
@@ -1247,6 +1289,7 @@
                                                                 )
                                                                 ColMajor
                                                                 ()
+                                                                .true.
                                                             )
                                                             4 1_extent_n
                                                             (Integer 4)
@@ -1348,14 +1391,17 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     global_init_07_m
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.
@@ -1413,6 +1459,7 @@
                                                 )
                                                 ColMajor
                                                 ()
+                                                .true.
                                             )
                                             6 1_extent_n
                                             (Integer 4)
@@ -1431,9 +1478,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             c:
                                 (Variable
@@ -1462,6 +1511,7 @@
                                                 )
                                                 ColMajor
                                                 ()
+                                                .true.
                                             )
                                             6 1_extent_step
                                             (Integer 4)
@@ -1480,9 +1530,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             counts:
                                 (ExternalSymbol
@@ -1616,6 +1668,7 @@
                                         )
                                         ColMajor
                                         ()
+                                        .true.
                                     )
                                     6 1_extent_n
                                     (Integer 4)
@@ -1627,6 +1680,8 @@
                             ()
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -1665,6 +1720,7 @@
                                         )
                                         ColMajor
                                         ()
+                                        .true.
                                     )
                                     6 1_extent_step
                                     (Integer 4)
@@ -1676,6 +1732,8 @@
                             ()
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -1706,6 +1764,7 @@
                                                 )
                                                 ColMajor
                                                 ()
+                                                .true.
                                             )
                                             6 1_extent_n
                                             (Integer 4)
@@ -1757,6 +1816,7 @@
                                                 )
                                                 ColMajor
                                                 ()
+                                                .true.
                                             )
                                             6 1_extent_step
                                             (Integer 4)

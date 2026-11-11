@@ -24,6 +24,7 @@
                     .true.
                     .false.
                     .false.
+                    .false.
                     ()
                 ),
             tomlf_structure_base:
@@ -61,9 +62,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             toml_value:
                                                 (ExternalSymbol
@@ -105,6 +108,7 @@
                                     .false.
                                     .false.
                                     ()
+                                    (.true.)
                                 ),
                             toml_ordered:
                                 (Struct
@@ -148,6 +152,7 @@
                                                     Source
                                                     .true.
                                                     .false.
+                                                    Public
                                                 )
                                         })
                                     toml_structure
@@ -175,6 +180,7 @@
                     ()
                     [tomlf_type_value]
                     .true.
+                    .false.
                     .false.
                     .false.
                     ()
@@ -261,9 +267,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     destroy
@@ -321,6 +329,8 @@
                                                 )
                                                 ()
                                             )]
+                                            ()
+                                            ()
                                         )]
                                         []
                                     )
@@ -390,6 +400,8 @@
                                                 )
                                                 ()
                                             )]
+                                            ()
+                                            ()
                                         )]
                                         []
                                     )]
@@ -443,9 +455,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     new_array
@@ -500,6 +514,7 @@
                                                     Source
                                                     .false.
                                                     .false.
+                                                    Public
                                                 ),
                                             list:
                                                 (Variable
@@ -528,9 +543,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     toml_array
@@ -589,6 +606,7 @@
                     .false.
                     .false.
                     .false.
+                    .false.
                     ()
                 ),
             tomlf_type_value:
@@ -628,9 +646,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     destroy
@@ -664,6 +684,7 @@
                                     .false.
                                     .false.
                                     ()
+                                    (.true.)
                                 ),
                             toml_value:
                                 (Struct
@@ -680,6 +701,7 @@
                                                     Source
                                                     .true.
                                                     .false.
+                                                    Public
                                                 ),
                                             key:
                                                 (Variable
@@ -703,9 +725,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     toml_value
@@ -721,7 +745,7 @@
                                     [key]
                                     []
                                     Source
-                                    Private
+                                    Public
                                     .false.
                                     .true.
                                     .false.
@@ -735,6 +759,7 @@
                     ()
                     []
                     .true.
+                    .false.
                     .false.
                     .false.
                     ()

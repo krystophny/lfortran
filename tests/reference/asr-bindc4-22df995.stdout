@@ -87,9 +87,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             j:
                                 (Variable
@@ -111,9 +113,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             newshape:
                                 (Variable
@@ -141,9 +145,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             queries:
                                 (Variable
@@ -167,9 +173,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             queries2:
                                 (Variable
@@ -203,9 +211,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             x:
                                 (Variable
@@ -237,9 +247,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             xv:
                                 (Variable
@@ -269,9 +281,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             y:
                                 (Variable
@@ -303,9 +317,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             yv:
                                 (Variable
@@ -335,9 +351,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             zv:
                                 (Variable
@@ -365,9 +383,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     bindc4
@@ -381,9 +401,12 @@
                             (Integer 4)
                             ColMajor
                             ()
+                            .true.
                         )
                         (IntegerConstant 2 (Integer 4) Decimal)
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -396,9 +419,12 @@
                             (Integer 4)
                             ColMajor
                             ()
+                            .true.
                         )
                         (IntegerConstant 3 (Integer 4) Decimal)
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -419,6 +445,7 @@
                             )
                             ()
                         )
+                        NoPointerBounds
                     )
                     (Associate
                         (Var 2 y)
@@ -437,6 +464,7 @@
                             )
                             ()
                         )
+                        NoPointerBounds
                     )
                     (Assignment
                         (Var 2 queries)
@@ -462,6 +490,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (DoLoop
                         ()
@@ -480,7 +510,7 @@
                             UBound
                             ()
                         )
-                        ())
+                        (IntegerConstant 1 (Integer 4) Decimal))
                         [(DoLoop
                             ()
                             ((Var 2 j)
@@ -498,7 +528,7 @@
                                 UBound
                                 ()
                             )
-                            ())
+                            (IntegerConstant 1 (Integer 4) Decimal))
                             [(Print
                                 (StringFormat
                                     ()
@@ -518,6 +548,7 @@
                                                     (Integer 2)
                                                     ColMajor
                                                     ()
+                                                    .false.
                                                 )
                                                 (Pointer
                                                     (Integer 2)
@@ -535,6 +566,8 @@
                                         ()
                                     )]
                                     FormatFortran
+                                    []
+                                    ()
                                     (Allocatable
                                         (String 1 () DeferredLength DescriptorString)
                                     )
@@ -611,6 +644,8 @@
                                 ()
                             )]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -634,7 +669,7 @@
                             UBound
                             ()
                         )
-                        ())
+                        (IntegerConstant 1 (Integer 4) Decimal))
                         [(DoLoop
                             ()
                             ((Var 2 j)
@@ -652,7 +687,7 @@
                                 UBound
                                 ()
                             )
-                            ())
+                            (IntegerConstant 1 (Integer 4) Decimal))
                             [(Print
                                 (StringFormat
                                     ()
@@ -672,6 +707,7 @@
                                                     (Integer 2)
                                                     ColMajor
                                                     ()
+                                                    .false.
                                                 )
                                                 (Pointer
                                                     (Integer 2)
@@ -689,6 +725,8 @@
                                         ()
                                     )]
                                     FormatFortran
+                                    []
+                                    ()
                                     (Allocatable
                                         (String 1 () DeferredLength DescriptorString)
                                     )
@@ -776,6 +814,8 @@
                                 ()
                             )]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -799,7 +839,7 @@
                             UBound
                             ()
                         )
-                        ())
+                        (IntegerConstant 1 (Integer 4) Decimal))
                         [(DoLoop
                             ()
                             ((Var 2 j)
@@ -817,7 +857,7 @@
                                 UBound
                                 ()
                             )
-                            ())
+                            (IntegerConstant 1 (Integer 4) Decimal))
                             [(Print
                                 (StringFormat
                                     ()
@@ -837,6 +877,7 @@
                                                     (Integer 2)
                                                     ColMajor
                                                     ()
+                                                    .false.
                                                 )
                                                 (Pointer
                                                     (Integer 2)
@@ -854,6 +895,8 @@
                                         ()
                                     )]
                                     FormatFortran
+                                    []
+                                    ()
                                     (Allocatable
                                         (String 1 () DeferredLength DescriptorString)
                                     )
@@ -882,6 +925,7 @@
                                             (Integer 2)
                                             ColMajor
                                             ()
+                                            .false.
                                         )
                                         (Pointer
                                             (Integer 2)
@@ -985,6 +1029,8 @@
                             (Var 2 c_null_ptr)
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )]

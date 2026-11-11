@@ -10,14 +10,18 @@ printed in ASR text as `(name :member value ...)`.
 maxdepth: 1
 ---
 alloc_arg
+array_extent_check
 array_index
 attribute
 call_arg
 case_stmt
 coarray_index
 codimension
+common_association
 dimension
 do_loop_head
+dtio_binding
+interface_body
 rank_stmt
 reduction_expr
 require_instantiation

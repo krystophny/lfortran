@@ -11,6 +11,9 @@
  * for both C and C++ code generation.
  */
 
+#include <algorithm>
+#include <functional>
+#include <cctype>
 #include <memory>
 #include <set>
 
@@ -18,6 +21,7 @@
 #include <libasr/containers.h>
 #include <libasr/codegen/asr_to_c.h>
 #include <libasr/codegen/c_utils.h>
+#include <libasr/codegen/c_loop_control.h>
 #include <libasr/exception.h>
 #include <libasr/asr_utils.h>
 #include <libasr/string_utils.h>
@@ -110,7 +114,25 @@ public:
     const ASR::Function_t *current_function = nullptr;
     std::map<uint64_t, SymbolInfo> sym_info;
     std::map<uint64_t, std::string> const_var_names;
-    std::map<int32_t, std::string> gotoid2name;
+    std::map<int64_t, std::string> gotoid2name;
+
+    // The constructs being written that an EXIT or a CYCLE can leave,
+    // innermost last: the loops, and the BLOCK, named IF and named SELECT
+    // CASE constructs. A `break` or a `continue` leaves only the innermost
+    // C loop, so leaving any other construct goes to a label of it, and so
+    // does leaving a loop with a loop-else, which runs only when the loop
+    // completes.
+    struct ConstructFrame {
+        const char *name;
+        bool is_loop;
+        bool has_else;
+        std::string exit_label, cycle_label;
+        // The body of a C++ lambda (see asr_to_cpp.cpp), which a CYCLE
+        // leaves by returning.
+        bool is_lambda = false;
+    };
+    std::vector<ConstructFrame> construct_frames;
+    size_t construct_label_count = 0;
     std::map<std::string, std::string> emit_headers;
     std::string array_types_decls;
     std::string forward_decl_functions;
@@ -153,6 +175,43 @@ public:
     SymbolTable* current_scope;
     bool is_string_concat_present;
 
+    // The views of a common block in this translation unit, the CommonBlock
+    // symbols with its link name, share the object of that linker symbol. A
+    // variable in a block has no declaration of its own: it is the object of
+    // its type at its offset in that storage, accessed through a `may_alias`
+    // type, so that the compiler does not assume it apart from the views of
+    // other types of the same storage.
+    struct CommonStorage {
+        // The C identifier of the object, whose linker symbol is link_name.
+        std::string name;
+        std::string link_name;
+        int64_t size = 0;
+        int64_t alignment = 1;
+        // Whether a Tentative or Initialized view provides the storage here,
+        // rather than External views only referring to it.
+        bool defined = false;
+        // Whether an Initialized view gives the storage its initial value,
+        // which makes the definition a strong one even when all is zero.
+        bool initialized_view = false;
+        // The variables of Initialized views that give the storage its
+        // initial value, by offset.
+        std::map<int64_t, const ASR::Variable_t*> initialized;
+    };
+    struct CommonPlacement {
+        const CommonStorage *storage;
+        int64_t offset;
+        // The static descriptor of an array, which every procedure reaches.
+        std::string descriptor;
+    };
+    // By link name.
+    std::map<std::string, CommonStorage> common_storage;
+    std::map<const ASR::Variable_t*, CommonPlacement> common_placement;
+    // The arrays of common_placement, in the order they were placed.
+    std::vector<const ASR::Variable_t*> common_arrays;
+    std::set<std::string> common_names;
+    // The element types that variables in common blocks are accessed as.
+    std::set<std::string> common_access_types;
+
     BaseCCPPVisitor(diag::Diagnostics &diag, Platform &platform,
             CompilerOptions &_compiler_options, bool gen_stdstring, bool gen_stdcomplex, bool is_c,
             int64_t default_lower_bound) : diag{diag},
@@ -166,6 +225,411 @@ public:
         const_vars_count{0}, loop_end_count{0}, bracket_open{0},
         is_string_concat_present{false} {
         }
+
+    /****************************** COMMON blocks *****************************/
+
+    void collect_common_blocks(SymbolTable *symtab,
+            std::vector<const ASR::CommonBlock_t*> &blocks) {
+        for (auto &item : symtab->get_scope()) {
+            ASR::symbol_t *sym = item.second;
+            if (ASR::is_a<ASR::CommonBlock_t>(*sym)) {
+                blocks.push_back(ASR::down_cast<ASR::CommonBlock_t>(sym));
+            } else if (ASR::is_a<ASR::Module_t>(*sym) || ASR::is_a<ASR::Program_t>(*sym) ||
+                    ASR::is_a<ASR::Function_t>(*sym) || ASR::is_a<ASR::BlockData_t>(*sym)) {
+                collect_common_blocks(ASRUtils::symbol_symtab(sym), blocks);
+            }
+        }
+    }
+
+    [[noreturn]] void common_unsupported(const ASR::Variable_t &v,
+            const std::string &what) {
+        throw CodeGenError(what + " in a COMMON block are not supported by the "
+            "C backend", v.base.base.loc);
+    }
+
+    // The type that an element of `v`, a variable in a common block, is
+    // accessed as, and the size and alignment of the element in the storage
+    // of the block. A logical is accessed as a `bool` but takes the storage
+    // of its kind, so only an array of logicals of kind 1 has elements of
+    // the size of a `bool`. A character, which is a pointer to a buffer of
+    // its own here, cannot be in the storage.
+    std::string common_element_type(const ASR::Variable_t &v, int64_t &size,
+            int64_t &alignment) {
+        if (ASRUtils::is_pointer(v.m_type)) {
+            common_unsupported(v, "pointers");
+        }
+        bool is_array = ASRUtils::is_array(v.m_type);
+        ASR::ttype_t *type = ASRUtils::type_get_past_array(v.m_type);
+        int64_t kind = ASRUtils::extract_kind_from_ttype_t(type);
+        switch (type->type) {
+            case ASR::ttypeType::Integer:
+            case ASR::ttypeType::UnsignedInteger: {
+                headers.insert("inttypes.h");
+                size = alignment = kind;
+                break;
+            }
+            case ASR::ttypeType::Real: {
+                if (kind != 4 && kind != 8) {
+                    common_unsupported(v, "real(" + std::to_string(kind) + ") variables");
+                }
+                size = alignment = kind;
+                break;
+            }
+            case ASR::ttypeType::Logical: {
+                if (is_array && kind != 1) {
+                    common_unsupported(v, "logical arrays of a kind other than 1");
+                }
+                size = alignment = kind;
+                break;
+            }
+            case ASR::ttypeType::Complex: {
+                if (kind != 4 && kind != 8) {
+                    common_unsupported(v, "complex(" + std::to_string(kind) + ") variables");
+                }
+                headers.insert("complex.h");
+                size = 2 * kind;
+                alignment = kind;
+                break;
+            }
+            case ASR::ttypeType::String: {
+                common_unsupported(v, "character variables");
+            }
+            case ASR::ttypeType::StructType: {
+                common_unsupported(v, "derived type variables");
+            }
+            default: {
+                common_unsupported(v, "variables of type "
+                    + ASRUtils::type_to_str_fortran_symbol(type, v.m_type_declaration));
+            }
+        }
+        std::string access_type = CUtils::get_c_type_from_ttype_t(type);
+        common_access_types.insert(access_type);
+        return access_type;
+    }
+
+    static std::string common_access_type_name(const std::string &type) {
+        std::string name = "_lcompilers_common_";
+        for (char c : type) {
+            name += std::isalnum(static_cast<unsigned char>(c)) ? c : '_';
+        }
+        return name;
+    }
+
+    int64_t common_size(const ASR::Variable_t &v) {
+        int64_t size, alignment;
+        common_element_type(v, size, alignment);
+        if (ASRUtils::is_array(v.m_type)) {
+            size *= ASRUtils::get_fixed_size_of_array(v.m_type);
+        }
+        return size;
+    }
+
+    // Places `v` at `offset` in `storage`. The variables of an Initialized
+    // view give the storage its initial value, which the variables of an
+    // External view, defined elsewhere, do not.
+    void place_common_variable(const ASR::Variable_t &v, CommonStorage &storage,
+            int64_t offset, bool initializes) {
+        int64_t size, alignment;
+        common_element_type(v, size, alignment);
+        LCOMPILERS_ASSERT(offset >= 0);
+        if (offset % alignment != 0) {
+            throw CodeGenError("variable '" + std::string(v.m_name) + "' is not "
+                "aligned for its type in its COMMON block, which the C backend "
+                "does not support", v.base.base.loc);
+        }
+        LCOMPILERS_ASSERT(common_placement.find(&v) == common_placement.end());
+        common_placement[&v] = {&storage, offset, ""};
+        if (ASRUtils::is_array(v.m_type)) {
+            common_arrays.push_back(&v);
+        }
+        size = common_size(v);
+        storage.size = std::max(storage.size, offset + size);
+        storage.alignment = std::max(storage.alignment, alignment);
+        if (initializes && (v.m_value != nullptr || v.m_symbolic_value != nullptr)) {
+            auto next = storage.initialized.lower_bound(offset);
+            bool overlaps = next != storage.initialized.end()
+                && next->first < offset + size;
+            if (next != storage.initialized.begin()) {
+                auto previous = std::prev(next);
+                overlaps = overlaps
+                    || previous->first + common_size(*previous->second) > offset;
+            }
+            if (overlaps) {
+                throw CodeGenError("variable '" + std::string(v.m_name) + "' gives "
+                    "an initial value to storage of its COMMON block that another "
+                    "variable also initializes", v.base.base.loc);
+            }
+            storage.initialized[offset] = &v;
+        }
+    }
+
+    // Lays out a view of a common block: its members one after another, each
+    // at the next offset of its alignment, and the variable of each
+    // association where its designator is at the anchor.
+    void layout_common_block(const ASR::CommonBlock_t &block) {
+        auto storage = common_storage.find(block.m_link_name);
+        if (storage == common_storage.end()) {
+            std::string base = "_lcompilers_common_" + std::string(
+                block.m_block_name ? block.m_block_name : "blank");
+            std::string name = base;
+            for (int i = 1; common_names.count(name) > 0; i++) {
+                name = base + "_" + std::to_string(i);
+            }
+            common_names.insert(name);
+            storage = common_storage.emplace(block.m_link_name, CommonStorage()).first;
+            storage->second.name = name;
+            storage->second.link_name = block.m_link_name;
+        }
+        if (block.m_role != ASR::common_block_roleType::External) {
+            storage->second.defined = true;
+        }
+        bool initializes = block.m_role == ASR::common_block_roleType::Initialized;
+        if (initializes) {
+            storage->second.initialized_view = true;
+        }
+        int64_t offset = 0;
+        for (size_t i = 0; i < block.n_members; i++) {
+            const ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(block.m_members[i]);
+            int64_t size, alignment;
+            common_element_type(*v, size, alignment);
+            offset = (offset + alignment - 1) / alignment * alignment;
+            place_common_variable(*v, storage->second, offset, initializes);
+            offset += common_size(*v);
+        }
+        for (size_t i = 0; i < block.n_associations; i++) {
+            const ASR::common_association_t &association = block.m_associations[i];
+            int64_t element, character, size, alignment;
+            const ASR::Variable_t *anchor = ASRUtils::get_storage_designator_offset(
+                association.m_anchor, element, character);
+            LCOMPILERS_ASSERT(anchor != nullptr &&
+                common_placement.find(anchor) != common_placement.end());
+            // Character variables are rejected above, so no designator
+            // starts within an element.
+            common_element_type(*anchor, size, alignment);
+            LCOMPILERS_ASSERT(character == 0);
+            int64_t at = common_placement[anchor].offset + element * size;
+            const ASR::Variable_t *v = ASRUtils::get_storage_designator_offset(
+                association.m_designator, element, character);
+            LCOMPILERS_ASSERT(v != nullptr && &v->base == association.m_variable);
+            common_element_type(*v, size, alignment);
+            LCOMPILERS_ASSERT(character == 0);
+            place_common_variable(*v, storage->second, at - element * size,
+                initializes);
+        }
+    }
+
+    void layout_common_blocks(const ASR::TranslationUnit_t &x) {
+        std::vector<const ASR::CommonBlock_t*> blocks;
+        collect_common_blocks(x.m_symtab, blocks);
+        for (const ASR::CommonBlock_t *block : blocks) {
+            layout_common_block(*block);
+        }
+    }
+
+    const CommonPlacement* common_placement_of(ASR::expr_t *x) {
+        if (!ASR::is_a<ASR::Var_t>(*x)) return nullptr;
+        ASR::symbol_t *s = ASRUtils::symbol_get_past_external(
+            ASR::down_cast<ASR::Var_t>(x)->m_v);
+        if (!ASR::is_a<ASR::Variable_t>(*s)) return nullptr;
+        auto placement = common_placement.find(ASR::down_cast<ASR::Variable_t>(s));
+        return placement == common_placement.end() ? nullptr : &placement->second;
+    }
+
+    static std::string common_address(const CommonPlacement &placement) {
+        return placement.storage->name + ".bytes + " + std::to_string(placement.offset);
+    }
+
+    // An array in a common block is in array element order. A procedure
+    // indexes a multidimensional dummy argument by the strides of a
+    // descriptor only when it keeps one; pass_array_by_data gives the others,
+    // assumed-shape ones included, their elements from the extents with the
+    // last subscript varying fastest, which would see such an array
+    // transposed.
+    void check_common_array_argument(ASR::expr_t *actual, ASR::expr_t *dummy) {
+        if (actual == nullptr || dummy == nullptr || !ASR::is_a<ASR::Var_t>(*dummy)) {
+            return;
+        }
+        if (ASR::is_a<ASR::ArrayPhysicalCast_t>(*actual)) {
+            actual = ASR::down_cast<ASR::ArrayPhysicalCast_t>(actual)->m_arg;
+        }
+        ASR::symbol_t *s = ASRUtils::symbol_get_past_external(
+            ASR::down_cast<ASR::Var_t>(dummy)->m_v);
+        if (common_placement_of(actual) == nullptr || !ASR::is_a<ASR::Variable_t>(*s)) {
+            return;
+        }
+        ASR::ttype_t *type = ASR::down_cast<ASR::Variable_t>(s)->m_type;
+        if (ASRUtils::is_array(type) && ASRUtils::extract_n_dims_from_ttype(type) > 1 &&
+                ASRUtils::extract_physical_type(type) !=
+                    ASR::array_physical_typeType::DescriptorArray) {
+            throw CodeGenError("an array in a COMMON block passed to a "
+                "multidimensional dummy argument is not supported by the C backend",
+                actual->base.loc);
+        }
+    }
+
+    // The elements of the array constant `a`, in array element order, as
+    // a C initializer list.
+    std::string array_constant_initializer(ASR::ArrayConstant_t *a) {
+        Allocator al(1024);
+        std::string r = "{";
+        int64_t n = ASRUtils::get_fixed_size_of_array(a->m_type);
+        for (int64_t i = 0; i < n; i++) {
+            if (i > 0) r += ", ";
+            self().visit_expr(*ASRUtils::fetch_ArrayConstant_value(al, a, i));
+            r += src;
+        }
+        return r + "}";
+    }
+
+    // The initializer of the field of `v` in the initial value of the
+    // storage of its common block: the constant `v` is initialized with, as
+    // any constant of the program is written, or the elements of an array
+    // constant.
+    std::string common_initial_value(const ASR::Variable_t &v) {
+        ASR::expr_t *value = ASRUtils::expr_value(
+            v.m_value ? v.m_value : v.m_symbolic_value);
+        if (value != nullptr && ASRUtils::is_array(v.m_type)
+                && ASR::is_a<ASR::ArrayConstant_t>(*value)) {
+            ASR::ArrayConstant_t *a = ASR::down_cast<ASR::ArrayConstant_t>(value);
+            int64_t n = ASRUtils::get_fixed_size_of_array(v.m_type);
+            if (ASRUtils::get_fixed_size_of_array(a->m_type) == n &&
+                    (ASRUtils::extract_n_dims_from_ttype(v.m_type) == 1 ||
+                     a->m_storage_format == ASR::arraystorageType::ColMajor)) {
+                return array_constant_initializer(a);
+            }
+        } else if (value != nullptr && !ASRUtils::is_array(v.m_type)
+                && ASRUtils::is_value_constant(value)) {
+            self().visit_expr(*value);
+            return src;
+        }
+        throw CodeGenError("the initial value of variable '" + std::string(v.m_name)
+            + "' in a COMMON block is not supported by the C backend", v.base.base.loc);
+    }
+
+    // The linker symbol `link_name` as the assembler label of a C object.
+    // GCC writes the label into its assembly as it is, so a label with
+    // another character than those of an identifier, such as the `#` of the
+    // link name of blank COMMON, is quoted for it; clang takes the label as
+    // the symbol name itself.
+    std::string common_asm_label(const std::string &link_name) {
+        std::string label = link_name;
+        if (platform == Platform::macOS_Intel || platform == Platform::macOS_ARM ||
+                platform == Platform::macOS_PowerPC) {
+            label = "_" + label;
+        }
+        bool identifier = std::all_of(label.begin(), label.end(), [](char c) {
+            return std::isalnum(static_cast<unsigned char>(c)) || c == '_' || c == '$' || c == '.';
+        });
+        std::string plain = "__asm__(\"" + str_escape_c(label) + "\")";
+        if (identifier) {
+            return plain;
+        }
+        return "\n#if defined(__clang__)\n    " + plain + "\n#else\n    __asm__(\"\\\""
+            + str_escape_c(label) + "\\\"\")\n#endif\n";
+    }
+
+    // The storage of the common blocks laid out by layout_common_blocks,
+    // preceded by the types it is accessed as. The object of a block has the
+    // block's link name as its linker symbol. An Initialized view defines it
+    // with the initial value of its variables, a packed structure of them at
+    // their offsets; otherwise a Tentative view defines it as a common
+    // symbol, which the linker merges with the definitions of other objects,
+    // keeping the largest; and External views only declare it.
+    std::string declare_common_storage() {
+        std::string decls;
+        for (const std::string &type : common_access_types) {
+            decls += "typedef " + type + " __attribute__((__may_alias__)) "
+                + common_access_type_name(type) + ";\n";
+        }
+        for (auto &item : common_storage) {
+            const CommonStorage &storage = item.second;
+            std::string fields, values;
+            int64_t end = 0;
+            for (auto &initialized : storage.initialized) {
+                const ASR::Variable_t &v = *initialized.second;
+                if (initialized.first > end) {
+                    fields += "        unsigned char pad" + std::to_string(end) + "["
+                        + std::to_string(initialized.first - end) + "];\n";
+                    values += "{0}, ";
+                }
+                int64_t size, alignment;
+                std::string type = common_element_type(v, size, alignment);
+                if (ASRUtils::is_logical(*ASRUtils::type_get_past_array(v.m_type))) {
+                    type = "unsigned char";
+                    size = 1;
+                }
+                std::string dims;
+                if (ASRUtils::is_array(v.m_type)) {
+                    int64_t n = ASRUtils::get_fixed_size_of_array(v.m_type);
+                    dims = "[" + std::to_string(n) + "]";
+                    size *= n;
+                }
+                fields += "        " + type + " v" + std::to_string(initialized.first)
+                    + dims + ";\n";
+                values += common_initial_value(v) + ", ";
+                end = initialized.first + size;
+            }
+            std::string decl = "union {\n";
+            if (!fields.empty()) {
+                decl += "    struct __attribute__((__packed__)) {\n" + fields + "    } init;\n";
+            }
+            decl += "    unsigned char bytes[" + std::to_string(std::max<int64_t>(storage.size, 1))
+                + "];\n} __attribute__((__aligned__(" + std::to_string(storage.alignment)
+                + "))) " + storage.name + " " + common_asm_label(storage.link_name);
+            if (!storage.defined) {
+                decls += "extern " + decl + ";\n";
+            } else if (storage.initialized_view) {
+                if (values.empty()) {
+                    values = "{0}, ";
+                }
+                values.resize(values.size() - 2);
+                decls += decl + " = {" + (fields.empty() ? values : "{" + values + "}")
+                    + "};\n";
+            } else {
+                decls += decl + " __attribute__((__common__));\n";
+            }
+        }
+        for (const ASR::Variable_t *v : common_arrays) {
+            CommonPlacement &placement = common_placement[v];
+            ASR::ttype_t *type = ASRUtils::type_get_past_array(v->m_type);
+            std::string element = CUtils::get_c_type_from_ttype_t(type);
+            std::string encoded_type = ASRUtils::get_type_code(type);
+            c_ds_api->get_array_type(element, encoded_type, array_types_decls);
+            std::string descriptor_type = c_ds_api->get_array_type(element,
+                encoded_type, array_types_decls, false);
+            std::string base = placement.storage->name + "_" + std::string(v->m_name);
+            placement.descriptor = base;
+            for (int i = 1; common_names.count(placement.descriptor) > 0; i++) {
+                placement.descriptor = base + "_" + std::to_string(i);
+            }
+            common_names.insert(placement.descriptor);
+            // The array in array element order, as the storage of the block
+            // holds it, for the procedures that index it by its strides.
+            ASR::dimension_t *dims = nullptr;
+            size_t n_dims = ASRUtils::extract_dimensions_from_ttype(v->m_type, dims);
+            std::string dims_init;
+            int64_t stride = 1;
+            for (size_t i = 0; i < n_dims; i++) {
+                int64_t start = 1, length = 0;
+                [[maybe_unused]] bool constant_bounds = (dims[i].m_start == nullptr ||
+                    ASRUtils::extract_value(ASRUtils::expr_value(dims[i].m_start), start))
+                    && ASRUtils::extract_value(ASRUtils::expr_value(dims[i].m_length), length);
+                LCOMPILERS_ASSERT(constant_bounds);
+                if (i > 0) dims_init += ", ";
+                dims_init += "{" + std::to_string(start) + ", " + std::to_string(length)
+                    + ", " + std::to_string(stride) + "}";
+                stride *= length;
+            }
+            decls += "static " + descriptor_type + " " + placement.descriptor
+                + " __attribute__((__unused__)) = {(" + element + "*)("
+                + common_address(placement) + "), {" + dims_init + "}, "
+                + std::to_string(n_dims) + ", 0, false};\n";
+        }
+        if (!decls.empty()) {
+            decls += "\n";
+        }
+        return decls;
+    }
 
     std::string get_final_combined_src(std::string head, std::string unit_src) {
         std::string to_include = "";
@@ -316,12 +780,16 @@ R"(#include <stdio.h>
             ASR::symbol_t* var_sym = x.m_symtab->get_symbol(item);
             if (ASR::is_a<ASR::Variable_t>(*var_sym)) {
                 ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(var_sym);
+                // A variable in a common block lives in the block's storage.
+                if (ASRUtils::get_common_block(v) != nullptr) {
+                    continue;
+                }
                 std::string decl = self().convert_variable_decl(*v);
                 decl = check_tmp_buffer() + decl;
                 bool used_define_for_const = (v->m_storage == ASR::storage_typeType::Parameter &&
                         v->m_intent == ASRUtils::intent_local);
                 if (used_define_for_const) {
-                    contains += decl + "\n";
+                    contains += decl + ";\n";
                     continue;
                 }
                 if (v->m_value) {
@@ -424,9 +892,17 @@ R"(#include <stdio.h>
                 decl += check_tmp_buffer() + d;
             }
         }
+        construct_frames.push_back({block->m_name, false, false, "", ""});
         for (size_t i=0; i<block->n_body; i++) {
             self().visit_stmt(*block->m_body[i]);
             body += src;
+        }
+        std::string exit_label = construct_frames.back().exit_label;
+        construct_frames.pop_back();
+        if (!exit_label.empty()) {
+            close_paranthesis += std::string(
+                (indentation_level - 1)*indentation_spaces, ' ')
+                + exit_label + ": ;\n";
         }
         decl += check_tmp_buffer();
         src = open_paranthesis + decl + body + close_paranthesis;
@@ -737,6 +1213,7 @@ R"(#include <stdio.h>
             return;
         }
         std::string sub = "";
+        self().declare_frame_types(*x.m_symtab);
         for (auto &item : x.m_symtab->get_scope()) {
             if (ASR::is_a<ASR::Function_t>(*item.second)) {
                 ASR::Function_t *f = ASR::down_cast<ASR::Function_t>(item.second);
@@ -826,8 +1303,12 @@ R"(#include <stdio.h>
                 ASR::symbol_t* var_sym = x.m_symtab->get_symbol(item);
                 if (ASR::is_a<ASR::Variable_t>(*var_sym)) {
                     ASR::Variable_t *v = ASR::down_cast<ASR::Variable_t>(var_sym);
-                    if (v->m_intent == ASRUtils::intent_local ||
-                        v->m_intent == ASRUtils::intent_return_var) {
+                    // A HostAssociated variable designates a variable of the
+                    // host through the frame, see visit_Var.
+                    if ((v->m_intent == ASRUtils::intent_local ||
+                            v->m_intent == ASRUtils::intent_return_var) &&
+                            ASRUtils::get_common_block(v) == nullptr &&
+                            !ASRUtils::is_host_associated(*v)) {
                         std::string d = indent + self().convert_variable_decl(*v) + ";\n";
                         decl += check_tmp_buffer() + d;
                     }
@@ -1074,12 +1555,28 @@ PyMODINIT_FUNC PyInit_lpython_module_)" + fn_name + R"((void) {
         }
      }
 
+    static ASR::Function_t* get_dummy_procedure_interface(ASR::Variable_t* var) {
+        if (!var || !var->m_type_declaration) return nullptr;
+        ASR::symbol_t* td = ASRUtils::symbol_get_past_external(var->m_type_declaration);
+        if (td && ASR::is_a<ASR::Function_t>(*td)) {
+            return ASR::down_cast<ASR::Function_t>(td);
+        }
+        return nullptr;
+    }
+
+    std::string convert_procedure_actual(ASR::expr_t*, ASR::expr_t*,
+                                        const std::string& value) {
+        return value;
+    }
+
     std::string construct_call_args(ASR::Function_t* f, size_t n_args, ASR::call_arg_t* m_args) {
         bracket_open++;
         std::string args = "";
         for (size_t i=0; i<n_args; i++) {
             ASR::expr_t* call_arg = m_args[i].m_value;
+            check_common_array_argument(call_arg, i < f->n_args ? f->m_args[i] : nullptr);
             self().visit_expr(*call_arg);
+            src = self().convert_procedure_actual(call_arg, f->m_args[i], src);
             ASR::ttype_t* type = ASRUtils::expr_type(call_arg);
             if (ASR::is_a<ASR::Var_t>(*call_arg)
                 && ASR::is_a<ASR::Variable_t>(
@@ -1124,8 +1621,29 @@ PyMODINIT_FUNC PyInit_lpython_module_)" + fn_name + R"((void) {
 
     void visit_FunctionCall(const ASR::FunctionCall_t &x) {
         CHECK_FAST_C_CPP(compiler_options, x)
-        ASR::Function_t *fn = ASR::down_cast<ASR::Function_t>(
-            ASRUtils::symbol_get_past_external(x.m_name));
+        ASR::symbol_t* call_sym = ASRUtils::symbol_get_past_external(x.m_name);
+        if (ASR::is_a<ASR::Variable_t>(*call_sym)) {
+            ASR::Variable_t* call_var = ASR::down_cast<ASR::Variable_t>(call_sym);
+            ASR::Function_t* iface = get_dummy_procedure_interface(call_var);
+            std::string fn_name = std::string(call_var->m_name);
+            std::string args;
+            if (iface) {
+                args = construct_call_args(iface, x.n_args, x.m_args);
+            } else {
+                bracket_open++;
+                for (size_t i=0; i<x.n_args; i++) {
+                    self().visit_expr(*x.m_args[i].m_value);
+                    args += src;
+                    if (i < x.n_args-1) args += ", ";
+                }
+                bracket_open--;
+            }
+            src = fn_name + "(" + args + ")";
+            last_expr_precedence = 2;
+            src = check_tmp_buffer() + src;
+            return;
+        }
+        ASR::Function_t *fn = ASR::down_cast<ASR::Function_t>(call_sym);
         std::string fn_name = fn->m_name;
         ASR::FunctionType_t *fn_type = ASRUtils::get_FunctionType(fn);
         if (fn_type->m_abi == ASR::abiType::BindC && fn_type->m_bindc_name) {
@@ -1266,6 +1784,27 @@ PyMODINIT_FUNC PyInit_lpython_module_)" + fn_name + R"((void) {
         bool is_value_dict = ASR::is_a<ASR::Dict_t>(*m_value_type);
         bool alloc_return_var = false;
         std::string indent(indentation_level*indentation_spaces, ' ');
+        if (ASR::is_a<ASR::ComplexRe_t>(*x.m_target) ||
+                ASR::is_a<ASR::ComplexIm_t>(*x.m_target)) {
+            bool is_re = ASR::is_a<ASR::ComplexRe_t>(*x.m_target);
+            ASR::expr_t* arg = is_re
+                ? ASR::down_cast<ASR::ComplexRe_t>(x.m_target)->m_arg
+                : ASR::down_cast<ASR::ComplexIm_t>(x.m_target)->m_arg;
+            self().visit_expr(*arg);
+            std::string complex_target = src;
+            self().visit_expr(*x.m_value);
+            if (is_c) {
+                // A complex is stored as an array of its two parts
+                std::string real_type = ASRUtils::extract_kind_from_ttype_t(
+                    ASRUtils::expr_type(arg)) == 4 ? "float" : "double";
+                src = indent + "((" + real_type + "*)&" + complex_target + ")["
+                    + (is_re ? "0" : "1") + "] = " + src + ";\n";
+            } else {
+                src = indent + complex_target + (is_re ? ".real(" : ".imag(")
+                    + src + ");\n";
+            }
+            return;
+        }
         if (ASRUtils::is_simd_array(x.m_target)) {
             this->visit_expr(*x.m_target);
             target = src;
@@ -1613,7 +2152,7 @@ PyMODINIT_FUNC PyInit_lpython_module_)" + fn_name + R"((void) {
         self().visit_expr(*x.m_target);
         std::string target_desc = src;
 
-        int value_rank = array_section->n_args, target_rank = 0;
+        int value_rank = checked_integer_cast<int>(array_section->n_args), target_rank = 0;
         std::vector<std::string> lbs(value_rank);
         std::vector<std::string> ubs(value_rank);
         std::vector<std::string> ds(value_rank);
@@ -1642,7 +2181,7 @@ PyMODINIT_FUNC PyInit_lpython_module_)" + fn_name + R"((void) {
             value_desc = value_desc + "->data";
             ASR::dimension_t* m_dims = nullptr;
             // Fill in m_dims:
-            [[maybe_unused]] int array_value_rank = ASRUtils::extract_dimensions_from_ttype(array_type, m_dims);
+            [[maybe_unused]] int array_value_rank = checked_integer_cast<int>(ASRUtils::extract_dimensions_from_ttype(array_type, m_dims));
             LCOMPILERS_ASSERT(array_value_rank == value_rank);
             std::vector<std::string> diminfo;
             diminfo.reserve(value_rank * 2);
@@ -1652,12 +2191,156 @@ PyMODINIT_FUNC PyInit_lpython_module_)" + fn_name + R"((void) {
                 self().visit_expr(*m_dims[i].m_length);
                 diminfo.push_back(src);
             }
-            fill_descriptor_for_array_section_data_only(value_desc, target_desc,
-                lbs, ubs, ds, non_sliced_indices,
-                diminfo, value_rank, target_rank);
+            if (common_placement_of(array_section->m_v) != nullptr) {
+                fill_descriptor_for_common_array_section(value_desc, target_desc,
+                    lbs, ubs, ds, non_sliced_indices, diminfo, value_rank, target_rank);
+            } else {
+                fill_descriptor_for_array_section_data_only(value_desc, target_desc,
+                    lbs, ubs, ds, non_sliced_indices,
+                    diminfo, value_rank, target_rank);
+            }
         } else {
             throw CodeGenError("Only Pointer to Data Array or Fixed Size array supported for now");
         }
+    }
+
+    // The descriptor of a section of an array in a common block, whose
+    // storage holds the array in array element order: the first subscript
+    // varies fastest.
+    void fill_descriptor_for_common_array_section(std::string value_desc,
+            std::string target_desc, std::vector<std::string>& lbs,
+            std::vector<std::string>& ubs, std::vector<std::string>& ds,
+            std::vector<std::string>& non_sliced_indices,
+            std::vector<std::string>& diminfo, int value_rank, int target_rank) {
+        std::string indent(indentation_level * indentation_spaces, ' ');
+        std::string offset = "0", stride = "1", dims;
+        int j = 0;
+        for (int i = 0; i < value_rank; i++) {
+            std::string first = ds[i] != "" ? lbs[i] : non_sliced_indices[i];
+            offset = "(" + offset + " + " + stride + " * ((" + first + ") - ("
+                + diminfo[2*i] + ")))";
+            if (ds[i] != "") {
+                std::string dim = target_desc + "->dims[" + std::to_string(j) + "]";
+                dims += indent + dim + ".stride = (" + stride + " * (" + ds[i] + "));\n";
+                dims += indent + dim + ".lower_bound = 1;\n";
+                dims += indent + dim + ".length = ((((" + ubs[i] + ") - (" + lbs[i]
+                    + "))/(" + ds[i] + ")) + 1);\n";
+                j++;
+            }
+            stride = "(" + stride + " * " + diminfo[2*i + 1] + ")";
+        }
+        LCOMPILERS_ASSERT(j == target_rank);
+        src = indent + target_desc + "->data = (" + value_desc + " + " + offset + ");\n"
+            + indent + target_desc + "->offset = 0;\n" + dims
+            + indent + target_desc + "->n_dims = " + std::to_string(target_rank) + ";\n";
+    }
+
+    // The variable of a BLOCK construct in `scope` that `pointer`, a pointer
+    // variable of `scope`, stands for, or nullptr. A procedure that reads a
+    // variable of a BLOCK construct from outside of it reads it through such
+    // a pointer, which the BLOCK associates with the variable on entry, at
+    // the location of the variable's declaration. The BLOCK can be nested in
+    // other BLOCK and ASSOCIATE constructs.
+    static const ASR::Variable_t* construct_variable_of(SymbolTable *scope,
+            const ASR::Variable_t &pointer) {
+        const ASR::Variable_t *result = nullptr;
+        ASRUtils::for_each_symbol_in_scope_and_constructs(scope,
+                [&](ASR::symbol_t *sym) {
+            if (result != nullptr || !ASR::is_a<ASR::Block_t>(*sym)) {
+                return;
+            }
+            const ASR::Block_t *block = ASR::down_cast<ASR::Block_t>(sym);
+            for (size_t i = 0; i < block->n_body; i++) {
+                if (!ASR::is_a<ASR::Associate_t>(*block->m_body[i])) {
+                    continue;
+                }
+                const ASR::Associate_t *a = ASR::down_cast<ASR::Associate_t>(
+                    block->m_body[i]);
+                const Location &loc = a->base.base.loc;
+                if (ASR::is_a<ASR::Var_t>(*a->m_target) && ASR::is_a<ASR::Var_t>(*a->m_value)
+                        && ASR::down_cast<ASR::Var_t>(a->m_target)->m_v
+                            == (const ASR::symbol_t*) &pointer
+                        && loc.first == pointer.base.base.loc.first
+                        && loc.last == pointer.base.base.loc.last) {
+                    const ASR::symbol_t *v = ASR::down_cast<ASR::Var_t>(a->m_value)->m_v;
+                    if (ASR::is_a<ASR::Variable_t>(*v)) {
+                        result = ASR::down_cast<ASR::Variable_t>(v);
+                        return;
+                    }
+                }
+            }
+        });
+        return result;
+    }
+
+    // The error for a member of a frame (see nested_vars), named after the
+    // host variable it refers to, whose variable the backend cannot designate
+    // yet. A member that refers to a frame passes it to an internal procedure
+    // of a more distant host.
+    CodeGenError unsupported_reference_member(const ASR::Variable_t &member) {
+        std::string backend = is_c ? "c" : "cpp";
+        const Location &loc = member.base.base.loc;
+        if (ASRUtils::is_frame_type(member.m_type_declaration)) {
+            return CodeGenError("calling an internal procedure of an outer host "
+                "from an internal procedure of an internal procedure is not "
+                "supported by the " + backend + " backend yet", loc);
+        }
+        ASR::ttype_t *t = ASR::down_cast<ASR::Reference_t>(member.m_type)->m_type;
+        std::string name = member.m_name;
+        ASR::symbol_t *type_declaration = member.m_type_declaration;
+        std::string what_prefix;
+        // A variable of a BLOCK construct is reached through a pointer of the
+        // host; describe the variable itself.
+        SymbolTable *host = member.m_parent_symtab->parent;
+        ASR::symbol_t *host_sym = host != nullptr
+            ? host->get_symbol(member.m_name) : nullptr;
+        if (host_sym != nullptr && ASR::is_a<ASR::Variable_t>(*host_sym)
+                && ASRUtils::is_pointer(ASR::down_cast<ASR::Variable_t>(host_sym)->m_type)) {
+            if (const ASR::Variable_t *v = construct_variable_of(host,
+                    *ASR::down_cast<ASR::Variable_t>(host_sym))) {
+                name = v->m_name;
+                t = v->m_type;
+                type_declaration = v->m_type_declaration;
+                what_prefix = "BLOCK ";
+            }
+        }
+        ASR::ttype_t *past_pointer = ASRUtils::type_get_past_allocatable_pointer(t);
+        if (ASR::is_a<ASR::FunctionType_t>(*past_pointer)) {
+            return CodeGenError("the host-associated procedure '" + name
+                + "' is not supported by the " + backend + " backend yet", loc);
+        }
+        ASR::ttype_t *elem = ASRUtils::type_get_past_array(past_pointer);
+        // A non-allocatable array or a character variable is reached through
+        // a pointer view, so only a pointer to a scalar of another type is
+        // known to be a pointer.
+        std::string what = ASRUtils::is_array(past_pointer) ? "array" : "variable";
+        if (ASRUtils::is_allocatable(t)) {
+            what = "allocatable " + what;
+        } else if (ASRUtils::is_pointer(t) && !ASRUtils::is_array(past_pointer) &&
+                !ASRUtils::is_character(*elem)) {
+            what = "pointer " + what;
+        }
+        // The length of a character variable is that of its view.
+        std::string type = ASRUtils::is_character(*elem) ? "character"
+            : ASRUtils::type_to_str_fortran_symbol(elem, type_declaration, true);
+        if (ASR::is_a<ASR::StructType_t>(*elem) &&
+                !ASR::down_cast<ASR::StructType_t>(elem)->m_is_unlimited_polymorphic) {
+            type = (ASRUtils::is_class_type(elem) ? "class(" : "type(") + type + ")";
+        }
+        return CodeGenError("the host-associated " + what_prefix + what + " '"
+            + name + "' of type " + type + " is not supported by the "
+            + backend + " backend yet", loc);
+    }
+
+    // Makes the member store the address of the variable, which it then
+    // designates (see visit_StructInstanceMember).
+    void visit_BindReference(const ASR::BindReference_t &x) {
+        std::string indent(indentation_level*indentation_spaces, ' ');
+        self().visit_expr(*x.m_variable);
+        std::string variable = std::move(src);
+        std::string reference = reference_member_storage(
+            *ASR::down_cast<ASR::StructInstanceMember_t>(x.m_reference));
+        src = indent + reference + " = &(" + variable + ");\n";
     }
 
     void visit_Associate(const ASR::Associate_t &x) {
@@ -2066,6 +2749,23 @@ PyMODINIT_FUNC PyInit_lpython_module_)" + fn_name + R"((void) {
             return;
         }
         ASR::Variable_t* sv = ASR::down_cast<ASR::Variable_t>(s);
+        if (ASRUtils::is_host_associated(*sv)) {
+            // The variable of the host that the member of the frame refers to.
+            self().visit_expr(*sv->m_symbolic_value);
+            return;
+        }
+        auto placement = common_placement.find(sv);
+        if (placement != common_placement.end()) {
+            if (ASRUtils::is_array(sv->m_type)) {
+                src = "(&" + placement->second.descriptor + ")";
+            } else {
+                int64_t size, alignment;
+                src = "(*(" + common_access_type_name(common_element_type(*sv, size,
+                    alignment)) + "*)(" + common_address(placement->second) + "))";
+            }
+            last_expr_precedence = 2;
+            return;
+        }
         if (is_c) {
             if ((sv->m_intent == ASRUtils::intent_in
                 || sv->m_intent == ASRUtils::intent_inout)
@@ -2085,18 +2785,38 @@ PyMODINIT_FUNC PyInit_lpython_module_)" + fn_name + R"((void) {
         last_expr_precedence = 2;
     }
 
-    void visit_StructInstanceMember(const ASR::StructInstanceMember_t& x) {
-        CHECK_FAST_C_CPP(compiler_options, x)
+    // The member that `x` designates, and for a member of Reference type the
+    // member itself, which holds the address of a variable.
+    std::string reference_member_storage(const ASR::StructInstanceMember_t& x) {
         std::string der_expr, member;
         this->visit_expr(*x.m_v);
         der_expr = std::move(src);
         member = ASRUtils::symbol_name(ASRUtils::symbol_get_past_external(x.m_m));
-        if( ASR::is_a<ASR::ArrayItem_t>(*x.m_v) ||
+        bool designates_value = ASR::is_a<ASR::ArrayItem_t>(*x.m_v) ||
             ASR::is_a<ASR::UnionInstanceMember_t>(*x.m_v) ||
-            ASR::is_a<ASR::StructInstanceMember_t>(*x.m_v) ) {
-            src = der_expr + "." + member;
+            ASR::is_a<ASR::StructInstanceMember_t>(*x.m_v);
+        if (ASR::is_a<ASR::StructInstanceMember_t>(*x.m_v) &&
+                ASRUtils::get_reference_member(
+                    *ASR::down_cast<ASR::StructInstanceMember_t>(x.m_v))) {
+            // A referenced variable of derived type is designated by its
+            // address, as a Var of it is.
+            designates_value = false;
+        }
+        if (designates_value) {
+            return der_expr + "." + member;
         } else {
-            src = der_expr + "->" + member;
+            return der_expr + "->" + member;
+        }
+    }
+
+    void visit_StructInstanceMember(const ASR::StructInstanceMember_t& x) {
+        CHECK_FAST_C_CPP(compiler_options, x)
+        src = reference_member_storage(x);
+        if (ASRUtils::get_reference_member(x)) {
+            // A member of Reference type designates the variable whose
+            // address it holds.
+            src = "(*" + src + ")";
+            last_expr_precedence = 2;
         }
     }
 
@@ -2668,6 +3388,10 @@ PyMODINIT_FUNC PyInit_lpython_module_)" + fn_name + R"((void) {
             }
             std::string sym = ASRUtils::symbol_name(tmp_sym);
             if (ASRUtils::is_array(type)) {
+                // The descriptor that the Var designates, also through a
+                // frame for a HostAssociated variable.
+                self().visit_expr(*tmp_expr);
+                sym = src;
                 std::string size_str = "1";
                 out += indent + sym + "->n_dims = " + std::to_string(x.m_args[i].n_dims) + ";\n";
                 std::string stride = "1";
@@ -2785,6 +3509,10 @@ PyMODINIT_FUNC PyInit_lpython_module_)" + fn_name + R"((void) {
         this->visit_expr(*x.m_test);
         std::string var = std::move(src);
         std::string out = indent + "if (";
+        // Only a named SELECT CASE construct can be left by an EXIT.
+        if (x.m_name != nullptr) {
+            construct_frames.push_back({x.m_name, false, false, "", ""});
+        }
 
         for (size_t i = 0; i < x.n_body; i++) {
             if (i > 0)
@@ -2853,6 +3581,13 @@ PyMODINIT_FUNC PyInit_lpython_module_)" + fn_name + R"((void) {
             out += indent + "}\n";
             indentation_level -= 1;
         }
+        if (x.m_name != nullptr) {
+            std::string exit_label = construct_frames.back().exit_label;
+            construct_frames.pop_back();
+            if (!exit_label.empty()) {
+                out += indent + exit_label + ": ;\n";
+            }
+        }
         src = check_tmp_buffer() + out;
     }
 
@@ -2864,24 +3599,19 @@ PyMODINIT_FUNC PyInit_lpython_module_)" + fn_name + R"((void) {
         out += src + ") {\n";
         bracket_open--;
         out = check_tmp_buffer() + out;
-        indentation_level += 1;
-        for (size_t i=0; i<x.n_body; i++) {
-            self().visit_stmt(*x.m_body[i]);
-            out += check_tmp_buffer() + src;
-        }
-        out += indent + "}\n";
-        indentation_level -= 1;
+        construct_frames.push_back({x.m_name, true, x.n_orelse > 0, "", ""});
+        out += close_loop(x.m_body, x.n_body, x.m_orelse, x.n_orelse);
         src = out;
     }
 
-    void visit_Exit(const ASR::Exit_t & /* x */) {
-        std::string indent(indentation_level*indentation_spaces, ' ');
-        src = indent + "break;\n";
+    void visit_Exit(const ASR::Exit_t &x) {
+        src = leave_construct(
+            construct_frame(x.m_stmt_name, x.base.base.loc), true);
     }
 
-    void visit_Cycle(const ASR::Cycle_t & /* x */) {
-        std::string indent(indentation_level*indentation_spaces, ' ');
-        src = indent + "continue;\n";
+    void visit_Cycle(const ASR::Cycle_t &x) {
+        src = leave_construct(
+            construct_frame(x.m_stmt_name, x.base.base.loc), false);
     }
 
     void visit_Return(const ASR::Return_t & /* x */) {
@@ -2944,80 +3674,236 @@ PyMODINIT_FUNC PyInit_lpython_module_)" + fn_name + R"((void) {
         last_expr_precedence = 2;
     }
 
-    void visit_DoLoop(const ASR::DoLoop_t &x) {
-        std::string current_body_copy = current_body;
-        current_body = "";
-        std::string loop_end_decl = "";
+    // The index in construct_frames of the construct that an EXIT or a
+    // CYCLE naming `name` leaves: the innermost loop if it names none.
+    size_t construct_frame(const char *name, const Location &loc) {
+        for (size_t i = construct_frames.size(); i-- > 0;) {
+            const ConstructFrame &f = construct_frames[i];
+            if (name == nullptr ? f.is_loop
+                    : f.name != nullptr && std::string(f.name) == name) {
+                return i;
+            }
+        }
+        throw CodeGenError("exit or cycle outside the construct it leaves",
+            loc);
+    }
+
+    // The statement that leaves the construct construct_frames[f], to its
+    // end if `exit` and to the next iteration otherwise.
+    std::string leave_construct(size_t f, bool exit) {
         std::string indent(indentation_level*indentation_spaces, ' ');
-        std::string out = indent + "for (";
-        ASR::Variable_t *loop_var = ASRUtils::EXPR2VAR(x.m_head.m_v);
-        std::string lvname=loop_var->m_name;
-        ASR::expr_t *a=x.m_head.m_start;
-        ASR::expr_t *b=x.m_head.m_end;
-        ASR::expr_t *c=x.m_head.m_increment;
-        LCOMPILERS_ASSERT(a);
-        LCOMPILERS_ASSERT(b);
-        int increment;
-        bool is_c_constant = false;
-        if (!c) {
-            increment = 1;
-            is_c_constant = true;
-        } else {
-            ASR::expr_t* c_value = ASRUtils::expr_value(c);
-            is_c_constant = ASRUtils::extract_value(c_value, increment);
+        ConstructFrame &frame = construct_frames[f];
+        bool innermost_loop = frame.is_loop;
+        for (size_t i = f + 1; i < construct_frames.size(); i++) {
+            innermost_loop = innermost_loop && !construct_frames[i].is_loop;
         }
-
-        if( is_c_constant ) {
-            std::string cmp_op;
-            if (increment > 0) {
-                cmp_op = "<=";
-            } else {
-                cmp_op = ">=";
-            }
-
-            out += lvname + "=";
-            self().visit_expr(*a);
-            out += src + "; " + lvname + cmp_op;
-            self().visit_expr(*b);
-            out += src + "; " + lvname;
-            if (increment == 1) {
-                out += "++";
-            } else if (increment == -1) {
-                out += "--";
-            } else {
-                out += "+=" + std::to_string(increment);
-            }
-        } else {
-            this->visit_expr(*c);
-            std::string increment_ = std::move(src);
-            self().visit_expr(*b);
-            std::string do_loop_end = std::move(src);
-            std::string do_loop_end_name = current_scope->get_unique_name(
-                "loop_end___" + std::to_string(loop_end_count));
-            loop_end_count += 1;
-            loop_end_decl = indent + CUtils::get_c_type_from_ttype_t(ASRUtils::expr_type(b), is_c) +
-                            " " + do_loop_end_name + " = " + do_loop_end + ";\n";
-            out += lvname + " = ";
-            self().visit_expr(*a);
-            out += src + "; ";
-            out += "((" + increment_ + " >= 0) && (" +
-                    lvname + " <= " + do_loop_end_name + ")) || (("
-                    + increment_ + " < 0) && (" + lvname + " >= "
-                    + do_loop_end_name + ")); " + lvname;
-            out += " += " + increment_;
+        if (innermost_loop && frame.is_lambda && !exit) {
+            return indent + "return;\n";
         }
+        if (innermost_loop && !(exit && frame.has_else)) {
+            return indent + (exit ? "break;\n" : "continue;\n");
+        }
+        std::string &label = exit ? frame.exit_label : frame.cycle_label;
+        if (label.empty()) {
+            label = std::string("__lfortran_") + (exit ? "exit" : "cycle")
+                + "_" + (frame.name ? std::string(frame.name) + "_" : "")
+                + std::to_string(construct_label_count++);
+        }
+        return indent + "goto " + label + ";\n";
+    }
 
-        out += ") {\n";
+    // Writes the body of the loop that the frame on top of
+    // construct_frames describes and the `}` that closes it, followed by
+    // its loop-else and the labels that leaving it goes to, and removes the
+    // frame.
+    std::string close_loop(ASR::stmt_t **body, size_t n_body,
+            ASR::stmt_t **orelse, size_t n_orelse) {
+        return close_loop([&]() {
+            std::string out;
+            for (size_t i = 0; i < n_body; i++) {
+                self().visit_stmt(*body[i]);
+                out += check_tmp_buffer() + src;
+            }
+            return out;
+        }, orelse, n_orelse);
+    }
+
+    // As above, with the body that `write_body` returns.
+    std::string close_loop(const std::function<std::string()> &write_body,
+            ASR::stmt_t **orelse, size_t n_orelse) {
+        std::string indent(indentation_level*indentation_spaces, ' ');
+        std::string inner(indent + std::string(indentation_spaces, ' '));
         indentation_level += 1;
-        for (size_t i=0; i<x.n_body; i++) {
-            self().visit_stmt(*x.m_body[i]);
-            current_body += src;
-        }
-        out += current_body;
-        out += indent + "}\n";
+        std::string out = write_body();
         indentation_level -= 1;
-        src = loop_end_decl + out;
-        current_body = current_body_copy;
+        const ConstructFrame &frame = construct_frames.back();
+        if (!frame.cycle_label.empty() && !is_c) {
+            // The body goes in a block of its own, so that the jump to the
+            // label at its end does not enter the scope of a declaration
+            // in it, which C++ forbids.
+            std::string block = inner + "{\n";
+            size_t line = 0;
+            while (line < out.size()) {
+                size_t next = out.find('\n', line);
+                next = next == std::string::npos ? out.size() : next + 1;
+                if (out[line] != '\n') {
+                    block += std::string(indentation_spaces, ' ');
+                }
+                block += out.substr(line, next - line);
+                line = next;
+            }
+            out = block + inner + "}\n";
+        }
+        if (!frame.cycle_label.empty()) {
+            out += inner + frame.cycle_label + ": ;\n";
+        }
+        out += indent + "}\n";
+        std::string exit_label = frame.exit_label;
+        construct_frames.pop_back();
+        for (size_t i = 0; i < n_orelse; i++) {
+            self().visit_stmt(*orelse[i]);
+            out += check_tmp_buffer() + src;
+        }
+        if (!exit_label.empty()) {
+            out += indent + exit_label + ": ;\n";
+        }
+        return out;
+    }
+
+    // The end or the step `e` of a counted loop as its `for` header writes
+    // it. Fortran evaluates both once, before the loop: one that the loop
+    // cannot change (see CUtils::loop_control_invariant) is written as it
+    // is, anything else is copied into a constant declared in `decl`.
+    std::string loop_control(ASR::expr_t *e, const char *role,
+            ASR::ttype_t *type, const std::set<ASR::symbol_t*> &modified,
+            const std::set<ASR::symbol_t*> &unshared, std::string &decl) {
+        self().visit_expr(*e);
+        if (CUtils::loop_control_invariant(e, modified, unshared)) {
+            return src;
+        }
+        std::string name = current_scope->get_unique_name(
+            std::string("__lfortran_") + role + "_"
+            + std::to_string(loop_end_count++));
+        std::string indent(indentation_level*indentation_spaces, ' ');
+        decl += indent + "const " + CUtils::get_c_type_from_ttype_t(type, is_c)
+            + " " + name + " = " + src + ";\n";
+        return name;
+    }
+
+    // Opens the C `for` of the counted loop `head` with the body
+    // `loop_body`, declaring first the copies of its end and step that it
+    // needs. The loop tests `<=` for a positive step and `>=` for a
+    // negative one, so it ends with the index one step past the last
+    // iteration, and a loop that runs no iteration leaves it at the start,
+    // as Fortran has it. Only a step whose sign is not evident (see
+    // CUtils::loop_step_sign) needs a test that depends on it.
+    std::string counted_for(const ASR::do_loop_head_t &head,
+            ASR::stmt_t **loop_body, size_t n_body, const Location &loc) {
+        std::string indent(indentation_level*indentation_spaces, ' ');
+        if (head.m_v == nullptr) {
+            return indent + "for (;;) {\n";
+        }
+        LCOMPILERS_ASSERT(head.m_start != nullptr && head.m_end != nullptr
+            && head.m_increment != nullptr);
+        ASR::ttype_t *type = ASRUtils::type_get_past_allocatable_pointer(
+            ASRUtils::expr_type(head.m_v));
+        CUtils::LoopModifiedVariables body;
+        body.write(head.m_v);
+        for (size_t i = 0; i < n_body; i++) {
+            body.visit_stmt(*loop_body[i]);
+        }
+        // Without a call, only the statements of the loop can modify a
+        // variable while it runs, and `body` has seen all of them: the
+        // variables of the end and the step (all of which `controls`
+        // collects) can then change only if `body` modifies them.
+        CUtils::LoopModifiedVariables controls;
+        if (!body.calls) {
+            controls.write(head.m_end);
+            controls.write(head.m_increment);
+        }
+        int64_t step = 0;
+        bool step_known = ASRUtils::is_integer(*type)
+            && ASRUtils::extract_value(
+                ASRUtils::expr_value(head.m_increment), step);
+        int sign = 0;
+        if (step_known) {
+            if (step == 0) {
+                throw CodeGenError("a DO loop with a zero step reached the "
+                    "C code generator", loc);
+            }
+            sign = step > 0 ? 1 : -1;
+        } else if (ASRUtils::is_integer(*type)) {
+            sign = CUtils::loop_step_sign(head.m_increment, {});
+        } else {
+            double real_step = 0;
+            if (ASRUtils::extract_value(
+                    ASRUtils::expr_value(head.m_increment), real_step)) {
+                sign = real_step > 0 ? 1 : (real_step < 0 ? -1 : 0);
+            }
+        }
+        bracket_open++;
+        std::string decl;
+        std::string end = loop_control(head.m_end, "end", type,
+            body.modified, controls.modified, decl);
+        std::string inc = step_known ? std::string()
+            : loop_control(head.m_increment, "step", type, body.modified,
+                controls.modified, decl);
+        // Spelled as any other reference to the variable, which need not be
+        // a local of its own (one in a common block, say).
+        self().visit_expr(*head.m_v);
+        std::string v = src;
+        std::string out = indent + "for (" + v + " = ";
+        self().visit_expr(*head.m_start);
+        out += src + "; ";
+        if (sign != 0) {
+            out += v + (sign > 0 ? " <= " : " >= ") + end;
+        } else {
+            out += inc + " > 0 ? " + v + " <= " + end + " : " + v + " >= "
+                + end;
+        }
+        out += "; " + v;
+        if (!step_known) {
+            out += " += " + inc;
+        } else if (step == 1) {
+            out += "++";
+        } else if (step == -1) {
+            out += "--";
+        } else if (step > 0) {
+            out += " += " + std::to_string(step);
+        } else {
+            out += " -= " + std::to_string(-step);
+        }
+        out += ") {\n";
+        bracket_open--;
+        return check_tmp_buffer() + decl + out;
+    }
+
+    void visit_DoLoop(const ASR::DoLoop_t &x) {
+        std::string out = counted_for(x.m_head, x.m_body, x.n_body,
+            x.base.base.loc);
+        construct_frames.push_back({x.m_name, true, x.n_orelse > 0, "", ""});
+        out += close_loop(x.m_body, x.n_body, x.m_orelse, x.n_orelse);
+        src = out;
+    }
+
+    // A DO CONCURRENT runs its iterations in order, as nested loops over its
+    // indices from the `h`-th on, the first index outermost.
+    std::string concurrent_loops(const ASR::DoConcurrentLoop_t &x, size_t h) {
+        std::string out = counted_for(x.m_head[h], x.m_body, x.n_body,
+            x.base.base.loc);
+        construct_frames.push_back({nullptr, true, false, "", ""});
+        if (h + 1 == x.n_head) {
+            out += close_loop(x.m_body, x.n_body, nullptr, 0);
+        } else {
+            out += close_loop([&]() { return concurrent_loops(x, h + 1); },
+                nullptr, 0);
+        }
+        return out;
+    }
+
+    void visit_DoConcurrentLoop(const ASR::DoConcurrentLoop_t &x) {
+        LCOMPILERS_ASSERT(x.n_head > 0);
+        src = concurrent_loops(x, 0);
     }
 
     void visit_If(const ASR::If_t &x) {
@@ -3031,6 +3917,10 @@ PyMODINIT_FUNC PyInit_lpython_module_)" + fn_name + R"((void) {
         bracket_open--;
         out = check_tmp_buffer() + out;
         indentation_level += 1;
+        // Only a named IF construct can be left by an EXIT.
+        if (x.m_name != nullptr) {
+            construct_frames.push_back({x.m_name, false, false, "", ""});
+        }
         for (size_t i=0; i<x.n_body; i++) {
             self().visit_stmt(*x.m_body[i]);
             current_body += check_tmp_buffer() + src;
@@ -3048,6 +3938,13 @@ PyMODINIT_FUNC PyInit_lpython_module_)" + fn_name + R"((void) {
             }
             out += current_body;
             out += indent + "}\n";
+        }
+        if (x.m_name != nullptr) {
+            std::string exit_label = construct_frames.back().exit_label;
+            construct_frames.pop_back();
+            if (!exit_label.empty()) {
+                out += indent + exit_label + ": ;\n";
+            }
         }
         indentation_level -= 1;
         src = out;
@@ -3071,8 +3968,28 @@ PyMODINIT_FUNC PyInit_lpython_module_)" + fn_name + R"((void) {
 
     void visit_SubroutineCall(const ASR::SubroutineCall_t &x) {
         std::string indent(indentation_level*indentation_spaces, ' ');
-        ASR::Function_t *s = ASR::down_cast<ASR::Function_t>(
-            ASRUtils::symbol_get_past_external(x.m_name));
+        ASR::symbol_t* call_sym = ASRUtils::symbol_get_past_external(x.m_name);
+        if (ASR::is_a<ASR::Variable_t>(*call_sym)) {
+            ASR::Variable_t* call_var = ASR::down_cast<ASR::Variable_t>(call_sym);
+            ASR::Function_t* iface = get_dummy_procedure_interface(call_var);
+            std::string sym_name = std::string(call_var->m_name);
+            std::string args;
+            if (iface) {
+                args = construct_call_args(iface, x.n_args, x.m_args);
+            } else {
+                bracket_open++;
+                for (size_t i=0; i<x.n_args; i++) {
+                    if (!x.m_args[i].m_value) continue;
+                    self().visit_expr(*x.m_args[i].m_value);
+                    args += src;
+                    if (i < x.n_args-1) args += ", ";
+                }
+                bracket_open--;
+            }
+            src = indent + sym_name + "(" + args + ");\n";
+            return;
+        }
+        ASR::Function_t *s = ASR::down_cast<ASR::Function_t>(call_sym);
         // TODO: use a mapping with a hash(s) instead:
         std::string sym_name = s->m_name;
         ASR::FunctionType_t *s_type = ASRUtils::get_FunctionType(s);

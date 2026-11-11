@@ -22,6 +22,7 @@
                                                     Source
                                                     .false.
                                                     .false.
+                                                    Private
                                                 ),
                                             pwunf:
                                                 (StructMethodDeclaration
@@ -33,6 +34,7 @@
                                                     Source
                                                     .false.
                                                     .false.
+                                                    Private
                                                 ),
                                             ~write_formatted:
                                                 (GenericProcedure
@@ -99,9 +101,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             iomsg:
                                                 (Variable
@@ -123,9 +127,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             iostat:
                                                 (Variable
@@ -147,9 +153,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             iotype:
                                                 (Variable
@@ -171,9 +179,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             pfmt:
                                                 (Variable
@@ -195,9 +205,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             unit:
                                                 (Variable
@@ -219,9 +231,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             vlist:
                                                 (Variable
@@ -249,9 +263,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     pwf
@@ -330,9 +346,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             iomsg:
                                                 (Variable
@@ -354,9 +372,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             iostat:
                                                 (Variable
@@ -378,9 +398,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             unit:
                                                 (Variable
@@ -402,9 +424,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     pwunf
@@ -447,6 +471,7 @@
                     write7_mod
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.

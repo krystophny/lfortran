@@ -39,6 +39,7 @@
         false
         false
         false
+        false
         nil
       )
       "generated" (Program
@@ -69,9 +70,11 @@
               nil
               false
               false
+              false
               :NotMethod
               nil
               []
+              nil
             )
           }
         )

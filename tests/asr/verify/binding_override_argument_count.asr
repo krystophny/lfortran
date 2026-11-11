@@ -19,6 +19,7 @@
                     :Source
                     true
                     false
+                    :Public
                   )
                 }
               )
@@ -70,9 +71,11 @@
                     nil
                     false
                     false
+                    false
                     :NotMethod
                     nil
                     []
+                    nil
                   )
                   "a" (Variable
                     3
@@ -95,9 +98,11 @@
                     nil
                     false
                     false
+                    false
                     :NotMethod
                     nil
                     []
+                    nil
                   )
                 }
               )
@@ -156,6 +161,7 @@
                     :Source
                     false
                     false
+                    :Public
                   )
                 }
               )
@@ -207,9 +213,11 @@
                     nil
                     false
                     false
+                    false
                     :NotMethod
                     nil
                     []
+                    nil
                   )
                   "i1" (Variable
                     5
@@ -232,9 +240,11 @@
                     nil
                     false
                     false
+                    false
                     :NotMethod
                     nil
                     []
+                    nil
                   )
                   "a" (Variable
                     5
@@ -257,9 +267,11 @@
                     nil
                     false
                     false
+                    false
                     :NotMethod
                     nil
                     []
+                    nil
                   )
                 }
               )
@@ -316,6 +328,7 @@
         "m"
         nil
         []
+        false
         false
         false
         false

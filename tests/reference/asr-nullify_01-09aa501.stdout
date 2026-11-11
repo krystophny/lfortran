@@ -29,9 +29,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             p2:
                                 (Variable
@@ -55,9 +57,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             t1:
                                 (Variable
@@ -79,9 +83,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     nullify_01
@@ -89,15 +95,19 @@
                     [(Associate
                         (Var 2 p1)
                         (Var 2 t1)
+                        NoPointerBounds
                     )
                     (Associate
                         (Var 2 p2)
                         (Var 2 t1)
+                        NoPointerBounds
                     )
                     (Assignment
                         (Var 2 p1)
                         (IntegerConstant 1 (Integer 4) Decimal)
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )

@@ -69,6 +69,8 @@
                                                             ()
                                                             [(IntegerConstant 5 (Integer 4) Decimal)]
                                                             FormatFortran
+                                                            []
+                                                            ()
                                                             (Allocatable
                                                                 (String 1 () DeferredLength DescriptorString)
                                                             )
@@ -80,6 +82,8 @@
                                                             ()
                                                             [(Var 3 x)]
                                                             FormatFortran
+                                                            []
+                                                            ()
                                                             (Allocatable
                                                                 (String 1 () DeferredLength DescriptorString)
                                                             )
@@ -112,9 +116,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     b
@@ -150,6 +156,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )
                                     (Print
                                         (StringConstant
@@ -174,6 +182,7 @@
                     nested_03_a
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.

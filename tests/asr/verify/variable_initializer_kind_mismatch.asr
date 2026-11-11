@@ -39,9 +39,11 @@
               nil
               false
               false
+              false
               :NotMethod
               nil
               []
+              nil
             )
             "n" (Variable
               1
@@ -64,9 +66,11 @@
               nil
               false
               false
+              false
               :NotMethod
               nil
               []
+              nil
             )
           }
         )
@@ -81,6 +85,8 @@
               (SymbolRef 1 "k")
             )
             nil
+            false
+            false
             false
             false
           )

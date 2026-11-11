@@ -37,6 +37,7 @@
 #include <llvm/Target/TargetMachine.h>
 #include <llvm/Transforms/Scalar.h>
 #include <llvm/Transforms/Scalar/GVN.h>
+#include <llvm/Transforms/InstCombine/InstCombine.h>
 #include <llvm/Transforms/Scalar/InstSimplifyPass.h>
 #include <llvm/Transforms/IPO.h>
 #include <llvm/Transforms/IPO/AlwaysInliner.h>
@@ -44,7 +45,6 @@
 #include <llvm/Transforms/Instrumentation/AddressSanitizer.h>
 #include <llvm/Transforms/Instrumentation/ThreadSanitizer.h>
 #endif
-#include <llvm/Transforms/InstCombine/InstCombine.h>
 #include <llvm/ExecutionEngine/ObjectCache.h>
 #include <llvm/Support/CommandLine.h>
 #include <llvm/Support/FileSystem.h>
@@ -61,6 +61,11 @@
 #if LLVM_VERSION_MAJOR >= 17
     // TODO: removed from LLVM 17
     #include <llvm/Passes/PassBuilder.h>
+    #include <llvm/Transforms/Scalar/LICM.h>
+    #include <llvm/Transforms/Scalar/LoopPassManager.h>
+    #include <llvm/Transforms/Scalar/SimpleLoopUnswitch.h>
+    #include <llvm/Transforms/Scalar/SROA.h>
+    #include <llvm/Transforms/Scalar/SimplifyCFG.h>
 #else
 #    include <llvm/Transforms/IPO/PassManagerBuilder.h>
 #endif
@@ -99,6 +104,8 @@
 #include <libasr/codegen/KaleidoscopeJIT.h>
 #include <libasr/codegen/evaluator.h>
 #include <libasr/codegen/asr_to_llvm.h>
+#include <libasr/codegen/llvm_reductions.h>
+#include <libasr/codegen/llvm_rsqrt.h>
 #include <libasr/codegen/asr_to_cpp.h>
 #include <libasr/exception.h>
 #include <libasr/asr.h>
@@ -205,6 +212,17 @@ std::vector<std::string> get_detected_host_features()
     }
     std::sort(features.begin(), features.end());
     return features;
+}
+
+bool host_has_feature(const char *name)
+{
+#if LLVM_VERSION_MAJOR >= 19
+    auto host_features = llvm::sys::getHostCPUFeatures();
+#else
+    llvm::StringMap<bool, llvm::MallocAllocator> host_features;
+    llvm::sys::getHostCPUFeatures(host_features);
+#endif
+    return host_features.lookup(name);
 }
 
 #if defined(HAVE_TARGET_AARCH64) && LLVM_VERSION_MAJOR >= 18
@@ -344,6 +362,17 @@ std::string resolve_native_cpu(const llvm::Target &target,
     std::string cpu = get_host_cpu(option, config);
     if (!is_valid_cpu(target, triple, cpu)) {
         return "generic";
+    }
+    if (cpu == "generic") {
+        // LLVM reports "generic" for CPUs it does not recognize. Its generic
+        // cost model prefers 512-bit vectors, but known models with the same
+        // instruction set use 256-bit vectors, which is faster for small
+        // loops. Keep the detected features and only switch the CPU model.
+        if (host_has_feature("avx512f")) {
+            return "skylake-avx512";
+        } else if (host_has_feature("avx2")) {
+            return "haswell";
+        }
     }
     return cpu;
 }
@@ -521,20 +550,58 @@ std::vector<std::string> get_arch_features(
         + triple.str() + "'");
 }
 
+#if LLVM_VERSION_MAJOR >= 18
+using CodeGenOptLevel = llvm::CodeGenOptLevel;
+#else
+using CodeGenOptLevel = llvm::CodeGenOpt::Level;
+#endif
+
+bool is_wasm_triple(const llvm::Triple &triple)
+{
+    return triple.getArch() == llvm::Triple::wasm32
+        || triple.getArch() == llvm::Triple::wasm64;
+}
+
+// Machine code generation follows clang and flang: the default mode is -O0,
+// which selects the -O0 instruction selector and the fast register allocator,
+// and `--fast` is -O3. The default mode runs no IR optimizations.
+CodeGenOptLevel codegen_opt_level(const LLVMTargetConfig &config)
+{
+    if (config.fast) {
+        return CodeGenOptLevel::Aggressive;
+    }
+    // At -O0 the WebAssembly backend skips register stackification and
+    // coloring, so every virtual register becomes a separate local, and large
+    // functions exceed the 50000 locals per function that engines accept.
+    if (is_wasm_triple(llvm::Triple(config.triple))) {
+        return CodeGenOptLevel::Default;
+    }
+    return CodeGenOptLevel::None;
+}
+
 std::unique_ptr<llvm::TargetMachine> create_target_machine(
     const LLVMTargetConfig &config)
 {
     const llvm::Target *target = get_llvm_target(config.triple);
     llvm::TargetOptions options;
+    // The IR of `--fast` already allows contraction (`fast` flags), but the
+    // AArch64 backend of LLVM 11 only fuses with this option.
+    if (config.fast_math) {
+        options.AllowFPOpFusion = llvm::FPOpFusion::Fast;
+    }
     llvm::Triple triple(config.triple);
+    // ELF startup code runs .init_array. LLD leaves .ctors as its own section,
+    // so constructors there never run. Clang emits .init_array on ELF.
+    if (triple.isOSBinFormatELF()) {
+        options.UseInitArray = true;
+    }
     // WebAssembly objects are linked into static executables (wasm-ld for
     // WASI, emcc for Emscripten), which do not need position independent
     // code; clang also defaults to the static model there. In the PIC model
     // the WebAssembly backend lowers a call through a pointer that was just
     // loaded with a function's address as a direct `call` with a GOT
     // relocation, which produces an invalid module.
-    bool is_wasm = triple.getArch() == llvm::Triple::wasm32
-        || triple.getArch() == llvm::Triple::wasm64;
+    bool is_wasm = is_wasm_triple(triple);
     RM_OPTIONAL_TYPE<llvm::Reloc::Model> relocation_model
         = is_wasm ? llvm::Reloc::Model::Static : llvm::Reloc::Model::PIC_;
     RM_OPTIONAL_TYPE<llvm::CodeModel::Model> code_model;
@@ -545,17 +612,19 @@ std::unique_ptr<llvm::TargetMachine> create_target_machine(
         config.triple,
 #endif
         config.cpu, config.features, options, relocation_model, code_model,
-#if LLVM_VERSION_MAJOR >= 18
-        config.fast ? llvm::CodeGenOptLevel::Aggressive
-                    : llvm::CodeGenOptLevel::Default
-#else
-        config.fast ? llvm::CodeGenOpt::Aggressive
-                    : llvm::CodeGenOpt::Default
-#endif
-    );
+        codegen_opt_level(config));
     if (!machine) {
         throw LCompilersException("could not create target machine for '"
             + config.triple + "'");
+    }
+    // At -O0 the AArch64 backend selects GlobalISel (clang uses it too), whose
+    // localizer scans a basic block linearly for each value it moves, so code
+    // generation time is quadratic in the size of large blocks. Select
+    // FastISel instead, as on x86-64; it falls back to SelectionDAG for what
+    // it does not handle.
+    if (machine->getOptLevel() == CodeGenOptLevel::None
+            && triple.isAArch64()) {
+        machine->setGlobalISel(false);
     }
     return std::unique_ptr<llvm::TargetMachine>(machine);
 }
@@ -594,6 +663,8 @@ LLVMTargetConfig resolve_llvm_target_config(
 
     LLVMTargetConfig config;
     config.fast = compiler_options.po.fast;
+    config.fast_math = compiler_options.po.fast
+        && !compiler_options.po.no_fast_math;
     config.triple = compiler_options.target.empty()
         ? llvm::sys::getDefaultTargetTriple()
         : llvm::Triple::normalize(compiler_options.target);
@@ -642,6 +713,22 @@ LLVMTargetConfig resolve_llvm_target_config(
         validate_cpu(*target, triple, config.tune_cpu, "--mtune");
     }
 
+#if LLVM_VERSION_MAJOR < 10
+    // The x86 backends of LLVM 7, 8 and 9 add the fp128 register class (XMM)
+    // to an x86-64 subtarget only when it has MMX (X86ISelLowering.cpp:
+    // `is64Bit() && hasMMX()`). Without it, fp128 arguments are expanded into
+    // integer pairs, so real(16) arithmetic and comparisons call the libgcc
+    // helpers (e.g. __subtf3, __lttf2) with fp128 in general purpose
+    // registers, while libgcc and the psABI expect SSE registers, and every
+    // real(16) result is wrong. The "generic" CPU that we use by default has
+    // only x87 plus the 64-bit baseline SSE2, but no MMX. Target the x86-64
+    // baseline, which clang uses by default and which includes MMX. LLVM 10
+    // removed the MMX condition.
+    if (march.empty() && resolved_cpu.empty()
+            && triple.getArch() == llvm::Triple::x86_64) {
+        config.cpu = "x86-64";
+    }
+#endif
     config.features = join_features(features);
     std::unique_ptr<llvm::TargetMachine> machine
         = create_target_machine(config);
@@ -786,7 +873,8 @@ LLVMEvaluator::LLVMEvaluator(LLVMTargetConfig target_config_)
     TM = create_target_machine(target_config);
 
     // For some reason the JIT requires a different TargetMachine
-    jit = cantFail(llvm::orc::KaleidoscopeJIT::Create());
+    jit = cantFail(llvm::orc::KaleidoscopeJIT::Create(
+        codegen_opt_level(target_config)));
 
     _lfortran_stan(0.5);
 }
@@ -982,6 +1070,25 @@ void LLVMEvaluator::create_empty_object_file(const std::string &filename) {
     save_object_file(*module, filename);
 }
 
+#if LLVM_VERSION_MAJOR < 9
+// IndVarSimplify in LLVM 7 and 8 can mark the increment of a loop counter
+// that starts at -1 (a DO loop starting at 0) as `nuw`. Unrolling an inner
+// loop by the upper bound of its trip count then trusts that flag, assumes at
+// least two iterations and drops the first exit test, so a one-trip loop runs
+// twice. LLVM 9 fixed this. X86 enables upper-bound unrolling for CPUs with a
+// loop buffer, so the miscompile depends on the host CPU under `--fast`.
+static void disable_upper_bound_unrolling() {
+    llvm::StringMap<llvm::cl::Option*> &options
+        = llvm::cl::getRegisteredOptions();
+    auto option = options.find("unroll-max-upperbound");
+    // The option may occur only once per process; opt() runs for every file
+    // and REPL cell.
+    if (option != options.end() && option->second->getNumOccurrences() == 0) {
+        option->second->addOccurrence(0, "unroll-max-upperbound", "0");
+    }
+}
+#endif
+
 void LLVMEvaluator::opt(llvm::Module &m) {
     configure_module(m);
 
@@ -990,16 +1097,30 @@ void LLVMEvaluator::opt(llvm::Module &m) {
     llvm::FunctionAnalysisManager FAM;
     llvm::CGSCCAnalysisManager CGAM;
     llvm::ModuleAnalysisManager MAM;
-    llvm::PassBuilder PB = llvm::PassBuilder(TM.get());
+    // The default tuning options leave the SLP vectorizer off; clang and
+    // flang enable it at -O2 and -O3, as the legacy pipeline below does.
+    llvm::PipelineTuningOptions PTO;
+    PTO.LoopVectorization = true;
+    PTO.SLPVectorization = true;
+    llvm::PassBuilder PB = llvm::PassBuilder(TM.get(), PTO);
     PB.registerModuleAnalyses(MAM);
     PB.registerCGSCCAnalyses(CGAM);
     PB.registerFunctionAnalyses(FAM);
     PB.registerLoopAnalyses(LAM);
     PB.crossRegisterProxies(LAM, FAM, CGAM, MAM);
     llvm::ModulePassManager MPM = PB.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O3);
+    // Late simplifications expose invariant conditions guarding descriptor loads.
+    llvm::LoopPassManager LPM;
+    LPM.addPass(llvm::SimpleLoopUnswitchPass(/*NonTrivial=*/true));
+    LPM.addPass(llvm::LICMPass(llvm::LICMOptions()));
+    MPM.addPass(llvm::createModuleToFunctionPassAdaptor(
+        llvm::createFunctionToLoopPassAdaptor(std::move(LPM), /*UseMemorySSA=*/true)));
     MPM.run(m, MAM);
 
 #else
+#if LLVM_VERSION_MAJOR < 9
+    disable_upper_bound_unrolling();
+#endif
     llvm::legacy::PassManager mpm;
     mpm.add(new llvm::TargetLibraryInfoWrapperPass(TM->getTargetTriple()));
     mpm.add(llvm::createTargetTransformInfoWrapperPass(TM->getTargetIRAnalysis()));
@@ -1025,6 +1146,113 @@ void LLVMEvaluator::opt(llvm::Module &m) {
     mpm.add(llvm::createVerifierPass());
     mpm.run(m);
 #endif
+    // expand_reciprocal_sqrt edits the IR outside the pass managers. On
+    // LLVM 17 and later the function analyses filled by MPM are then stale,
+    // and the late SROA round below would read them. The legacy pipeline
+    // has no analysis cache.
+#if LLVM_VERSION_MAJOR >= 17
+    std::vector<llvm::Function *> rsqrt_changed;
+    for (llvm::Function &f : m) {
+        if (expand_reciprocal_sqrt(f, TM->getTargetTriple())) {
+            rsqrt_changed.push_back(&f);
+        }
+    }
+#else
+    for (llvm::Function &f : m) {
+        expand_reciprocal_sqrt(f, TM->getTargetTriple());
+    }
+#endif
+
+    // The late cleanup and the horizontal reduction rewrite only run on
+    // functions that the rewrite may apply to: definitions for x86 with AVX
+    // that contain a fast sum of three vector squares. Other functions and
+    // targets (such as AArch64) keep the code of the pipeline above.
+    std::vector<llvm::Function *> late_functions;
+    for (llvm::Function &f : m) {
+        if (may_recombine_horizontal_reductions(f, *TM)) {
+            late_functions.push_back(&f);
+        }
+    }
+
+    // SROA runs before the vectorizer, so a fixed-size local array that the
+    // vectorized loop then accesses keeps its stack slot. Simplifying once
+    // more promotes it and exposes the reductions the vectorizer built.
+    // The loop passes after the last GVN also leave loads of memory that
+    // was set from constants, such as the values a loop starts from; GVN
+    // forwards them, so the horizontal reduction pass can see the
+    // components that stay zero across the loop.
+    if (!late_functions.empty()) {
+#if LLVM_VERSION_MAJOR >= 17
+        llvm::FunctionPassManager LateFPM;
+        LateFPM.addPass(llvm::SROAPass(llvm::SROAOptions(
+            llvm::SROAOptions::ModifyCFG)));
+        LateFPM.addPass(llvm::GVNPass());
+        LateFPM.addPass(llvm::InstCombinePass());
+        LateFPM.addPass(llvm::SimplifyCFGPass());
+        for (llvm::Function *f : rsqrt_changed) {
+            FAM.invalidate(*f, llvm::PreservedAnalyses::none());
+        }
+        for (llvm::Function *f : late_functions) {
+            LateFPM.run(*f, FAM);
+        }
+        // The functions changed outside of a module pass: drop the module
+        // analyses (and through them the function ones) computed before.
+        MAM.invalidate(m, llvm::PreservedAnalyses::none());
+#else
+        llvm::legacy::FunctionPassManager late(&m);
+        late.add(llvm::createTargetTransformInfoWrapperPass(
+            TM->getTargetIRAnalysis()));
+        late.add(llvm::createSROAPass());
+        late.add(llvm::createGVNPass());
+        late.add(llvm::createInstructionCombiningPass());
+        late.add(llvm::createCFGSimplificationPass());
+        late.doInitialization();
+        for (llvm::Function *f : late_functions) {
+            late.run(*f);
+        }
+        late.doFinalization();
+#endif
+    }
+
+    // The horizontal reduction pass matches the lane transpose the SLP
+    // vectorizer builds for a four-way sum of squares and rewrites it as
+    // pairwise horizontal additions. It only matches fast math instructions,
+    // so ordinary compilations keep their existing output.
+    bool reduced = false;
+    for (llvm::Function *f : late_functions) {
+        reduced |= recombine_horizontal_reductions(*f, *TM);
+    }
+    if (reduced) {
+        // Simplify and schedule the rewritten reductions. This is LLVM's
+        // module O1 pipeline, so it also revisits functions the matcher
+        // left unchanged.
+#if LLVM_VERSION_MAJOR >= 17
+        llvm::ModulePassManager Final
+            = PB.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O1);
+        Final.run(m, MAM);
+#else
+        llvm::legacy::PassManager final_mpm;
+        final_mpm.add(new llvm::TargetLibraryInfoWrapperPass(
+            TM->getTargetTriple()));
+        final_mpm.add(llvm::createTargetTransformInfoWrapperPass(
+            TM->getTargetIRAnalysis()));
+        llvm::legacy::FunctionPassManager final_fpm(&m);
+        final_fpm.add(llvm::createTargetTransformInfoWrapperPass(
+            TM->getTargetIRAnalysis()));
+        llvm::PassManagerBuilder final_builder;
+        final_builder.OptLevel = 1;
+        final_builder.SizeLevel = 0;
+        final_builder.Inliner = llvm::createFunctionInliningPass(1, 0, false);
+        final_builder.populateFunctionPassManager(final_fpm);
+        final_builder.populateModulePassManager(final_mpm);
+        final_fpm.doInitialization();
+        for (llvm::Function &func : m) {
+            final_fpm.run(func);
+        }
+        final_fpm.doFinalization();
+        final_mpm.run(m);
+#endif
+    }
 }
 
 std::string LLVMEvaluator::module_to_string(llvm::Module &m) {
@@ -1094,8 +1322,7 @@ WasmLFortranExecutor::WasmLFortranExecutor()
         throw LCompilersException("WasmLFortranExecutor: failed to create temp dir");
     TempDir = tmp.str().str();
 
-    // Claim a unique instance ID so that __lfortran_evaluate_N function names
-    // are globally unique across all executor instances in the same process.
+    // Side modules share the process's dynamic-linker namespace.
     static std::atomic<int> s_next_id{0};
     m_id = s_next_id.fetch_add(1);
 }
@@ -1120,41 +1347,22 @@ void WasmLFortranExecutor::add_module(std::unique_ptr<LLVMModule> lm, int eval_c
 {
     std::unique_ptr<llvm::Module> mod = std::move(lm->m_m);
 
-    // Rename __lfortran_evaluate_<eval_count> → __lfortran_evaluate_<m_id>_<eval_count>
-    // so that multiple WasmLFortranExecutor instances in the same process (e.g.
-    // test suite) each own uniquely-named symbols and dlsym(RTLD_DEFAULT) finds
-    // the right one without needing per-handle tracking.
-    const std::string logical_stem = "__lfortran_evaluate_" + std::to_string(eval_count);
-    const std::string unique_stem  = "__lfortran_evaluate_" + std::to_string(m_id)
-                                     + "_" + std::to_string(eval_count);
-    if (llvm::Function *fn = mod->getFunction(logical_stem))
-        fn->setName(unique_stem);
-    // Same for the program unit of this evaluation, if the cell defined one:
-    // get_symbol_address() rewrites every "__lfortran_evaluate_" name, so this
-    // one has to carry the instance id too.
-    if (llvm::Function *fn = mod->getFunction(logical_stem + "_program"))
-        fn->setName(unique_stem + "_program");
-    // And for the set up of the globals it declares.
-    if (llvm::Function *fn = mod->getFunction(logical_stem + "_setup"))
-        fn->setName(unique_stem + "_setup");
+    const std::string instance = "__exec" + std::to_string(m_id) + "_";
+    const std::string unique_stem = instance + std::to_string(eval_count);
 
-    // Symbols qualified by their cell (__cell<N>_...) are named per session,
-    // so two executors in one process emit the same names. The wasm dynamic
-    // linker has one global namespace, so the second definition collides with
-    // the first -- and if their signatures differ, a module importing the name
-    // fails to link. Give each instance its own, the same way the run function
-    // above is made unique. Renaming here covers definitions and the
-    // declarations other modules of this instance import them through, so they
-    // still resolve to each other.
-    {
-        const std::string cell_prefix = "__cell";
-        const std::string instance = "__e" + std::to_string(m_id) + "_";
-        auto qualify = [&](llvm::GlobalValue &g) {
-            std::string n = g.getName().str();
-            if (n.rfind(cell_prefix, 0) == 0) g.setName(instance + n);
-        };
-        for (llvm::Function &f : mod->functions()) qualify(f);
-        for (llvm::GlobalVariable &g : mod->globals()) qualify(g);
+    // Isolate every exported definition, not just cell entry points. Otherwise
+    // a function in one executor can interpose on a variable in another. Record
+    // ownership before renaming so imports from this and later modules agree,
+    // while unresolved runtime imports retain their external ABI names.
+    for (const llvm::GlobalValue &g : mod->global_values()) {
+        if (!g.isDeclaration() && !g.hasLocalLinkage() && !g.hasAppendingLinkage()) {
+            std::string name = g.getName().str();
+            symbols.emplace(name, instance + name);
+        }
+    }
+    for (llvm::GlobalValue &g : mod->global_values()) {
+        auto symbol = symbols.find(g.getName().str());
+        if (symbol != symbols.end()) g.setName(symbol->second);
     }
 
     const std::string triple = "wasm32-unknown-emscripten";
@@ -1216,14 +1424,8 @@ void WasmLFortranExecutor::add_module(std::unique_ptr<LLVMModule> lm, int eval_c
 
 intptr_t WasmLFortranExecutor::get_symbol_address(const std::string &name)
 {
-    // Translate the logical name to the instance-unique name, then look it up
-    // in the global RTLD symbol table.  Within one session there is only ever
-    // one executor, so RTLD_DEFAULT finds the right symbol.  In the test suite
-    // the per-instance prefix prevents collisions across test cases.
-    const std::string prefix = "__lfortran_evaluate_";
-    std::string actual = name;
-    if (name.substr(0, prefix.size()) == prefix)
-        actual = prefix + std::to_string(m_id) + "_" + name.substr(prefix.size());
+    auto symbol = symbols.find(name);
+    const std::string &actual = symbol == symbols.end() ? name : symbol->second;
 
     void *sym = dlsym(RTLD_DEFAULT, actual.c_str());
     if (!sym)

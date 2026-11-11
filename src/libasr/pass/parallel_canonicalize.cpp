@@ -231,6 +231,53 @@ static ASR::stmt_t *make_canonical_region(Allocator &al, const Location &loc,
         body.p, body.n, exec_target));
 }
 
+// Whether an expression of a loop head calls nothing, so that evaluating it
+// costs no more than the loop it bounds.
+static bool loop_bound_is_inert(ASR::expr_t *e) {
+    if (e == nullptr) return true;
+    PassUtils::FunctionCallFinder finder;
+    finder.visit_expr(*e);
+    return !finder.found;
+}
+
+static bool loop_heads_are_inert(const ASR::do_loop_head_t *heads,
+        size_t n_heads) {
+    for (size_t i = 0; i < n_heads; i++) {
+        if (!loop_bound_is_inert(heads[i].m_start) ||
+                !loop_bound_is_inert(heads[i].m_end) ||
+                !loop_bound_is_inert(heads[i].m_increment)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// Whether running these statements does nothing: there are none, or each is
+// a loop whose head calls nothing and whose body again does nothing.
+static bool statements_do_nothing(ASR::stmt_t **body, size_t n_body) {
+    for (size_t i = 0; i < n_body; i++) {
+        ASR::stmt_t *s = body[i];
+        if (ASR::is_a<ASR::DoLoop_t>(*s)) {
+            ASR::DoLoop_t *loop = ASR::down_cast<ASR::DoLoop_t>(s);
+            if (loop->n_orelse > 0 ||
+                    !loop_heads_are_inert(&loop->m_head, 1) ||
+                    !statements_do_nothing(loop->m_body, loop->n_body)) {
+                return false;
+            }
+        } else if (ASR::is_a<ASR::DoConcurrentLoop_t>(*s)) {
+            ASR::DoConcurrentLoop_t *loop =
+                ASR::down_cast<ASR::DoConcurrentLoop_t>(s);
+            if (!loop_heads_are_inert(loop->m_head, loop->n_head) ||
+                    !statements_do_nothing(loop->m_body, loop->n_body)) {
+                return false;
+            }
+        } else {
+            return false;
+        }
+    }
+    return true;
+}
+
 // Whether an OpenMP region is left anywhere under a statement. A region
 // inside the loop body -- a `critical` section, a `barrier` -- says the
 // iterations synchronize with each other, which is the opposite of what a
@@ -243,6 +290,28 @@ public:
     void visit_OMPRegion(const ASR::OMPRegion_t &x) {
         found = true;
         ASR::BaseWalkVisitor<NestedRegionFinder>::visit_OMPRegion(x);
+    }
+};
+
+// The BLOCK and ASSOCIATE constructs a statement runs, however deeply they
+// are nested in it.
+class NestedConstructCollector :
+    public ASRUtils::BlockBodyWalkVisitor<NestedConstructCollector>
+{
+public:
+    std::set<ASR::symbol_t*> &constructs;
+
+    explicit NestedConstructCollector(std::set<ASR::symbol_t*> &constructs_) :
+        constructs(constructs_) {}
+
+    void visit_BlockCall(const ASR::BlockCall_t &x) {
+        constructs.insert(ASRUtils::symbol_get_past_external(x.m_m));
+        BlockBodyWalkVisitor::visit_BlockCall(x);
+    }
+
+    void visit_AssociateBlockCall(const ASR::AssociateBlockCall_t &x) {
+        constructs.insert(ASRUtils::symbol_get_past_external(x.m_m));
+        BlockBodyWalkVisitor::visit_AssociateBlockCall(x);
     }
 };
 
@@ -297,6 +366,8 @@ public:
     // Whether a loop construct that does not name a device may be
     // canonicalized as well.
     bool offload_omp_loops;
+    // The BLOCK and ASSOCIATE constructs inside a loop that became a region.
+    std::set<ASR::symbol_t*> constructs_in_regions;
 
     ParallelCanonicalizeVisitor(Allocator &al, const PassOptions &pass_options_) :
         StatementWalkVisitor(al), pass_options(pass_options_),
@@ -490,6 +561,15 @@ public:
             decline(x);
             return;
         }
+        // Only the rectangular prefix of the nest is partitioned; a loop
+        // whose bounds read an enclosing index, and the loops inside it,
+        // stay sequential loops in the body, which runs the same iterations.
+        int64_t rectangular = (int64_t)ASRUtils::rectangular_loop_nest_depth(
+            nest.loops);
+        if (rectangular < collapse) {
+            collapse = rectangular;
+            descend_loop_nest(body[0], collapse, nest, why);
+        }
 
         NestedRegionFinder finder;
         for (size_t i = 0; i < nest.n_body; i++) {
@@ -504,6 +584,7 @@ public:
         }
 
         drop_loop_indices(local, nest);
+        NestedConstructCollector(constructs_in_regions).visit_stmt(*body[0]);
 
         pass_result.reserve(al, 1);
         pass_result.push_back(al, make_canonical_region(al, x.base.base.loc,
@@ -523,7 +604,7 @@ public:
             body.push_back(al, x.m_body[i]);
         }
         for (size_t i = x.n_head; i > 1; i--) {
-            ASR::stmt_t *inner = ASRUtils::STMT(ASR::make_DoLoop_t(al,
+            ASR::stmt_t *inner = ASRUtils::STMT(ASRUtils::make_DoLoop_t_util(al,
                 x.base.base.loc, s2c(al, ""), x.m_head[i - 1],
                 body.p, body.n, nullptr, 0));
             Vec<ASR::stmt_t*> outer;
@@ -531,7 +612,7 @@ public:
             outer.push_back(al, inner);
             body = outer;
         }
-        return ASRUtils::STMT(ASR::make_DoLoop_t(al, x.base.base.loc,
+        return ASRUtils::STMT(ASRUtils::make_DoLoop_t_util(al, x.base.base.loc,
             s2c(al, ""), x.m_head[0], body.p, body.n, nullptr, 0));
     }
 
@@ -540,13 +621,62 @@ public:
     // and a thread that opened a second partition inside the first would be
     // dividing what it was already given; a concurrent loop left in the body
     // simply runs its iterations in order inside that thread.
+    //
+    // A concurrent loop whose iterations do nothing is not a parallel loop
+    // at all: there is no work to partition, and a lowering would only pay
+    // for a launch, a thread team or a copy of the data it names. It is left
+    // as it is and runs in order, its heads evaluated as written.
     void visit_DoConcurrentLoop(const ASR::DoConcurrentLoop_t &x) {
         if (x.n_head == 0) return;
+        if (statements_do_nothing(x.m_body, x.n_body)) return;
+        ASR::stmt_t *loop = build_loop_nest(x);
+        ParallelLoopNest nest;
+        int64_t collapse = (int64_t)x.n_head;
+        if (parallel_loop_nest_of(loop, collapse, nest)) {
+            collapse = (int64_t)ASRUtils::rectangular_loop_nest_depth(
+                nest.loops);
+        }
+        NestedConstructCollector(constructs_in_regions).visit_stmt(*loop);
         pass_result.reserve(al, 1);
         pass_result.push_back(al, make_canonical_region(al, x.base.base.loc,
             x.m_shared, x.n_shared, x.m_local, x.n_local,
-            x.m_reduction, x.n_reduction, (int64_t)x.n_head, nullptr, 0,
-            false, build_loop_nest(x), ASR::exec_targetType::ExecAuto));
+            x.m_reduction, x.n_reduction, collapse, nullptr, 0,
+            false, loop, ASR::exec_targetType::ExecAuto));
+    }
+
+    // A BLOCK or an ASSOCIATE is walked from the symbol table of its scope,
+    // not from the statement that runs it, so one inside a loop that became
+    // a region is skipped here: its loops are in the body of that region,
+    // and are left as they are, as they would be without the construct.
+    // The statements of a construct come before the constructs nested in
+    // it, so that a loop among them has made its region before they are
+    // reached.
+    template <typename T>
+    void visit_construct(const T &x) {
+        if (constructs_in_regions.count(
+                const_cast<ASR::symbol_t*>(&x.base))) {
+            return;
+        }
+        T &xx = const_cast<T&>(x);
+        SymbolTable *parent_scope = current_scope;
+        current_scope = xx.m_symtab;
+        transform_stmts(xx.m_body, xx.n_body);
+        for (auto &item : xx.m_symtab->get_scope()) {
+            visit_symbol(*item.second);
+        }
+        current_scope = parent_scope;
+    }
+
+    void visit_Block(const ASR::Block_t &x) {
+        visit_construct(x);
+    }
+
+    void visit_AssociateBlock(const ASR::AssociateBlock_t &x) {
+        visit_construct(x);
+    }
+
+    // A FORALL is lowered later, by the forall pass, so its body is left as it is.
+    void visit_ForAllSingle(const ASR::ForAllSingle_t &/*x*/) {
     }
 
     // Leaves a region the pass could not canonicalize exactly as it was, so

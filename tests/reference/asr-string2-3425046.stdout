@@ -28,13 +28,12 @@
                                     Public
                                 ),
                             f_string:
-                                (ExternalSymbol
+                                (GenericProcedure
                                     2
                                     f_string
-                                    4 f_string
-                                    fpm_strings
-                                    []
-                                    f_string
+                                    [2 f_string~genericprocedure@f_string
+                                    2 f_string_cptr@f_string
+                                    2 f_string_cptr_n@f_string]
                                     Public
                                 ),
                             f_string_cptr@f_string:
@@ -45,7 +44,7 @@
                                     fpm_strings
                                     []
                                     f_string_cptr
-                                    Public
+                                    Private
                                 ),
                             f_string_cptr_n@f_string:
                                 (ExternalSymbol
@@ -55,7 +54,7 @@
                                     fpm_strings
                                     []
                                     f_string_cptr_n
-                                    Public
+                                    Private
                                 ),
                             f_string~genericprocedure@f_string:
                                 (ExternalSymbol
@@ -65,7 +64,7 @@
                                     fpm_strings
                                     []
                                     f_string~genericprocedure
-                                    Public
+                                    Private
                                 ),
                             get_temp_filename:
                                 (Function
@@ -100,19 +99,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
-                                                ),
-                                            f_string@f_string~genericprocedure:
-                                                (ExternalSymbol
-                                                    21
-                                                    f_string@f_string~genericprocedure
-                                                    4 f_string~genericprocedure
-                                                    fpm_strings
-                                                    []
-                                                    f_string~genericprocedure
-                                                    Private
+                                                    ()
                                                 ),
                                             tempfile:
                                                 (Variable
@@ -136,9 +127,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     get_temp_filename
@@ -164,7 +157,7 @@
                                     [(Assignment
                                         (Var 21 tempfile)
                                         (FunctionCall
-                                            21 f_string@f_string~genericprocedure
+                                            2 f_string~genericprocedure@f_string
                                             2 f_string
                                             [((Var 21 c_tempfile))]
                                             (Allocatable
@@ -174,6 +167,8 @@
                                             ()
                                         )
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )]
@@ -210,9 +205,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             dir_handle:
                                                 (Variable
@@ -236,19 +233,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
-                                                ),
-                                            f_string@f_string_cptr:
-                                                (ExternalSymbol
-                                                    20
-                                                    f_string@f_string_cptr
-                                                    4 f_string_cptr
-                                                    fpm_strings
-                                                    []
-                                                    f_string_cptr
-                                                    Private
+                                                    ()
                                                 ),
                                             string_fortran:
                                                 (Variable
@@ -272,9 +261,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     list_files
@@ -319,7 +310,7 @@
                                             [(Assignment
                                                 (Var 20 string_fortran)
                                                 (FunctionCall
-                                                    20 f_string@f_string_cptr
+                                                    2 f_string_cptr@f_string
                                                     2 f_string
                                                     [((Var 20 dir_entry_c))]
                                                     (Allocatable
@@ -329,6 +320,8 @@
                                                     ()
                                                 )
                                                 ()
+                                                .false.
+                                                .false.
                                                 .false.
                                                 .false.
                                             )]
@@ -356,6 +349,7 @@
                     ()
                     [fpm_strings
                     iso_c_binding]
+                    .false.
                     .false.
                     .false.
                     .false.
@@ -426,7 +420,7 @@
                                                                     Default
                                                                     (Integer 8)
                                                                     ()
-                                                                    Source
+                                                                    BindC
                                                                     Public
                                                                     Required
                                                                     .false.
@@ -435,9 +429,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             s:
                                                                 (Variable
@@ -461,9 +457,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     c_strlen
@@ -515,9 +513,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             lfortran_tmp:
                                                 (Variable
@@ -539,9 +539,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             s:
                                                 (Variable
@@ -565,9 +567,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     f_string_cptr
@@ -605,6 +609,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )
                                     (Assignment
                                         (Var 6 s)
@@ -618,6 +624,8 @@
                                             ()
                                         )
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )]
@@ -654,9 +662,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             n:
                                                 (Variable
@@ -678,9 +688,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             s:
                                                 (Variable
@@ -702,9 +714,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     f_string_cptr_n
@@ -771,9 +785,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             f_string:
                                                 (Variable
@@ -797,9 +813,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     f_string~genericprocedure
@@ -862,9 +880,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     string_t
@@ -895,6 +915,7 @@
                     [iso_c_binding
                     fpm_strings]
                     .true.
+                    .false.
                     .false.
                     .false.
                     ()

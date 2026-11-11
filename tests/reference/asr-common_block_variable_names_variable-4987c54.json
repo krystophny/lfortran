@@ -1,0 +1,13 @@
+{
+    "basename": "asr-common_block_variable_names_variable-4987c54",
+    "cmd": "lfortran --show-asr --no-color {infile} -o {outfile}",
+    "infile": "tests/asr/verify/common_block_variable_names_variable.asr",
+    "infile_hash": "2b1996e2c3f2471e260208597887f6950afef8ef9281dab4e5d16b6f",
+    "outfile": null,
+    "outfile_hash": null,
+    "stdout": null,
+    "stdout_hash": null,
+    "stderr": "asr-common_block_variable_names_variable-4987c54.stderr",
+    "stderr_hash": "a1f6a5a97924c291770f989af413b6c834b98f167cb43a9a9a710267",
+    "returncode": 2
+}

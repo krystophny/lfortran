@@ -68,9 +68,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             i:
                                                                 (Variable
@@ -92,37 +94,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
-                                                                    NotMethod
-                                                                    ()
-                                                                    []
-                                                                ),
-                                                            lfortran_tmp:
-                                                                (Variable
-                                                                    8
-                                                                    lfortran_tmp
-                                                                    []
-                                                                    Local
-                                                                    ()
-                                                                    ()
-                                                                    Default
-                                                                    (TypeParameter
-                                                                        w
-                                                                        NonExtensible
-                                                                        .false.
-                                                                    )
-                                                                    ()
-                                                                    Source
-                                                                    Private
-                                                                    Required
-                                                                    .false.
-                                                                    .false.
-                                                                    .false.
-                                                                    ()
-                                                                    .false.
                                                                     .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             x:
                                                                 (Variable
@@ -154,9 +130,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             y:
                                                                 (Variable
@@ -188,9 +166,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     axpy
@@ -250,39 +230,8 @@
                                                             (Integer 4)
                                                             ()
                                                         )
-                                                        ())
+                                                        (IntegerConstant 1 (Integer 4) Decimal))
                                                         [(Assignment
-                                                            (Var 8 lfortran_tmp)
-                                                            (FunctionCall
-                                                                5 times
-                                                                ()
-                                                                [((Var 8 a))
-                                                                ((ArrayItem
-                                                                    (Var 8 x)
-                                                                    [(()
-                                                                    (Var 8 i)
-                                                                    ())]
-                                                                    (TypeParameter
-                                                                        u
-                                                                        NonExtensible
-                                                                        .false.
-                                                                    )
-                                                                    ColMajor
-                                                                    ()
-                                                                ))]
-                                                                (TypeParameter
-                                                                    w
-                                                                    NonExtensible
-                                                                    .false.
-                                                                )
-                                                                ()
-                                                                ()
-                                                            )
-                                                            ()
-                                                            .false.
-                                                            .false.
-                                                        )
-                                                        (Assignment
                                                             (ArrayItem
                                                                 (Var 8 y)
                                                                 [(()
@@ -295,6 +244,7 @@
                                                                 )
                                                                 ColMajor
                                                                 ()
+                                                                .false.
                                                             )
                                                             (FunctionCall
                                                                 5 plus
@@ -311,8 +261,34 @@
                                                                     )
                                                                     ColMajor
                                                                     ()
+                                                                    .false.
                                                                 ))
-                                                                ((Var 8 lfortran_tmp))]
+                                                                ((FunctionCall
+                                                                    5 times
+                                                                    ()
+                                                                    [((Var 8 a))
+                                                                    ((ArrayItem
+                                                                        (Var 8 x)
+                                                                        [(()
+                                                                        (Var 8 i)
+                                                                        ())]
+                                                                        (TypeParameter
+                                                                            u
+                                                                            NonExtensible
+                                                                            .false.
+                                                                        )
+                                                                        ColMajor
+                                                                        ()
+                                                                        .false.
+                                                                    ))]
+                                                                    (TypeParameter
+                                                                        w
+                                                                        NonExtensible
+                                                                        .false.
+                                                                    )
+                                                                    ()
+                                                                    ()
+                                                                ))]
                                                                 (TypeParameter
                                                                     v
                                                                     NonExtensible
@@ -322,6 +298,8 @@
                                                                 ()
                                                             )
                                                             ()
+                                                            .false.
+                                                            .false.
                                                             .false.
                                                             .false.
                                                         )]
@@ -362,9 +340,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             b:
                                                                 (Variable
@@ -390,9 +370,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             op:
                                                                 (Variable
@@ -418,9 +400,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     plus
@@ -444,7 +428,7 @@
                                                         Implementation
                                                         ()
                                                         .true.
-                                                        .false.
+                                                        .true.
                                                         .false.
                                                         .false.
                                                         .false.
@@ -486,9 +470,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             times:
                                                 (Function
@@ -519,9 +505,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             b:
                                                                 (Variable
@@ -547,9 +535,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             op:
                                                                 (Variable
@@ -575,9 +565,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     times
@@ -601,7 +593,7 @@
                                                         Implementation
                                                         ()
                                                         .true.
-                                                        .false.
+                                                        .true.
                                                         .false.
                                                         .false.
                                                         .false.
@@ -643,9 +635,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             v:
                                                 (Variable
@@ -671,9 +665,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             w:
                                                 (Variable
@@ -699,9 +695,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     axpy_tmpl
@@ -750,9 +748,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             axpy:
                                                 (Function
@@ -779,9 +779,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             i:
                                                                 (Variable
@@ -803,33 +805,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
-                                                                    NotMethod
-                                                                    ()
-                                                                    []
-                                                                ),
-                                                            lfortran_tmp:
-                                                                (Variable
-                                                                    12
-                                                                    lfortran_tmp
-                                                                    []
-                                                                    Local
-                                                                    ()
-                                                                    ()
-                                                                    Default
-                                                                    (Real 4)
-                                                                    ()
-                                                                    Source
-                                                                    Private
-                                                                    Required
-                                                                    .false.
-                                                                    .false.
-                                                                    .false.
-                                                                    ()
-                                                                    .false.
                                                                     .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             x:
                                                                 (Variable
@@ -857,9 +837,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             y:
                                                                 (Variable
@@ -887,9 +869,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     axpy
@@ -937,31 +921,8 @@
                                                             (Integer 4)
                                                             ()
                                                         )
-                                                        ())
+                                                        (IntegerConstant 1 (Integer 4) Decimal))
                                                         [(Assignment
-                                                            (Var 12 lfortran_tmp)
-                                                            (FunctionCall
-                                                                9 ~mul_intrinsic
-                                                                ()
-                                                                [((Var 12 a))
-                                                                ((ArrayItem
-                                                                    (Var 12 x)
-                                                                    [(()
-                                                                    (Var 12 i)
-                                                                    ())]
-                                                                    (Integer 4)
-                                                                    ColMajor
-                                                                    ()
-                                                                ))]
-                                                                (Real 4)
-                                                                ()
-                                                                ()
-                                                            )
-                                                            ()
-                                                            .false.
-                                                            .false.
-                                                        )
-                                                        (Assignment
                                                             (ArrayItem
                                                                 (Var 12 y)
                                                                 [(()
@@ -970,6 +931,7 @@
                                                                 (Real 4)
                                                                 ColMajor
                                                                 ()
+                                                                .false.
                                                             )
                                                             (FunctionCall
                                                                 9 ~add_intrinsic
@@ -982,13 +944,33 @@
                                                                     (Real 4)
                                                                     ColMajor
                                                                     ()
+                                                                    .false.
                                                                 ))
-                                                                ((Var 12 lfortran_tmp))]
+                                                                ((FunctionCall
+                                                                    9 ~mul_intrinsic
+                                                                    ()
+                                                                    [((Var 12 a))
+                                                                    ((ArrayItem
+                                                                        (Var 12 x)
+                                                                        [(()
+                                                                        (Var 12 i)
+                                                                        ())]
+                                                                        (Integer 4)
+                                                                        ColMajor
+                                                                        ()
+                                                                        .false.
+                                                                    ))]
+                                                                    (Real 4)
+                                                                    ()
+                                                                    ()
+                                                                ))]
                                                                 (Real 4)
                                                                 ()
                                                                 ()
                                                             )
                                                             ()
+                                                            .false.
+                                                            .false.
                                                             .false.
                                                             .false.
                                                         )]
@@ -1029,9 +1011,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             sp:
                                                 (Variable
@@ -1062,9 +1046,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             x:
                                                 (Variable
@@ -1092,9 +1078,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             y:
                                                 (Variable
@@ -1122,9 +1110,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             ~add_intrinsic:
                                                 (Function
@@ -1151,9 +1141,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             arg1:
                                                                 (Variable
@@ -1175,9 +1167,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             ret:
                                                                 (Variable
@@ -1199,9 +1193,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     ~add_intrinsic
@@ -1213,12 +1209,12 @@
                                                         Implementation
                                                         ()
                                                         .true.
-                                                        .false.
+                                                        .true.
                                                         .false.
                                                         .false.
                                                         .false.
                                                         []
-                                                        .true.
+                                                        .false.
                                                         Host
                                                     )
                                                     []
@@ -1234,6 +1230,8 @@
                                                             ()
                                                         )
                                                         ()
+                                                        .false.
+                                                        .false.
                                                         .false.
                                                         .false.
                                                     )]
@@ -1268,9 +1266,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             arg1:
                                                                 (Variable
@@ -1292,9 +1292,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             ret:
                                                                 (Variable
@@ -1316,9 +1318,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     ~mul_intrinsic
@@ -1330,12 +1334,12 @@
                                                         Implementation
                                                         ()
                                                         .true.
-                                                        .false.
+                                                        .true.
                                                         .false.
                                                         .false.
                                                         .false.
                                                         []
-                                                        .true.
+                                                        .false.
                                                         Host
                                                     )
                                                     []
@@ -1357,6 +1361,8 @@
                                                             ()
                                                         )
                                                         ()
+                                                        .false.
+                                                        .false.
                                                         .false.
                                                         .false.
                                                     )]
@@ -1392,6 +1398,8 @@
                                             (Real 4)
                                         )
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )
@@ -1432,6 +1440,8 @@
                                             )
                                         )
                                         ()
+                                        .false.
+                                        .false.
                                         .false.
                                         .false.
                                     )
@@ -1483,6 +1493,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )
                                     (SubroutineCall
                                         9 axpy
@@ -1522,6 +1534,8 @@
                                             ()
                                             [(Var 9 y)]
                                             FormatFortran
+                                            []
+                                            ()
                                             (Allocatable
                                                 (String 1 () DeferredLength DescriptorString)
                                             )
@@ -1568,9 +1582,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             b:
                                                                 (Variable
@@ -1596,9 +1612,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 ),
                                                             op:
                                                                 (Variable
@@ -1624,9 +1642,11 @@
                                                                     ()
                                                                     .false.
                                                                     .false.
+                                                                    .false.
                                                                     NotMethod
                                                                     ()
                                                                     []
+                                                                    ()
                                                                 )
                                                         })
                                                     op
@@ -1650,7 +1670,7 @@
                                                         Implementation
                                                         ()
                                                         .true.
-                                                        .false.
+                                                        .true.
                                                         .false.
                                                         .false.
                                                         .false.
@@ -1692,9 +1712,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             u:
                                                 (Variable
@@ -1720,9 +1742,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             v:
                                                 (Variable
@@ -1748,9 +1772,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     op
@@ -1764,6 +1790,7 @@
                     template_03_m
                     ()
                     [template_03_m]
+                    .false.
                     .false.
                     .false.
                     .false.

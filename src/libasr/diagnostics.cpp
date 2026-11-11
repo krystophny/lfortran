@@ -133,8 +133,10 @@ std::string get_line(std::string str, int n)
     return line;
 }
 
-void populate_span(diag::Span &s, const LocationManager &lm,
-        bool skip_output_to_input = false) {
+// Converts the linear `loc` of the span to lines and columns in the original
+// code and returns the position of `loc.first` in the original code
+static uint32_t populate_span_linecol(diag::Span &s, const LocationManager &lm,
+        bool skip_output_to_input) {
     std::string first_filename, last_filename;
     uint32_t first_pos = skip_output_to_input
         ? s.loc.first : lm.output_to_input_pos(s.loc.first, false);
@@ -152,6 +154,19 @@ void populate_span(diag::Span &s, const LocationManager &lm,
         s.last_line = s.first_line;
         s.last_column = s.first_column;
     }
+    return first_pos;
+}
+
+// Diagnostics emitted by the C preprocessor itself carry input-buffer
+// offsets (not output-buffer offsets), so we must bypass the
+// output->input remapping that LocationManager normally applies.
+static bool has_input_offsets(const diag::Diagnostic &d) {
+    return d.stage == diag::Stage::CPreprocessor;
+}
+
+void populate_span(diag::Span &s, const LocationManager &lm,
+        bool skip_output_to_input = false) {
+    uint32_t first_pos = populate_span_linecol(s, lm, skip_output_to_input);
     std::string input;
     // An interactive cell is only ever in memory, so the text comes with the
     // location rather than from a file of that name.
@@ -172,13 +187,19 @@ void populate_span(diag::Span &s, const LocationManager &lm,
 
 // Loop over all labels and their spans, populate all of them
 void populate_spans(diag::Diagnostic &d, const LocationManager &lm) {
-    // Diagnostics emitted by the C preprocessor itself carry input-buffer
-    // offsets (not output-buffer offsets), so we must bypass the
-    // output->input remapping that LocationManager normally applies.
-    bool skip_output_to_input = (d.stage == diag::Stage::CPreprocessor);
+    bool skip = has_input_offsets(d);
     for (auto &l : d.labels) {
         for (auto &s : l.spans) {
-            populate_span(s, lm, skip_output_to_input);
+            populate_span(s, lm, skip);
+        }
+    }
+}
+
+void populate_spans_linecol(Diagnostic &d, const LocationManager &lm) {
+    bool skip = has_input_offsets(d);
+    for (auto &l : d.labels) {
+        for (auto &s : l.spans) {
+            populate_span_linecol(s, lm, skip);
         }
     }
 }
@@ -229,10 +250,10 @@ std::string render_diagnostic_human(const Diagnostic &d, bool use_colors) {
     if (!d.code.empty()) out << " [" << d.code << "]";
     out << reset << bold << ": " << d.message << reset << std::endl;
 
+    int line_num_width = 1;
     if (d.labels.size() > 0 && d.labels[0].spans.size() > 0) {
         Label l = d.labels[0];
         Span s = l.spans[0];
-        int line_num_width = 1;
         if (s.last_line >= 10000) {
             line_num_width = 5;
         } else if (s.last_line >= 1000) {
@@ -354,6 +375,22 @@ std::string render_diagnostic_human(const Diagnostic &d, bool use_colors) {
                 out << " " << l.message << reset << std::endl;
             }
         } // Labels
+    }
+    // Children without labels, such as a help, follow as `= help: ...`,
+    // with the lines of a message of several lines aligned
+    for (auto &c : d.children) {
+        std::string child_type = std::get<0>(diag_level_to_str(c, use_colors));
+        std::string prefix = "= " + child_type + ": ";
+        out << std::string(line_num_width+1, ' ') << blue_bold << "=" << reset
+            << " " << bold << child_type << reset << ": ";
+        std::string message = c.message;
+        size_t pos;
+        while ((pos = message.find('\n')) != std::string::npos) {
+            out << message.substr(0, pos) << std::endl
+                << std::string(line_num_width+1+prefix.size(), ' ');
+            message = message.substr(pos+1);
+        }
+        out << message << std::endl;
     }
     return out.str();
 }

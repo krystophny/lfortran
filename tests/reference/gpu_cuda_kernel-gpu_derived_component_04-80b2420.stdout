@@ -1,0 +1,156 @@
+#include <stdint.h>
+
+struct point {
+    float x;
+    float y;
+};
+
+struct outer {
+    point a;
+    int k;
+};
+
+struct __ScalarArgs___lfortran_gpu_kernel_0_24gpu_derived_component_04 {
+    int __dim_r_0;
+    int __lb_r_0;
+    int __dim_x_0;
+    int __lb_x_0;
+    int __dim_y_0;
+    int __lb_y_0;
+};
+
+extern "C" __global__ void __launch_bounds__(256) __lfortran_gpu_kernel_0_24gpu_derived_component_04(
+    point& last,
+    float* __restrict__ r,
+    float* __restrict__ x,
+    float* __restrict__ y,
+    __ScalarArgs___lfortran_gpu_kernel_0_24gpu_derived_component_04 __scalar_args)
+{
+    int __lb_r_0 = __scalar_args.__lb_r_0;
+    int __lb_x_0 = __scalar_args.__lb_x_0;
+    int __lb_y_0 = __scalar_args.__lb_y_0;
+    int __flat_idx;
+    point __gpu_private_last;
+    int i__dc;
+    const int n = 100000;
+    point q;
+    if ((((blockIdx.x * blockDim.x) + threadIdx.x) >= 100000)) {
+        return;
+    }
+    __flat_idx = ((blockIdx.x * blockDim.x) + threadIdx.x);
+    i__dc = (__flat_idx + 1);
+    __gpu_private_last = last;
+    q.x = y[((int)(i__dc) - (__lb_y_0))];
+    q.y = x[((int)(i__dc) - (__lb_x_0))];
+    r[((int)(i__dc) - (__lb_r_0))] = (q.x - q.y);
+    if ((i__dc == n)) {
+        __gpu_private_last = q;
+        last = __gpu_private_last;
+    }
+}
+
+struct __ScalarArgs___lfortran_gpu_kernel_1_26gpu_derived_component_04_m1s {
+    int __dim_r_0;
+    int __lb_r_0;
+    int __dim_x_0;
+    int __lb_x_0;
+    int __dim_y_0;
+    int __lb_y_0;
+    int __loop_end_0;
+};
+
+extern "C" __global__ void __launch_bounds__(256) __lfortran_gpu_kernel_1_26gpu_derived_component_04_m1s(
+    point& p,
+    float* __restrict__ r,
+    float* __restrict__ x,
+    float* __restrict__ y,
+    __ScalarArgs___lfortran_gpu_kernel_1_26gpu_derived_component_04_m1s __scalar_args)
+{
+    int __lb_r_0 = __scalar_args.__lb_r_0;
+    int __lb_x_0 = __scalar_args.__lb_x_0;
+    int __lb_y_0 = __scalar_args.__lb_y_0;
+    int __loop_end_0 = __scalar_args.__loop_end_0;
+    int __flat_idx;
+    point __gpu_private_p;
+    int i__dc;
+    if ((((blockIdx.x * blockDim.x) + threadIdx.x) >= (((__loop_end_0 >= 1)) ? (((__loop_end_0 - 1) + 1)) : (0)))) {
+        return;
+    }
+    __flat_idx = ((blockIdx.x * blockDim.x) + threadIdx.x);
+    i__dc = (__flat_idx + 1);
+    __gpu_private_p = p;
+    __gpu_private_p.x = x[((int)(i__dc) - (__lb_x_0))];
+    __gpu_private_p.y = y[((int)(i__dc) - (__lb_y_0))];
+    p = __gpu_private_p;
+    r[((int)(i__dc) - (__lb_r_0))] = (__gpu_private_p.x + __gpu_private_p.y);
+}
+
+__device__ inline float _lcompilers_aint_f32_gpu_29(float a) {
+    float _lcompilers_aint_f32{};
+    if ((abs(a) <   9.22337203685477581e+18f)) {
+        _lcompilers_aint_f32 = ((float)((long)a));
+    } else {
+        _lcompilers_aint_f32 = a;
+    }
+    return _lcompilers_aint_f32;
+}
+
+__device__ inline float _lcompilers_aint_f321_gpu_30(float a) {
+    float _lcompilers_aint_f321{};
+    if ((abs(a) <   9.22337203685477581e+18f)) {
+        _lcompilers_aint_f321 = ((float)((long)a));
+    } else {
+        _lcompilers_aint_f321 = a;
+    }
+    return _lcompilers_aint_f321;
+}
+
+__device__ inline float _lcompilers_anint_f32_gpu_28(float a) {
+    float _lcompilers_anint_f32{};
+    if ((a >   0.00000000000000000e+00f)) {
+        _lcompilers_anint_f32 = _lcompilers_aint_f32_gpu_29((a +   5.00000000000000000e-01f));
+    } else {
+        _lcompilers_anint_f32 = _lcompilers_aint_f321_gpu_30((a -   5.00000000000000000e-01f));
+    }
+    return _lcompilers_anint_f32;
+}
+
+struct __ScalarArgs___lfortran_gpu_kernel_2_26gpu_derived_component_04_m1t {
+    int __dim_a_0;
+    int __lb_a_0;
+    int __loop_end_0;
+};
+
+extern "C" __global__ void __launch_bounds__(256) __lfortran_gpu_kernel_2_26gpu_derived_component_04_m1t(
+    int* __restrict__ a,
+    outer& o,
+    __ScalarArgs___lfortran_gpu_kernel_2_26gpu_derived_component_04_m1t __scalar_args)
+{
+    int __lb_a_0 = __scalar_args.__lb_a_0;
+    int __loop_end_0 = __scalar_args.__loop_end_0;
+    int __flat_idx;
+    float __gpu_private_o_a_x;
+    float __gpu_private_o_a_y;
+    int __gpu_private_o_k;
+    int i__dc;
+    if ((((blockIdx.x * blockDim.x) + threadIdx.x) >= (((__loop_end_0 >= 1)) ? (((__loop_end_0 - 1) + 1)) : (0)))) {
+        return;
+    }
+    __flat_idx = ((blockIdx.x * blockDim.x) + threadIdx.x);
+    i__dc = (__flat_idx + 1);
+    __gpu_private_o_a_x = o.a.x;
+    __gpu_private_o_a_y = o.a.y;
+    __gpu_private_o_k = o.k;
+    __gpu_private_o_a_x = ((float)i__dc);
+    o.a.x = __gpu_private_o_a_x;
+    a[((int)(i__dc) - (__lb_a_0))] = ((int)__gpu_private_o_a_x);
+    if ((i__dc == 3)) {
+        __gpu_private_o_k = 7;
+        o.k = __gpu_private_o_k;
+    }
+    if ((i__dc == 5)) {
+        __gpu_private_o_a_y = ((float)50);
+        o.a.y = __gpu_private_o_a_y;
+    }
+}
+

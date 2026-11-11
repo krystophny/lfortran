@@ -42,9 +42,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     base
@@ -95,9 +97,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             i:
                                 (Variable
@@ -119,9 +123,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             struct_from:
                                 (Variable
@@ -150,9 +156,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             struct_from2:
                                 (Variable
@@ -187,9 +195,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             struct_from3:
                                 (Variable
@@ -218,9 +228,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             struct_to:
                                 (Variable
@@ -249,9 +261,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             struct_to2:
                                 (Variable
@@ -286,9 +300,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             struct_to3:
                                 (Variable
@@ -317,9 +333,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             to:
                                 (Variable
@@ -349,9 +367,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             toml_value:
                                 (Struct
@@ -378,9 +398,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     toml_value
@@ -543,6 +565,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Allocate
                         [((Var 2 to)
@@ -567,6 +591,8 @@
                             ()
                             [(Var 2 to)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -621,6 +647,8 @@
                                 ()
                             )]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -670,6 +698,8 @@
                         )
                         (IntegerConstant 42 (Integer 4) Decimal)
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -742,7 +772,7 @@
                         ((Var 2 i)
                         (IntegerConstant 1 (Integer 4) Decimal)
                         (IntegerConstant 3 (Integer 4) Decimal)
-                        ())
+                        (IntegerConstant 1 (Integer 4) Decimal))
                         [(Assignment
                             (StructInstanceMember
                                 (ArrayItem
@@ -758,6 +788,7 @@
                                     )
                                     ColMajor
                                     ()
+                                    .false.
                                 )
                                 2 1_toml_value_x
                                 (Integer 4)
@@ -771,6 +802,8 @@
                                 ()
                             )
                             ()
+                            .false.
+                            .false.
                             .false.
                             .false.
                         )]
@@ -815,7 +848,7 @@
                                 (Integer 4)
                                 ()
                             )
-                            ())
+                            (IntegerConstant 1 (Integer 4) Decimal))
                             [(If
                                 ()
                                 (IntegerCompare
@@ -833,6 +866,7 @@
                                             )
                                             ColMajor
                                             ()
+                                            .false.
                                         )
                                         2 1_toml_value_x
                                         (Integer 4)
@@ -885,6 +919,8 @@
                         )
                         (IntegerConstant 123 (Integer 4) Decimal)
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -940,6 +976,8 @@
                         )
                         (IntegerConstant 42 (Integer 4) Decimal)
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )

@@ -25,16 +25,17 @@ Result<ASR::asr_t*> symbol_table_visitor(Allocator &al, AST::TranslationUnit_t &
         SymbolTable *symbol_table,
         CompilerOptions &compiler_options,
         std::map<uint64_t, std::map<std::string, ASR::ttype_t*>>& implicit_mapping,
-        std::map<uint64_t, ASR::symbol_t*>& common_variables_hash,
-        std::map<uint64_t, size_t>& common_variables_byte_offset,
         std::map<uint64_t, std::vector<std::string>>& external_procedures_mapping,
+        std::map<uint32_t, std::set<std::string>> &procedure_references,
         std::map<uint64_t, std::vector<std::string>>& explicit_intrinsic_procedures_mapping,
         std::map<uint32_t, std::map<std::string, std::pair<ASR::ttype_t*, ASR::symbol_t*>>> &instantiate_types,
         std::map<uint32_t, std::map<std::string, ASR::symbol_t*>> &instantiate_symbols,
         std::map<std::string, std::map<std::string, std::vector<AST::decl_stmt_t*>>> &entry_functions,
         std::map<std::string, std::vector<int>> &entry_function_arguments_mapping,
         std::map<uint32_t, std::vector<ASR::stmt_t*>> &data_structure,
-        LCompilers::LocationManager &lm);
+        std::set<ASR::symbol_t*> &getter_functions,
+        LCompilers::LocationManager &lm,
+        const std::map<std::string, ASR::ttype_t*> *interactive_implicit_types);
 
 Result<ASR::TranslationUnit_t*> body_visitor(Allocator &al,
         AST::TranslationUnit_t &ast,
@@ -42,15 +43,15 @@ Result<ASR::TranslationUnit_t*> body_visitor(Allocator &al,
         ASR::asr_t *unit,
         CompilerOptions &compiler_options,
         std::map<uint64_t, std::map<std::string, ASR::ttype_t*>>& implicit_mapping,
-        std::map<uint64_t, ASR::symbol_t*>& common_variables_hash,
-        std::map<uint64_t, size_t>& common_variables_byte_offset,
         std::map<uint64_t, std::vector<std::string>>& external_procedures_mapping,
+        std::map<uint32_t, std::set<std::string>> &procedure_references,
         std::map<uint64_t, std::vector<std::string>>& explicit_intrinsic_procedures_mapping,
         std::map<uint32_t, std::map<std::string, std::pair<ASR::ttype_t*, ASR::symbol_t*>>> &instantiate_types,
         std::map<uint32_t, std::map<std::string, ASR::symbol_t*>> &instantiate_symbols,
         std::map<std::string, std::map<std::string, std::vector<AST::decl_stmt_t*>>> &entry_functions,
         std::map<std::string, std::vector<int>> &entry_function_arguments_mapping,
         std::map<uint32_t, std::vector<ASR::stmt_t*>> &data_structure,
+        std::set<ASR::symbol_t*> &getter_functions,
         LCompilers::LocationManager &lm);
 
 void load_rtlib() {
@@ -61,27 +62,39 @@ void load_rtlib() {
 Result<ASR::TranslationUnit_t*> ast_to_asr(Allocator &al,
     AST::TranslationUnit_t &ast, diag::Diagnostics &diagnostics,
     SymbolTable *symbol_table, bool symtab_only,
-    CompilerOptions &compiler_options, LCompilers::LocationManager &lm)
+    CompilerOptions &compiler_options, LCompilers::LocationManager &lm,
+    std::map<std::string, ASR::ttype_t*> *interactive_implicit_types)
 {
     std::map<uint64_t, std::map<std::string, ASR::ttype_t*>> implicit_mapping;
-    std::map<uint64_t, ASR::symbol_t*> common_variables_hash;
-    std::map<uint64_t, size_t> common_variables_byte_offset;
     std::map<uint64_t, std::vector<std::string>> external_procedures_mapping;
+    std::map<uint32_t, std::set<std::string>> procedure_references;
     std::map<uint64_t, std::vector<std::string>> explicit_intrinsic_procedures_mapping;
     std::map<uint32_t, std::map<std::string, std::pair<ASR::ttype_t*, ASR::symbol_t*>>> instantiate_types;
     std::map<uint32_t, std::map<std::string, ASR::symbol_t*>> instantiate_symbols;
     std::map<std::string, std::map<std::string, std::vector<AST::decl_stmt_t*>>> entry_functions;
     std::map<std::string, std::vector<int>> entry_function_arguments_mapping;
     std::map<uint32_t, std::vector<ASR::stmt_t*>> data_structure;
+    std::set<ASR::symbol_t*> getter_functions;
     ASR::asr_t *unit;
+    // selected_real_kind folds constants here and instantiates the runtime
+    // call later; both must see this compilation's long double kind.
+    set_active_c_long_double_kind(compiler_options.po.c_long_double_kind);
     auto res = symbol_table_visitor(al, ast, diagnostics, symbol_table,
-        compiler_options, implicit_mapping, common_variables_hash, common_variables_byte_offset,
-        external_procedures_mapping, explicit_intrinsic_procedures_mapping, instantiate_types,
-        instantiate_symbols, entry_functions, entry_function_arguments_mapping, data_structure, lm);
+        compiler_options, implicit_mapping,
+        external_procedures_mapping, procedure_references, explicit_intrinsic_procedures_mapping, instantiate_types,
+        instantiate_symbols, entry_functions, entry_function_arguments_mapping, data_structure,
+        getter_functions, lm,
+        interactive_implicit_types);
     if (res.ok) {
         unit = res.result;
     } else {
         return res.error;
+    }
+    // Some errors are reported without aborting, so that the rest of the
+    // code is still checked. Without --continue-compilation, any reported
+    // error must still fail the compilation.
+    if (!compiler_options.continue_compilation && diagnostics.has_error()) {
+        return Error();
     }
     ASR::TranslationUnit_t *tu = ASR::down_cast2<ASR::TranslationUnit_t>(unit);
     if (compiler_options.po.dump_all_passes) {
@@ -102,22 +115,26 @@ Result<ASR::TranslationUnit_t*> ast_to_asr(Allocator &al,
     PassUtils::UpdateDependenciesVisitor u(al);
     u.visit_TranslationUnit(*tu);
 #if defined(WITH_LFORTRAN_ASSERT)
-    if (!asr_verify(*tu, true, diagnostics)) {
+    // After a reported error the ASR can hold the bad code, so skip verify.
+    if (!diagnostics.has_error() && !asr_verify(*tu, true, diagnostics)) {
         return Error();
     };
 #endif
     if (!symtab_only) {
         auto res = body_visitor(
             al, ast, diagnostics, unit, compiler_options,
-            implicit_mapping, common_variables_hash, common_variables_byte_offset,
-            external_procedures_mapping, explicit_intrinsic_procedures_mapping, instantiate_types,
+            implicit_mapping,
+            external_procedures_mapping, procedure_references, explicit_intrinsic_procedures_mapping, instantiate_types,
             instantiate_symbols, entry_functions, entry_function_arguments_mapping,
-            data_structure, lm
+            data_structure, getter_functions, lm
         );
         if (res.ok) {
             tu = res.result;
         } else {
             return res.error;
+        }
+        if (!compiler_options.continue_compilation && diagnostics.has_error()) {
+            return Error();
         }
         if (compiler_options.rtlib) load_rtlib();
         if (compiler_options.po.dump_all_passes) {
@@ -136,10 +153,13 @@ Result<ASR::TranslationUnit_t*> ast_to_asr(Allocator &al,
             outfile.close();
         }
 #if defined(WITH_LFORTRAN_ASSERT)
-        if (!asr_verify(*tu, true, diagnostics)) {
+        if (!diagnostics.has_error() && !asr_verify(*tu, true, diagnostics)) {
             return Error();
         };
 #endif
+    }
+    if (interactive_implicit_types) {
+        *interactive_implicit_types = implicit_mapping[get_hash(&tu->base.base)];
     }
     return tu;
 }

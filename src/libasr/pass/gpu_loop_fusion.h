@@ -1,0 +1,38 @@
+#ifndef LIBASR_PASS_GPU_LOOP_FUSION_H
+#define LIBASR_PASS_GPU_LOOP_FUSION_H
+
+#include <libasr/asr.h>
+#include <libasr/utils.h>
+
+#include <set>
+
+namespace LCompilers {
+
+    // Fuses a parallel loop that computes arrays into the parallel loop
+    // after it that reads them at constant offsets, recomputing each value
+    // where it is read, for loops assigned to the device. See
+    // gpu_loop_fusion.cpp.
+    void pass_gpu_loop_fusion(Allocator &al, ASR::TranslationUnit_t &unit,
+                              const PassOptions &pass_options);
+
+    // Forwards a block-private full-domain map into the statements that
+    // read its elements at subscripts computed there, so that no private
+    // array is stored per thread.
+    void pass_gpu_private_map_forwarding(Allocator &al,
+        ASR::TranslationUnit_t &unit, const PassOptions &pass_options);
+
+    // Eliminates a single-use private map into its full-domain ordered
+    // scalar fold after shared reduction lowering, before device storage.
+    void pass_gpu_private_reduction_fusion(Allocator &al,
+        ASR::TranslationUnit_t &unit, const PassOptions &pass_options);
+
+    // The fusion, adding to `rarely_run` the original loops it keeps for
+    // the last iteration of the DO loops around them (GpuRarelyRun in
+    // gpu_loop_utils.h).
+    void gpu_loop_fusion(Allocator &al, ASR::TranslationUnit_t &unit,
+                         const PassOptions &pass_options,
+                         std::set<ASR::stmt_t*> &rarely_run);
+
+} // namespace LCompilers
+
+#endif // LIBASR_PASS_GPU_LOOP_FUSION_H

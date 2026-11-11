@@ -27,9 +27,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             b:
                                 (Variable
@@ -51,9 +53,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             c:
                                 (Variable
@@ -75,9 +79,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             lhs:
                                 (Variable
@@ -105,9 +111,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             r1:
                                 (Variable
@@ -135,9 +143,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             rhs:
                                 (Variable
@@ -165,9 +175,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     transfer_09
@@ -189,6 +201,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (Var 2 a)
@@ -201,6 +215,7 @@
                                 (Integer 4)
                                 ColMajor
                                 ()
+                                .true.
                             )
                             (Var 2 a)
                             ()
@@ -208,6 +223,8 @@
                             ()
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -222,6 +239,7 @@
                                 (Integer 4)
                                 ColMajor
                                 ()
+                                .true.
                             )
                             (Var 2 b)
                             ()
@@ -229,6 +247,8 @@
                             ()
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -243,6 +263,7 @@
                                 (Integer 4)
                                 ColMajor
                                 ()
+                                .true.
                             )
                             (Var 2 c)
                             ()
@@ -252,6 +273,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (ArraySection
@@ -284,6 +307,8 @@
                         ()
                         .false.
                         .false.
+                        .false.
+                        .false.
                     )
                     (Assignment
                         (ArraySection
@@ -314,6 +339,8 @@
                             ()
                         )
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -329,6 +356,8 @@
                             (Var 2 b)
                             (Var 2 c)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -345,6 +374,8 @@
                             (Var 2 lhs)
                             (Var 2 r1)]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -364,6 +395,7 @@
                                         (Integer 4)
                                         ColMajor
                                         ()
+                                        .true.
                                     )
                                     NotEq
                                     (ArrayItem
@@ -374,6 +406,7 @@
                                         (Integer 4)
                                         ColMajor
                                         ()
+                                        .true.
                                     )
                                     (Logical 4)
                                     ()
@@ -388,6 +421,7 @@
                                         (Integer 4)
                                         ColMajor
                                         ()
+                                        .true.
                                     )
                                     NotEq
                                     (ArrayItem
@@ -398,6 +432,7 @@
                                         (Integer 4)
                                         ColMajor
                                         ()
+                                        .true.
                                     )
                                     (Logical 4)
                                     ()
@@ -415,6 +450,7 @@
                                     (Integer 4)
                                     ColMajor
                                     ()
+                                    .true.
                                 )
                                 NotEq
                                 (ArrayItem
@@ -425,6 +461,7 @@
                                     (Integer 4)
                                     ColMajor
                                     ()
+                                    .true.
                                 )
                                 (Logical 4)
                                 ()
@@ -450,6 +487,7 @@
                                         (Real 4)
                                         ColMajor
                                         ()
+                                        .true.
                                     )
                                     NotEq
                                     (Var 2 a)
@@ -466,6 +504,7 @@
                                         (Real 4)
                                         ColMajor
                                         ()
+                                        .true.
                                     )
                                     NotEq
                                     (Var 2 b)
@@ -485,6 +524,7 @@
                                     (Real 4)
                                     ColMajor
                                     ()
+                                    .true.
                                 )
                                 NotEq
                                 (Var 2 c)

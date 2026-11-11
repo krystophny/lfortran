@@ -6,6 +6,7 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Value.h>
@@ -43,6 +44,14 @@ namespace LCompilers {
         * dimensions are available at compile time.
         */
         bool is_explicit_shape(ASR::Variable_t* v);
+
+        /*
+        * The type code of an item of type `val_type` in the variadic
+        * protocol of _lfortran_formatted_read. It determines how the
+        * runtime converts the field and the storage size of the item.
+        */
+        int32_t get_formatted_read_type_code(ASR::ttype_t* val_type,
+            ASR::expr_t* val_expr);
 
         /*
         * Available descriptors are listed
@@ -104,9 +113,9 @@ namespace LCompilers {
                 */
                 virtual
                 llvm::Type* get_argument_type(llvm::Type* type,
-                    std::uint32_t, std::string,
+                    std::uint64_t, std::string,
                     std::unordered_map
-                    <std::uint32_t, std::unordered_map
+                    <std::uint64_t, std::unordered_map
                                     <std::string, llvm::Type*>>&
                                     arr_arg_type_cache) = 0;
 
@@ -121,7 +130,8 @@ namespace LCompilers {
                     ASR::expr_t* expr,
                     ASR::ttype_t* m_type_,
                     llvm::Type* el_type,
-                    bool get_pointer=false) = 0;
+                    bool get_pointer=false,
+                    ASR::symbol_t* type_declaration=nullptr) = 0;
 
                 /*
                 * Fills the elements of the input array descriptor
@@ -134,7 +144,7 @@ namespace LCompilers {
                     llvm::Module* module, bool reserve_data_memory=true) = 0;
 
                 virtual
-                void fill_array_details(ASR::expr_t* src_expr, ASR::expr_t* dest_expr,
+                void fill_array_details(ASR::expr_t* src_expr, ASR::symbol_t* dest_type_declaration,
                     llvm::Value* source, llvm::Value* destination,
                     ASR::ttype_t* source_array_type, ASR::ttype_t* dest_array_type, llvm::Module* module, bool ignore_data) = 0;
 
@@ -200,6 +210,13 @@ namespace LCompilers {
                 */
                 virtual
                 llvm::Type* get_dimension_descriptor_type(bool get_pointer=false) = 0;
+
+                /*
+                * Whether `type` is an array descriptor type created by
+                * this class (not the dimension descriptor type).
+                */
+                virtual
+                bool is_array_descriptor_type(llvm::Type* type) = 0;
 
                 /*
                 * Returns the llvm::Type* used for array indices (i32 or i64).
@@ -322,7 +339,8 @@ namespace LCompilers {
                                      ASR::ttype_t* asr_data_type = nullptr,
                                      llvm::Type* result_desc_type = nullptr,
                                      llvm::Value* order = nullptr,
-                                     ASR::expr_t* order_expr = nullptr) = 0;
+                                     ASR::expr_t* order_expr = nullptr,
+                                     llvm::Value* result = nullptr) = 0;
 
                 virtual
                 void copy_array(llvm::Type* src_ty, llvm::Value* src, llvm::Type* dest_ty, llvm::Value* dest,
@@ -345,32 +363,7 @@ namespace LCompilers {
                                             int output_kind, int dim_kind=4) = 0;
 
                 /*
-                * Creates a contiguous copy of data from a DescriptorArray.
-                * Helpful when having strided access to an array.
-                * Returns a pointer to the newly allocated contiguous buffer.
-                * Allocation is done on heap using lfortran_malloc,
-                * So, please make sure to free the memory after use.
-                *
-                * Note: Similar logic exists in ASR passes (pass/print_arr.cpp & pass/array_op.cpp).
-                * But, the ASR pass for print statements was disabled in #6351.
-                * Enabling it opened other issues, hence this separate LLVM implementation
-                * to handle strided arrays for writing array into strings (used in print statements), 
-                * by storing in a contiguous buffer first.
-                */
-                virtual
-                llvm::Value* create_contiguous_copy_from_descriptor(
-                    llvm::Type* source_llvm_type, llvm::Value* source_desc,
-                    llvm::Type* elem_type, int rank, llvm::Module* module) = 0;
-
-                virtual
-                llvm::Value* create_contiguous_copy_from_descriptor(
-                    llvm::Type* source_llvm_type, llvm::Value* source_desc,
-                    llvm::Type* elem_type, llvm::Value* rank,
-                    llvm::Value* num_elements, llvm::Module* module) = 0;
-
-                /*
                 * Copies contiguous data into a potentially-strided descriptor array.
-                * The inverse of create_contiguous_copy_from_descriptor.
                 * Uses element-wise copy respecting the target descriptor's strides.
                 */
                 virtual
@@ -398,14 +391,21 @@ namespace LCompilers {
                 virtual
                 llvm::Value* internal_to_cfi(
                     llvm::Type* internal_type, llvm::Value* internal_desc,
-                    llvm::Type* el_type, int n_dims, uint64_t elem_size,
+                    llvm::Type* el_type, int n_dims, llvm::Value* elem_size,
                     int8_t type_code, int cfi_attr) = 0;
 
                 virtual
                 llvm::Value* cfi_to_internal(
                     llvm::Type* internal_type,
                     llvm::Type* el_type, llvm::Value* cfi_desc,
-                    int n_dims, uint64_t elem_size) = 0;
+                    int n_dims, uint64_t elem_size,
+                    llvm::Value* internal_desc = nullptr) = 0;
+
+                virtual
+                void cfi_to_internal_string(
+                    llvm::Type* internal_type, llvm::Type* str_desc_type,
+                    llvm::Value* cfi_desc, int n_dims,
+                    llvm::Value* internal_desc) = 0;
 
                 virtual
                 void push_data_array_args(
@@ -452,6 +452,7 @@ namespace LCompilers {
 
                 std::map<std::string, std::pair<llvm::StructType*, llvm::Type*>> tkr2array;
                 std::map<std::pair<llvm::Type*, int>, llvm::StructType*> rank_array_cache;
+                std::unordered_set<llvm::Type*> array_descriptor_types;
 
                 CompilerOptions& co;
 
@@ -494,9 +495,9 @@ namespace LCompilers {
 
                 virtual
                 llvm::Type* get_argument_type(llvm::Type* type,
-                    std::uint32_t m_h, std::string arg_name,
+                    std::uint64_t m_h, std::string arg_name,
                     std::unordered_map
-                    <std::uint32_t, std::unordered_map
+                    <std::uint64_t, std::unordered_map
                                     <std::string, llvm::Type*>>&
                         arr_arg_type_cache);
 
@@ -505,7 +506,8 @@ namespace LCompilers {
                     ASR::expr_t* expr,
                     ASR::ttype_t* m_type_,
                     llvm::Type* el_type,
-                    bool get_pointer=false);
+                    bool get_pointer=false,
+                    ASR::symbol_t* type_declaration=nullptr);
 
                 virtual
                 void fill_array_details(
@@ -514,7 +516,7 @@ namespace LCompilers {
                     llvm::Module* module, bool reserve_data_memory=true);
 
                 virtual
-                void fill_array_details(ASR::expr_t* src_expr, ASR::expr_t* dest_expr,
+                void fill_array_details(ASR::expr_t* src_expr, ASR::symbol_t* dest_type_declaration,
                     llvm::Value* source, llvm::Value* destination,
                     ASR::ttype_t* source_array_type, ASR::ttype_t* dest_array_type, llvm::Module* module, bool ignore_data);
 
@@ -569,6 +571,9 @@ namespace LCompilers {
 
                 virtual
                 llvm::Type* get_dimension_descriptor_type(bool get_pointer=false);
+
+                virtual
+                bool is_array_descriptor_type(llvm::Type* type);
 
                 virtual
                 llvm::Value* get_pointer_to_data(llvm::Type* type, llvm::Value* arr);
@@ -637,7 +642,8 @@ namespace LCompilers {
                                      ASR::ttype_t* asr_data_type = nullptr,
                                      llvm::Type* result_desc_type = nullptr,
                                      llvm::Value* order = nullptr,
-                                     ASR::expr_t* order_expr = nullptr);
+                                     ASR::expr_t* order_expr = nullptr,
+                                     llvm::Value* result = nullptr);
 
                 virtual
                 void copy_array(llvm::Type* src_ty, llvm::Value* src, llvm::Type* dest_ty, llvm::Value* dest,
@@ -658,17 +664,6 @@ namespace LCompilers {
                 virtual
                 llvm::Value* get_array_size(llvm::Type* type, llvm::Value* array, llvm::Value* dim,
                                             int output_kind, int dim_kind=4);
-
-                virtual
-                llvm::Value* create_contiguous_copy_from_descriptor(
-                    llvm::Type* source_llvm_type, llvm::Value* source_desc,
-                    llvm::Type* elem_type, int rank, llvm::Module* module);
-
-                virtual
-                llvm::Value* create_contiguous_copy_from_descriptor(
-                    llvm::Type* source_llvm_type, llvm::Value* source_desc,
-                    llvm::Type* elem_type, llvm::Value* rank,
-                    llvm::Value* num_elements, llvm::Module* module);
 
                 virtual
                 void copy_contiguous_data_to_descriptor(
@@ -699,17 +694,30 @@ namespace LCompilers {
                 // folds offset into base_addr, converts strides to bytes.
                 llvm::Value* internal_to_cfi(
                     llvm::Type* internal_type, llvm::Value* internal_desc,
-                    llvm::Type* el_type, int n_dims, uint64_t elem_size,
+                    llvm::Type* el_type, int n_dims, llvm::Value* elem_size,
                     int8_t type_code, int cfi_attr);
 
                 // Convert a CFI descriptor to an internal descriptor:
                 // sets offset=0, converts byte strides to element strides.
+                // Character data is wrapped in a string_descriptor.
                 // internal_type: the cached internal struct type to use for the alloca.
+                // internal_desc: an existing internal descriptor to write into;
+                // when null, a new one is allocated.
                 llvm::Value* cfi_to_internal(
                     llvm::Type* internal_type,
                     llvm::Type* el_type, llvm::Value* cfi_desc,
-                    int n_dims, uint64_t elem_size);
-                
+                    int n_dims, uint64_t elem_size,
+                    llvm::Value* internal_desc = nullptr);
+
+                // Write a CFI character array descriptor back into an
+                // existing internal one: its string_descriptor takes the
+                // CFI base_addr and elem_len (the runtime character length),
+                // and byte strides are divided by that length.
+                void cfi_to_internal_string(
+                    llvm::Type* internal_type, llvm::Type* str_desc_type,
+                    llvm::Value* cfi_desc, int n_dims,
+                    llvm::Value* internal_desc);
+
                 void push_data_array_args(
                     ASR::ttype_t* val_type, ASR::expr_t* val_expr,
                     llvm::Value* data_ptr, llvm::Value* n_elems,

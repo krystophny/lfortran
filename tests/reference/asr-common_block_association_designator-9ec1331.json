@@ -1,0 +1,13 @@
+{
+    "basename": "asr-common_block_association_designator-9ec1331",
+    "cmd": "lfortran --show-asr --no-color {infile} -o {outfile}",
+    "infile": "tests/asr/verify/common_block_association_designator.asr",
+    "infile_hash": "e9a90069cf76f089371de6bf175d44ce0271544e2bf0a3e684c3bb30",
+    "outfile": null,
+    "outfile_hash": null,
+    "stdout": null,
+    "stdout_hash": null,
+    "stderr": "asr-common_block_association_designator-9ec1331.stderr",
+    "stderr_hash": "f9208677ad4b3d84246449708190c6660f1e3693192111bb35c45bf4",
+    "returncode": 2
+}

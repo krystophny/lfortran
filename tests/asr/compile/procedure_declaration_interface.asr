@@ -40,9 +40,11 @@
                     nil
                     false
                     false
+                    false
                     :NotMethod
                     nil
                     []
+                    nil
                   )
                 }
               )
@@ -75,6 +77,8 @@
                     (SymbolRef 1 "target_value")
                   )
                   nil
+                  false
+                  false
                   false
                   false
                 )
@@ -117,9 +121,11 @@
               nil
               false
               false
+              false
               :NotMethod
               nil
               []
+              nil
             )
           }
         )
@@ -139,6 +145,8 @@
               )
             )
             nil
+            false
+            false
             false
             false
           )
@@ -179,6 +187,8 @@
                 )
               ]
               :FormatFortran
+              []
+              nil
               (Allocatable
                 (String
                   1
@@ -221,6 +231,8 @@
                 )
               ]
               :FormatFortran
+              []
+              nil
               (Allocatable
                 (String
                   1
@@ -380,9 +392,11 @@
                     nil
                     false
                     false
+                    false
                     :NotMethod
                     nil
                     []
+                    nil
                   )
                 }
               )
@@ -454,9 +468,11 @@
                     nil
                     false
                     false
+                    false
                     :NotMethod
                     nil
                     []
+                    nil
                   )
                   "my_wrapper" (Variable
                     5
@@ -479,9 +495,11 @@
                     nil
                     false
                     false
+                    false
                     :NotMethod
                     nil
                     []
+                    nil
                   )
                   "wrapper_wrapper" (Function
                     (SymbolTable
@@ -508,9 +526,11 @@
                           nil
                           false
                           false
+                          false
                           :NotMethod
                           nil
                           []
+                          nil
                         )
                       }
                     )
@@ -550,6 +570,8 @@
                           nil
                         )
                         nil
+                        false
+                        false
                         false
                         false
                       )
@@ -624,6 +646,8 @@
                   nil
                   false
                   false
+                  false
+                  false
                 )
               ]
               (Var
@@ -641,6 +665,7 @@
         [
           "my_module"
         ]
+        false
         false
         false
         false

@@ -13,6 +13,15 @@ add_library(lfortran_runtime SHARED ${SRC})
 target_include_directories(lfortran_runtime BEFORE PUBLIC ${libasr_SOURCE_DIR}/..)
 target_include_directories(lfortran_runtime BEFORE PUBLIC ${libasr_BINARY_DIR}/..)
 target_link_libraries(lfortran_runtime PRIVATE ${MATH_LIBRARIES})
+if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Stream files read by the shared runtime are read ahead by helper threads.
+    find_package(Threads)
+    if (Threads_FOUND)
+        target_link_libraries(lfortran_runtime PRIVATE Threads::Threads)
+        target_compile_definitions(lfortran_runtime PRIVATE
+            LFORTRAN_READAHEAD_THREADS)
+    endif()
+endif()
 if (HAVE_INTERNAL_ALLOC_CHECK)
     target_compile_definitions(lfortran_runtime PRIVATE LFORTRAN_INTERNAL_ALLOC_CHECK)
 endif()
@@ -30,7 +39,17 @@ if (HAVE_INTERNAL_ALLOC_CHECK)
     target_compile_definitions(lfortran_runtime_static PRIVATE LFORTRAN_INTERNAL_ALLOC_CHECK)
 endif()
 set_target_properties(lfortran_runtime_static PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY ..)
+    LIBRARY_OUTPUT_DIRECTORY ..
+    # The driver looks for liblfortran_runtime_static.a next to the shared
+    # runtime. LIBRARY_OUTPUT_DIRECTORY does not move a static archive.
+    ARCHIVE_OUTPUT_DIRECTORY ..)
+if (WIN32)
+    # Static and import libraries (ARCHIVE) and DLLs (RUNTIME) go next to the
+    # runtime modules too, where the driver looks for them.
+    set_target_properties(lfortran_runtime lfortran_runtime_static PROPERTIES
+        ARCHIVE_OUTPUT_DIRECTORY ..
+        RUNTIME_OUTPUT_DIRECTORY ..)
+endif()
 
 if(WITH_TARGET_WASM)
 
@@ -81,6 +100,7 @@ install(TARGETS lfortran_runtime
 # Install the header
 install(
     FILES ../../../src/libasr/runtime/lfortran_intrinsics.h
+        ../../../src/libasr/runtime/lfortran_stdin.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/lfortran/impure
 )
 

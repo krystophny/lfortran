@@ -10,6 +10,34 @@ namespace LCompilers {
         // modfile is being deserialized, where they are not yet resolved.
         bool check_external = true;
         bool require_main_program = false;
+        // Set once the string_length_arguments pass has run: every character
+        // dummy that ASRUtils::is_string_dummy_with_hidden_length() selects
+        // must then have its hidden length dummy, and every call must pass it.
+        bool string_length_arguments = false;
+        // Set once the string_format_array_args pass has run: every array
+        // argument (and an array format) of a StringFormat, every array item
+        // of a WRITE statement and an internal file that is an array must
+        // then be of PointerArray physical type, with all its dimensions
+        // present. An array item of a READ statement must be one too, unless
+        // it is a descriptor that is not contiguous by construction.
+        bool string_format_array_args = false;
+        // Set once the intrinsic_function pass has run: no StorageSize
+        // IntrinsicElementalFunction remains. The pass lowers each one to the
+        // length of its character argument in bits.
+        bool intrinsic_function = false;
+        // Set once the nested_vars pass has run: a procedure no longer
+        // refers to a variable of an enclosing procedure or main program
+        // (other than a named constant, a variable in a common block or a
+        // threadprivate variable), but to
+        // its HostAssociated alias, bound through the frame dummy argument;
+        // and no declaration of a host calls one of its internal procedures
+        // that takes the frame, which is bound only when its body starts;
+        // and no FrameAddress remains.
+        // These rules also hold after every later pass: the pass manager
+        // sets this option once the pass has run, and the verifier applies
+        // them by itself to ASR that declares a frame type, such as `.asr`
+        // input, since only the pass makes one.
+        bool nested_vars = false;
     };
 
     // Verifies that ASR is correctly constructed and contains valid Fortran

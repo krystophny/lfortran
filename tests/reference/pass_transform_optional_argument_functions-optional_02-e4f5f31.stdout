@@ -27,9 +27,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             __libasr_created_variable_pointer_:
                                 (Variable
@@ -53,9 +55,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 ),
                             f1:
                                 (ExternalSymbol
@@ -89,9 +93,11 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     optional_02
@@ -100,6 +106,8 @@
                         (Var 4 i)
                         (IntegerConstant 10 (Integer 4) Decimal)
                         ()
+                        .false.
+                        .false.
                         .false.
                         .false.
                     )
@@ -115,10 +123,12 @@
                         [(Associate
                             (Var 4 __libasr_created_variable_pointer_)
                             (Var 4 i)
+                            NoPointerBounds
                         )]
                         [(Associate
                             (Var 4 __libasr_created_variable_pointer_)
                             (Var 4 __libasr_created_dummy_variable_)
+                            NoPointerBounds
                         )]
                     )
                     (Print
@@ -151,6 +161,8 @@
                                 ()
                             )]
                             FormatFortran
+                            []
+                            ()
                             (Allocatable
                                 (String 1 () DeferredLength DescriptorString)
                             )
@@ -189,9 +201,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             r:
                                                 (Variable
@@ -215,9 +229,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             x:
                                                 (Variable
@@ -239,9 +255,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     f1
@@ -272,6 +290,8 @@
                                         ()
                                         .false.
                                         .false.
+                                        .false.
+                                        .false.
                                     )]
                                     (Var 3 r)
                                     Public
@@ -283,6 +303,7 @@
                     optional_02_m
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.

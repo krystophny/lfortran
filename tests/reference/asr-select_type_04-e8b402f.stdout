@@ -36,9 +36,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             success:
                                                 (Variable
@@ -60,9 +62,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     enum_stat
@@ -135,15 +139,18 @@
                                     ()
                                     .false.
                                     .false.
+                                    .false.
                                     NotMethod
                                     ()
                                     []
+                                    ()
                                 )
                         })
                     class_default_select_type
                     ()
                     []
                     .true.
+                    .false.
                     .false.
                     .false.
                     ()
@@ -194,9 +201,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     check_table
@@ -268,9 +277,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             stat:
                                                 (Variable
@@ -292,9 +303,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             table:
                                                 (Variable
@@ -322,9 +335,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             tmp:
                                                 (Variable
@@ -354,9 +369,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             ~select_type_block_:
                                                 (Block
@@ -392,6 +409,7 @@
                                                             ()
                                                             (Var 4 toml_table)
                                                         )
+                                                        NoPointerBounds
                                                     )
                                                     (If
                                                         ()
@@ -411,6 +429,8 @@
                                                                 (IntegerConstant 0 (Integer 4) Decimal)
                                                             )
                                                             ()
+                                                            .false.
+                                                            .false.
                                                             .false.
                                                             .false.
                                                         )]
@@ -452,6 +472,8 @@
                                                                 (IntegerConstant -1 (Integer 4) Decimal)
                                                             )
                                                             ()
+                                                            .false.
+                                                            .false.
                                                             .false.
                                                             .false.
                                                         )]
@@ -576,9 +598,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             inline:
                                                 (Variable
@@ -606,9 +630,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     toml_table
@@ -658,9 +684,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             int:
                                                 (Variable
@@ -682,9 +710,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     toml_value
@@ -714,6 +744,7 @@
                     ()
                     [class_default_select_type]
                     .true.
+                    .false.
                     .false.
                     .false.
                     ()
@@ -788,6 +819,7 @@
                     ()
                     [class_default_select_type_user
                     class_default_select_type]
+                    .false.
                     .false.
                     .false.
                     .false.

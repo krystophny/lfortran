@@ -39,9 +39,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 ),
                                             value2:
                                                 (Variable
@@ -70,9 +72,11 @@
                                                     ()
                                                     .false.
                                                     .false.
+                                                    .false.
                                                     NotMethod
                                                     ()
                                                     []
+                                                    ()
                                                 )
                                         })
                                     dict_item
@@ -122,7 +126,7 @@
                                     (StructType
                                         []
                                         []
-                                        .false.
+                                        .true.
                                         .true.
                                     )
                                     []
@@ -142,6 +146,7 @@
                     fortuno_types
                     ()
                     []
+                    .false.
                     .false.
                     .false.
                     .false.

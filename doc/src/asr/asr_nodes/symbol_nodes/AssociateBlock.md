@@ -61,10 +61,12 @@ body, which binds the name to the target expression rather than copying it.
         :contiguous_attr false
         :bindc_name nil
         :is_volatile false
+        :is_asynchronous false
         :is_protected false
         :pass_attr :NotMethod
         :self_argument nil
         :codims []
+        :common_block nil
       )
     }
   )
@@ -77,6 +79,7 @@ body, which binds the name to the target expression rather than copying it.
       :value (Var
         :v (SymbolRef 1 "x")
       )
+      :form :NoPointerBounds
     )
     (Assignment
       :target (Var
@@ -92,6 +95,8 @@ body, which binds the name to the target expression rather than copying it.
       :overloaded nil
       :realloc_lhs false
       :move_allocation false
+      :new_target false
+      :new_allocation false
     )
   ]
 )
